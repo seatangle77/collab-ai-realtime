@@ -6,6 +6,10 @@ export interface ListAdminUsersParams {
   page_size?: number
   email?: string
   name?: string
+  id?: string
+  device_token?: string
+  created_from?: string
+  created_to?: string
 }
 
 export async function listAdminUsers(params: ListAdminUsersParams): Promise<Page<AdminUser>> {
@@ -14,9 +18,27 @@ export async function listAdminUsers(params: ListAdminUsersParams): Promise<Page
   if (params.page_size) query.set('page_size', String(params.page_size))
   if (params.email) query.set('email', params.email)
   if (params.name) query.set('name', params.name)
+  if (params.id) query.set('id', params.id)
+  if (params.device_token) query.set('device_token', params.device_token)
+  if (params.created_from) query.set('created_from', params.created_from)
+  if (params.created_to) query.set('created_to', params.created_to)
 
   const qs = query.toString()
-  const url = '/api/admin/users' + (qs ? `?${qs}` : '')
+  const url = '/api/admin/users/' + (qs ? `?${qs}` : '')
   return http.get<Page<AdminUser>>(url)
 }
+
+export async function deleteAdminUser(id: string): Promise<void> {
+  await http.delete<void>(`/api/admin/users/${id}`)
+}
+
+export interface UpdateAdminUserPayload {
+  name?: string
+  device_token?: string | null
+}
+
+export async function updateAdminUser(id: string, payload: UpdateAdminUserPayload): Promise<AdminUser> {
+  return http.patch<AdminUser>(`/api/admin/users/${id}`, payload)
+}
+
 

@@ -1,6 +1,7 @@
 import os
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .db import DBNotConfiguredError, ping_db
@@ -14,6 +15,25 @@ from .admin.memberships import router as admin_memberships_router
 from .admin.chat_sessions import router as admin_chat_sessions_router
 
 app = FastAPI()
+
+# CORS 配置：开发环境显式允许本地前端，避免通配符与凭证冲突
+frontend_origin = os.getenv("FRONTEND_ORIGIN")
+allow_origins = (
+    [frontend_origin]
+    if frontend_origin
+    else [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allow_origins,
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(db_router)
 app.include_router(auth_router)

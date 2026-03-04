@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
@@ -14,6 +14,16 @@ from .schemas import Page, PageMeta
 
 
 router = APIRouter(prefix="/api/admin/users", tags=["admin-users"])
+
+
+def _to_utc_naive(dt: datetime) -> datetime:
+    """
+    将带时区的 datetime 统一转换为 UTC naive，
+    避免 asyncpg 在处理 offset-naive / offset-aware 混用时抛错。
+    """
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 class AdminUserOut(BaseModel):
@@ -35,6 +45,10 @@ async def list_users(
     page_size: int = Query(20, ge=1, le=100),
     email: str | None = None,
     name: str | None = None,
+    user_id: str | None = Query(None, alias="id"),
+    device_token: str | None = None,
+    created_from: datetime | None = None,
+    created_to: datetime | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> Page[AdminUserOut]:
     offset = (page - 1) * page_size
@@ -48,6 +62,18 @@ async def list_users(
     if name:
         where_clauses.append("name ILIKE :name")
         params["name"] = f"%{name}%"
+    if user_id:
+        where_clauses.append("id = :id")
+        params["id"] = user_id
+    if device_token:
+        where_clauses.append("device_token ILIKE :device_token")
+        params["device_token"] = f"%{device_token}%"
+    if created_from:
+        where_clauses.append("created_at >= :created_from")
+        params["created_from"] = _to_utc_naive(created_from)
+    if created_to:
+        where_clauses.append("created_at <= :created_to")
+        params["created_to"] = _to_utc_naive(created_to)
 
     where_sql = " AND ".join(where_clauses)
 
