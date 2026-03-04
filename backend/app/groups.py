@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from typing import Any, Mapping
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -41,6 +42,10 @@ class GroupDetail(BaseModel):
     member_count: int
     members: list[GroupMember]
     my_role: str | None = None
+
+
+class GroupUpdate(BaseModel):
+    name: str
 
 
 async def _get_group_or_404(group_id: str, db: AsyncSession) -> Mapping[str, Any]:
@@ -92,28 +97,32 @@ async def create_group(
     db: AsyncSession = Depends(get_db),
     current_user: Mapping[str, Any] = Depends(get_current_user),
 ) -> GroupDetail:
+    # 创建群组 ID，沿用 g001/g002 风格的字符串 ID
+    group_id = f"g{uuid.uuid4().hex[:8]}"
+
     # 创建群组
     result = await db.execute(
         text(
             """
-            INSERT INTO groups (name, created_at, is_active)
-            VALUES (:name, NOW(), TRUE)
+            INSERT INTO groups (id, name, created_at, is_active)
+            VALUES (:id, :name, NOW(), TRUE)
             RETURNING id
             """
         ),
-        {"name": payload.name},
+        {"id": group_id, "name": payload.name},
     )
     group_id = result.scalar_one()
 
     # 当前用户作为 leader 加入群组
+    membership_id = f"m{uuid.uuid4().hex[:8]}"
     await db.execute(
         text(
             """
-            INSERT INTO group_memberships (group_id, user_id, role, status, created_at)
-            VALUES (:group_id, :user_id, 'leader', 'active', NOW())
+            INSERT INTO group_memberships (id, group_id, user_id, role, status, created_at)
+            VALUES (:id, :group_id, :user_id, 'leader', 'active', NOW())
             """
         ),
-        {"group_id": group_id, "user_id": current_user["id"]},
+        {"id": membership_id, "group_id": group_id, "user_id": current_user["id"]},
     )
     await db.commit()
 
@@ -172,6 +181,50 @@ async def get_group(
     return await _get_group_detail(group_id, current_user["id"], db)
 
 
+@router.patch("/{group_id}", response_model=GroupDetail)
+async def update_group(
+    group_id: str,
+    payload: GroupUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: Mapping[str, Any] = Depends(get_current_user),
+) -> GroupDetail:
+    """
+    更新群组名称，仅 leader 可操作。
+    """
+    await _get_group_or_404(group_id, db)
+
+    # 校验当前用户是否为该群 leader
+    role_result = await db.execute(
+        text(
+            """
+            SELECT role
+            FROM group_memberships
+            WHERE group_id = :group_id
+              AND user_id = :user_id
+              AND status = 'active'
+            """
+        ),
+        {"group_id": group_id, "user_id": current_user["id"]},
+    )
+    role_row = role_result.mappings().first()
+    if not role_row or role_row["role"] != "leader":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只有群主可以修改群名称")
+
+    await db.execute(
+        text(
+            """
+            UPDATE groups
+            SET name = :name
+            WHERE id = :group_id AND is_active = TRUE
+            """
+        ),
+        {"group_id": group_id, "name": payload.name},
+    )
+    await db.commit()
+
+    return await _get_group_detail(group_id, current_user["id"], db)
+
+
 @router.post("/{group_id}/join", response_model=GroupDetail)
 async def join_group(
     group_id: str,
@@ -226,14 +279,15 @@ async def join_group(
         )
     else:
         # 新成员加入，角色默认为 member
+        membership_id = f"m{uuid.uuid4().hex[:8]}"
         await db.execute(
             text(
                 """
-                INSERT INTO group_memberships (group_id, user_id, role, status, created_at)
-                VALUES (:group_id, :user_id, 'member', 'active', NOW())
+                INSERT INTO group_memberships (id, group_id, user_id, role, status, created_at)
+                VALUES (:id, :group_id, :user_id, 'member', 'active', NOW())
                 """
             ),
-            {"group_id": group_id, "user_id": current_user["id"]},
+            {"id": membership_id, "group_id": group_id, "user_id": current_user["id"]},
         )
 
     await db.commit()
@@ -260,4 +314,57 @@ async def leave_group(
     )
     await db.commit()
     return {"success": True}
+
+
+@router.post("/{group_id}/members/{user_id}/kick", response_model=GroupDetail)
+async def kick_member(
+    group_id: str,
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: Mapping[str, Any] = Depends(get_current_user),
+) -> GroupDetail:
+    """
+    将某个成员移出群组，仅 leader 可操作。
+    """
+    await _get_group_or_404(group_id, db)
+
+    # 校验当前用户是否为 leader
+    leader_result = await db.execute(
+        text(
+            """
+            SELECT role
+            FROM group_memberships
+            WHERE group_id = :group_id
+              AND user_id = :user_id
+              AND status = 'active'
+            """
+        ),
+        {"group_id": group_id, "user_id": current_user["id"]},
+    )
+    leader_row = leader_result.mappings().first()
+    if not leader_row or leader_row["role"] != "leader":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只有群主可以踢出成员")
+
+    if user_id == current_user["id"]:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不能通过踢人接口将自己移出群组")
+
+    result = await db.execute(
+        text(
+            """
+            UPDATE group_memberships
+            SET status = 'left'
+            WHERE group_id = :group_id
+              AND user_id = :user_id
+              AND status = 'active'
+            RETURNING id
+            """
+        ),
+        {"group_id": group_id, "user_id": user_id},
+    )
+    row = result.mappings().first()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="该用户不在群组中")
+
+    await db.commit()
+    return await _get_group_detail(group_id, current_user["id"], db)
 
