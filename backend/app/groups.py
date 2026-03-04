@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import Any, Mapping
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -23,7 +24,7 @@ class GroupCreate(BaseModel):
 class GroupSummary(BaseModel):
     id: str
     name: str
-    created_at: Any
+    created_at: datetime
     is_active: bool
     member_count: int
     my_role: str

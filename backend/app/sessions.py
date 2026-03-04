@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Mapping
+from datetime import datetime
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -22,8 +23,8 @@ class SessionCreate(BaseModel):
 class ChatSessionOut(BaseModel):
     id: str
     group_id: str
-    created_at: Any
-    last_updated: Any
+    created_at: datetime
+    last_updated: datetime
     session_title: str
 
 
@@ -145,7 +146,7 @@ class TranscriptOut(BaseModel):
     start: Any
     end: Any
     duration: int | None = None
-    created_at: Any
+    created_at: datetime
 
 
 class SessionUpdate(BaseModel):

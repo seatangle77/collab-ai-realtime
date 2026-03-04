@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
@@ -20,7 +21,7 @@ class AdminUserOut(BaseModel):
     name: str
     email: str
     device_token: str | None = None
-    created_at: Any
+    created_at: datetime
 
 
 class AdminUserUpdate(BaseModel):

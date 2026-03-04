@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
@@ -21,7 +22,7 @@ class AdminMembershipOut(BaseModel):
     user_id: str
     role: str
     status: str
-    created_at: Any
+    created_at: datetime
 
 
 class AdminMembershipUpdate(BaseModel):
