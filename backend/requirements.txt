@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+sqlalchemy>=2
+asyncpg
+pydantic-settings
+greenlet
+python-jose[cryptography]
+passlib[bcrypt]

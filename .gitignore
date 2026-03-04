@@ -2,6 +2,8 @@ backend/venv/
 backend/__pycache__/
 backend/*.pyc
 backend/.env
+backend/.env.local
+backend/.env.production
 
 web/node_modules/
 web/dist/
