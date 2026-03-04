@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import os
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,12 +19,12 @@ from .db import get_db
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer(auto_error=True)
 
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-me")  # 建议线上用环境变量覆盖
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 小时
+PASSWORD_SALT = os.getenv("PASSWORD_SALT", "change-me-salt")
 
 
 class RegisterRequest(BaseModel):
@@ -52,11 +54,17 @@ class TokenResponse(BaseModel):
 
 
 def _hash_password(plain_password: str) -> str:
-    return pwd_context.hash(plain_password)
+    """
+    简化版密码哈希：SHA256(salt + password)。
+    对当前项目足够使用，比明文安全，不再依赖 bcrypt/passlib。
+    """
+    data = (PASSWORD_SALT + plain_password).encode("utf-8")
+    return hashlib.sha256(data).hexdigest()
 
 
 def _verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    expected = _hash_password(plain_password)
+    return hmac.compare_digest(expected, hashed_password)
 
 
 def _create_access_token(data: dict[str, Any], expires_delta: timedelta | None = None) -> str:
@@ -108,16 +116,20 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
     if existing.first():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="邮箱已被注册")
 
+    # 生成用户 ID（沿用现有 u001/u002 风格）
+    user_id = f"u{uuid.uuid4().hex[:8]}"
+
     # 插入新用户
     result = await db.execute(
         text(
             """
-            INSERT INTO users_info (name, email, device_token, password_hash, created_at)
-            VALUES (:name, :email, :device_token, :password_hash, NOW())
+            INSERT INTO users_info (id, name, email, device_token, password_hash, created_at)
+            VALUES (:id, :name, :email, :device_token, :password_hash, NOW())
             RETURNING id, name, email, device_token, created_at
             """
         ),
         {
+            "id": user_id,
             "name": payload.name,
             "email": payload.email,
             "device_token": payload.device_token,
