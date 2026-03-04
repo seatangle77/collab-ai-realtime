@@ -8,6 +8,10 @@ from .routes import router as db_router
 from .auth import router as auth_router
 from .groups import router as groups_router
 from .sessions import router as sessions_router
+from .admin.users import router as admin_users_router
+from .admin.groups import router as admin_groups_router
+from .admin.memberships import router as admin_memberships_router
+from .admin.chat_sessions import router as admin_chat_sessions_router
 
 app = FastAPI()
 
@@ -15,6 +19,10 @@ app.include_router(db_router)
 app.include_router(auth_router)
 app.include_router(groups_router)
 app.include_router(sessions_router)
+app.include_router(admin_users_router)
+app.include_router(admin_groups_router)
+app.include_router(admin_memberships_router)
+app.include_router(admin_chat_sessions_router)
 
 
 @app.exception_handler(DBNotConfiguredError)
