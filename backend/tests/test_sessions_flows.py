@@ -1,0 +1,312 @@
+from __future__ import annotations
+
+import uuid
+from typing import Any, Dict, Tuple
+
+import requests
+
+BASE_URL = "http://127.0.0.1:8000"
+
+
+def _log(ok: bool, message: str, extra: Any | None = None) -> bool:
+    prefix = "✅" if ok else "❌"
+    print(f"{prefix} {message}")
+    if not ok and extra is not None:
+        print("   详情:", extra)
+    return ok
+
+
+def register_and_login(name: str, email_suffix: str) -> Tuple[str, str]:
+    """注册一个用户并登录，返回 (access_token, user_id)。"""
+    email = f"test_{email_suffix}_{uuid.uuid4().hex[:6]}@example.com"
+    password = "test_password_123"
+
+    r = requests.post(
+        f"{BASE_URL}/api/auth/register",
+        json={
+            "name": name,
+            "email": email,
+            "password": password,
+            "device_token": "test_device_token",
+        },
+    )
+    r.raise_for_status()
+    user = r.json()
+    user_id = user["id"]
+
+    r = requests.post(
+        f"{BASE_URL}/api/auth/login",
+        json={"email": email, "password": password},
+    )
+    r.raise_for_status()
+    data = r.json()
+    token = data["access_token"]
+    return token, user_id
+
+
+# ---------- 场景：准备 group 和成员 ----------
+
+
+def setup_group_with_members(ctx: Dict[str, Any]) -> bool:
+    # 注册 & 登录 3 个用户
+    ctx["leader_token"], ctx["leader_user_id"] = register_and_login("组长用户", "leader")
+    ctx["member_token"], ctx["member_user_id"] = register_and_login("第二成员", "member")
+    ctx["outsider_token"], ctx["outsider_user_id"] = register_and_login("路人用户", "outsider")
+
+    # leader 创建 group
+    headers_leader = {"Authorization": f"Bearer {ctx['leader_token']}"}
+    r = requests.post(
+        f"{BASE_URL}/api/groups",
+        json={"name": "会话测试群组"},
+        headers=headers_leader,
+    )
+    if r.status_code != 201:
+        return _log(False, "准备阶段：创建群组失败", {"status_code": r.status_code, "text": r.text})
+    data = r.json()
+    ctx["group_id"] = data["group"]["id"]
+
+    # member 加入 group
+    headers_member = {"Authorization": f"Bearer {ctx['member_token']}"}
+    r = requests.post(f"{BASE_URL}/api/groups/{ctx['group_id']}/join", headers=headers_member)
+    if r.status_code != 200:
+        return _log(False, "准备阶段：成员加入群组失败", {"status_code": r.status_code, "body": r.text})
+
+    return _log(True, "准备阶段：成功创建 group 并加入一个成员", ctx)
+
+
+# ---------- 创建会话相关 ----------
+
+
+def scenario_create_sessions(ctx: Dict[str, Any]) -> bool:
+    ok = True
+
+    # leader 创建第一个会话
+    headers_leader = {"Authorization": f"Bearer {ctx['leader_token']}"}
+    r = requests.post(
+        f"{BASE_URL}/api/groups/{ctx['group_id']}/sessions",
+        json={"session_title": "第一次会话"},
+        headers=headers_leader,
+    )
+    if r.status_code != 201:
+        return _log(False, "leader 创建会话失败（期望 201）", {"status_code": r.status_code, "text": r.text})
+    data = r.json()
+    ctx["session_id_1"] = data["id"]
+    ok &= _log(True, "leader 创建会话成功", data)
+
+    # member 创建第二个会话
+    headers_member = {"Authorization": f"Bearer {ctx['member_token']}"}
+    r = requests.post(
+        f"{BASE_URL}/api/groups/{ctx['group_id']}/sessions",
+        json={"session_title": "第二次会话"},
+        headers=headers_member,
+    )
+    if r.status_code != 201:
+        return _log(False, "member 创建会话失败（期望 201）", {"status_code": r.status_code, "text": r.text})
+    data = r.json()
+    ctx["session_id_2"] = data["id"]
+    ok &= _log(True, "member 创建会话成功", data)
+
+    # outsider 尝试创建会话应失败
+    headers_outsider = {"Authorization": f"Bearer {ctx['outsider_token']}"}
+    r = requests.post(
+        f"{BASE_URL}/api/groups/{ctx['group_id']}/sessions",
+        json={"session_title": "不应该成功的会话"},
+        headers=headers_outsider,
+    )
+    ok &= _log(r.status_code == 403, "outsider 创建会话被禁止场景", {"status_code": r.status_code, "body": r.text})
+    return ok
+
+
+# ---------- 会话列表相关 ----------
+
+
+def scenario_list_sessions(ctx: Dict[str, Any]) -> bool:
+    headers_leader = {"Authorization": f"Bearer {ctx['leader_token']}"}
+
+    # 默认不带 include_ended
+    r = requests.get(f"{BASE_URL}/api/groups/{ctx['group_id']}/sessions", headers=headers_leader)
+    if r.status_code != 200:
+        return _log(False, "leader 列出会话失败（期望 200）", {"status_code": r.status_code, "text": r.text})
+    sessions = r.json()
+    ids = {s["id"] for s in sessions}
+    ok = ctx["session_id_1"] in ids and ctx["session_id_2"] in ids
+    ok &= _log(ok, "默认列表包含两个会话场景", sessions)
+
+    # outsider 列出会话应被禁止
+    headers_outsider = {"Authorization": f"Bearer {ctx['outsider_token']}"}
+    r = requests.get(f"{BASE_URL}/api/groups/{ctx['group_id']}/sessions", headers=headers_outsider)
+    ok &= _log(r.status_code == 403, "outsider 查看会话列表被禁止场景", {"status_code": r.status_code, "body": r.text})
+    return ok
+
+
+# ---------- 更新会话标题相关 ----------
+
+
+def scenario_update_session_titles(ctx: Dict[str, Any]) -> bool:
+    ok = True
+
+    # leader 更新自己的会话标题
+    headers_leader = {"Authorization": f"Bearer {ctx['leader_token']}"}
+    r = requests.patch(
+        f"{BASE_URL}/api/sessions/{ctx['session_id_1']}",
+        json={"session_title": "会话1-改名"},
+        headers=headers_leader,
+    )
+    if r.status_code != 200:
+        return _log(False, "leader 更新会话标题失败", {"status_code": r.status_code, "text": r.text})
+    data = r.json()
+    ok &= _log(data["session_title"] == "会话1-改名", "leader 更新会话标题场景", data)
+
+    # member 更新自己创建的会话标题
+    headers_member = {"Authorization": f"Bearer {ctx['member_token']}"}
+    r = requests.patch(
+        f"{BASE_URL}/api/sessions/{ctx['session_id_2']}",
+        json={"session_title": "会话2-改名"},
+        headers=headers_member,
+    )
+    if r.status_code != 200:
+        return _log(False, "member 更新会话标题失败", {"status_code": r.status_code, "text": r.text})
+    data = r.json()
+    ok &= _log(data["session_title"] == "会话2-改名", "member 更新会话标题场景", data)
+
+    # outsider 更新任意会话标题应失败
+    headers_outsider = {"Authorization": f"Bearer {ctx['outsider_token']}"}
+    r = requests.patch(
+        f"{BASE_URL}/api/sessions/{ctx['session_id_1']}",
+        json={"session_title": "不应该成功"},
+        headers=headers_outsider,
+    )
+    ok &= _log(r.status_code == 403, "outsider 更新会话标题被禁止场景", {"status_code": r.status_code, "body": r.text})
+
+    # 更新不存在的会话
+    r = requests.patch(
+        f"{BASE_URL}/api/sessions/nonexistent-session",
+        json={"session_title": "whatever"},
+        headers=headers_leader,
+    )
+    ok &= _log(r.status_code == 404, "更新不存在会话返回 404 场景", {"status_code": r.status_code, "body": r.text})
+
+    return ok
+
+
+# ---------- 结束 / 归档会话相关 ----------
+
+
+def scenario_end_session(ctx: Dict[str, Any]) -> bool:
+    ok = True
+
+    # member 结束 session_1
+    headers_member = {"Authorization": f"Bearer {ctx['member_token']}"}
+    r = requests.post(
+        f"{BASE_URL}/api/sessions/{ctx['session_id_1']}/end",
+        headers=headers_member,
+    )
+    if r.status_code != 200:
+        return _log(False, "member 结束会话失败", {"status_code": r.status_code, "text": r.text})
+    ok &= _log(True, "member 结束会话场景", r.json())
+
+    # 默认列表不再包含 session_1，只包含 session_2
+    headers_leader = {"Authorization": f"Bearer {ctx['leader_token']}"}
+    r = requests.get(f"{BASE_URL}/api/groups/{ctx['group_id']}/sessions", headers=headers_leader)
+    if r.status_code != 200:
+        return _log(False, "结束后 leader 列出会话失败", {"status_code": r.status_code, "text": r.text})
+    sessions = r.json()
+    ids = {s["id"] for s in sessions}
+    ok &= _log(
+        ctx["session_id_1"] not in ids and ctx["session_id_2"] in ids,
+        "结束后默认列表仅包含未结束会话场景",
+        sessions,
+    )
+
+    # include_ended=true 时能看到所有会话
+    r = requests.get(
+        f"{BASE_URL}/api/groups/{ctx['group_id']}/sessions",
+        params={"include_ended": "true"},
+        headers=headers_leader,
+    )
+    if r.status_code != 200:
+        return _log(False, "include_ended=true 列出会话失败", {"status_code": r.status_code, "text": r.text})
+    sessions = r.json()
+    ids = {s["id"] for s in sessions}
+    ok &= _log(
+        ctx["session_id_1"] in ids and ctx["session_id_2"] in ids,
+        "include_ended=true 列表包含所有会话场景",
+        sessions,
+    )
+
+    # outsider 结束会话应失败
+    headers_outsider = {"Authorization": f"Bearer {ctx['outsider_token']}"}
+    r = requests.post(
+        f"{BASE_URL}/api/sessions/{ctx['session_id_2']}/end",
+        headers=headers_outsider,
+    )
+    ok &= _log(r.status_code == 403, "outsider 结束会话被禁止场景", {"status_code": r.status_code, "body": r.text})
+
+    # 结束不存在的会话
+    r = requests.post(
+        f"{BASE_URL}/api/sessions/nonexistent-session/end",
+        headers=headers_leader,
+    )
+    ok &= _log(r.status_code == 404, "结束不存在会话返回 404 场景", {"status_code": r.status_code, "body": r.text})
+
+    return ok
+
+
+# ---------- 转写列表相关（这里只检查权限 & 基本行为） ----------
+
+
+def scenario_transcripts_permissions(ctx: Dict[str, Any]) -> bool:
+    ok = True
+
+    # 对已有的 session_2（未结束），成员应该可以查转写（可能为空 list，也算成功）
+    headers_member = {"Authorization": f"Bearer {ctx['member_token']}"}
+    r = requests.get(
+        f"{BASE_URL}/api/sessions/{ctx['session_id_2']}/transcripts",
+        headers=headers_member,
+    )
+    ok &= _log(r.status_code == 200, "群成员查看会话转写场景", {"status_code": r.status_code, "body": r.text})
+
+    # outsider 查同一会话应 403
+    headers_outsider = {"Authorization": f"Bearer {ctx['outsider_token']}"}
+    r = requests.get(
+        f"{BASE_URL}/api/sessions/{ctx['session_id_2']}/transcripts",
+        headers=headers_outsider,
+    )
+    ok &= _log(r.status_code == 403, "outsider 查看会话转写被禁止场景", {"status_code": r.status_code, "body": r.text})
+
+    # 查看不存在的会话转写应 404
+    headers_leader = {"Authorization": f"Bearer {ctx['leader_token']}"}
+    r = requests.get(
+        f"{BASE_URL}/api/sessions/nonexistent-session/transcripts",
+        headers=headers_leader,
+    )
+    ok &= _log(r.status_code == 404, "查看不存在会话转写返回 404 场景", {"status_code": r.status_code, "body": r.text})
+
+    return ok
+
+
+# ---------- 总入口 ----------
+
+
+def run_all() -> None:
+    print("=== 开始 Sessions 会话相关功能测试 ===")
+    ctx: Dict[str, Any] = {}
+
+    ok = True
+    ok &= setup_group_with_members(ctx)
+    if not ok:
+        print("准备阶段失败，后续场景跳过 ❌")
+        return
+
+    ok &= scenario_create_sessions(ctx)
+    ok &= scenario_list_sessions(ctx)
+    ok &= scenario_update_session_titles(ctx)
+    ok &= scenario_end_session(ctx)
+    ok &= scenario_transcripts_permissions(ctx)
+
+    print("\n=== Sessions 测试结果: {} ===".format("全部通过 ✅" if ok else "有失败 ❌"))
+
+
+if __name__ == "__main__":
+    run_all()
+
