@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
@@ -14,6 +14,12 @@ from .schemas import Page, PageMeta
 
 
 router = APIRouter(prefix="/api/admin/groups", tags=["admin-groups"])
+
+
+def _to_utc_naive(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 class AdminGroupOut(BaseModel):
@@ -38,6 +44,8 @@ async def list_groups(
     page_size: int = Query(20, ge=1, le=100),
     name: str | None = None,
     is_active: bool | None = None,
+    created_from: datetime | None = None,
+    created_to: datetime | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> Page[AdminGroupOut]:
     offset = (page - 1) * page_size
@@ -51,6 +59,12 @@ async def list_groups(
     if is_active is not None:
         where_clauses.append("is_active = :is_active")
         params["is_active"] = is_active
+    if created_from:
+        where_clauses.append("created_at >= :created_from")
+        params["created_from"] = _to_utc_naive(created_from)
+    if created_to:
+        where_clauses.append("created_at <= :created_to")
+        params["created_to"] = _to_utc_naive(created_to)
 
     where_sql = " AND ".join(where_clauses)
 

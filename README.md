@@ -74,3 +74,15 @@ npm run build
   - 前端与后端可以分别部署，只要前端访问的后端地址（`http.ts` 中的 `baseURL`）可达即可。
   - 若前后端同域部署，可将 `dist` 目录挂载到 Nginx 的根目录，后端通过反向代理暴露 `/api/**`。
 - 如需在不同环境使用不同后端地址，可后续改造为读取环境变量或构建时注入配置。
+
+### E2E 测试（Playwright）
+
+- 运行前需**先启动后端**（`uvicorn ... --port 8000`）和前端（或由 Playwright 自动启动）。
+- 环境变量（可选）：`ADMIN_API_KEY`、`API_BASE_URL`（默认 `http://localhost:8000`）。
+
+| 命令 | 说明 |
+|------|------|
+| `npm run test:e2e` | 运行全部 E2E（用户管理 + 群组管理） |
+| `npm run test:e2e:users` | 仅运行用户管理 E2E |
+| `npm run test:e2e:groups` | 仅运行群组管理 E2E |
+| `npm run test:e2e:ui` | 以 UI 模式运行，便于调试 |
