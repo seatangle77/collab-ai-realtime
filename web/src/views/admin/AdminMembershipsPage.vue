@@ -2,8 +2,10 @@
 import { onMounted, reactive, ref } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import type { AdminMembership } from '../../types/admin'
-import { listAdminMemberships, updateAdminMembership, deleteAdminMembership } from '../../api/admin/memberships'
+import type { AdminGroup, AdminMembership, AdminUser } from '../../types/admin'
+import { listAdminMemberships, updateAdminMembership, deleteAdminMembership, createAdminMembership } from '../../api/admin/memberships'
+import { listAdminGroups } from '../../api/admin/groups'
+import { listAdminUsers } from '../../api/admin/users'
 
 interface Filters {
   group_id: string
@@ -25,6 +27,27 @@ const filters = reactive<Filters>({
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
+
+const createDialogVisible = ref(false)
+const createFormRef = ref<FormInstance>()
+const createForm = reactive({
+  group_id: '',
+  user_id: '',
+  role: 'member',
+  status: 'active',
+})
+
+const groupOptions = ref<AdminGroup[]>([])
+const groupLoading = ref(false)
+const userOptions = ref<AdminUser[]>([])
+const userLoading = ref(false)
+
+const createRules: FormRules<typeof createForm> = {
+  group_id: [{ required: true, message: '请输入群组 ID', trigger: 'blur' }],
+  user_id: [{ required: true, message: '请输入用户 ID', trigger: 'blur' }],
+  role: [{ required: true, message: '请选择角色', trigger: 'change' }],
+  status: [{ required: true, message: '请选择状态', trigger: 'change' }],
+}
 
 const editDialogVisible = ref(false)
 const editFormRef = ref<FormInstance>()
@@ -89,6 +112,52 @@ function handlePageSizeChange(size: number) {
   fetchMemberships()
 }
 
+function openCreateDialog() {
+  createForm.group_id = ''
+  createForm.user_id = ''
+  createForm.role = 'member'
+  createForm.status = 'active'
+  // 预先加载一批群组和用户，先下拉再在下拉内搜索
+  loadInitialGroupOptions()
+  loadInitialUserOptions()
+  createDialogVisible.value = true
+}
+
+async function loadInitialGroupOptions() {
+  groupLoading.value = true
+  try {
+    const res = await listAdminGroups({
+      page: 1,
+      page_size: 20,
+      name: undefined,
+    })
+    groupOptions.value = res.items
+  } catch (e: any) {
+    console.error(e)
+    ElMessage.error(e?.message || '搜索群组失败')
+  } finally {
+    groupLoading.value = false
+  }
+}
+
+async function loadInitialUserOptions() {
+  userLoading.value = true
+  try {
+    const res = await listAdminUsers({
+      page: 1,
+      page_size: 20,
+      email: undefined,
+      name: undefined,
+    })
+    userOptions.value = res.items
+  } catch (e: any) {
+    console.error(e)
+    ElMessage.error(e?.message || '搜索用户失败')
+  } finally {
+    userLoading.value = false
+  }
+}
+
 function openEditDialog(row: AdminMembership) {
   editForm.id = row.id
   editForm.role = row.role
@@ -111,6 +180,36 @@ async function submitEdit() {
     } catch (e: any) {
       console.error(e)
       ElMessage.error(e?.message || '更新成员关系失败')
+    }
+  })
+}
+
+async function submitCreate() {
+  if (!createFormRef.value) return
+  await createFormRef.value.validate(async (valid) => {
+    if (!valid) return
+    try {
+      await createAdminMembership({
+        group_id: createForm.group_id,
+        user_id: createForm.user_id,
+        role: createForm.role as 'leader' | 'member',
+        status: createForm.status as 'active' | 'left' | 'kicked',
+      })
+      ElMessage.success('创建成员关系成功')
+      createDialogVisible.value = false
+      // 默认用当前筛选条件刷新；若当前未筛选，可根据需要设置为新建的 group_id/user_id
+      if (!filters.group_id) {
+        filters.group_id = createForm.group_id
+      }
+      if (!filters.user_id) {
+        filters.user_id = createForm.user_id
+      }
+      page.value = 1
+      fetchMemberships()
+    } catch (e: any) {
+      console.error(e)
+      const msg = e?.response?.data?.detail || e?.message || '创建成员关系失败'
+      ElMessage.error(msg)
     }
   })
 }
@@ -152,6 +251,7 @@ onMounted(() => {
   <div class="admin-memberships-page">
     <div class="admin-memberships-header">
       <h2 class="admin-memberships-title">成员关系管理</h2>
+      <el-button type="primary" @click="openCreateDialog">新建成员关系</el-button>
     </div>
 
     <el-card class="admin-memberships-filters" shadow="never">
@@ -245,6 +345,62 @@ onMounted(() => {
         />
       </div>
     </el-card>
+
+    <el-dialog v-model="createDialogVisible" title="新建成员关系" width="460px">
+      <el-form ref="createFormRef" :model="createForm" :rules="createRules" label-width="96px">
+        <el-form-item label="群组 ID" prop="group_id">
+          <el-select
+            v-model="createForm.group_id"
+            filterable
+            clearable
+            placeholder="从下拉中选择或搜索群组"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="g in groupOptions"
+              :key="g.id"
+              :label="`${g.name}（${g.id}）`"
+              :value="g.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="用户 ID" prop="user_id">
+          <el-select
+            v-model="createForm.user_id"
+            filterable
+            clearable
+            placeholder="从下拉中选择或搜索用户"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="u in userOptions"
+              :key="u.id"
+              :label="`${u.name || u.email}（${u.email} / ${u.id}）`"
+              :value="u.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="角色" prop="role">
+          <el-select v-model="createForm.role" placeholder="请选择角色" style="width: 100%">
+            <el-option label="群主 / 负责人 (leader)" value="leader" />
+            <el-option label="普通成员 (member)" value="member" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="状态" prop="status">
+          <el-select v-model="createForm.status" placeholder="请选择状态" style="width: 100%">
+            <el-option label="有效 (active)" value="active" />
+            <el-option label="已退出 (left)" value="left" />
+            <el-option label="被移除 (kicked)" value="kicked" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="createDialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="submitCreate">创建</el-button>
+        </span>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="editDialogVisible" title="编辑成员关系" width="420px">
       <el-form ref="editFormRef" :model="editForm" :rules="editRules" label-width="80px">

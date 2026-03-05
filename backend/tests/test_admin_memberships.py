@@ -330,6 +330,355 @@ def scenario_admin_list_memberships_created_time_filter(ctx: Dict[str, Any]) -> 
     return ok
 
 
+# ---------- 场景：管理员通过接口创建成员关系 ----------
+
+
+def scenario_admin_create_membership_success(_ctx: Dict[str, Any]) -> bool:
+    """
+    管理员为指定群组和用户创建一条全新的成员关系，预期 201 且列表可见。
+    为避免干扰已有上下文，这里使用独立的用户与群组。
+    """
+    # leader 创建群
+    info_leader = register_and_login("create_success_leader")
+    group_detail = create_group(info_leader["access_token"], name="admin 创建成员关系-成功场景")
+    group_id = group_detail["group"]["id"]
+
+    # 再注册一个成员用户
+    info_member = register_and_login("create_success_member")
+    user_id = info_member["user"]["id"]
+
+    # 通过 admin 创建成员关系
+    r = requests.post(
+        f"{BASE_URL}/api/admin/memberships",
+        json={
+            "group_id": group_id,
+            "user_id": user_id,
+            "role": "member",
+            "status": "active",
+        },
+        headers=ADMIN_HEADERS,
+    )
+    if r.status_code != 201:
+        return _log(
+            False,
+            "admin 创建成员关系失败（期望 201）",
+            {"status_code": r.status_code, "body": r.text},
+        )
+    data = r.json()
+    ok = data["group_id"] == group_id and data["user_id"] == user_id
+    ok &= _log(ok, "admin 创建成员关系成功场景", data)
+
+    # 再通过 admin 列表接口确认可见
+    r_list = requests.get(
+        f"{BASE_URL}/api/admin/memberships",
+        params={"group_id": group_id, "user_id": user_id, "page": 1, "page_size": 10},
+        headers=ADMIN_HEADERS,
+    )
+    if r_list.status_code != 200:
+        return _log(
+            False,
+            "admin 创建后按 group_id+user_id 列出成员关系失败（期望 200）",
+            {"status_code": r_list.status_code, "body": r_list.text},
+        )
+    data_list = r_list.json()
+    ok &= _log(
+        any(item["id"] == data["id"] for item in data_list.get("items", [])),
+        "admin 创建成员关系后列表校验场景",
+        data_list,
+    )
+    return ok
+
+
+def scenario_admin_create_membership_already_active_conflict(ctx: Dict[str, Any]) -> bool:
+    """
+    对已经 active 的成员再次创建 active 成员关系，应返回 409。
+    """
+    # 为避免受前面场景中对 member2 status 修改的影响，这里**固定使用 leader** 的成员关系，
+    # leader 在所有场景中始终保持 active 状态。
+    leader_user_id = ctx["leader_user_id"]
+    membership = next(
+        (m for m in ctx["memberships"] if m.get("user_id") == leader_user_id),
+        None,
+    )
+    if not membership:
+        return _log(False, "未找到任何 active 成员关系，无法测试重复添加场景", ctx["memberships"])
+
+    r = requests.post(
+        f"{BASE_URL}/api/admin/memberships",
+        json={
+            "group_id": membership["group_id"],
+            "user_id": membership["user_id"],
+            "role": membership["role"],
+            "status": "active",
+        },
+        headers=ADMIN_HEADERS,
+    )
+    ok = r.status_code == 409
+    return _log(
+        ok,
+        "admin 为已在群中的 active 成员重复创建成员关系返回 409 场景",
+        {"status_code": r.status_code, "body": r.text},
+    )
+
+
+def scenario_admin_create_membership_group_full() -> bool:
+    """
+    当群组已满（active 成员数达到 MAX_GROUP_MEMBERS）时，尝试为新用户创建 active 成员关系应返回 409。
+    """
+    # 创建 leader + 群
+    info_leader = register_and_login("group_full_leader")
+    group_detail = create_group(info_leader["access_token"], name="成员关系-满员群")
+    group_id = group_detail["group"]["id"]
+
+    # 再注册若干成员并通过业务 join 接口加入，直到达到上限
+    members: list[Dict[str, Any]] = []
+    for i in range(1, 3):  # 业务侧 MAX_GROUP_MEMBERS=3，leader 已经占 1，这里再加入 2 个
+        info = register_and_login(f"group_full_member{i}")
+        members.append(info)
+        join_group(info["access_token"], group_id)
+
+    # 额外注册一个用户，尝试通过 admin 创建 active 成员关系
+    extra = register_and_login("group_full_extra")
+    r = requests.post(
+        f"{BASE_URL}/api/admin/memberships",
+        json={
+            "group_id": group_id,
+            "user_id": extra["user"]["id"],
+            "role": "member",
+            "status": "active",
+        },
+        headers=ADMIN_HEADERS,
+    )
+    ok = r.status_code == 409
+    return _log(
+        ok,
+        "admin 在群组人数已满时创建 active 成员关系返回 409 场景",
+        {"status_code": r.status_code, "body": r.text},
+    )
+
+
+def scenario_admin_create_membership_reactivate_existing() -> bool:
+    """
+    对已有成员关系（status!=active）使用 POST 接口进行“复活”，应复用原记录并更新 role/status。
+    """
+    # 独立构造一个群组和成员关系，避免污染其它场景
+    info_leader = register_and_login("reactivate_leader")
+    group_detail = create_group(info_leader["access_token"], name="成员关系-复活场景群")
+    group_id = group_detail["group"]["id"]
+
+    info_member = register_and_login("reactivate_member")
+    user_id = info_member["user"]["id"]
+
+    # 先通过业务 join 接口生成一条 active 成员关系
+    join_group(info_member["access_token"], group_id)
+
+    # 找到这条 membership
+    r_list = requests.get(
+        f"{BASE_URL}/api/admin/memberships",
+        params={"group_id": group_id, "user_id": user_id, "page": 1, "page_size": 10},
+        headers=ADMIN_HEADERS,
+    )
+    if r_list.status_code != 200:
+        return _log(
+            False,
+            "reactivate 场景：首次列出成员关系失败（期望 200）",
+            {"status_code": r_list.status_code, "body": r_list.text},
+        )
+    data_list = r_list.json()
+    if not data_list["items"]:
+        return _log(False, "reactivate 场景：未找到成员关系记录", data_list)
+    membership = data_list["items"][0]
+    mid = membership["id"]
+
+    # 先通过 admin 接口将其 status 改为 left
+    r_update = requests.patch(
+        f"{BASE_URL}/api/admin/memberships/{mid}",
+        json={"status": "left"},
+        headers=ADMIN_HEADERS,
+    )
+    if r_update.status_code != 200:
+        return _log(
+            False,
+            "reactivate 场景：将成员 status 设为 left 失败（期望 200）",
+            {"status_code": r_update.status_code, "body": r_update.text},
+        )
+
+    # 再通过 POST 接口将其“复活”为 active，并变更角色为 member（如果之前是 leader）
+    r_create = requests.post(
+        f"{BASE_URL}/api/admin/memberships",
+        json={
+            "group_id": group_id,
+            "user_id": user_id,
+            "role": "member",
+            "status": "active",
+        },
+        headers=ADMIN_HEADERS,
+    )
+    if r_create.status_code != 201:
+        return _log(
+            False,
+            "reactivate 场景：通过 POST 复活成员关系失败（期望 201）",
+            {"status_code": r_create.status_code, "body": r_create.text},
+        )
+    data_create = r_create.json()
+    ok = data_create["id"] == mid and data_create["status"] == "active" and data_create["role"] == "member"
+    ok &= _log(ok, "reactivate 场景：POST 返回内容校验", data_create)
+
+    # 再获取详情确认
+    r_detail = requests.get(
+        f"{BASE_URL}/api/admin/memberships/{mid}",
+        headers=ADMIN_HEADERS,
+    )
+    if r_detail.status_code != 200:
+        return _log(
+            False,
+            "reactivate 场景：复活后获取详情失败（期望 200）",
+            {"status_code": r_detail.status_code, "body": r_detail.text},
+        )
+    data_detail = r_detail.json()
+    ok &= _log(
+        data_detail["status"] == "active" and data_detail["role"] == "member",
+        "reactivate 场景：详情状态校验",
+        data_detail,
+    )
+    return ok
+
+
+def scenario_admin_create_membership_in_inactive_group() -> bool:
+    """
+    当群组 is_active=False 时，尝试创建成员关系应返回 409。
+    """
+    # 创建群组
+    info_leader = register_and_login("inactive_group_leader")
+    group_detail = create_group(info_leader["access_token"], name="成员关系-关闭群")
+    group_id = group_detail["group"]["id"]
+
+    # 将群组设为 inactive
+    r_toggle = requests.patch(
+        f"{BASE_URL}/api/admin/groups/{group_id}",
+        json={"is_active": False},
+        headers=ADMIN_HEADERS,
+    )
+    if r_toggle.status_code != 200:
+        return _log(
+            False,
+            "inactive_group 场景：admin 将群组设为 inactive 失败（期望 200）",
+            {"status_code": r_toggle.status_code, "body": r_toggle.text},
+        )
+
+    # 再注册一个成员用户
+    info_member = register_and_login("inactive_group_member")
+    user_id = info_member["user"]["id"]
+
+    # 尝试创建 active 成员关系
+    r_create = requests.post(
+        f"{BASE_URL}/api/admin/memberships",
+        json={
+            "group_id": group_id,
+            "user_id": user_id,
+            "role": "member",
+            "status": "active",
+        },
+        headers=ADMIN_HEADERS,
+    )
+    ok = r_create.status_code == 409
+    return _log(
+        ok,
+        "inactive_group 场景：在已关闭群组中创建成员关系返回 409 场景",
+        {"status_code": r_create.status_code, "body": r_create.text},
+    )
+
+
+def scenario_admin_create_membership_invalid_role_or_status(ctx: Dict[str, Any]) -> bool:
+    """
+    role/status 非法值时应返回 400。
+    这里复用 ctx 中已有的 group_id 和某个用户 id。
+    """
+    group_id = ctx["group_id"]
+    member1_user_id = ctx["member1_user_id"]
+
+    ok = True
+
+    # 无效角色
+    r_role = requests.post(
+        f"{BASE_URL}/api/admin/memberships",
+        json={
+            "group_id": group_id,
+            "user_id": member1_user_id,
+            "role": "invalid_role",
+            "status": "active",
+        },
+        headers=ADMIN_HEADERS,
+    )
+    ok &= _log(
+        r_role.status_code == 400,
+        "admin 创建成员关系时传入无效 role 返回 400 场景",
+        {"status_code": r_role.status_code, "body": r_role.text},
+    )
+
+    # 无效状态
+    r_status = requests.post(
+        f"{BASE_URL}/api/admin/memberships",
+        json={
+            "group_id": group_id,
+            "user_id": member1_user_id,
+            "role": "member",
+            "status": "invalid_status",
+        },
+        headers=ADMIN_HEADERS,
+    )
+    ok &= _log(
+        r_status.status_code == 400,
+        "admin 创建成员关系时传入无效 status 返回 400 场景",
+        {"status_code": r_status.status_code, "body": r_status.text},
+    )
+
+    return ok
+
+
+def scenario_admin_create_membership_group_or_user_not_found(ctx: Dict[str, Any]) -> bool:
+    """
+    群组或用户不存在时应返回 404。
+    """
+    ok = True
+
+    # 群组不存在
+    r_group = requests.post(
+        f"{BASE_URL}/api/admin/memberships",
+        json={
+            "group_id": "g_non_exist_12345",
+            "user_id": ctx["member1_user_id"],
+            "role": "member",
+            "status": "active",
+        },
+        headers=ADMIN_HEADERS,
+    )
+    ok &= _log(
+        r_group.status_code == 404,
+        "admin 创建成员关系时群组不存在返回 404 场景",
+        {"status_code": r_group.status_code, "body": r_group.text},
+    )
+
+    # 用户不存在
+    r_user = requests.post(
+        f"{BASE_URL}/api/admin/memberships",
+        json={
+            "group_id": ctx["group_id"],
+            "user_id": "u_non_exist_67890",
+            "role": "member",
+            "status": "active",
+        },
+        headers=ADMIN_HEADERS,
+    )
+    ok &= _log(
+        r_user.status_code == 404,
+        "admin 创建成员关系时用户不存在返回 404 场景",
+        {"status_code": r_user.status_code, "body": r_user.text},
+    )
+
+    return ok
+
+
 # ---------- 场景：获取单条成员详情 ----------
 
 
@@ -489,6 +838,22 @@ def scenario_admin_missing_or_wrong_token() -> bool:
         {"status_code": r.status_code, "body": r.text},
     )
 
+    # 不带 X-Admin-Token 调用创建成员关系接口
+    r_create = requests.post(
+        f"{BASE_URL}/api/admin/memberships",
+        json={
+            "group_id": "g_dummy",
+            "user_id": "u_dummy",
+            "role": "member",
+            "status": "active",
+        },
+    )
+    ok &= _log(
+        r_create.status_code == 403,
+        "缺少 X-Admin-Token 调用 admin 创建成员关系接口被禁止场景",
+        {"status_code": r_create.status_code, "body": r_create.text},
+    )
+
     # 带错误的 token
     r = requests.get(
         f"{BASE_URL}/api/admin/memberships",
@@ -498,6 +863,23 @@ def scenario_admin_missing_or_wrong_token() -> bool:
         r.status_code == 403,
         "错误 X-Admin-Token 访问后台成员关系接口被禁止场景",
         {"status_code": r.status_code, "body": r.text},
+    )
+
+    # 带错误 token 调用创建成员关系接口
+    r_create_wrong = requests.post(
+        f"{BASE_URL}/api/admin/memberships",
+        json={
+            "group_id": "g_dummy",
+            "user_id": "u_dummy",
+            "role": "member",
+            "status": "active",
+        },
+        headers={"X-Admin-Token": "WrongKey"},
+    )
+    ok &= _log(
+        r_create_wrong.status_code == 403,
+        "错误 X-Admin-Token 调用 admin 创建成员关系接口被禁止场景",
+        {"status_code": r_create_wrong.status_code, "body": r_create_wrong.text},
     )
 
     return ok
@@ -515,6 +897,13 @@ def run_all() -> None:
     ok &= scenario_admin_list_memberships_basic(ctx)
     ok &= scenario_admin_list_memberships_filters(ctx)
     ok &= scenario_admin_list_memberships_created_time_filter(ctx)
+    ok &= scenario_admin_create_membership_success(ctx)
+    ok &= scenario_admin_create_membership_already_active_conflict(ctx)
+    ok &= scenario_admin_create_membership_group_full()
+    ok &= scenario_admin_create_membership_reactivate_existing()
+    ok &= scenario_admin_create_membership_in_inactive_group()
+    ok &= scenario_admin_create_membership_invalid_role_or_status(ctx)
+    ok &= scenario_admin_create_membership_group_or_user_not_found(ctx)
     ok &= scenario_admin_get_membership_detail(ctx)
     ok &= scenario_admin_get_membership_not_found()
     ok &= scenario_admin_update_membership_role_and_status(ctx)

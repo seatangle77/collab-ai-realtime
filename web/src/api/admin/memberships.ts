@@ -11,6 +11,13 @@ export interface ListAdminMembershipsParams {
   created_to?: string
 }
 
+export interface CreateAdminMembershipPayload {
+  group_id: string
+  user_id: string
+  role: 'leader' | 'member'
+  status?: 'active' | 'left' | 'kicked'
+}
+
 export async function listAdminMemberships(params: ListAdminMembershipsParams): Promise<Page<AdminMembership>> {
   const query = new URLSearchParams()
   if (params.page) query.set('page', String(params.page))
@@ -24,6 +31,10 @@ export async function listAdminMemberships(params: ListAdminMembershipsParams): 
   const qs = query.toString()
   const url = '/api/admin/memberships' + (qs ? `?${qs}` : '')
   return http.get<Page<AdminMembership>>(url)
+}
+
+export async function createAdminMembership(payload: CreateAdminMembershipPayload): Promise<AdminMembership> {
+  return http.post<AdminMembership>('/api/admin/memberships', payload)
 }
 
 export interface UpdateAdminMembershipPayload {

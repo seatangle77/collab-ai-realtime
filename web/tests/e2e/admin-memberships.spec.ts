@@ -157,6 +157,43 @@ test.describe.serial('Admin 成员关系管理页面 - 查询与时间', () => {
     await loginAsAdminAndGoToMemberships(page)
   })
 
+  test('0. 通过 Admin 页面新建成员关系并在列表中看到', async ({ page }) => {
+    // 独立准备一组群组和用户，避免污染 shared fixture
+    const leader = await registerAndLogin('ui-create-leader')
+    const { groupId } = await createGroup(leader.accessToken, `UI创建成员关系测试群-${Date.now()}`)
+
+    const member = await registerAndLogin('ui-create-member')
+
+    // 打开新建成员关系对话框
+    await page.getByRole('button', { name: '新建成员关系' }).click()
+    const createDialog = page.getByRole('dialog', { name: '新建成员关系' })
+    await expect(createDialog).toBeVisible()
+
+    // 选择群组：下拉+搜索
+    const groupSelect = createDialog.locator('.el-form-item').filter({ hasText: '群组 ID' }).locator('.el-select')
+    await groupSelect.click()
+    const groupOption = page.getByRole('option').filter({ hasText: groupId }).first()
+    await groupOption.click()
+
+    // 选择用户：下拉+搜索（列表里包含新建用户）
+    const userSelect = createDialog.locator('.el-form-item').filter({ hasText: '用户 ID' }).locator('.el-select')
+    await userSelect.click()
+    const userOption = page.getByRole('option').filter({ hasText: member.userId }).first()
+    await userOption.click()
+
+    await createDialog.getByRole('button', { name: '创建' }).click()
+
+    await expect(page.getByText('创建成员关系成功')).toBeVisible()
+
+    // 按群组 ID + 用户 ID 查询应该能看到该成员关系
+    await page.getByPlaceholder('按群组 ID 精确查询').fill(groupId)
+    await page.getByPlaceholder('按用户 ID 精确查询').fill(member.userId)
+    await page.getByRole('button', { name: '查询' }).click()
+
+    const rows = page.getByRole('row').filter({ hasText: groupId }).filter({ hasText: member.userId })
+    await expect(rows.first()).toBeVisible()
+  })
+
   test('1. 按群组 ID 查询出准备好的成员关系', async ({ page }) => {
     await page.getByPlaceholder('按群组 ID 精确查询').fill(shared.groupId)
     await page.getByRole('button', { name: '查询' }).click()
@@ -313,6 +350,71 @@ test.describe('Admin 成员关系管理 - 查询组合与时间边界', () => {
 
     const rows = page.getByRole('row').filter({ hasText: fixture.groupId })
     await expect(rows.first()).toBeVisible()
+  })
+
+  test('新建成员关系 - 必填项为空时表单校验阻止创建', async ({ page }) => {
+    await page.getByRole('button', { name: '新建成员关系' }).click()
+    const createDialog = page.getByRole('dialog', { name: '新建成员关系' })
+    await expect(createDialog).toBeVisible()
+
+    // 不选择任何群组和用户，直接点击创建
+    await createDialog.getByRole('button', { name: '创建' }).click()
+
+    await expect(createDialog.getByText('请输入群组 ID')).toBeVisible()
+    await expect(createDialog.getByText('请输入用户 ID')).toBeVisible()
+    await expect(createDialog).toBeVisible()
+  })
+
+  test('新建成员关系 - 取消创建时不应产生新数据', async ({ page }) => {
+    // 准备一组群组和用户，但只用于校验不会在列表中出现
+    const leader = await registerAndLogin('ui-cancel-leader')
+    const { groupId } = await createGroup(leader.accessToken, `UI取消创建测试群-${Date.now()}`)
+    const member = await registerAndLogin('ui-cancel-member')
+
+    await page.getByRole('button', { name: '新建成员关系' }).click()
+    const createDialog = page.getByRole('dialog', { name: '新建成员关系' })
+    await expect(createDialog).toBeVisible()
+
+    // 选择群组和用户，但点击取消
+    const groupSelect = createDialog.locator('.el-form-item').filter({ hasText: '群组 ID' }).locator('.el-select')
+    await groupSelect.click()
+    await page.getByRole('option').filter({ hasText: groupId }).first().click()
+
+    const userSelect = createDialog.locator('.el-form-item').filter({ hasText: '用户 ID' }).locator('.el-select')
+    await userSelect.click()
+    await page.getByRole('option').filter({ hasText: member.userId }).first().click()
+
+    await createDialog.getByRole('button', { name: '取消' }).click()
+
+    // 按 groupId + userId 查询，应查不到该成员关系
+    await page.getByPlaceholder('按群组 ID 精确查询').fill(groupId)
+    await page.getByPlaceholder('按用户 ID 精确查询').fill(member.userId)
+    await page.getByRole('button', { name: '查询' }).click()
+
+    const rows = page.getByRole('row').filter({ hasText: groupId }).filter({ hasText: member.userId })
+    await expect(rows).toHaveCount(0)
+  })
+
+  test('新建成员关系 - 多次打开关闭弹窗时表单状态重置', async ({ page }) => {
+    await page.getByRole('button', { name: '新建成员关系' }).click()
+    let createDialog = page.getByRole('dialog', { name: '新建成员关系' })
+    await expect(createDialog).toBeVisible()
+
+    // 简单选一个选项后取消
+    const groupSelect = createDialog.locator('.el-form-item').filter({ hasText: '群组 ID' }).locator('.el-select')
+    await groupSelect.click()
+    const anyGroupOption = page.getByRole('option').first()
+    await anyGroupOption.click()
+
+    await createDialog.getByRole('button', { name: '取消' }).click()
+
+    // 再次打开，新建表单应重置为空/默认值
+    await page.getByRole('button', { name: '新建成员关系' }).click()
+    createDialog = page.getByRole('dialog', { name: '新建成员关系' })
+    await expect(createDialog).toBeVisible()
+
+    await expect(createDialog.getByText('从下拉中选择或搜索群组')).toBeVisible()
+    await expect(createDialog.getByText('从下拉中选择或搜索用户')).toBeVisible()
   })
 })
 
