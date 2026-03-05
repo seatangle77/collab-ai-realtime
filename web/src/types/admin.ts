@@ -33,4 +33,15 @@ export interface AdminMembership {
   created_at: string
 }
 
+export interface AdminChatSession {
+  id: string
+  group_id: string
+  session_title: string
+  created_at: string
+  last_updated: string
+  is_active: boolean | null
+  ended_at: string | null
+}
+
+
 

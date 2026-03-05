@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta
 from typing import Any, Dict
 
 import requests
@@ -203,6 +204,150 @@ def scenario_admin_list_chat_sessions_filters(ctx: Dict[str, Any]) -> bool:
     return ok
 
 
+# ---------- 场景：创建时间 / 更新时间 / 结束时间范围过滤 ----------
+
+
+def scenario_admin_chat_sessions_time_filters(ctx: Dict[str, Any]) -> bool:
+  """
+  使用 created_from/created_to、last_updated_from/last_updated_to、ended_from/ended_to
+  对同一 group 下的会话做时间范围过滤，验证：
+  1）在一个宽松时间窗口内可以查到准备阶段产生的会话；
+  2）在窗口之外查不到这些会话；
+  3）使用 ended_* 仅命中已结束的会话。
+  """
+  group_id = ctx["group_id"]
+
+  r = requests.get(
+      f"{BASE_URL}/api/admin/chat-sessions",
+      params={"group_id": group_id, "page": 1, "page_size": 20},
+      headers=ADMIN_HEADERS,
+  )
+  if r.status_code != 200:
+      return _log(
+          False,
+          "admin 基础列表用于时间过滤准备失败（期望 200）",
+          {"status_code": r.status_code, "body": r.text},
+      )
+
+  data = r.json()
+  items = data.get("items", [])
+  if not items:
+      return _log(False, "时间过滤场景：指定 group 下没有任何会话", data)
+
+  def _parse(ts: str | None) -> datetime | None:
+      if not ts:
+          return None
+      try:
+          return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+      except Exception as exc:  # noqa: BLE001
+          _log(False, "解析时间字符串失败", {"value": ts, "error": str(exc)})
+          return None
+
+  created_list = [_parse(i.get("created_at")) for i in items]
+  created_list = [d for d in created_list if d is not None]
+
+  if not created_list:
+      return _log(False, "时间过滤场景：无法解析任何 created_at", items)
+
+  earliest_created = min(created_list)
+  latest_created = max(created_list)
+
+  # ---- created_at 窗口：包含所有会话 ----
+  window_start = (earliest_created - timedelta(minutes=5)).isoformat()
+  window_end = (latest_created + timedelta(minutes=5)).isoformat()
+
+  r_in = requests.get(
+      f"{BASE_URL}/api/admin/chat-sessions",
+      params={
+          "group_id": group_id,
+          "created_from": window_start,
+          "created_to": window_end,
+          "page": 1,
+          "page_size": 50,
+      },
+      headers=ADMIN_HEADERS,
+  )
+  if r_in.status_code != 200:
+      return _log(
+          False,
+          "admin 使用 created_from/created_to 过滤会话失败（期望 200）",
+          {"status_code": r_in.status_code, "body": r_in.text},
+      )
+  data_in = r_in.json()
+  original_ids = {i["id"] for i in items}
+  returned_ids_in = {i["id"] for i in data_in.get("items", [])}
+  ok = original_ids.issubset(returned_ids_in)
+  ok &= _log(
+      ok,
+      "admin created_at 窗口内包含准备阶段创建的会话场景",
+      {"window_start": window_start, "window_end": window_end, "returned": data_in},
+  )
+
+  # ---- created_at 窗口：在所有记录之后，应查不到这些会话 ----
+  future_start = (latest_created + timedelta(hours=1)).isoformat()
+  future_end = (latest_created + timedelta(hours=2)).isoformat()
+  r_out = requests.get(
+      f"{BASE_URL}/api/admin/chat-sessions",
+      params={
+          "group_id": group_id,
+          "created_from": future_start,
+          "created_to": future_end,
+          "page": 1,
+          "page_size": 50,
+      },
+      headers=ADMIN_HEADERS,
+  )
+  if r_out.status_code != 200:
+      return _log(
+          False,
+          "admin 使用 created_from/created_to（未来窗口）过滤失败（期望 200）",
+          {"status_code": r_out.status_code, "body": r_out.text},
+      )
+  data_out = r_out.json()
+  returned_ids_out = {i["id"] for i in data_out.get("items", [])}
+  ok &= _log(
+      original_ids.isdisjoint(returned_ids_out),
+      "admin created_at 未来窗口不包含准备阶段会话场景",
+      {"future_start": future_start, "future_end": future_end, "returned": data_out},
+  )
+
+  # ---- ended_at 窗口：仅命中已结束的会话（如果存在）----
+  ended_times = [_parse(i.get("ended_at")) for i in items]
+  ended_times = [d for d in ended_times if d is not None]
+  if ended_times:
+      earliest_ended = min(ended_times)
+      latest_ended = max(ended_times)
+      ended_start = (earliest_ended - timedelta(minutes=5)).isoformat()
+      ended_end = (latest_ended + timedelta(minutes=5)).isoformat()
+
+      r_ended = requests.get(
+          f"{BASE_URL}/api/admin/chat-sessions",
+          params={
+              "group_id": group_id,
+              "ended_from": ended_start,
+              "ended_to": ended_end,
+              "page": 1,
+              "page_size": 50,
+          },
+          headers=ADMIN_HEADERS,
+      )
+      if r_ended.status_code != 200:
+          return _log(
+              False,
+              "admin 使用 ended_from/ended_to 过滤会话失败（期望 200）",
+              {"status_code": r_ended.status_code, "body": r_ended.text},
+          )
+      data_ended = r_ended.json()
+      # 返回结果中的会话，其 ended_at 都应非空
+      ok &= _log(
+          all(item.get("ended_at") for item in data_ended.get("items", [])),
+          "admin 使用 ended_from/ended_to 仅命中已结束会话场景",
+          data_ended,
+      )
+
+  return ok
+
+
 # ---------- 场景：获取会话详情 ----------
 
 
@@ -386,6 +531,7 @@ def run_all() -> None:
     ok &= setup_chat_sessions(ctx)
     ok &= scenario_admin_list_chat_sessions_basic(ctx)
     ok &= scenario_admin_list_chat_sessions_filters(ctx)
+    ok &= scenario_admin_chat_sessions_time_filters(ctx)
     ok &= scenario_admin_get_chat_session_detail(ctx)
     ok &= scenario_admin_get_chat_session_not_found()
     ok &= scenario_admin_update_chat_session_title(ctx)
