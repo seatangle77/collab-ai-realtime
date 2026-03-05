@@ -24,3 +24,13 @@ export interface AdminGroup {
   is_active: boolean
 }
 
+export interface AdminMembership {
+  id: string
+  group_id: string
+  user_id: string
+  role: string
+  status: string
+  created_at: string
+}
+
+

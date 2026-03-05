@@ -82,7 +82,8 @@ npm run build
 
 | 命令 | 说明 |
 |------|------|
-| `npm run test:e2e` | 运行全部 E2E（用户管理 + 群组管理） |
+| `npm run test:e2e` | 运行全部 E2E（用户管理 + 群组管理 + 成员关系管理） |
 | `npm run test:e2e:users` | 仅运行用户管理 E2E |
 | `npm run test:e2e:groups` | 仅运行群组管理 E2E |
+| `npm run test:e2e:memberships` | 仅运行成员关系管理 E2E |
 | `npm run test:e2e:ui` | 以 UI 模式运行，便于调试 |

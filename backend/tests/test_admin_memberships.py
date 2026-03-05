@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta
 from typing import Any, Dict, List
 
 import requests
@@ -230,6 +231,105 @@ def scenario_admin_list_memberships_filters(ctx: Dict[str, Any]) -> bool:
     return ok
 
 
+# ---------- 场景：创建时间范围过滤 ----------
+
+
+def scenario_admin_list_memberships_created_time_filter(ctx: Dict[str, Any]) -> bool:
+    """
+    使用 created_from/created_to 过滤成员关系，确保：
+    1）在一个宽松时间窗口内可以查到准备阶段产生的成员关系；
+    2）在窗口之外查不到这些成员关系。
+    """
+    memberships: List[Dict[str, Any]] = ctx["memberships"]
+    if not memberships:
+        return _log(False, "created_time 过滤场景：ctx['memberships'] 为空", ctx)
+
+    # 从准备阶段的 membership 中解析 created_at 列表
+    created_list: list[datetime] = []
+    for m in memberships:
+        raw = m.get("created_at")
+        if not isinstance(raw, str):
+            continue
+        try:
+            # 兼容 FastAPI 默认的 ISO 格式，可能带尾部的 Z
+            created_list.append(datetime.fromisoformat(raw.replace("Z", "+00:00")))
+        except Exception as exc:  # noqa: BLE001
+            _log(False, "解析 membership.created_at 失败", {"raw": raw, "error": str(exc)})
+
+    if not created_list:
+        return _log(False, "created_time 过滤场景：无法解析任何 created_at", memberships)
+
+    earliest = min(created_list)
+    latest = max(created_list)
+
+    # 构造一个「肯定包含」所有记录的时间窗口：向前/向后各扩 5 分钟
+    window_start = (earliest - timedelta(minutes=5)).isoformat()
+    window_end = (latest + timedelta(minutes=5)).isoformat()
+
+    group_id = ctx["group_id"]
+    r_in = requests.get(
+        f"{BASE_URL}/api/admin/memberships",
+        params={
+            "group_id": group_id,
+            "created_from": window_start,
+            "created_to": window_end,
+            "page": 1,
+            "page_size": 50,
+        },
+        headers=ADMIN_HEADERS,
+    )
+    if r_in.status_code != 200:
+        return _log(
+            False,
+            "admin 使用 created_from/created_to 过滤成员关系失败（期望 200）",
+            {"status_code": r_in.status_code, "body": r_in.text},
+        )
+
+    data_in = r_in.json()
+    returned_ids_in = {item["id"] for item in data_in["items"]}
+    original_ids = {m["id"] for m in memberships}
+    ok_in = original_ids.issubset(returned_ids_in)
+
+    ok = _log(
+        ok_in,
+        "admin 使用 created_from/created_to 过滤（窗口内包含准备阶段生成的成员关系）场景",
+        {"window_start": window_start, "window_end": window_end, "returned": data_in},
+    )
+
+    # 再构造一个「肯定在所有记录之后」的时间窗口，预期查不到这些成员关系
+    after_start = (latest + timedelta(minutes=10)).isoformat()
+    after_end = (latest + timedelta(minutes=20)).isoformat()
+    r_out = requests.get(
+        f"{BASE_URL}/api/admin/memberships",
+        params={
+            "group_id": group_id,
+            "created_from": after_start,
+            "created_to": after_end,
+            "page": 1,
+            "page_size": 50,
+        },
+        headers=ADMIN_HEADERS,
+    )
+    if r_out.status_code != 200:
+        return _log(
+            False,
+            "admin 使用 created_from/created_to（窗口在所有记录之后）过滤失败（期望 200）",
+            {"status_code": r_out.status_code, "body": r_out.text},
+        )
+
+    data_out = r_out.json()
+    returned_ids_out = {item["id"] for item in data_out["items"]}
+    ok_out = original_ids.isdisjoint(returned_ids_out)
+
+    ok &= _log(
+        ok_out,
+        "admin 使用 created_from/created_to（窗口在所有记录之后）过滤场景",
+        {"after_start": after_start, "after_end": after_end, "returned": data_out},
+    )
+
+    return ok
+
+
 # ---------- 场景：获取单条成员详情 ----------
 
 
@@ -414,6 +514,7 @@ def run_all() -> None:
     ok &= setup_memberships(ctx)
     ok &= scenario_admin_list_memberships_basic(ctx)
     ok &= scenario_admin_list_memberships_filters(ctx)
+    ok &= scenario_admin_list_memberships_created_time_filter(ctx)
     ok &= scenario_admin_get_membership_detail(ctx)
     ok &= scenario_admin_get_membership_not_found()
     ok &= scenario_admin_update_membership_role_and_status(ctx)

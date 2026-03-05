@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
@@ -15,6 +15,11 @@ from .schemas import Page, PageMeta
 
 router = APIRouter(prefix="/api/admin/memberships", tags=["admin-memberships"])
 
+
+def _to_utc_naive(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 class AdminMembershipOut(BaseModel):
     id: str
@@ -45,6 +50,8 @@ async def list_memberships(
         alias="status",
         description="按成员状态过滤，例如 active/left/kicked",
     ),
+    created_from: datetime | None = None,
+    created_to: datetime | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> Page[AdminMembershipOut]:
     offset = (page - 1) * page_size
@@ -61,6 +68,12 @@ async def list_memberships(
     if status_filter:
         where_clauses.append("status = :status")
         params["status"] = status_filter
+    if created_from:
+        where_clauses.append("created_at >= :created_from")
+        params["created_from"] = _to_utc_naive(created_from)
+    if created_to:
+        where_clauses.append("created_at <= :created_to")
+        params["created_to"] = _to_utc_naive(created_to)
 
     where_sql = " AND ".join(where_clauses)
 
