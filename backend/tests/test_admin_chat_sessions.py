@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
 
 import requests
@@ -348,6 +348,343 @@ def scenario_admin_chat_sessions_time_filters(ctx: Dict[str, Any]) -> bool:
   return ok
 
 
+# ---------- 场景：管理员创建会话（未开始 / 进行中） ----------
+
+
+def scenario_admin_create_chat_session_success_not_started() -> bool:
+    """
+    管理员为指定群组创建一条“未开始”的会话（is_active=None, ended_at=None）。
+    """
+    info = register_and_login("admin_create_not_started_owner")
+    access_token = info["access_token"]
+    group_detail = create_group(access_token, name="Admin 后台新建未开始会话群")
+    group_id = group_detail["group"]["id"]
+
+    r = requests.post(
+        f"{BASE_URL}/api/admin/chat-sessions",
+        json={"group_id": group_id, "session_title": "后台新建未开始会话"},
+        headers=ADMIN_HEADERS,
+    )
+    if r.status_code != 201:
+        return _log(
+            False,
+            "admin 创建未开始会话失败（期望 201）",
+            {"status_code": r.status_code, "body": r.text},
+        )
+    data = r.json()
+    ok = (
+        data.get("group_id") == group_id
+        and data.get("session_title") == "后台新建未开始会话"
+        # 业务默认 is_active=True，未开始与进行中通过 created_at/last_updated 区分
+        and data.get("is_active") is True
+        and data.get("ended_at") is None
+        and data.get("created_at") == data.get("last_updated")
+    )
+    ok &= _log(ok, "admin 创建未开始会话成功场景", data)
+
+    # 再通过列表接口校验可见性
+    r_list = requests.get(
+        f"{BASE_URL}/api/admin/chat-sessions",
+        params={"group_id": group_id, "page": 1, "page_size": 10},
+        headers=ADMIN_HEADERS,
+    )
+    if r_list.status_code != 200:
+        return _log(
+            False,
+            "admin 创建未开始会话后列表查询失败（期望 200）",
+            {"status_code": r_list.status_code, "body": r_list.text},
+        )
+    data_list = r_list.json()
+    ids = {item["id"] for item in data_list.get("items", [])}
+    ok &= _log(
+        data["id"] in ids,
+        "admin 创建未开始会话后列表校验场景",
+        data_list,
+    )
+    return ok
+
+
+def scenario_admin_create_chat_session_success_ongoing() -> bool:
+    """
+    管理员创建一条“进行中”的会话（is_active=True）。
+    """
+    info = register_and_login("admin_create_ongoing_owner")
+    access_token = info["access_token"]
+    group_detail = create_group(access_token, name="Admin 后台新建进行中会话群")
+    group_id = group_detail["group"]["id"]
+
+    r = requests.post(
+        f"{BASE_URL}/api/admin/chat-sessions",
+        json={
+            "group_id": group_id,
+            "session_title": "后台新建进行中会话",
+            "is_active": True,
+        },
+        headers=ADMIN_HEADERS,
+    )
+    if r.status_code != 201:
+        return _log(
+            False,
+            "admin 创建进行中会话失败（期望 201）",
+            {"status_code": r.status_code, "body": r.text},
+        )
+    data = r.json()
+    ok = (
+        data.get("group_id") == group_id
+        and data.get("session_title") == "后台新建进行中会话"
+        and data.get("is_active") is True
+        and data.get("ended_at") is None
+    )
+    ok &= _log(ok, "admin 创建进行中会话成功场景", data)
+    return ok
+
+
+# ---------- 场景：管理员创建/更新会话时显式控制时间字段 ----------
+
+
+def _parse_dt(value: str | None) -> datetime | None:
+    """
+    将 ISO 字符串解析为 UTC naive datetime，统一比较口径：
+    - 若带时区，则先转为 UTC 再去掉 tzinfo；
+    - 若不带时区，则直接视为 naive。
+    """
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+    except Exception as exc:  # noqa: BLE001
+        _log(False, "解析时间字符串失败(_parse_dt)", {"value": value, "error": str(exc)})
+        return None
+
+
+def scenario_admin_create_chat_session_with_explicit_times() -> bool:
+    """
+    管理员创建会话时显式传入 created_at/last_updated/ended_at，验证后台按传入值落库：
+    - 若传入 ended_at 且未显式传 is_active，则 is_active=False。
+    - created_at/last_updated 与传入值在秒级上相等；
+    - ended_at 至少非空（具体值可能受数据库时区类型影响，这里不做精确校验）。
+    """
+    info = register_and_login("admin_create_with_times_owner")
+    access_token = info["access_token"]
+    group_detail = create_group(access_token, name="Admin 后台新建带时间会话群")
+    group_id = group_detail["group"]["id"]
+
+    # 使用 UTC 时间，但传给后端时用 ISO 字符串（不额外拼接 "Z"，避免出现 "+00:00Z" 这种非法格式）
+    base_time = datetime.now(timezone.utc).replace(microsecond=0, tzinfo=None)
+    created_at = (base_time - timedelta(hours=2)).isoformat()
+    last_updated = (base_time - timedelta(hours=1)).isoformat()
+    ended_at = base_time.isoformat()
+
+    r = requests.post(
+        f"{BASE_URL}/api/admin/chat-sessions",
+        json={
+            "group_id": group_id,
+            "session_title": "后台新建带时间会话",
+            "created_at": created_at,
+            "last_updated": last_updated,
+            "ended_at": ended_at,
+        },
+        headers=ADMIN_HEADERS,
+    )
+    if r.status_code != 201:
+        return _log(
+            False,
+            "admin 创建带显式时间的会话失败（期望 201）",
+            {"status_code": r.status_code, "body": r.text},
+        )
+
+    data = r.json()
+    created_resp = _parse_dt(data.get("created_at"))
+    last_updated_resp = _parse_dt(data.get("last_updated"))
+    # ended_at 可能是 timestamptz，返回值可能带 Z，这里只校验非空
+    ended_value = data.get("ended_at")
+
+    created_expected = _parse_dt(created_at)
+    last_updated_expected = _parse_dt(last_updated)
+
+    def _close(a: datetime | None, b: datetime | None) -> bool:
+        if a is None or b is None:
+            return False
+        return abs((a - b).total_seconds()) < 1
+
+    ok = (
+        data.get("group_id") == group_id
+        and data.get("is_active") is False  # 传了 ended_at 且未指定 is_active，默认视为已结束
+        and _close(created_resp, created_expected)
+        and _close(last_updated_resp, last_updated_expected)
+        and ended_value is not None
+    )
+    ok &= _log(ok, "admin 创建带显式时间会话成功场景", data)
+    return ok
+
+
+def scenario_admin_update_chat_session_times(ctx: Dict[str, Any]) -> bool:
+    """
+    管理员更新会话时显式修改 created_at/last_updated：
+    - 传入 last_updated 时，应使用传入值而不是自动 NOW()。
+    """
+    sid = ctx["session_id_2"]
+
+    # 同样使用 UTC naive 时间，避免传入带重复时区信息的字符串
+    now_utc = datetime.now(timezone.utc).replace(microsecond=0, tzinfo=None)
+    new_created = (now_utc - timedelta(days=1)).isoformat()
+    new_last_updated = (now_utc - timedelta(minutes=30)).isoformat()
+
+    r = requests.patch(
+        f"{BASE_URL}/api/admin/chat-sessions/{sid}",
+        json={
+            "created_at": new_created,
+            "last_updated": new_last_updated,
+        },
+        headers=ADMIN_HEADERS,
+    )
+    if r.status_code != 200:
+        return _log(
+            False,
+            "admin 显式更新 created_at/last_updated 失败（期望 200）",
+            {"status_code": r.status_code, "body": r.text},
+        )
+
+    data = r.json()
+    created_resp = _parse_dt(data.get("created_at"))
+    last_updated_resp = _parse_dt(data.get("last_updated"))
+    created_expected = _parse_dt(new_created)
+    last_updated_expected = _parse_dt(new_last_updated)
+
+    def _close(a: datetime | None, b: datetime | None) -> bool:
+        if a is None or b is None:
+            return False
+        return abs((a - b).total_seconds()) < 1
+
+    ok = _close(created_resp, created_expected) and _close(last_updated_resp, last_updated_expected)
+    ok &= _log(ok, "admin 显式更新 created_at/last_updated 场景", data)
+    return ok
+
+
+# ---------- 场景：status 三态过滤 ----------
+
+
+def scenario_admin_list_chat_sessions_status_filters_with_status_param(ctx: Dict[str, Any]) -> bool:
+    """
+    使用 status=not_started/ongoing/ended 三态过滤会话。
+    利用准备阶段的 ctx（包含已结束/进行中会话），并额外创建一条未开始会话。
+    """
+    ok = True
+    group_id = ctx["group_id"]
+
+    # 额外创建一条未开始会话：通过 admin 创建，created_at == last_updated 且未结束
+    r_create_not_started = requests.post(
+        f"{BASE_URL}/api/admin/chat-sessions",
+        json={
+            "group_id": group_id,
+            "session_title": "后台 status 测试未开始会话",
+        },
+        headers=ADMIN_HEADERS,
+    )
+    if r_create_not_started.status_code != 201:
+        return _log(
+            False,
+            "status 三态场景：admin 创建未开始会话失败（期望 201）",
+            {"status_code": r_create_not_started.status_code, "body": r_create_not_started.text},
+        )
+    created_not_started = r_create_not_started.json()
+    not_started_id = created_not_started["id"]
+
+    # not_started：通过 status=not_started + group_id 应至少包含该会话
+    r_list = requests.get(
+        f"{BASE_URL}/api/admin/chat-sessions",
+        params={"group_id": group_id, "session_title": "status 测试未开始", "page": 1, "page_size": 20},
+        headers=ADMIN_HEADERS,
+    )
+    r_not = requests.get(
+        f"{BASE_URL}/api/admin/chat-sessions",
+        params={"group_id": group_id, "status": "not_started", "page": 1, "page_size": 20},
+        headers=ADMIN_HEADERS,
+    )
+    if r_not.status_code != 200:
+        return _log(
+            False,
+            "admin 按 status=not_started 过滤会话失败（期望 200）",
+            {"status_code": r_not.status_code, "body": r_not.text},
+        )
+    data_not = r_not.json()
+    ids_not = {item["id"] for item in data_not.get("items", [])}
+    ok &= _log(
+        not_started_id in ids_not,
+        "admin 按 status=not_started 过滤会话场景",
+        data_not,
+    )
+
+    # ongoing：将准备阶段的 session_id_2 视为进行中，通过 admin 更新标题改变 last_updated
+    r_update_ongoing = requests.patch(
+        f"{BASE_URL}/api/admin/chat-sessions/{ctx['session_id_2']}",
+        json={"session_title": "进行中会话（已更新）"},
+        headers=ADMIN_HEADERS,
+    )
+    if r_update_ongoing.status_code != 200:
+        return _log(
+            False,
+            "status 三态场景：将 session_id_2 标记为进行中失败（期望 200）",
+            {"status_code": r_update_ongoing.status_code, "body": r_update_ongoing.text},
+        )
+
+    r_ongoing = requests.get(
+        f"{BASE_URL}/api/admin/chat-sessions",
+        params={"group_id": group_id, "status": "ongoing", "page": 1, "page_size": 20},
+        headers=ADMIN_HEADERS,
+    )
+    if r_ongoing.status_code != 200:
+        return _log(
+            False,
+            "admin 按 status=ongoing 过滤会话失败（期望 200）",
+            {"status_code": r_ongoing.status_code, "body": r_ongoing.text},
+        )
+    data_ongoing = r_ongoing.json()
+    ids_ongoing = {item["id"] for item in data_ongoing.get("items", [])}
+    ok &= _log(
+        ctx["session_id_2"] in ids_ongoing,
+        "admin 按 status=ongoing 过滤会话场景",
+        data_ongoing,
+    )
+
+    # ended：应至少包含准备阶段结束的 session_id_1
+    r_ended = requests.get(
+        f"{BASE_URL}/api/admin/chat-sessions",
+        params={"group_id": group_id, "status": "ended", "page": 1, "page_size": 20},
+        headers=ADMIN_HEADERS,
+    )
+    if r_ended.status_code != 200:
+        return _log(
+            False,
+            "admin 按 status=ended 过滤会话失败（期望 200）",
+            {"status_code": r_ended.status_code, "body": r_ended.text},
+        )
+    data_ended = r_ended.json()
+    ids_ended = {item["id"] for item in data_ended.get("items", [])}
+    ok &= _log(
+        ctx["session_id_1"] in ids_ended,
+        "admin 按 status=ended 过滤会话场景",
+        data_ended,
+    )
+
+    return ok
+
+
+def scenario_admin_list_chat_sessions_invalid_status_param() -> bool:
+    """
+    非法的 status 参数应返回 400。
+    """
+    r = requests.get(
+        f"{BASE_URL}/api/admin/chat-sessions",
+        params={"status": "invalid_status"},
+        headers=ADMIN_HEADERS,
+    )
+    ok = r.status_code == 400
+    return _log(ok, "admin 使用非法 status 参数返回 400 场景", {"status_code": r.status_code, "body": r.text})
+
 # ---------- 场景：获取会话详情 ----------
 
 
@@ -506,6 +843,20 @@ def scenario_admin_missing_or_wrong_token() -> bool:
         {"status_code": r.status_code, "body": r.text},
     )
 
+    # 不带 X-Admin-Token 调用创建会话接口
+    r_create = requests.post(
+        f"{BASE_URL}/api/admin/chat-sessions",
+        json={
+            "group_id": "g_dummy",
+            "session_title": "no-token-session",
+        },
+    )
+    ok &= _log(
+        r_create.status_code == 403,
+        "缺少 X-Admin-Token 调用 admin 创建会话接口被禁止场景",
+        {"status_code": r_create.status_code, "body": r_create.text},
+    )
+
     # 带错误的 token
     r = requests.get(
         f"{BASE_URL}/api/admin/chat-sessions",
@@ -515,6 +866,21 @@ def scenario_admin_missing_or_wrong_token() -> bool:
         r.status_code == 403,
         "错误 X-Admin-Token 访问后台会话接口被禁止场景",
         {"status_code": r.status_code, "body": r.text},
+    )
+
+    # 带错误 token 调用创建会话接口
+    r_create_wrong = requests.post(
+        f"{BASE_URL}/api/admin/chat-sessions",
+        json={
+            "group_id": "g_dummy",
+            "session_title": "wrong-token-session",
+        },
+        headers={"X-Admin-Token": "WrongKey"},
+    )
+    ok &= _log(
+        r_create_wrong.status_code == 403,
+        "错误 X-Admin-Token 调用 admin 创建会话接口被禁止场景",
+        {"status_code": r_create_wrong.status_code, "body": r_create_wrong.text},
     )
 
     return ok
@@ -532,10 +898,16 @@ def run_all() -> None:
     ok &= scenario_admin_list_chat_sessions_basic(ctx)
     ok &= scenario_admin_list_chat_sessions_filters(ctx)
     ok &= scenario_admin_chat_sessions_time_filters(ctx)
+    ok &= scenario_admin_create_chat_session_success_not_started()
+    ok &= scenario_admin_create_chat_session_success_ongoing()
+    ok &= scenario_admin_create_chat_session_with_explicit_times()
+    ok &= scenario_admin_list_chat_sessions_status_filters_with_status_param(ctx)
+    ok &= scenario_admin_list_chat_sessions_invalid_status_param()
     ok &= scenario_admin_get_chat_session_detail(ctx)
     ok &= scenario_admin_get_chat_session_not_found()
     ok &= scenario_admin_update_chat_session_title(ctx)
     ok &= scenario_admin_update_chat_session_flags(ctx)
+    ok &= scenario_admin_update_chat_session_times(ctx)
     ok &= scenario_admin_update_chat_session_no_fields(ctx)
     ok &= scenario_admin_delete_chat_session_success(ctx)
     ok &= scenario_admin_delete_chat_session_not_found()

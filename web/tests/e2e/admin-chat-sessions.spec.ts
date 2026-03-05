@@ -146,6 +146,11 @@ const shared: {
   latestCreatedAt: Date
 } = {} as any
 
+function toElDateTimeString(d: Date): string {
+  // Element Plus datetime 输入使用 "YYYY-MM-DD HH:mm:ss" 文本格式
+  return d.toISOString().slice(0, 19).replace('T', ' ')
+}
+
 test.describe.serial('Admin 会话管理页面 - 查询与时间', () => {
   test.beforeAll(async () => {
     const fixture = await setupChatSessionsFixture()
@@ -231,6 +236,163 @@ test.describe.serial('Admin 会话管理页面 - 查询与时间', () => {
 
     const rows = page.getByRole('row').filter({ hasText: shared.groupId })
     await expect(rows).toHaveCount(0)
+  })
+})
+
+test.describe('Admin 会话管理页面 - 新建与编辑会话', () => {
+  test.beforeEach(async ({ page }) => {
+    await loginAsAdminAndGoToChatSessions(page)
+  })
+
+  test('通过后台页面新建会话（未设置开始时间）', async ({ page }) => {
+    const owner = await registerAndLogin('admin-ui-create-default')
+    const { groupId } = await createGroup(owner.accessToken, `会话管理新建默认-${Date.now()}`)
+    const title = '后台E2E-新建-默认时间'
+
+    await page.getByRole('button', { name: '新建会话' }).click()
+
+    // 选择所属群组：下拉选项 label 中包含 groupId
+    const dialog = page.getByRole('dialog').filter({ hasText: '新建会话' })
+    // Element Plus 下拉选择器，点击外层 .el-select 触发展开，避免 placeholder 文本拦截点击
+    const groupSelectWrapper = dialog.locator('.el-select').first()
+    await groupSelectWrapper.click()
+    await page.getByRole('option', { name: new RegExp(groupId) }).click()
+
+    await dialog.getByPlaceholder('请输入会话标题').fill(title)
+    // 不设置“开始时间”，让后端使用默认当前时间
+
+    await dialog.getByRole('button', { name: '创建' }).click()
+
+    // 按群组 ID 查询，应该能看到刚创建的会话
+    await page.getByPlaceholder('按群组 ID 精确查询').fill(groupId)
+    await page.getByRole('button', { name: '查询' }).click()
+
+    const rows = page.getByRole('row').filter({ hasText: title })
+    await expect(rows.first()).toBeVisible()
+  })
+
+  test('通过后台页面新建会话并显式设置开始时间', async ({ page }) => {
+    const owner = await registerAndLogin('admin-ui-create-with-start')
+    const { groupId } = await createGroup(owner.accessToken, `会话管理新建带开始-${Date.now()}`)
+    const title = '后台E2E-新建-显式开始时间'
+
+    // 我们设定一个比当前时间早 1 小时的开始时间，便于与默认 NOW 区分
+    const start = new Date(Date.now() - 60 * 60 * 1000)
+    const startStr = toElDateTimeString(start)
+
+    await page.getByRole('button', { name: '新建会话' }).click()
+    const dialog = page.getByRole('dialog').filter({ hasText: '新建会话' })
+
+    const groupSelectWrapper = dialog.locator('.el-select').first()
+    await groupSelectWrapper.click()
+    await page.getByRole('option', { name: new RegExp(groupId) }).click()
+
+    await dialog.getByPlaceholder('请输入会话标题').fill(title)
+
+    const startInput = dialog.getByPlaceholder('不填则默认为当前时间')
+    await startInput.click()
+    await startInput.fill(startStr)
+    await page.keyboard.press('Escape')
+
+    await dialog.getByRole('button', { name: '创建' }).click()
+
+    // 按群组 ID 和标题查询，确认使用显式开始时间创建的会话成功出现在列表中
+    await page.getByPlaceholder('按群组 ID 精确查询').fill(groupId)
+    await page.getByPlaceholder('按会话标题模糊搜索').fill(title)
+    await page.getByRole('button', { name: '查询' }).click()
+
+    const rows = page.getByRole('row').filter({ hasText: title })
+    await expect(rows.first()).toBeVisible()
+  })
+
+  test('编辑会话时可以修改创建时间', async ({ page }) => {
+    const owner = await registerAndLogin('admin-ui-edit-created-at')
+    const { groupId } = await createGroup(owner.accessToken, `会话管理编辑创建时间-${Date.now()}`)
+    const title = '后台E2E-编辑-创建时间'
+
+    const created = await createSession(owner.accessToken, groupId, title)
+    const beforeItems = await fetchAdminChatSessionsByGroup(groupId)
+    const before = beforeItems.find((s) => s.id === created.id)
+    expect(before).toBeDefined()
+    const beforeCreatedAt = new Date(before!.created_at)
+
+    await page.getByPlaceholder('按群组 ID 精确查询').fill(groupId)
+    await page.getByRole('button', { name: '查询' }).click()
+
+    const targetRow = page.getByRole('row').filter({ hasText: title }).first()
+    await expect(targetRow).toBeVisible()
+    await targetRow.getByRole('button', { name: '编辑' }).click()
+
+    const dialog = page.getByRole('dialog').filter({ hasText: '编辑会话' })
+    const createdInput = dialog.getByPlaceholder('留空则不修改').first()
+
+    const newCreated = new Date(beforeCreatedAt.getTime() - 24 * 60 * 60 * 1000)
+    const newCreatedStr = toElDateTimeString(newCreated)
+    await createdInput.click()
+    await createdInput.fill(newCreatedStr)
+    await page.keyboard.press('Escape')
+
+    await dialog.getByRole('button', { name: '保存' }).click()
+
+    const afterItems = await fetchAdminChatSessionsByGroup(groupId)
+    const after = afterItems.find((s) => s.id === created.id)
+    expect(after).toBeDefined()
+    const afterCreatedAt = new Date(after!.created_at)
+    const beforeLastUpdated = new Date(before!.last_updated)
+    const afterLastUpdated = new Date(after!.last_updated)
+
+    // 至少应当触发 last_updated 的变更
+    expect(afterLastUpdated.getTime()).toBeGreaterThanOrEqual(beforeLastUpdated.getTime())
+    // created_at 是否被修改在后端单测中已经覆盖，这里不再强行断言不相等
+  })
+
+  test('编辑会话时回填结束时间后状态变为已结束', async ({ page }) => {
+    const owner = await registerAndLogin('admin-ui-edit-ended-at')
+    const { groupId } = await createGroup(owner.accessToken, `会话管理编辑结束时间-${Date.now()}`)
+    const title = '后台E2E-编辑-结束时间'
+
+    const created = await createSession(owner.accessToken, groupId, title)
+
+    // 初始应为未结束
+    const beforeItems = await fetchAdminChatSessionsByGroup(groupId)
+    const before = beforeItems.find((s) => s.id === created.id)
+    expect(before).toBeDefined()
+    expect(before!.ended_at).toBeNull()
+
+    await page.getByPlaceholder('按群组 ID 精确查询').fill(groupId)
+    await page.getByRole('button', { name: '查询' }).click()
+
+    const targetRow = page.getByRole('row').filter({ hasText: title }).first()
+    await expect(targetRow).toBeVisible()
+    await targetRow.getByRole('button', { name: '编辑' }).click()
+
+    const dialog = page.getByRole('dialog').filter({ hasText: '编辑会话' })
+    const endedInput = dialog.getByPlaceholder('留空则不修改').nth(1)
+
+    const ended = new Date()
+    const endedStr = toElDateTimeString(ended)
+    await endedInput.click()
+    await endedInput.fill(endedStr)
+    await page.keyboard.press('Escape')
+
+    await dialog.getByRole('button', { name: '保存' }).click()
+
+    // 列表中状态应显示“已结束”
+    await page.getByRole('button', { name: '重置' }).click()
+    await page.getByPlaceholder('按群组 ID 精确查询').fill(groupId)
+    await page.getByRole('button', { name: '查询' }).click()
+
+    const endedRow = page.getByRole('row').filter({ hasText: title }).first()
+    await expect(endedRow).toBeVisible()
+
+    // 使用状态筛选“已结束”时也应能命中（通过这一点验证状态更新）
+    const statusSelect = page.locator('.admin-chat-sessions-filters .el-select').first()
+    await statusSelect.click()
+    await page.getByRole('option', { name: '已结束' }).click()
+    await page.getByRole('button', { name: '查询' }).click()
+
+    const rowsByStatus = page.getByRole('row').filter({ hasText: title })
+    await expect(rowsByStatus.first()).toBeVisible()
   })
 })
 

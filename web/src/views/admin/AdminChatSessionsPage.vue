@@ -2,13 +2,19 @@
 import { onMounted, reactive, ref } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import type { AdminChatSession } from '../../types/admin'
-import { listAdminChatSessions, updateAdminChatSession, deleteAdminChatSession } from '../../api/admin/chat-sessions'
+import type { AdminChatSession, AdminGroup } from '../../types/admin'
+import {
+  listAdminChatSessions,
+  updateAdminChatSession,
+  deleteAdminChatSession,
+  createAdminChatSession,
+} from '../../api/admin/chat-sessions'
+import { listAdminGroups } from '../../api/admin/groups'
 
 interface Filters {
   group_id: string
   session_title: string
-  is_active: '' | boolean
+  status: '' | 'not_started' | 'ongoing' | 'ended'
   createdAtRange: Date[] | []
   lastUpdatedRange: Date[] | []
   endedAtRange: Date[] | []
@@ -20,7 +26,7 @@ const sessions = ref<AdminChatSession[]>([])
 const filters = reactive<Filters>({
   group_id: '',
   session_title: '',
-  is_active: '',
+  status: '',
   createdAtRange: [],
   lastUpdatedRange: [],
   endedAtRange: [],
@@ -30,13 +36,30 @@ const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
 
+const createDialogVisible = ref(false)
+const createFormRef = ref<FormInstance>()
+const createForm = reactive({
+  group_id: '',
+  session_title: '',
+  created_at: null as Date | null,
+})
+
+const groupOptions = ref<AdminGroup[]>([])
+const groupLoading = ref(false)
+
+const createRules: FormRules<typeof createForm> = {
+  group_id: [{ required: true, message: '请选择群组', trigger: 'change' }],
+  session_title: [{ required: true, message: '请输入会话标题', trigger: 'blur' }],
+}
+
 const editDialogVisible = ref(false)
 const editFormRef = ref<FormInstance>()
 const editForm = reactive({
   id: '',
   session_title: '',
   is_active: true as boolean | null,
-  ended_at: null as string | null,
+  created_at: null as Date | null,
+  ended_at: null as Date | null,
 })
 
 const editRules: FormRules<typeof editForm> = {
@@ -58,7 +81,7 @@ async function fetchSessions() {
       page_size: pageSize.value,
       group_id: filters.group_id || undefined,
       session_title: filters.session_title || undefined,
-      is_active: filters.is_active === '' ? undefined : filters.is_active,
+      status: filters.status || undefined,
       created_from: createdFrom ? createdFrom.toISOString() : undefined,
       created_to: createdTo ? createdTo.toISOString() : undefined,
       last_updated_from: lastUpdatedFrom ? lastUpdatedFrom.toISOString() : undefined,
@@ -86,7 +109,7 @@ function handleSearch() {
 function handleReset() {
   filters.group_id = ''
   filters.session_title = ''
-  filters.is_active = ''
+  filters.status = ''
   filters.createdAtRange = []
   filters.lastUpdatedRange = []
   filters.endedAtRange = []
@@ -105,11 +128,37 @@ function handlePageSizeChange(size: number) {
   fetchSessions()
 }
 
+async function loadInitialGroupOptions() {
+  groupLoading.value = true
+  try {
+    const res = await listAdminGroups({
+      page: 1,
+      page_size: 50,
+      name: undefined,
+    })
+    groupOptions.value = res.items
+  } catch (e: any) {
+    console.error(e)
+    ElMessage.error(e?.message || '加载群组列表失败')
+  } finally {
+    groupLoading.value = false
+  }
+}
+
+function openCreateDialog() {
+  createForm.group_id = ''
+  createForm.session_title = ''
+  createForm.created_at = null
+  loadInitialGroupOptions()
+  createDialogVisible.value = true
+}
+
 function openEditDialog(row: AdminChatSession) {
   editForm.id = row.id
   editForm.session_title = row.session_title
   editForm.is_active = row.is_active
-  editForm.ended_at = row.ended_at
+  editForm.created_at = row.created_at ? new Date(row.created_at) : null
+  editForm.ended_at = row.ended_at ? new Date(row.ended_at) : null
   editDialogVisible.value = true
 }
 
@@ -122,8 +171,11 @@ async function submitEdit() {
         session_title: editForm.session_title,
         is_active: editForm.is_active,
       }
-      if (editForm.ended_at !== null) {
-        payload.ended_at = editForm.ended_at
+      if (editForm.created_at) {
+        payload.created_at = editForm.created_at.toISOString()
+      }
+      if (editForm.ended_at) {
+        payload.ended_at = editForm.ended_at.toISOString()
       }
       await updateAdminChatSession(editForm.id, payload)
       ElMessage.success('更新会话成功')
@@ -132,6 +184,38 @@ async function submitEdit() {
     } catch (e: any) {
       console.error(e)
       ElMessage.error(e?.message || '更新会话失败')
+    }
+  })
+}
+
+async function submitCreate() {
+  if (!createFormRef.value) return
+  await createFormRef.value.validate(async (valid) => {
+    if (!valid) return
+    try {
+      const payload: Record<string, any> = {
+        group_id: createForm.group_id,
+        session_title: createForm.session_title,
+      }
+      if (createForm.created_at) {
+        const iso = createForm.created_at.toISOString()
+        payload.created_at = iso
+        // 默认将 last_updated 与创建时间对齐，便于“未开始/进行中”状态判断
+        payload.last_updated = iso
+      }
+
+      await createAdminChatSession(payload)
+      ElMessage.success('创建会话成功')
+      createDialogVisible.value = false
+      if (!filters.group_id) {
+        filters.group_id = createForm.group_id
+      }
+      page.value = 1
+      fetchSessions()
+    } catch (e: any) {
+      console.error(e)
+      const msg = e?.response?.data?.detail || e?.message || '创建会话失败'
+      ElMessage.error(msg)
     }
   })
 }
@@ -169,6 +253,7 @@ onMounted(() => {
   <div class="admin-chat-sessions-page">
     <div class="admin-chat-sessions-header">
       <h2 class="admin-chat-sessions-title">会话管理</h2>
+      <el-button type="primary" @click="openCreateDialog">新建会话</el-button>
     </div>
 
     <el-card class="admin-chat-sessions-filters" shadow="never">
@@ -186,10 +271,11 @@ onMounted(() => {
           </el-col>
           <el-col :span="5">
             <el-form-item label="会话状态">
-              <el-select v-model="filters.is_active" placeholder="全部" clearable style="width: 100%">
+              <el-select v-model="filters.status" placeholder="全部" clearable style="width: 100%">
                 <el-option label="全部" value="" />
-                <el-option label="进行中" :value="true" />
-                <el-option label="已结束" :value="false" />
+                <el-option label="未开始" value="not_started" />
+                <el-option label="进行中" value="ongoing" />
+                <el-option label="已结束" value="ended" />
               </el-select>
             </el-form-item>
           </el-col>
@@ -253,10 +339,18 @@ onMounted(() => {
         <el-table-column prop="last_updated" label="最后更新时间" min-width="180" show-overflow-tooltip />
         <el-table-column label="状态" min-width="120">
           <template #default="{ row }">
-            <el-tag :type="row.is_active ? 'success' : 'info'">
-              <span v-if="row.is_active">进行中</span>
-              <span v-else-if="!row.is_active && row.ended_at">已结束</span>
-              <span v-else>未知</span>
+            <el-tag
+              :type="
+                row.ended_at
+                  ? 'info'
+                  : row.created_at === row.last_updated
+                    ? 'warning'
+                    : 'success'
+              "
+            >
+              <span v-if="row.ended_at">已结束</span>
+              <span v-else-if="row.created_at === row.last_updated">未开始</span>
+              <span v-else>进行中</span>
             </el-tag>
           </template>
         </el-table-column>
@@ -282,6 +376,45 @@ onMounted(() => {
       </div>
     </el-card>
 
+    <el-dialog v-model="createDialogVisible" title="新建会话" width="480px">
+      <el-form ref="createFormRef" :model="createForm" :rules="createRules" label-width="96px">
+        <el-form-item label="所属群组" prop="group_id">
+          <el-select
+            v-model="createForm.group_id"
+            filterable
+            clearable
+            placeholder="从下拉中选择或搜索群组"
+            :loading="groupLoading"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="g in groupOptions"
+              :key="g.id"
+              :label="`${g.name}（${g.id}）`"
+              :value="g.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="会话标题" prop="session_title">
+          <el-input v-model="createForm.session_title" placeholder="请输入会话标题" />
+        </el-form-item>
+        <el-form-item label="开始时间">
+          <el-date-picker
+            v-model="createForm.created_at"
+            type="datetime"
+            placeholder="不填则默认为当前时间"
+            style="width: 100%"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="createDialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="submitCreate">创建</el-button>
+        </span>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="editDialogVisible" title="编辑会话" width="480px">
       <el-form ref="editFormRef" :model="editForm" :rules="editRules" label-width="96px">
         <el-form-item label="会话标题" prop="session_title">
@@ -292,6 +425,22 @@ onMounted(() => {
             <el-option label="进行中" :value="true" />
             <el-option label="已结束" :value="false" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="创建时间">
+          <el-date-picker
+            v-model="editForm.created_at"
+            type="datetime"
+            placeholder="留空则不修改"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="结束时间">
+          <el-date-picker
+            v-model="editForm.ended_at"
+            type="datetime"
+            placeholder="留空则不修改"
+            style="width: 100%"
+          />
         </el-form-item>
       </el-form>
       <template #footer>

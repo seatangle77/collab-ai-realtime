@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -9,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
+from ..groups import _get_group_or_404
 from .deps import require_admin
 from .schemas import Page, PageMeta
 
@@ -36,6 +38,17 @@ class AdminChatSessionUpdate(BaseModel):
     session_title: str | None = None
     is_active: bool | None = None
     ended_at: datetime | None = None
+    created_at: datetime | None = None
+    last_updated: datetime | None = None
+
+
+class AdminChatSessionCreate(BaseModel):
+    group_id: str
+    session_title: str
+    is_active: bool | None = None
+    created_at: datetime | None = None
+    last_updated: datetime | None = None
+    ended_at: datetime | None = None
 
 
 @router.get(
@@ -48,6 +61,11 @@ async def list_chat_sessions(
     page_size: int = Query(20, ge=1, le=100),
     group_id: str | None = None,
     is_active: bool | None = None,
+    status_param: str | None = Query(
+        default=None,
+        alias="status",
+        description="会话状态：not_started / ongoing / ended；若提供，则优先于 is_active 筛选",
+    ),
     title: str | None = Query(default=None, alias="session_title"),
     created_from: datetime | None = None,
     created_to: datetime | None = None,
@@ -65,7 +83,25 @@ async def list_chat_sessions(
     if group_id:
         where_clauses.append("group_id = :group_id")
         params["group_id"] = group_id
-    if is_active is not None:
+
+    # 状态优先：若显式传入 status（status_param），则按照 not_started/ongoing/ended 三态进行筛选；
+    # 否则回退到原有的 is_active 布尔筛选逻辑。
+    if status_param is not None:
+        # not_started: 认为是尚未有任何更新/结束的会话，使用 created_at == last_updated 且尚未结束 近似 表示
+        if status_param == "not_started":
+            where_clauses.append("ended_at IS NULL AND created_at = last_updated")
+        # ongoing: 认为是已经有过更新但尚未结束的会话
+        elif status_param == "ongoing":
+            where_clauses.append("ended_at IS NULL AND created_at <> last_updated")
+        # ended: 结束时间非空即视为已结束
+        elif status_param == "ended":
+            where_clauses.append("ended_at IS NOT NULL")
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="无效的会话状态",
+            )
+    elif is_active is not None:
         where_clauses.append("is_active = :is_active")
         params["is_active"] = is_active
     if title:
@@ -121,6 +157,64 @@ async def list_chat_sessions(
     )
 
 
+@router.post(
+    "/",
+    response_model=AdminChatSessionOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_admin)],
+)
+async def create_chat_session(
+    payload: AdminChatSessionCreate,
+    db: AsyncSession = Depends(get_db),
+) -> AdminChatSessionOut:
+    # 校验群组存在且处于可用状态（使用业务侧的 _get_group_or_404，要求 is_active = TRUE）
+    await _get_group_or_404(payload.group_id, db)
+
+    session_id = f"s{uuid.uuid4().hex[:8]}"
+
+    # 计算各时间字段：
+    # - 若未显式传入，则沿用原有行为，使用当前时间；
+    # - 若传入，则统一转为 UTC naive 后写入。
+    now_utc = datetime.now(timezone.utc)
+    created_at = payload.created_at or now_utc
+    last_updated = payload.last_updated or created_at
+    ended_at = payload.ended_at
+
+    created_at_naive = _to_utc_naive(created_at)
+    last_updated_naive = _to_utc_naive(last_updated)
+    ended_at_naive = _to_utc_naive(ended_at) if ended_at is not None else None
+
+    # 数据库中 is_active 为 NOT NULL，且业务侧 create_session 默认视为可用会话。
+    # 若传入 ended_at 且未显式指定 is_active，则默认视为已结束会话。
+    if payload.is_active is None:
+        is_active_value = False if ended_at is not None else True
+    else:
+        is_active_value = payload.is_active
+
+    result = await db.execute(
+        text(
+            """
+            INSERT INTO chat_sessions (id, group_id, session_title, created_at, last_updated, is_active, ended_at)
+            VALUES (:id, :group_id, :title, :created_at, :last_updated, :is_active, :ended_at)
+            RETURNING id, group_id, session_title, created_at, last_updated, is_active, ended_at
+            """
+        ),
+        {
+            "id": session_id,
+            "group_id": payload.group_id,
+            "title": payload.session_title,
+            "is_active": is_active_value,
+            "created_at": created_at_naive,
+            "last_updated": last_updated_naive,
+            "ended_at": ended_at_naive,
+        },
+    )
+    row = result.mappings().first()
+    await db.commit()
+
+    return AdminChatSessionOut.model_validate(dict(row))
+
+
 @router.get(
     "/{session_id}",
     response_model=AdminChatSessionOut,
@@ -163,6 +257,8 @@ async def update_chat_session(
         payload.session_title is None
         and payload.is_active is None
         and payload.ended_at is None
+        and payload.created_at is None
+        and payload.last_updated is None
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -180,10 +276,17 @@ async def update_chat_session(
         params["is_active"] = payload.is_active
     if payload.ended_at is not None:
         sets.append("ended_at = :ended_at")
-        params["ended_at"] = payload.ended_at
+        params["ended_at"] = _to_utc_naive(payload.ended_at)
+    if payload.created_at is not None:
+        sets.append("created_at = :created_at")
+        params["created_at"] = _to_utc_naive(payload.created_at)
 
-    # 每次更新顺带刷新 last_updated
-    sets.append("last_updated = NOW()")
+    # last_updated：若调用方显式传入，则使用传入值；否则保持原有行为，自动刷新为当前时间。
+    if payload.last_updated is not None:
+        sets.append("last_updated = :last_updated")
+        params["last_updated"] = _to_utc_naive(payload.last_updated)
+    else:
+        sets.append("last_updated = NOW()")
 
     set_sql = ", ".join(sets)
 
