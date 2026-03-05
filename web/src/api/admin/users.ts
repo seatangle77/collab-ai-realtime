@@ -10,6 +10,8 @@ export interface ListAdminUsersParams {
   device_token?: string
   created_from?: string
   created_to?: string
+  group_name?: string
+  group_id?: string
 }
 
 export async function listAdminUsers(params: ListAdminUsersParams): Promise<Page<AdminUser>> {
@@ -22,6 +24,8 @@ export async function listAdminUsers(params: ListAdminUsersParams): Promise<Page
   if (params.device_token) query.set('device_token', params.device_token)
   if (params.created_from) query.set('created_from', params.created_from)
   if (params.created_to) query.set('created_to', params.created_to)
+  if (params.group_name) query.set('group_name', params.group_name)
+  if (params.group_id) query.set('group_id', params.group_id)
 
   const qs = query.toString()
   const url = '/api/admin/users/' + (qs ? `?${qs}` : '')

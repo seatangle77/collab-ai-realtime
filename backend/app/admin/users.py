@@ -32,6 +32,8 @@ class AdminUserOut(BaseModel):
     email: str
     device_token: str | None = None
     created_at: datetime
+    group_ids: list[str] = []
+    group_names: list[str] = []
 
 
 class AdminUserUpdate(BaseModel):
@@ -49,6 +51,8 @@ async def list_users(
     device_token: str | None = None,
     created_from: datetime | None = None,
     created_to: datetime | None = None,
+    group_name: str | None = None,
+    group_id: str | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> Page[AdminUserOut]:
     offset = (page - 1) * page_size
@@ -74,18 +78,45 @@ async def list_users(
     if created_to:
         where_clauses.append("created_at <= :created_to")
         params["created_to"] = _to_utc_naive(created_to)
+    if group_name:
+        where_clauses.append(
+            """
+            EXISTS (
+              SELECT 1
+              FROM group_memberships gm
+              JOIN groups g ON g.id = gm.group_id
+              WHERE gm.user_id = users_info.id
+                AND gm.status = 'active'
+                AND g.name ILIKE :group_name
+            )
+            """
+        )
+        params["group_name"] = f"%{group_name}%"
+    if group_id:
+        where_clauses.append(
+            """
+            EXISTS (
+              SELECT 1
+              FROM group_memberships gm
+              WHERE gm.user_id = users_info.id
+                AND gm.status = 'active'
+                AND gm.group_id = :group_id
+            )
+            """
+        )
+        params["group_id"] = group_id
 
     where_sql = " AND ".join(where_clauses)
 
-    # 统计总数
+    # 统计总数：只在 users_info 上计数，必要时通过 EXISTS 引用成员/群组表
     count_result = await db.execute(
         text(f"SELECT COUNT(*) AS cnt FROM users_info WHERE {where_sql}"),
         params,
     )
     total = count_result.scalar_one()
 
-    # 查询分页数据
-    query = text(
+    # 第一步：只从 users_info 拉取当前页基础信息，保持与旧版接口的性能特征接近
+    base_query = text(
         f"""
         SELECT id, name, email, device_token, created_at
         FROM users_info
@@ -98,9 +129,63 @@ async def list_users(
     params_with_page["limit"] = page_size
     params_with_page["offset"] = offset
 
-    result = await db.execute(query, params_with_page)
-    rows = result.mappings().all()
-    items = [AdminUserOut.model_validate(dict(row)) for row in rows]
+    base_result = await db.execute(base_query, params_with_page)
+    base_rows = base_result.mappings().all()
+
+    # 没有任何用户时，直接返回
+    if not base_rows:
+        return Page[AdminUserOut](
+            items=[],
+            meta=PageMeta(total=total, page=page, page_size=page_size),
+        )
+
+    # 提取当前页用户 ID，用于后续批量查询成员关系
+    user_ids = [row["id"] for row in base_rows]
+
+    # 第二步：仅针对当前页用户，批量查出其 active 成员关系和对应群组
+    memberships_query = text(
+        """
+        SELECT
+          gm.user_id,
+          array_agg(DISTINCT g.id) AS group_ids,
+          array_agg(DISTINCT g.name) AS group_names
+        FROM group_memberships gm
+        JOIN groups g ON g.id = gm.group_id
+        WHERE gm.user_id = ANY(:user_ids)
+          AND gm.status = 'active'
+        GROUP BY gm.user_id
+        """
+    )
+    memberships_result = await db.execute(
+        memberships_query,
+        {"user_ids": user_ids},
+    )
+    memberships_rows = memberships_result.mappings().all()
+
+    # 聚合为 user_id -> {group_ids, group_names} 的映射，方便合并
+    memberships_map: dict[str, dict[str, list[str]]] = {}
+    for row in memberships_rows:
+        uid = row["user_id"]
+        memberships_map[uid] = {
+            "group_ids": list(row["group_ids"] or []),
+            "group_names": list(row["group_names"] or []),
+        }
+
+    # 组装最终返回的 AdminUserOut 列表
+    items: list[AdminUserOut] = []
+    for row in base_rows:
+        uid = row["id"]
+        extra = memberships_map.get(uid, {"group_ids": [], "group_names": []})
+        payload: dict[str, Any] = {
+            "id": row["id"],
+            "name": row["name"],
+            "email": row["email"],
+            "device_token": row["device_token"],
+            "created_at": row["created_at"],
+            "group_ids": extra["group_ids"],
+            "group_names": extra["group_names"],
+        }
+        items.append(AdminUserOut.model_validate(payload))
 
     return Page[AdminUserOut](
         items=items,

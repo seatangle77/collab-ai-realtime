@@ -15,6 +15,8 @@ export interface AdminUser {
   email: string
   device_token: string | null
   created_at: string
+  group_ids?: string[]
+  group_names?: string[]
 }
 
 export interface AdminGroup {

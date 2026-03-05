@@ -12,6 +12,8 @@ interface Filters {
   id: string
   device_token: string
   createdAtRange: Date[] | []
+  group_name: string
+  group_id: string
 }
 
 const loading = ref(false)
@@ -23,6 +25,8 @@ const filters = reactive<Filters>({
   id: '',
   device_token: '',
   createdAtRange: [],
+  group_name: '',
+  group_id: '',
 })
 
 const page = ref(1)
@@ -62,6 +66,24 @@ const editRules: FormRules<typeof editForm> = {
   name: [{ required: true, message: '请输入姓名', trigger: 'blur' }],
 }
 
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return '-'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return value
+  return d
+    .toLocaleString('zh-CN', {
+      timeZone: 'Asia/Shanghai',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    })
+    .replace(/\//g, '-')
+}
+
 async function fetchUsers() {
   loading.value = true
   try {
@@ -73,6 +95,8 @@ async function fetchUsers() {
       name: filters.name || undefined,
       id: filters.id || undefined,
       device_token: filters.device_token || undefined,
+      group_name: filters.group_name || undefined,
+      group_id: filters.group_id || undefined,
       created_from: from ? from.toISOString() : undefined,
       created_to: to ? to.toISOString() : undefined,
     })
@@ -99,6 +123,8 @@ function handleReset() {
   filters.id = ''
   filters.device_token = ''
   filters.createdAtRange = []
+  filters.group_name = ''
+  filters.group_id = ''
   page.value = 1
   fetchUsers()
 }
@@ -207,7 +233,8 @@ onMounted(() => {
     </div>
 
     <el-card class="admin-users-filters" shadow="never">
-      <el-form :model="filters" label-width="84px" class="admin-users-filters-form">
+      <el-form :model="filters" label-width="72px" class="admin-users-filters-form">
+        <!-- 第一行：用户维度 -->
         <el-row :gutter="12">
           <el-col :span="6">
             <el-form-item label="ID">
@@ -225,26 +252,38 @@ onMounted(() => {
             </el-form-item>
           </el-col>
           <el-col :span="6">
-            <el-form-item label="设备 Token">
+            <el-form-item label="设备">
               <el-input v-model="filters.device_token" placeholder="按设备 Token 模糊搜索" clearable />
             </el-form-item>
           </el-col>
         </el-row>
+
+        <!-- 第二行：小组维度 + 时间 + 按钮 -->
         <el-row :gutter="12" class="admin-users-filters-row-bottom">
-          <el-col :span="10">
+          <el-col :span="6">
+            <el-form-item label="小组 ID">
+              <el-input v-model="filters.group_id" placeholder="按小组 ID 精确查询" clearable />
+            </el-form-item>
+          </el-col>
+          <el-col :span="6">
+            <el-form-item label="小组名称">
+              <el-input v-model="filters.group_name" placeholder="按小组名称模糊搜索" clearable />
+            </el-form-item>
+          </el-col>
+          <el-col :span="8">
             <el-form-item label="创建时间">
               <el-date-picker
                 v-model="filters.createdAtRange"
                 type="datetimerange"
                 range-separator="至"
-                start-placeholder="开始时间"
-                end-placeholder="结束时间"
+                start-placeholder="开始"
+                end-placeholder="结束"
                 value-format=""
                 style="width: 100%"
               />
             </el-form-item>
           </el-col>
-          <el-col :span="14" class="admin-users-filters-actions">
+          <el-col :span="4" class="admin-users-filters-actions">
             <el-form-item label=" ">
               <el-button type="primary" @click="handleSearch">查询</el-button>
               <el-button @click="handleReset">重置</el-button>
@@ -260,12 +299,27 @@ onMounted(() => {
         <el-table-column prop="name" label="姓名" min-width="120" show-overflow-tooltip />
         <el-table-column prop="email" label="邮箱" min-width="180" show-overflow-tooltip />
         <el-table-column prop="device_token" label="设备 Token" min-width="220" show-overflow-tooltip />
-        <el-table-column
-          prop="created_at"
-          label="创建时间"
-          min-width="180"
-          show-overflow-tooltip
-        />
+        <el-table-column label="小组 ID" min-width="220">
+          <template #default="{ row }">
+            <span v-if="row.group_ids?.length">
+              {{ row.group_ids.join(', ') }}
+            </span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="小组名称" min-width="220">
+          <template #default="{ row }">
+            <span v-if="row.group_names?.length">
+              {{ row.group_names.join(', ') }}
+            </span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="创建时间" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ formatDateTime(row.created_at) }}
+          </template>
+        </el-table-column>
         <el-table-column label="操作" min-width="160" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="openEditDialog(row)">编辑</el-button>
@@ -368,6 +422,7 @@ onMounted(() => {
 .admin-users-filters-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
 }
 
 .admin-users-table {

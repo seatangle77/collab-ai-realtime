@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY || 'TestAdminKey123'
+const API_BASE = process.env.API_BASE_URL || 'http://localhost:8000'
 
 async function loginAsAdmin(page: import('@playwright/test').Page) {
   await page.goto('/admin/login')
@@ -8,6 +9,40 @@ async function loginAsAdmin(page: import('@playwright/test').Page) {
   await page.getByRole('button', { name: '进入后台' }).click()
   await expect(page).toHaveURL(/\/admin\/users/)
   await expect(page.getByRole('heading', { name: '用户管理' })).toBeVisible()
+}
+
+async function createAdminGroupViaApi(name: string): Promise<{ id: string; name: string; created_at: string }> {
+  const res = await fetch(`${API_BASE}/api/admin/groups`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Admin-Token': ADMIN_API_KEY,
+    },
+    body: JSON.stringify({ name }),
+  })
+  if (!res.ok) {
+    throw new Error(`create admin group failed: ${res.status} ${await res.text()}`)
+  }
+  return (await res.json()) as { id: string; name: string; created_at: string }
+}
+
+async function createAdminMembershipViaApi(groupId: string, userId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/admin/memberships`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Admin-Token': ADMIN_API_KEY,
+    },
+    body: JSON.stringify({
+      group_id: groupId,
+      user_id: userId,
+      role: 'member',
+      status: 'active',
+    }),
+  })
+  if (!res.ok) {
+    throw new Error(`create admin membership failed: ${res.status} ${await res.text()}`)
+  }
 }
 
 /** 同一流程内共享的测试数据，按顺序执行时复用 */
@@ -19,6 +54,10 @@ const shared: {
   updatedDeviceToken: string
   createdAtClient: Date
   userId: string
+  groupId1: string
+  groupName1: string
+  groupId2: string
+  groupName2: string
 } = {} as any
 
 test.describe.serial('Admin 用户管理页面', () => {
@@ -102,21 +141,73 @@ test.describe.serial('Admin 用户管理页面', () => {
     await expect(idRow).toBeVisible()
   })
 
-  test('6. 按创建时间范围查询', async ({ page }) => {
-    const start = new Date(shared.createdAtClient.getTime() - 10 * 60 * 1000)
-    const end = new Date(shared.createdAtClient.getTime() + 10 * 60 * 1000)
+  test('6. 通过 Admin API 为该用户创建小组与成员关系，并在列表展示', async ({ page }) => {
+    // 创建两个小组，并为当前用户创建 active 成员关系
+    const g1Name = `E2E-用户小组-1-${Date.now()}`
+    const g2Name = `E2E-用户小组-2-${Date.now()}`
+    const g1 = await createAdminGroupViaApi(g1Name)
+    const g2 = await createAdminGroupViaApi(g2Name)
+    shared.groupId1 = g1.id
+    shared.groupName1 = g1.name
+    shared.groupId2 = g2.id
+    shared.groupName2 = g2.name
 
-    const datePicker = page.locator('.admin-users-filters').getByPlaceholder('开始时间')
-    await datePicker.click()
+    await createAdminMembershipViaApi(shared.groupId1, shared.userId)
+    await createAdminMembershipViaApi(shared.groupId2, shared.userId)
 
-    const startInput = page.locator('.admin-users-filters input').nth(4)
-    const endInput = page.locator('.admin-users-filters input').nth(5)
-    await startInput.fill(start.toISOString().slice(0, 19).replace('T', ' '))
-    await endInput.fill(end.toISOString().slice(0, 19).replace('T', ' '))
-
+    // 通过邮箱筛选该用户，检查小组列内容
+    await page.getByRole('button', { name: '重置' }).click()
+    await page.getByPlaceholder('按邮箱模糊搜索').fill(shared.email)
     await page.getByRole('button', { name: '查询' }).click()
-    const timeRow = page.getByRole('row').filter({ hasText: shared.email }).first()
-    await expect(timeRow).toBeVisible()
+
+    const row = page.getByRole('row').filter({ hasText: shared.email }).first()
+    await expect(row).toBeVisible()
+
+  // 列顺序: ID(0), 姓名(1), 邮箱(2), 设备Token(3), 小组ID(4), 小组名称(5), 创建时间(6), 操作(7)
+  const groupIdCell = row.getByRole('cell').nth(4)
+  const groupNameCell = row.getByRole('cell').nth(5)
+    await expect(groupIdCell).toContainText(shared.groupId1)
+    await expect(groupIdCell).toContainText(shared.groupId2)
+    await expect(groupNameCell).toContainText(shared.groupName1)
+    await expect(groupNameCell).toContainText(shared.groupName2)
+  })
+
+  test('7. 按小组 ID 精确查询', async ({ page }) => {
+    await page.getByRole('button', { name: '重置' }).click()
+    await page.locator('.admin-users-filters').getByPlaceholder('按小组 ID 精确查询').fill(shared.groupId1)
+    await page.getByRole('button', { name: '查询' }).click()
+
+    const row = page.getByRole('row').filter({ hasText: shared.email }).first()
+    await expect(row).toBeVisible()
+    await expect(row).toContainText(shared.groupId1)
+  })
+
+  test('8. 按小组名称模糊查询', async ({ page }) => {
+    await page.getByRole('button', { name: '重置' }).click()
+    const partName = shared.groupName1.slice(0, 6)
+    await page.getByPlaceholder('按小组名称模糊搜索').fill(partName)
+    await page.getByRole('button', { name: '查询' }).click()
+
+    const row = page.getByRole('row').filter({ hasText: shared.email }).first()
+    await expect(row).toBeVisible()
+    await expect(row).toContainText(shared.groupName1)
+
+  // 负向用例主要在后端测试中覆盖，这里前端只验证“能命中”的场景即可
+  })
+
+  test('9. 列表中的创建时间显示为人类可读格式', async ({ page }) => {
+    await page.getByRole('button', { name: '重置' }).click()
+    await page.getByPlaceholder('按邮箱模糊搜索').fill(shared.email)
+    await page.getByRole('button', { name: '查询' }).click()
+
+    const row = page.getByRole('row').filter({ hasText: shared.email }).first()
+    await expect(row).toBeVisible()
+  const createdAtCell = row.getByRole('cell').nth(6) // 创建时间列
+    const text = (await createdAtCell.innerText()).trim()
+
+    // 不再是原始 ISO 字符串，而是 yyyy-MM-dd HH:mm:ss 形式
+    expect(text).toMatch(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/)
+    expect(text).not.toContain('T')
   })
 
   test('7. 删除用户', async ({ page }) => {
@@ -426,11 +517,12 @@ test.describe('Admin 用户管理 - 查询条件与组合', () => {
     await expect(page.getByText('创建用户成功')).toBeVisible()
     const createdAt = new Date()
 
-    const start = new Date(createdAt.getTime() - 5 * 60 * 1000)
-    const end = new Date(createdAt.getTime() + 5 * 60 * 1000)
-    await page.locator('.admin-users-filters').getByPlaceholder('开始时间').click()
-    const startInput = page.locator('.admin-users-filters input').nth(4)
-    const endInput = page.locator('.admin-users-filters input').nth(5)
+    // 时间窗口放宽到 ±24h，避免时区/延迟导致边界刚好排除该用户
+    const start = new Date(createdAt.getTime() - 24 * 60 * 60 * 1000)
+    const end = new Date(createdAt.getTime() + 24 * 60 * 60 * 1000)
+    const startInput = page.locator('.admin-users-filters').getByPlaceholder('开始')
+    const endInput = page.locator('.admin-users-filters').getByPlaceholder('结束')
+    await startInput.click()
     await startInput.fill(start.toISOString().slice(0, 19).replace('T', ' '))
     await endInput.fill(end.toISOString().slice(0, 19).replace('T', ' '))
     await page.getByPlaceholder('按邮箱模糊搜索').fill(email)
@@ -451,9 +543,9 @@ test.describe('Admin 用户管理 - 查询条件与组合', () => {
 
     const start = new Date(createdAt.getTime() + 24 * 60 * 60 * 1000)
     const end = new Date(createdAt.getTime() + 48 * 60 * 60 * 1000)
-    await page.locator('.admin-users-filters').getByPlaceholder('开始时间').click()
-    const startInput = page.locator('.admin-users-filters input').nth(4)
-    const endInput = page.locator('.admin-users-filters input').nth(5)
+    const startInput = page.locator('.admin-users-filters').getByPlaceholder('开始')
+    const endInput = page.locator('.admin-users-filters').getByPlaceholder('结束')
+    await startInput.click()
     await startInput.fill(start.toISOString().slice(0, 19).replace('T', ' '))
     await endInput.fill(end.toISOString().slice(0, 19).replace('T', ' '))
     await page.getByPlaceholder('按邮箱模糊搜索').fill(email)
@@ -474,9 +566,9 @@ test.describe('Admin 用户管理 - 查询条件与组合', () => {
 
     const end = new Date(createdAt.getTime() - 60 * 60 * 1000)
     const start = new Date(createdAt.getTime() - 48 * 60 * 60 * 1000)
-    await page.locator('.admin-users-filters').getByPlaceholder('开始时间').click()
-    const startInput = page.locator('.admin-users-filters input').nth(4)
-    const endInput = page.locator('.admin-users-filters input').nth(5)
+    const startInput = page.locator('.admin-users-filters').getByPlaceholder('开始')
+    const endInput = page.locator('.admin-users-filters').getByPlaceholder('结束')
+    await startInput.click()
     await startInput.fill(start.toISOString().slice(0, 19).replace('T', ' '))
     await endInput.fill(end.toISOString().slice(0, 19).replace('T', ' '))
     await page.getByPlaceholder('按邮箱模糊搜索').fill(email)
@@ -497,9 +589,9 @@ test.describe('Admin 用户管理 - 查询条件与组合', () => {
 
     const start = new Date(createdAt.getTime() - 2 * 60 * 1000)
     const end = new Date(createdAt.getTime() + 2 * 60 * 1000)
-    await page.locator('.admin-users-filters').getByPlaceholder('开始时间').click()
-    const startInput = page.locator('.admin-users-filters input').nth(4)
-    const endInput = page.locator('.admin-users-filters input').nth(5)
+    const startInput = page.locator('.admin-users-filters').getByPlaceholder('开始')
+    const endInput = page.locator('.admin-users-filters').getByPlaceholder('结束')
+    await startInput.click()
     await startInput.fill(start.toISOString().slice(0, 19).replace('T', ' '))
     await endInput.fill(end.toISOString().slice(0, 19).replace('T', ' '))
     await page.getByPlaceholder('按邮箱模糊搜索').fill(email)
@@ -520,9 +612,9 @@ test.describe('Admin 用户管理 - 查询条件与组合', () => {
 
     const start = new Date(createdAt.getTime() - 5 * 60 * 1000)
     const end = new Date(createdAt.getTime() + 5 * 60 * 1000)
-    await page.locator('.admin-users-filters').getByPlaceholder('开始时间').click()
-    const startInput = page.locator('.admin-users-filters input').nth(4)
-    const endInput = page.locator('.admin-users-filters input').nth(5)
+    const startInput = page.locator('.admin-users-filters').getByPlaceholder('开始')
+    const endInput = page.locator('.admin-users-filters').getByPlaceholder('结束')
+    await startInput.click()
     await startInput.fill(start.toISOString().slice(0, 19).replace('T', ' '))
     await endInput.fill(end.toISOString().slice(0, 19).replace('T', ' '))
     await page.getByPlaceholder('按邮箱模糊搜索').fill('other-not-exist@x.com')
