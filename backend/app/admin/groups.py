@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -27,6 +28,11 @@ class AdminGroupOut(BaseModel):
     name: str
     created_at: datetime
     is_active: bool
+
+
+class AdminGroupCreate(BaseModel):
+    name: str
+    is_active: bool = True
 
 
 class AdminGroupUpdate(BaseModel):
@@ -95,6 +101,34 @@ async def list_groups(
         items=items,
         meta=PageMeta(total=total, page=page, page_size=page_size),
     )
+
+
+@router.post(
+    "/",
+    response_model=AdminGroupOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_admin)],
+)
+async def create_group(
+    payload: AdminGroupCreate,
+    db: AsyncSession = Depends(get_db),
+) -> AdminGroupOut:
+    group_id = f"g{uuid.uuid4().hex[:8]}"
+
+    result = await db.execute(
+        text(
+            """
+            INSERT INTO groups (id, name, created_at, is_active)
+            VALUES (:id, :name, NOW(), :is_active)
+            RETURNING id, name, created_at, is_active
+            """
+        ),
+        {"id": group_id, "name": payload.name, "is_active": payload.is_active},
+    )
+    row = result.mappings().first()
+    await db.commit()
+
+    return AdminGroupOut.model_validate(dict(row))
 
 
 @router.get(

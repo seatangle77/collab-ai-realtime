@@ -3,7 +3,7 @@ import { onMounted, reactive, ref } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { AdminGroup } from '../../types/admin'
-import { listAdminGroups, deleteAdminGroup, updateAdminGroup } from '../../api/admin/groups'
+import { listAdminGroups, deleteAdminGroup, updateAdminGroup, createAdminGroup } from '../../api/admin/groups'
 
 interface Filters {
   name: string
@@ -33,6 +33,17 @@ const editForm = reactive({
 })
 
 const editRules: FormRules<typeof editForm> = {
+  name: [{ required: true, message: '请输入群组名称', trigger: 'blur' }],
+}
+
+const createDialogVisible = ref(false)
+const createFormRef = ref<FormInstance>()
+const createForm = reactive({
+  name: '',
+  is_active: true,
+})
+
+const createRules: FormRules<typeof createForm> = {
   name: [{ required: true, message: '请输入群组名称', trigger: 'blur' }],
 }
 
@@ -84,6 +95,12 @@ function handlePageSizeChange(size: number) {
   fetchGroups()
 }
 
+function openCreateDialog() {
+  createForm.name = ''
+  createForm.is_active = true
+  createDialogVisible.value = true
+}
+
 function openEditDialog(row: AdminGroup) {
   editForm.id = row.id
   editForm.name = row.name
@@ -106,6 +123,26 @@ async function submitEdit() {
     } catch (e: any) {
       console.error(e)
       ElMessage.error(e?.message || '更新群组失败')
+    }
+  })
+}
+
+async function submitCreate() {
+  if (!createFormRef.value) return
+  await createFormRef.value.validate(async (valid) => {
+    if (!valid) return
+    try {
+      await createAdminGroup({
+        name: createForm.name,
+        is_active: createForm.is_active,
+      })
+      ElMessage.success('创建群组成功')
+      createDialogVisible.value = false
+      page.value = 1
+      fetchGroups()
+    } catch (e: any) {
+      console.error(e)
+      ElMessage.error(e?.message || '创建群组失败')
     }
   })
 }
@@ -143,6 +180,7 @@ onMounted(() => {
   <div class="admin-groups-page">
     <div class="admin-groups-header">
       <h2 class="admin-groups-title">群组管理</h2>
+      <el-button type="primary" @click="openCreateDialog">新建群组</el-button>
     </div>
 
     <el-card class="admin-groups-filters" shadow="never">
@@ -231,6 +269,23 @@ onMounted(() => {
         <span class="dialog-footer">
           <el-button @click="editDialogVisible = false">取消</el-button>
           <el-button type="primary" @click="submitEdit">保存</el-button>
+        </span>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="createDialogVisible" title="新建群组" width="420px">
+      <el-form ref="createFormRef" :model="createForm" :rules="createRules" label-width="80px">
+        <el-form-item label="名称" prop="name">
+          <el-input v-model="createForm.name" />
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-switch v-model="createForm.is_active" active-text="启用" inactive-text="停用" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="createDialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="submitCreate">创建</el-button>
         </span>
       </template>
     </el-dialog>

@@ -64,6 +64,67 @@ test.describe.serial('Admin 群组管理页面', () => {
     await loginAsAdminAndGoToGroups(page)
   })
 
+  test('0. 通过 Admin 页面新建启用群组并在列表中看到', async ({ page }) => {
+    const groupName = `AdminUI群组-${Date.now()}`
+
+    await page.getByRole('button', { name: '新建群组' }).click()
+
+    const createDialog = page.getByRole('dialog', { name: '新建群组' })
+    await expect(createDialog).toBeVisible()
+
+    const nameInput = createDialog.getByLabel('名称')
+    await nameInput.fill(groupName)
+
+    await createDialog.getByRole('button', { name: '创建' }).click()
+
+    await expect(page.getByText('创建群组成功')).toBeVisible()
+
+    await page.getByPlaceholder('按群组名称模糊搜索').fill(groupName)
+    await page.getByRole('button', { name: '查询' }).click()
+
+    const row = page.getByRole('row').filter({ hasText: groupName }).first()
+    await expect(row).toBeVisible()
+    await expect(row).toContainText('启用')
+  })
+
+  test('0.1 通过 Admin 页面新建停用群组并通过状态筛选验证', async ({ page }) => {
+    const groupName = `AdminUI群组-初始停用-${Date.now()}`
+
+    await page.getByRole('button', { name: '新建群组' }).click()
+
+    const createDialog = page.getByRole('dialog', { name: '新建群组' })
+    await expect(createDialog).toBeVisible()
+
+    const nameInput = createDialog.getByLabel('名称')
+    await nameInput.fill(groupName)
+
+    // 默认是启用，切换为停用：Element Plus 的可点击区域在 .el-switch/.el-switch__core 上，input 本身是隐藏的
+    const switchEl = createDialog.locator('.el-switch')
+    await switchEl.waitFor()
+    await switchEl.click()
+
+    await createDialog.getByRole('button', { name: '创建' }).click()
+
+    await expect(page.getByText('创建群组成功')).toBeVisible()
+
+    await page.getByPlaceholder('按群组名称模糊搜索').fill(groupName)
+
+    // 状态筛选为 启用 时查不到
+    await page.locator('.admin-groups-filters .el-select').first().click()
+    await page.getByRole('option', { name: '启用' }).click()
+    await page.getByRole('button', { name: '查询' }).click()
+    await expect(page.getByRole('row').filter({ hasText: groupName })).toHaveCount(0)
+
+    // 状态筛选为 停用 时可以查到
+    await page.locator('.admin-groups-filters .el-select').first().click()
+    await page.getByRole('option', { name: '停用' }).click()
+    await page.getByRole('button', { name: '查询' }).click()
+
+    const row = page.getByRole('row').filter({ hasText: groupName }).first()
+    await expect(row).toBeVisible()
+    await expect(row).toContainText('停用')
+  })
+
   test('1. 通过 App 接口创建群组并在列表中看到', async ({ page }) => {
     const created = await createGroupViaAppApi()
     shared.groupId = created.groupId
@@ -101,8 +162,9 @@ test.describe.serial('Admin 群组管理页面', () => {
   })
 
   test('4. 按创建时间范围筛选', async ({ page }) => {
-    const start = new Date(shared.createdAt.getTime() - 60 * 60 * 1000)
-    const end = new Date(shared.createdAt.getTime() + 60 * 60 * 1000)
+    // 为避免本地时区与服务端存储时区差异导致边界误差，这里使用相对宽松的 ±24 小时区间
+    const start = new Date(shared.createdAt.getTime() - 24 * 60 * 60 * 1000)
+    const end = new Date(shared.createdAt.getTime() + 24 * 60 * 60 * 1000)
     const startStr = start.toISOString().slice(0, 19).replace('T', ' ')
     const endStr = end.toISOString().slice(0, 19).replace('T', ' ')
 
@@ -188,6 +250,60 @@ test.describe('Admin 群组管理 - 查询与边界', () => {
     await page.getByRole('button', { name: '查询' }).click()
 
     await expect(page.getByRole('row').filter({ hasText: created.groupName })).toHaveCount(0)
+  })
+
+  test('新建群组 - 名称为空时表单校验阻止创建', async ({ page }) => {
+    await page.getByRole('button', { name: '新建群组' }).click()
+
+    const createDialog = page.getByRole('dialog', { name: '新建群组' })
+    await expect(createDialog).toBeVisible()
+
+    const nameInput = createDialog.getByLabel('名称')
+    await nameInput.fill('')
+
+    await createDialog.getByRole('button', { name: '创建' }).click()
+
+    await expect(createDialog.getByText('请输入群组名称')).toBeVisible()
+    await expect(createDialog).toBeVisible()
+  })
+
+  test('新建群组 - 取消创建时不应产生新数据', async ({ page }) => {
+    const groupName = `AdminUI群组-取消-${Date.now()}`
+
+    await page.getByRole('button', { name: '新建群组' }).click()
+
+    const createDialog = page.getByRole('dialog', { name: '新建群组' })
+    await expect(createDialog).toBeVisible()
+
+    const nameInput = createDialog.getByLabel('名称')
+    await nameInput.fill(groupName)
+
+    await createDialog.getByRole('button', { name: '取消' }).click()
+
+    await page.getByPlaceholder('按群组名称模糊搜索').fill(groupName)
+    await page.getByRole('button', { name: '查询' }).click()
+
+    await expect(page.getByRole('row').filter({ hasText: groupName })).toHaveCount(0)
+  })
+
+  test('新建群组 - 多次打开关闭弹窗时表单状态重置', async ({ page }) => {
+    const tempName = `TempName-${Date.now()}`
+
+    await page.getByRole('button', { name: '新建群组' }).click()
+    let createDialog = page.getByRole('dialog', { name: '新建群组' })
+    await expect(createDialog).toBeVisible()
+
+    let nameInput = createDialog.getByLabel('名称')
+    await nameInput.fill(tempName)
+
+    await createDialog.getByRole('button', { name: '取消' }).click()
+
+    await page.getByRole('button', { name: '新建群组' }).click()
+    createDialog = page.getByRole('dialog', { name: '新建群组' })
+    await expect(createDialog).toBeVisible()
+
+    nameInput = createDialog.getByLabel('名称')
+    await expect(nameInput).toHaveValue('')
   })
 
   test('编辑 - 名称为空时表单校验阻止保存', async ({ page }) => {

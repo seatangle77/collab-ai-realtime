@@ -47,6 +47,28 @@ DB_PASSWORD=StrongPass123
 
 然后用 systemd / Docker / 启动脚本加载该环境变量文件即可（代码默认会尝试读取它）。
 
+### 后端测试（HTTP 接口 / 流程）
+
+- **前置**：已按上文配置好数据库，并在仓库根目录启动后端，例如：
+
+  ```bash
+  uvicorn backend.app.main:app --reload --port 8000
+  ```
+
+- **运行方式**：在仓库根目录（与本 README 同级）执行下列任一命令，这些脚本会直接通过 HTTP 调用本地 `http://127.0.0.1:8000`：
+
+| 命令 | 说明 |
+|------|------|
+| `python -m backend.tests.test_auth_flows` | 认证流程（注册 / 登录 / 刷新等）业务自测脚本 |
+| `python -m backend.tests.test_group_flows` | App 端群组业务接口全流程（创建 / 加入 / 退出 / 踢人等） |
+| `python -m backend.tests.test_sessions_flows` | 会话业务接口全流程（创建会话 / 消息流转等） |
+| `python -m backend.tests.test_admin_users` | 后台用户管理相关接口（列表 / 筛选 / 编辑 / 删除） |
+| `python -m backend.tests.test_admin_groups` | 后台群组管理相关接口（列表 / 筛选 / 创建 / 编辑 / 删除） |
+| `python -m backend.tests.test_admin_memberships` | 后台成员关系管理接口（列表 / 编辑 / 删除） |
+| `python -m backend.tests.test_admin_chat_sessions` | 后台会话管理接口（列表 / 筛选 / 关闭会话等） |
+
+> 这些脚本主要用于快速验证后端接口是否在本地环境工作正常，属于“高层集成测试”，不会修改代码，只会往数据库写入一些测试数据。
+
 ## Web 前端（Vue 3 + Vite + Element Plus）
 
 ### 本地开发启动

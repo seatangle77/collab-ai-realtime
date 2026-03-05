@@ -10,6 +10,11 @@ export interface ListAdminGroupsParams {
   created_to?: string
 }
 
+export interface CreateAdminGroupPayload {
+  name: string
+  is_active?: boolean
+}
+
 export async function listAdminGroups(params: ListAdminGroupsParams): Promise<Page<AdminGroup>> {
   const query = new URLSearchParams()
   if (params.page) query.set('page', String(params.page))
@@ -22,6 +27,10 @@ export async function listAdminGroups(params: ListAdminGroupsParams): Promise<Pa
   const qs = query.toString()
   const url = '/api/admin/groups/' + (qs ? `?${qs}` : '')
   return http.get<Page<AdminGroup>>(url)
+}
+
+export async function createAdminGroup(payload: CreateAdminGroupPayload): Promise<AdminGroup> {
+  return http.post<AdminGroup>('/api/admin/groups', payload)
 }
 
 export async function deleteAdminGroup(id: string): Promise<void> {

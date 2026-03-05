@@ -169,6 +169,132 @@ def scenario_admin_list_groups_with_filters(ctx: Dict[str, Any]) -> bool:
     return ok
 
 
+# ---------- 场景：管理员创建群 ----------
+
+
+def scenario_admin_create_group_success(ctx: Dict[str, Any]) -> bool:
+    name = "后台创建群-成功场景"
+    r = requests.post(
+        f"{BASE_URL}/api/admin/groups",
+        json={"name": name},
+        headers=ADMIN_HEADERS,
+    )
+    if r.status_code != 201:
+        return _log(
+            False,
+            "admin 创建群组失败（期望 201）",
+            {"status_code": r.status_code, "body": r.text},
+        )
+
+    data = r.json()
+    ok = isinstance(data.get("id"), str) and data.get("name") == name and data.get("is_active") is True
+    ok &= _log(ok, "admin 创建群组成功场景", data)
+
+    # 记录下来，供后续校验或排查
+    ctx.setdefault("admin_groups", []).append(data)
+
+    # 再通过详情接口确认
+    gid = data["id"]
+    r2 = requests.get(
+        f"{BASE_URL}/api/admin/groups/{gid}",
+        headers=ADMIN_HEADERS,
+    )
+    if r2.status_code != 200:
+        return _log(
+            False,
+            "admin 创建后获取群组详情失败（期望 200）",
+            {"status_code": r2.status_code, "body": r2.text},
+        )
+    data2 = r2.json()
+    ok &= _log(
+        data2["id"] == gid and data2["name"] == name and data2["is_active"] is True,
+        "admin 创建群组后详情校验场景",
+        data2,
+    )
+    return ok
+
+
+def scenario_admin_create_group_with_inactive() -> bool:
+    """
+    显式传 is_active=false 创建群组，并通过列表过滤校验其状态。
+    """
+    name = "后台创建群-初始停用"
+    r = requests.post(
+        f"{BASE_URL}/api/admin/groups",
+        json={"name": name, "is_active": False},
+        headers=ADMIN_HEADERS,
+    )
+    if r.status_code != 201:
+        return _log(
+            False,
+            "admin 创建初始为 inactive 的群组失败（期望 201）",
+            {"status_code": r.status_code, "body": r.text},
+        )
+
+    data = r.json()
+    gid = data["id"]
+    ok = data["name"] == name and data["is_active"] is False
+    ok &= _log(ok, "admin 创建初始为 inactive 的群组场景", data)
+
+    # is_active=true 列表中不应包含该群
+    r_active = requests.get(
+        f"{BASE_URL}/api/admin/groups",
+        params={"page": 1, "page_size": 50, "is_active": True},
+        headers=ADMIN_HEADERS,
+    )
+    if r_active.status_code != 200:
+        return _log(
+            False,
+            "admin 按 is_active=true 过滤时请求失败（期望 200）",
+            {"status_code": r_active.status_code, "body": r_active.text},
+        )
+    active_ids = {item["id"] for item in r_active.json()["items"]}
+    ok &= _log(
+        gid not in active_ids,
+        "admin 创建为 inactive 的群组在 is_active=true 列表中不可见场景",
+        r_active.json(),
+    )
+
+    # is_active=false 列表中应包含该群
+    r_inactive = requests.get(
+        f"{BASE_URL}/api/admin/groups",
+        params={"page": 1, "page_size": 50, "is_active": False},
+        headers=ADMIN_HEADERS,
+    )
+    if r_inactive.status_code != 200:
+        return _log(
+            False,
+            "admin 按 is_active=false 过滤时请求失败（期望 200）",
+            {"status_code": r_inactive.status_code, "body": r_inactive.text},
+        )
+    inactive_ids = {item["id"] for item in r_inactive.json()["items"]}
+    ok &= _log(
+        gid in inactive_ids,
+        "admin 创建为 inactive 的群组在 is_active=false 列表中可见场景",
+        r_inactive.json(),
+    )
+
+    return ok
+
+
+def scenario_admin_create_group_missing_name() -> bool:
+    """
+    缺少必填字段 name，应触发请求体验证错误。
+    FastAPI/Pydantic 对缺失必填字段默认返回 422。
+    """
+    r = requests.post(
+        f"{BASE_URL}/api/admin/groups",
+        json={},
+        headers=ADMIN_HEADERS,
+    )
+    ok = r.status_code == 422
+    return _log(
+        ok,
+        "admin 创建群组但缺少 name 字段返回 422 场景",
+        {"status_code": r.status_code, "body": r.text},
+    )
+
+
 # ---------- 场景：获取群详情 ----------
 
 
@@ -322,6 +448,17 @@ def scenario_admin_missing_or_wrong_token() -> bool:
         {"status_code": r.status_code, "body": r.text},
     )
 
+    # 不带 X-Admin-Token 调用创建群组接口
+    r_create = requests.post(
+        f"{BASE_URL}/api/admin/groups",
+        json={"name": "no-token-admin-group"},
+    )
+    ok &= _log(
+        r_create.status_code == 403,
+        "缺少 X-Admin-Token 调用 admin 创建群组接口被禁止场景",
+        {"status_code": r_create.status_code, "body": r_create.text},
+    )
+
     # 带错误的 token
     r = requests.get(
         f"{BASE_URL}/api/admin/groups",
@@ -331,6 +468,18 @@ def scenario_admin_missing_or_wrong_token() -> bool:
         r.status_code == 403,
         "错误 X-Admin-Token 访问后台群组接口被禁止场景",
         {"status_code": r.status_code, "body": r.text},
+    )
+
+    # 带错误 token 调用创建群组接口
+    r_create_wrong = requests.post(
+        f"{BASE_URL}/api/admin/groups",
+        json={"name": "wrong-token-admin-group"},
+        headers={"X-Admin-Token": "WrongKey"},
+    )
+    ok &= _log(
+        r_create_wrong.status_code == 403,
+        "错误 X-Admin-Token 调用 admin 创建群组接口被禁止场景",
+        {"status_code": r_create_wrong.status_code, "body": r_create_wrong.text},
     )
 
     return ok
@@ -347,6 +496,9 @@ def run_all() -> None:
     ok &= setup_groups(ctx)
     ok &= scenario_admin_list_groups_basic(ctx)
     ok &= scenario_admin_list_groups_with_filters(ctx)
+    ok &= scenario_admin_create_group_success(ctx)
+    ok &= scenario_admin_create_group_with_inactive()
+    ok &= scenario_admin_create_group_missing_name()
     ok &= scenario_admin_get_group_detail(ctx)
     ok &= scenario_admin_get_group_not_found()
     ok &= scenario_admin_update_group_success(ctx)
