@@ -5,8 +5,6 @@ const API_BASE = process.env.API_BASE_URL || 'http://localhost:8000'
 async function registerUserForE2E() {
   const email = `app-e2e-${Date.now()}@example.com`
   const password = '1234'
-  const name = 'App E2E User'
-
   const res = await fetch(`${API_BASE}/api/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -89,10 +87,10 @@ test.describe('App 用户注册与登录', () => {
     await page.getByRole('button', { name: '登录' }).click()
 
     await expect(page).toHaveURL(/\/app\/?$/)
-
     await page.getByRole('button', { name: '退出登录' }).click()
     await expect(page).toHaveURL(/\/app\/login/)
 
+    // 再次访问受保护页面会被拦截到登录页
     await page.goto('/app/groups')
     await expect(page).toHaveURL(/\/app\/login/)
   })

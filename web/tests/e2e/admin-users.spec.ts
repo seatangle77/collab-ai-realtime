@@ -331,8 +331,8 @@ test.describe('Admin 用户管理 - 边界与异常', () => {
     let row = page.getByRole('row').filter({ hasText: email }).first()
     await expect(row).toBeVisible({ timeout: 30000 })
 
-    // 点击“要求修改密码”
-    await row.getByRole('button', { name: '要求修改密码' }).click()
+    // 点击“需改密码”
+    await row.getByRole('button', { name: '需改密码' }).click()
     await page.getByRole('button', { name: '确定' }).click()
     await expect(page.getByText('已标记该用户下次登录必须修改密码')).toBeVisible()
 
@@ -343,6 +343,80 @@ test.describe('Admin 用户管理 - 边界与异常', () => {
     row = page.getByRole('row').filter({ hasText: email }).first()
     await expect(row).toBeVisible({ timeout: 30000 })
     await expect(row.getByText('需修改')).toBeVisible()
+  })
+
+  test('标记需改密码 - 取消确认时不应更改密码状态', async ({ page }) => {
+    await loginAsAdmin(page)
+    const email = `e2e-mark-reset-cancel-${Date.now()}@example.com`
+
+    // 创建一个新用户，默认密码状态为“正常”
+    await page.getByRole('button', { name: '新建用户' }).click()
+    let dialog = page.getByRole('dialog', { name: '新建用户' })
+    await dialog.getByLabel('姓名').fill('MarkResetCancel')
+    await dialog.getByLabel('邮箱').fill(email)
+    await dialog.getByLabel('密码').fill('1234')
+    await dialog.getByRole('button', { name: '创建' }).click()
+    await expect(page.getByText('创建用户成功')).toBeVisible()
+
+    // 找到该用户并点击“需改密码”，在确认框里选择“取消”
+    await page.getByPlaceholder('按邮箱模糊搜索').fill(email)
+    await page.getByRole('button', { name: '查询' }).click()
+    let row = page.getByRole('row').filter({ hasText: email }).first()
+    await expect(row).toBeVisible({ timeout: 30000 })
+    await row.getByRole('button', { name: '需改密码' }).click()
+    await page.getByRole('button', { name: '取消' }).click()
+
+    // 再次查询，密码状态依然为“正常”
+    await page.getByRole('button', { name: '重置' }).click()
+    await page.getByPlaceholder('按邮箱模糊搜索').fill(email)
+    await page.getByRole('button', { name: '查询' }).click()
+    row = page.getByRole('row').filter({ hasText: email }).first()
+    await expect(row).toBeVisible({ timeout: 30000 })
+    await expect(row.getByText('正常')).toBeVisible()
+  })
+
+  test('标记需改密码 - 接口失败时提示错误且状态保持正常', async ({ page }) => {
+    await loginAsAdmin(page)
+    const email = `e2e-mark-reset-fail-${Date.now()}@example.com`
+
+    // 创建用户
+    await page.getByRole('button', { name: '新建用户' }).click()
+    let dialog = page.getByRole('dialog', { name: '新建用户' })
+    await dialog.getByLabel('姓名').fill('MarkResetFail')
+    await dialog.getByLabel('邮箱').fill(email)
+    await dialog.getByLabel('密码').fill('1234')
+    await dialog.getByRole('button', { name: '创建' }).click()
+    await expect(page.getByText('创建用户成功')).toBeVisible()
+
+    // 查到该用户
+    await page.getByPlaceholder('按邮箱模糊搜索').fill(email)
+    await page.getByRole('button', { name: '查询' }).click()
+    const row = page.getByRole('row').filter({ hasText: email }).first()
+    await expect(row).toBeVisible({ timeout: 30000 })
+
+    // 拦截 mark-password-reset 接口，让其返回 500
+    await page.route('**/api/admin/users/*/mark-password-reset', (route) =>
+      route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: 'mock error' }),
+      }),
+    )
+
+    // 点击“需改密码”并在确认框选择“确定”
+    await row.getByRole('button', { name: '需改密码' }).click()
+    await page.getByRole('button', { name: '确定' }).click()
+
+    // 出现错误提示（使用 mock error 文案）
+    await expect(page.getByText('mock error')).toBeVisible()
+
+    // 再次查询，状态仍为“正常”
+    await page.getByRole('button', { name: '重置' }).click()
+    await page.getByPlaceholder('按邮箱模糊搜索').fill(email)
+    await page.getByRole('button', { name: '查询' }).click()
+    const rowAfter = page.getByRole('row').filter({ hasText: email }).first()
+    await expect(rowAfter).toBeVisible({ timeout: 30000 })
+    await expect(rowAfter.getByText('正常')).toBeVisible()
   })
 
   test('创建用户 - 密码必须为 4 位', async ({ page }) => {
@@ -532,6 +606,79 @@ test.describe('Admin 用户管理 - 边界与异常', () => {
     await page.getByRole('button', { name: '查询' }).click()
 
     await expect(page.getByRole('row').filter({ hasText: fakeEmail })).toHaveCount(0)
+  })
+})
+
+test.describe('Admin 用户管理 - 模拟登录', () => {
+  test('模拟登录 - 成功以该用户身份在新页面打开 App', async ({ page, context }) => {
+    await loginAsAdmin(page)
+    const email = `e2e-impersonate-${Date.now()}@example.com`
+
+    // 创建一个新用户
+    await page.getByRole('button', { name: '新建用户' }).click()
+    const dialog = page.getByRole('dialog', { name: '新建用户' })
+    await dialog.getByLabel('姓名').fill('ImpersonateUser')
+    await dialog.getByLabel('邮箱').fill(email)
+    await dialog.getByLabel('密码').fill('1234')
+    await dialog.getByRole('button', { name: '创建' }).click()
+    await expect(page.getByText('创建用户成功')).toBeVisible()
+
+    // 定位该用户行
+    await page.getByPlaceholder('按邮箱模糊搜索').fill(email)
+    await page.getByRole('button', { name: '查询' }).click()
+    const row = page.getByRole('row').filter({ hasText: email }).first()
+    await expect(row).toBeVisible({ timeout: 30000 })
+
+    // 点击“模拟登录”，等待新页面打开
+    const [appPage] = await Promise.all([
+      context.waitForEvent('page'),
+      row.getByRole('button', { name: '模拟登录' }).click(),
+    ])
+
+    await appPage.waitForLoadState('domcontentloaded')
+    await expect(appPage).toHaveURL(/\/app(\/)?$/)
+
+    // 新开的 App 页面中成功加载，不强制要求展示该邮箱
+    const headerLogo = appPage.locator('.app-logo')
+    await expect(headerLogo).toBeVisible()
+  })
+
+  test('模拟登录 - 接口失败时给出错误提示且不应打开新页面', async ({ page, context }) => {
+    await loginAsAdmin(page)
+    const email = `e2e-impersonate-fail-${Date.now()}@example.com`
+
+    // 创建一个新用户
+    await page.getByRole('button', { name: '新建用户' }).click()
+    const dialog = page.getByRole('dialog', { name: '新建用户' })
+    await dialog.getByLabel('姓名').fill('ImpersonateFail')
+    await dialog.getByLabel('邮箱').fill(email)
+    await dialog.getByLabel('密码').fill('1234')
+    await dialog.getByRole('button', { name: '创建' }).click()
+    await expect(page.getByText('创建用户成功')).toBeVisible()
+
+    await page.getByPlaceholder('按邮箱模糊搜索').fill(email)
+    await page.getByRole('button', { name: '查询' }).click()
+    const row = page.getByRole('row').filter({ hasText: email }).first()
+    await expect(row).toBeVisible({ timeout: 30000 })
+
+    // 拦截 impersonate 接口返回 500
+    await page.route('**/api/admin/users/*/impersonate', (route) =>
+      route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: 'mock error' }),
+      }),
+    )
+
+    const pagesBefore = context.pages().length
+
+    await row.getByRole('button', { name: '模拟登录' }).click()
+    // 出现来自后端的 mock error 文案
+    await expect(page.getByText('mock error')).toBeVisible()
+
+    // 页面数量不应增加
+    const pagesAfter = context.pages().length
+    expect(pagesAfter).toBe(pagesBefore)
   })
 })
 
