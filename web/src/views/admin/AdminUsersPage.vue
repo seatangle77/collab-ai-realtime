@@ -468,11 +468,11 @@ onMounted(() => {
         @selection-change="handleSelectionChange"
       >
         <el-table-column type="selection" width="48" />
-        <el-table-column prop="id" label="ID" min-width="220" show-overflow-tooltip />
+        <el-table-column prop="id" label="ID" min-width="180" show-overflow-tooltip />
         <el-table-column prop="name" label="姓名" min-width="120" show-overflow-tooltip />
-        <el-table-column prop="email" label="邮箱" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="device_token" label="设备 Token" min-width="220" show-overflow-tooltip />
-        <el-table-column label="小组 ID" min-width="220">
+        <el-table-column prop="email" label="邮箱" min-width="170" show-overflow-tooltip />
+        <el-table-column prop="device_token" label="设备 Token" min-width="180" show-overflow-tooltip />
+        <el-table-column label="小组 ID" min-width="180">
           <template #default="{ row }">
             <span v-if="row.group_ids?.length">
               {{ row.group_ids.join(', ') }}
@@ -480,7 +480,7 @@ onMounted(() => {
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="小组名称" min-width="220">
+        <el-table-column label="小组名称" min-width="180">
           <template #default="{ row }">
             <span v-if="row.group_names?.length">
               {{ row.group_names.join(', ') }}
@@ -488,7 +488,7 @@ onMounted(() => {
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="密码状态" min-width="120">
+        <el-table-column label="密码状态" min-width="110">
           <template #default="{ row }">
             <el-tag
               v-if="row.password_needs_reset"
@@ -508,17 +508,19 @@ onMounted(() => {
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="创建时间" min-width="180" show-overflow-tooltip>
+        <el-table-column label="创建时间" min-width="170" show-overflow-tooltip>
           <template #default="{ row }">
             {{ formatDateTimeToCST(row.created_at) }}
           </template>
         </el-table-column>
         <el-table-column label="操作" min-width="260" fixed="right">
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="openEditDialog(row)">编辑</el-button>
-            <el-button type="danger" link size="small" @click="handleDelete(row)">删除</el-button>
-            <el-button type="primary" link size="small" @click="handleImpersonate(row)">以此身份打开 App</el-button>
-            <el-button type="warning" link size="small" @click="handleMarkPasswordReset(row)">要求修改密码</el-button>
+            <div class="admin-users-ops">
+              <el-button type="primary" link size="small" @click="openEditDialog(row)">编辑</el-button>
+              <el-button type="danger" link size="small" @click="handleDelete(row)">删除</el-button>
+              <el-button type="primary" link size="small" @click="handleImpersonate(row)">模拟登录</el-button>
+              <el-button type="warning" link size="small" @click="handleMarkPasswordReset(row)">需改密码</el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -638,6 +640,18 @@ onMounted(() => {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.admin-users-ops {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+
+.admin-users-ops :deep(.el-button) {
+  padding: 0 4px;
+  font-size: 12px;
 }
 </style>
 
