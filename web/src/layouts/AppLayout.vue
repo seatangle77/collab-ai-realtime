@@ -11,12 +11,29 @@ const tabs = computed(() => [
   { path: '/app/sessions', label: '我的会话' },
 ])
 
-const active = computed(() => route.path.startsWith('/app') ? route.path : '/app')
+const active = computed(() => (route.path.startsWith('/app') ? route.path : '/app'))
+
+const isLoggedIn = computed(() => {
+  if (typeof window === 'undefined') return false
+  return !!window.localStorage.getItem('app_access_token')
+})
 
 function go(path: string) {
   if (path !== route.path) {
     router.push(path)
   }
+}
+
+function goAuth() {
+  router.push('/app/login')
+}
+
+function logout() {
+  if (typeof window !== 'undefined') {
+    window.localStorage.removeItem('app_access_token')
+    window.localStorage.removeItem('app_user')
+  }
+  router.push('/app/login')
 }
 </script>
 
@@ -36,6 +53,24 @@ function go(path: string) {
           {{ tab.label }}
         </button>
       </nav>
+      <div class="app-auth">
+        <button
+          v-if="!isLoggedIn"
+          class="app-auth-btn"
+          type="button"
+          @click="goAuth"
+        >
+          登录 / 注册
+        </button>
+        <button
+          v-else
+          class="app-auth-btn"
+          type="button"
+          @click="logout"
+        >
+          退出登录
+        </button>
+      </div>
     </header>
     <main class="app-main">
       <RouterView />
@@ -55,6 +90,7 @@ function go(path: string) {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   padding: 10px 20px;
   background: #ffffff;
   border-bottom: 1px solid #e5e7eb;
@@ -85,9 +121,23 @@ function go(path: string) {
   color: #1d4ed8;
 }
 
+.app-auth {
+  display: flex;
+  align-items: center;
+}
+
+.app-auth-btn {
+  border-radius: 999px;
+  border: 1px solid #2563eb;
+  padding: 6px 12px;
+  font-size: 13px;
+  background: #2563eb;
+  color: #ffffff;
+  cursor: pointer;
+}
+
 .app-main {
   flex: 1;
   padding: 16px 20px 24px;
 }
 </style>
-

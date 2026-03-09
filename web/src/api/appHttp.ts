@@ -1,0 +1,75 @@
+export interface AppHttpConfig {
+  baseURL?: string
+}
+
+const defaultConfig: AppHttpConfig = {
+  baseURL: import.meta.env.VITE_API_BASE_URL || '',
+}
+
+function getAppToken(): string | null {
+  if (typeof window === 'undefined') return null
+  return window.localStorage.getItem('app_access_token')
+}
+
+async function request<T>(url: string, init: RequestInit = {}, config: AppHttpConfig = {}): Promise<T> {
+  const finalConfig = { ...defaultConfig, ...config }
+  const baseURL = finalConfig.baseURL ?? ''
+  const token = getAppToken()
+
+  const headers: HeadersInit = {
+    'Content-Type': 'application/json',
+    ...(init.headers ?? {}),
+  }
+
+  if (token) {
+    ;(headers as Record<string, string>)['Authorization'] = `Bearer ${token}`
+  }
+
+  const response = await fetch(baseURL + url, {
+    ...init,
+    headers,
+  })
+
+  if (response.status === 401 || response.status === 403) {
+    if (typeof window !== 'undefined') {
+      const redirect = encodeURIComponent(window.location.pathname + window.location.search)
+      window.location.href = `/app/login?redirect=${redirect}`
+    }
+    throw new Error('未授权访问用户端接口')
+  }
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '')
+    throw new Error(text || `请求失败，状态码 ${response.status}`)
+  }
+
+  if (response.status === 204) {
+    return undefined as unknown as T
+  }
+
+  return (await response.json()) as T
+}
+
+export const appHttp = {
+  get: <T>(url: string, config?: AppHttpConfig) => request<T>(url, { method: 'GET' }, config),
+  post: <T>(url: string, body?: unknown, config?: AppHttpConfig) =>
+    request<T>(
+      url,
+      {
+        method: 'POST',
+        body: body != null ? JSON.stringify(body) : undefined,
+      },
+      config,
+    ),
+  patch: <T>(url: string, body?: unknown, config?: AppHttpConfig) =>
+    request<T>(
+      url,
+      {
+        method: 'PATCH',
+        body: body != null ? JSON.stringify(body) : undefined,
+      },
+      config,
+    ),
+  delete: <T>(url: string, config?: AppHttpConfig) => request<T>(url, { method: 'DELETE' }, config),
+}
+

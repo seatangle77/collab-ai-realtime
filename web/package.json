@@ -12,7 +12,8 @@
     "test:e2e:users": "playwright test tests/e2e/admin-users.spec.ts",
     "test:e2e:groups": "playwright test tests/e2e/admin-groups.spec.ts",
     "test:e2e:memberships": "playwright test tests/e2e/admin-memberships.spec.ts",
-    "test:e2e:chat-sessions": "playwright test tests/e2e/admin-chat-sessions.spec.ts"
+    "test:e2e:chat-sessions": "playwright test tests/e2e/admin-chat-sessions.spec.ts",
+    "test:e2e:app-auth": "playwright test tests/e2e/app-auth.spec.ts"
   },
   "dependencies": {
     "vue": "^3.5.25",

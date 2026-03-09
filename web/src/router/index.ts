@@ -10,6 +10,17 @@ const routes: RouteRecordRaw[] = [
     path: '/',
     redirect: '/app',
   },
+  // 用户端登录 / 注册
+  {
+    path: '/app/login',
+    name: 'AppLogin',
+    component: () => import('../views/app/AppLogin.vue'),
+  },
+  {
+    path: '/app/register',
+    name: 'AppRegister',
+    component: () => import('../views/app/AppRegister.vue'),
+  },
   // 用户端 APP 路由
   {
     path: '/app',
@@ -75,5 +86,35 @@ export const router = createRouter({
   routes,
 })
 
-export default router
+router.beforeEach((to, _from, next) => {
+  const publicAppPaths = ['/app/login', '/app/register']
+  if (typeof window === 'undefined') {
+    next()
+    return
+  }
 
+  const token = window.localStorage.getItem('app_access_token')
+
+  // 已登录用户访问登录/注册页，直接重定向到 App 首页
+  if (token && publicAppPaths.includes(to.path)) {
+    next('/app')
+    return
+  }
+
+  // 未登录访问受保护的 /app 路由时，跳转到登录页
+  if (to.path.startsWith('/app') && !publicAppPaths.includes(to.path)) {
+    if (!token) {
+      next({
+        path: '/app/login',
+        query: {
+          redirect: to.fullPath,
+        },
+      })
+      return
+    }
+  }
+
+  next()
+})
+
+export default router
