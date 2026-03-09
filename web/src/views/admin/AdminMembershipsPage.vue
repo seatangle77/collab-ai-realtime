@@ -7,6 +7,7 @@ import { listAdminMemberships, updateAdminMembership, deleteAdminMembership, del
 import { listAdminGroups } from '../../api/admin/groups'
 import { listAdminUsers } from '../../api/admin/users'
 import { formatDateTimeToCST } from '../../utils/datetime'
+import { exportRowsToCsv } from '../../utils/csv'
 
 interface Filters {
   group_id: string
@@ -296,6 +297,55 @@ async function handleBatchDelete() {
   }
 }
 
+function handleExportSelectedCsv() {
+  if (selectedRows.value.length === 0) {
+    ElMessage.warning('请先选择要导出的成员关系')
+    return
+  }
+
+  const now = new Date()
+  const ts = now.toISOString().slice(0, 19).replace(/[:T]/g, '-')
+  const filename = `成员关系管理-选中导出-${ts}.csv`
+
+  exportRowsToCsv<AdminMembership>({
+    filename,
+    columns: [
+      { key: 'id', title: 'ID' },
+      { key: 'group_id', title: '群组 ID' },
+      {
+        key: 'group_name',
+        title: '群组名称',
+        format: (row) => row.group_name ?? '',
+      },
+      { key: 'user_id', title: '用户 ID' },
+      {
+        key: 'user_name',
+        title: '用户名称',
+        format: (row) => row.user_name ?? '',
+      },
+      { key: 'role', title: '角色' },
+      {
+        key: 'status',
+        title: '状态',
+        format: (row) =>
+          row.status === 'active'
+            ? '有效 (active)'
+            : row.status === 'left'
+              ? '已退出 (left)'
+              : row.status === 'kicked'
+                ? '被移除 (kicked)'
+                : row.status,
+      },
+      {
+        key: 'created_at',
+        title: '创建时间',
+        format: (row) => formatDateTimeToCST(row.created_at),
+      },
+    ],
+    rows: selectedRows.value,
+  })
+}
+
 async function handleDelete(row: AdminMembership) {
   try {
     await ElMessageBox.confirm(
@@ -386,6 +436,13 @@ onMounted(() => {
 
     <el-card class="admin-memberships-table" shadow="never">
       <div class="admin-memberships-toolbar">
+        <el-button
+          type="primary"
+          :disabled="selectedRows.length === 0"
+          @click="handleExportSelectedCsv"
+        >
+          {{ selectedRows.length > 0 ? `导出选中 (${selectedRows.length})` : '导出选中' }}
+        </el-button>
         <el-button
           type="danger"
           :disabled="selectedRows.length === 0"

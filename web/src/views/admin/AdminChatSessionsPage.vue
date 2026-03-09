@@ -12,6 +12,7 @@ import {
 } from '../../api/admin/chat-sessions'
 import { listAdminGroups } from '../../api/admin/groups'
 import { formatDateTimeToCST } from '../../utils/datetime'
+import { exportRowsToCsv } from '../../utils/csv'
 
 interface Filters {
   group_id: string
@@ -255,6 +256,56 @@ async function handleBatchDelete() {
   }
 }
 
+function handleExportSelectedCsv() {
+  if (selectedRows.value.length === 0) {
+    ElMessage.warning('请先选择要导出的会话')
+    return
+  }
+
+  const now = new Date()
+  const ts = now.toISOString().slice(0, 19).replace(/[:T]/g, '-')
+  const filename = `会话管理-选中导出-${ts}.csv`
+
+  exportRowsToCsv<AdminChatSession>({
+    filename,
+    columns: [
+      { key: 'id', title: 'ID' },
+      { key: 'group_id', title: '群组 ID' },
+      {
+        key: 'group_name',
+        title: '群组名称',
+        format: (row) => row.group_name ?? '',
+      },
+      { key: 'session_title', title: '会话标题' },
+      {
+        key: 'created_at',
+        title: '创建时间',
+        format: (row) => formatDateTimeToCST(row.created_at),
+      },
+      {
+        key: 'last_updated',
+        title: '最后更新时间',
+        format: (row) => formatDateTimeToCST(row.last_updated),
+      },
+      {
+        key: 'is_active',
+        title: '状态',
+        format: (row) => {
+          if (row.ended_at) return '已结束'
+          if (row.created_at === row.last_updated) return '未开始'
+          return '进行中'
+        },
+      },
+      {
+        key: 'ended_at',
+        title: '结束时间',
+        format: (row) => formatDateTimeToCST(row.ended_at),
+      },
+    ],
+    rows: selectedRows.value,
+  })
+}
+
 async function handleDelete(row: AdminChatSession) {
   try {
     await ElMessageBox.confirm(`确认删除会话「${row.session_title || row.id}」吗？该操作不可恢复。`, '删除确认', {
@@ -367,6 +418,13 @@ onMounted(() => {
 
     <el-card class="admin-chat-sessions-table" shadow="never">
       <div class="admin-chat-sessions-toolbar">
+        <el-button
+          type="primary"
+          :disabled="selectedRows.length === 0"
+          @click="handleExportSelectedCsv"
+        >
+          {{ selectedRows.length > 0 ? `导出选中 (${selectedRows.length})` : '导出选中' }}
+        </el-button>
         <el-button
           type="danger"
           :disabled="selectedRows.length === 0"

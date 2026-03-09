@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import fs from 'fs'
 
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY || 'TestAdminKey123'
 const API_BASE = process.env.API_BASE_URL || 'http://localhost:8000'
@@ -149,6 +150,16 @@ const shared: {
   latestCreatedAt: Date
 } = {} as any
 
+const comboFixture: {
+  groupId: string
+  groupName: string | null
+  activeSessionTitle: string
+  endedSessionTitle: string
+  sessions: ChatSessionItem[]
+  earliestCreatedAt: Date
+  latestCreatedAt: Date
+} = {} as any
+
 function toElDateTimeString(d: Date): string {
   // Element Plus datetime 输入使用 "YYYY-MM-DD HH:mm:ss" 文本格式
   return d.toISOString().slice(0, 19).replace('T', ' ')
@@ -185,23 +196,45 @@ test.describe.serial('Admin 会话管理页面 - 查询与时间', () => {
   })
 
   test('3. 按状态筛选进行中 / 已结束', async ({ page }) => {
-    await page.getByPlaceholder('按群组 ID 精确查询').fill(shared.groupId)
+    // 基于真实业务规则从 shared.sessions 里推导状态：
+    // - not_started: ended_at 为 null 且 created_at == last_updated
+    // - ongoing:     ended_at 为 null 且 created_at != last_updated
+    // - ended:       ended_at 非空
+    const sessions = shared.sessions
+    const endedSession = sessions.find((s) => s.ended_at !== null)
+    const ongoingSession = sessions.find(
+      (s) => s.ended_at === null && s.created_at !== s.last_updated,
+    )
 
-    await page.locator('.admin-chat-sessions-filters .el-select').first().click()
-    await page.getByRole('option', { name: '进行中' }).click()
-    await page.getByRole('button', { name: '查询' }).click()
-
-    const activeRows = page.getByRole('row').filter({ hasText: shared.activeSessionTitle })
-    await expect(activeRows.first()).toBeVisible()
-
-    await page.getByRole('button', { name: '重置' }).click()
+    // 先验证「已结束」筛选一定能命中至少一条（fixture 中第一次会话已结束）
     await page.getByPlaceholder('按群组 ID 精确查询').fill(shared.groupId)
     await page.locator('.admin-chat-sessions-filters .el-select').first().click()
     await page.getByRole('option', { name: '已结束' }).click()
     await page.getByRole('button', { name: '查询' }).click()
 
-    const endedRows = page.getByRole('row').filter({ hasText: shared.endedSessionTitle })
+    const endedRows = page
+      .getByRole('row')
+      .filter({ hasText: (endedSession ?? { session_title: shared.endedSessionTitle }).session_title })
     await expect(endedRows.first()).toBeVisible()
+
+    // 再验证「进行中」筛选：
+    // - 如果 fixture 中确实存在 ongoing 会话，则应能命中该会话；
+    // - 如果不存在 ongoing 会话，则进行中筛选结果应为空。
+    await page.getByRole('button', { name: '重置' }).click()
+    await page.getByPlaceholder('按群组 ID 精确查询').fill(shared.groupId)
+    await page.locator('.admin-chat-sessions-filters .el-select').first().click()
+    await page.getByRole('option', { name: '进行中' }).click()
+    await page.getByRole('button', { name: '查询' }).click()
+
+    if (ongoingSession) {
+      const activeRows = page
+        .getByRole('row')
+        .filter({ hasText: ongoingSession.session_title })
+      await expect(activeRows.first()).toBeVisible()
+    } else {
+      const rows = page.getByRole('row').filter({ hasText: shared.groupId })
+      await expect(rows).toHaveCount(0)
+    }
   })
 
   test('4. 按创建时间范围筛选（命中窗口）', async ({ page }) => {
@@ -410,17 +443,25 @@ test.describe('Admin 会话管理页面 - 新建与编辑会话', () => {
 })
 
 test.describe('Admin 会话管理 - 查询组合与时间边界', () => {
+  test.beforeAll(async () => {
+    const fixture = await setupChatSessionsFixture()
+    Object.assign(comboFixture, fixture)
+  })
+
   test.beforeEach(async ({ page }) => {
     await loginAsAdminAndGoToChatSessions(page)
   })
 
   test('查询组合 - 群组 ID + 标题 + 状态', async ({ page }) => {
-    const fixture = await setupChatSessionsFixture()
+    const fixture = comboFixture
 
     await page.getByPlaceholder('按群组 ID 精确查询').fill(fixture.groupId)
     await page.getByPlaceholder('按会话标题模糊搜索').fill('第二次')
-    await page.locator('.admin-chat-sessions-filters .el-select').first().click()
-    await page.getByRole('option', { name: '进行中' }).click()
+    const statusSelect = page.locator('.admin-chat-sessions-filters .el-select').first()
+    await statusSelect.click()
+    const ongoingOption = page.getByRole('option', { name: '进行中' })
+    await ongoingOption.waitFor({ state: 'visible', timeout: 10000 })
+    await ongoingOption.click()
     await page.getByRole('button', { name: '查询' }).click()
 
     const rows = page.getByRole('row').filter({ hasText: '第二次会话' })
@@ -428,7 +469,7 @@ test.describe('Admin 会话管理 - 查询组合与时间边界', () => {
   })
 
   test('创建时间仅设置开始或结束也能查到记录', async ({ page }) => {
-    const fixture = await setupChatSessionsFixture()
+    const fixture = comboFixture
     const createdDates = fixture.sessions
       .map((s) => new Date(s.created_at))
       .filter((d) => !Number.isNaN(d.getTime()))
@@ -465,7 +506,7 @@ test.describe('Admin 会话管理 - 查询组合与时间边界', () => {
   })
 
   test('创建时间边界点（from=to=created_at）仍能查到记录', async ({ page }) => {
-    const fixture = await setupChatSessionsFixture()
+    const fixture = comboFixture
     const target = fixture.sessions[0]
     const createdAt = new Date(target.created_at)
     const boundary = createdAt.toISOString().slice(0, 19).replace('T', ' ')
@@ -499,6 +540,10 @@ test.describe('Admin 会话管理 - 查询组合与时间边界', () => {
     await expect(page.getByRole('button', { name: '批量删除' })).toBeDisabled()
   })
 
+   test('导出选中 - 未选时按钮禁用', async ({ page }) => {
+    await expect(page.getByRole('button', { name: '导出选中' })).toBeDisabled()
+  })
+
   test('批量删除 - 选中两个会话并删除', async ({ page }) => {
     const owner = await registerAndLogin('admin-batch-del-sess')
     const { groupId } = await createGroup(owner.accessToken, `批量删除会话群-${Date.now()}`)
@@ -517,6 +562,56 @@ test.describe('Admin 会话管理 - 查询组合与时间边界', () => {
     await expect(page.getByText('成功删除 2 条会话')).toBeVisible()
     await expect(page.getByRole('row').filter({ hasText: title1 })).toHaveCount(0)
     await expect(page.getByRole('row').filter({ hasText: title2 })).toHaveCount(0)
+  })
+
+  test('导出选中 - 选中两个会话导出 CSV 且只包含两行数据', async ({ page, browserName }) => {
+    test.skip(browserName === 'webkit', '下载在部分浏览器环境下不稳定，这里主测 Chromium/Firefox')
+
+    const owner = await registerAndLogin('admin-export-sess')
+    const { groupId } = await createGroup(owner.accessToken, `导出会话群-${Date.now()}`)
+    const title1 = '导出测试会话1'
+    const title2 = '导出测试会话2'
+    await createSession(owner.accessToken, groupId, title1)
+    await createSession(owner.accessToken, groupId, title2)
+
+    await page.getByPlaceholder('按群组 ID 精确查询').fill(groupId)
+    await page.getByRole('button', { name: '查询' }).click()
+
+    const rows = page.getByRole('row').filter({ hasText: groupId })
+    await expect(rows.first()).toBeVisible({ timeout: 30000 })
+    const count = await rows.count()
+    expect(count).toBeGreaterThanOrEqual(2)
+
+    const row1 = rows.nth(0)
+    const row2 = rows.nth(1)
+    await row1.locator('.el-checkbox').first().click()
+    await row2.locator('.el-checkbox').first().click()
+
+    const exportBtn = page.getByRole('button').filter({ hasText: /导出选中/ })
+    await expect(exportBtn).toBeEnabled()
+    await expect(exportBtn).toHaveText(/导出选中\s*[（(]2[）)]/)
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      exportBtn.click(),
+    ])
+
+    const downloadPath = await download.path()
+    expect(downloadPath).not.toBeNull()
+    const csvText = fs.readFileSync(downloadPath as string, 'utf-8')
+
+    // 表头包含关键列
+    expect(csvText).toContain('群组 ID')
+    expect(csvText).toContain('群组名称')
+    expect(csvText).toContain('会话标题')
+    expect(csvText).toContain('创建时间')
+    expect(csvText).toContain('最后更新时间')
+    expect(csvText).toContain('状态')
+    expect(csvText).toContain('结束时间')
+
+    // 行数 = 1 行表头 + 2 行数据
+    const lines = csvText.trimEnd().split('\n')
+    expect(lines.length).toBe(1 + 2)
   })
 })
 

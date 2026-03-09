@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import fs from 'fs'
 
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY || 'TestAdminKey123'
 const API_BASE = process.env.API_BASE_URL || 'http://localhost:8000'
@@ -149,6 +150,16 @@ const shared: {
   latestCreatedAt: Date
 } = {} as any
 
+const comboFixture: {
+  groupId: string
+  leaderUserId: string
+  member1UserId: string
+  member2UserId: string
+  memberships: MembershipItem[]
+  earliestCreatedAt: Date
+  latestCreatedAt: Date
+} = {} as any
+
 test.describe.serial('Admin 成员关系管理页面 - 查询与时间', () => {
   test.beforeAll(async () => {
     const fixture = await setupMembershipFixture()
@@ -288,12 +299,17 @@ test.describe.serial('Admin 成员关系管理页面 - 查询与时间', () => {
 })
 
 test.describe('Admin 成员关系管理 - 查询组合与时间边界', () => {
+  test.beforeAll(async () => {
+    const fixture = await setupMembershipFixture()
+    Object.assign(comboFixture, fixture)
+  })
+
   test.beforeEach(async ({ page }) => {
     await loginAsAdminAndGoToMemberships(page)
   })
 
   test('查询组合 - 群组 ID + 用户 ID + 状态', async ({ page }) => {
-    const fixture = await setupMembershipFixture()
+    const fixture = comboFixture
     const targetMembership = fixture.memberships.find((m) => m.user_id === fixture.member1UserId) ?? fixture.memberships[0]
 
     await page.getByPlaceholder('按群组 ID 精确查询').fill(fixture.groupId)
@@ -309,7 +325,7 @@ test.describe('Admin 成员关系管理 - 查询组合与时间边界', () => {
   })
 
   test('创建时间仅设置开始或结束也能查到记录', async ({ page }) => {
-    const fixture = await setupMembershipFixture()
+    const fixture = comboFixture
     const createdDates = fixture.memberships.map((m) => new Date(m.created_at)).filter((d) => !Number.isNaN(d.getTime()))
     const earliest = new Date(Math.min(...createdDates.map((d) => d.getTime())))
     const latest = new Date(Math.max(...createdDates.map((d) => d.getTime())))
@@ -344,7 +360,7 @@ test.describe('Admin 成员关系管理 - 查询组合与时间边界', () => {
   })
 
   test('创建时间边界点（from=to=created_at）仍能查到记录', async ({ page }) => {
-    const fixture = await setupMembershipFixture()
+    const fixture = comboFixture
     const target = fixture.memberships[0]
     const createdAt = new Date(target.created_at)
     const start = new Date(createdAt.getTime() - 5 * 60 * 1000)
@@ -447,6 +463,10 @@ test.describe('Admin 成员关系管理 - 新建与批量删除', () => {
     await expect(page.getByRole('button', { name: '批量删除' })).toBeDisabled()
   })
 
+  test('导出选中 - 未选时按钮禁用', async ({ page }) => {
+    await expect(page.getByRole('button', { name: '导出选中' })).toBeDisabled()
+  })
+
   test('批量删除 - 选中两条成员关系并删除', async ({ page }) => {
     const fixture = await setupMembershipFixture()
     await page.getByPlaceholder('按群组 ID 精确查询').pressSequentially(fixture.groupId)
@@ -467,5 +487,47 @@ test.describe('Admin 成员关系管理 - 新建与批量删除', () => {
     // 不依赖 ElMessage 浮层（易消失），改为等列表刷新后行数减少
     const remaining = page.getByRole('row').filter({ hasText: fixture.groupId })
     await expect(remaining).toHaveCount(beforeCount - 2, { timeout: 30000 })
+  })
+
+  test('导出选中 - 选中两条成员关系导出 CSV 且只包含两行数据', async ({ page, browserName }) => {
+    test.skip(browserName === 'webkit', '下载在部分浏览器环境下不稳定，这里主测 Chromium/Firefox')
+
+    const fixture = await setupMembershipFixture()
+    await page.getByPlaceholder('按群组 ID 精确查询').pressSequentially(fixture.groupId)
+    await page.getByRole('button', { name: '查询' }).click()
+
+    const rows = page.getByRole('row').filter({ hasText: fixture.groupId })
+    await expect(rows.first()).toBeVisible({ timeout: 30000 })
+    const count = await rows.count()
+    await expect(count).toBeGreaterThanOrEqual(2)
+
+    const row1 = rows.nth(0)
+    const row2 = rows.nth(1)
+    await row1.locator('.el-checkbox').first().click()
+    await row2.locator('.el-checkbox').first().click()
+
+    const exportBtn = page.getByRole('button').filter({ hasText: /导出选中/ })
+    await expect(exportBtn).toBeEnabled()
+    await expect(exportBtn).toHaveText(/导出选中\s*[（(]2[）)]/)
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      exportBtn.click(),
+    ])
+
+    const downloadPath = await download.path()
+    expect(downloadPath).not.toBeNull()
+    const csvText = fs.readFileSync(downloadPath as string, 'utf-8')
+
+    // 表头包含关键列
+    expect(csvText).toContain('群组 ID')
+    expect(csvText).toContain('用户 ID')
+    expect(csvText).toContain('角色')
+    expect(csvText).toContain('状态')
+    expect(csvText).toContain('创建时间')
+
+    // 行数 = 1 行表头 + 2 行数据
+    const lines = csvText.trimEnd().split('\n')
+    expect(lines.length).toBe(1 + 2)
   })
 })

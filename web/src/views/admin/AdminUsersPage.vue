@@ -6,6 +6,7 @@ import type { AdminUser } from '../../types/admin'
 import { listAdminUsers, deleteAdminUser, deleteAdminUsersBatch, updateAdminUser } from '../../api/admin/users'
 import { registerUser } from '../../api/auth'
 import { formatDateTimeToCST } from '../../utils/datetime'
+import { exportRowsToCsv } from '../../utils/csv'
 
 interface Filters {
   email: string
@@ -255,6 +256,47 @@ async function handleBatchDelete() {
   }
 }
 
+function handleExportSelectedCsv() {
+  if (selectedRows.value.length === 0) {
+    ElMessage.warning('请先选择要导出的用户')
+    return
+  }
+
+  const now = new Date()
+  const ts = now.toISOString().slice(0, 19).replace(/[:T]/g, '-')
+  const filename = `用户管理-选中导出-${ts}.csv`
+
+  exportRowsToCsv<AdminUser>({
+    filename,
+    columns: [
+      { key: 'id', title: 'ID' },
+      { key: 'name', title: '姓名' },
+      { key: 'email', title: '邮箱' },
+      {
+        key: 'device_token',
+        title: '设备 Token',
+        format: (row) => row.device_token ?? '',
+      },
+      {
+        key: 'group_ids',
+        title: '小组 ID',
+        format: (row) => (row.group_ids?.length ? row.group_ids.join(', ') : ''),
+      },
+      {
+        key: 'group_names',
+        title: '小组名称',
+        format: (row) => (row.group_names?.length ? row.group_names.join(', ') : ''),
+      },
+      {
+        key: 'created_at',
+        title: '创建时间',
+        format: (row) => formatDateTimeToCST(row.created_at),
+      },
+    ],
+    rows: selectedRows.value,
+  })
+}
+
 async function handleDelete(row: AdminUser) {
   try {
     await ElMessageBox.confirm(`确认删除用户「${row.name || row.email}」吗？该操作不可恢复。`, '删除确认', {
@@ -354,6 +396,13 @@ onMounted(() => {
 
     <el-card class="admin-users-table" shadow="never">
       <div class="admin-users-toolbar">
+        <el-button
+          type="primary"
+          :disabled="selectedRows.length === 0"
+          @click="handleExportSelectedCsv"
+        >
+          {{ selectedRows.length > 0 ? `导出选中 (${selectedRows.length})` : '导出选中' }}
+        </el-button>
         <el-button
           type="danger"
           :disabled="selectedRows.length === 0"

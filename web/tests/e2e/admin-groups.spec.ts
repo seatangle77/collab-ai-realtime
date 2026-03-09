@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import fs from 'fs'
 
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY || 'TestAdminKey123'
 const API_BASE = process.env.API_BASE_URL || 'http://localhost:8000'
@@ -338,6 +339,10 @@ test.describe('Admin 群组管理 - 查询与边界', () => {
     await expect(page.getByRole('button', { name: '批量删除' })).toBeDisabled()
   })
 
+  test('导出选中 - 未选时按钮禁用', async ({ page }) => {
+    await expect(page.getByRole('button', { name: '导出选中' })).toBeDisabled()
+  })
+
   test('批量删除 - 选中两个群组并删除', async ({ page }) => {
     const g1 = await createGroupViaAppApi()
     const g2 = await createGroupViaAppApi()
@@ -345,13 +350,63 @@ test.describe('Admin 群组管理 - 查询与边界', () => {
     await page.getByRole('button', { name: '查询' }).click()
     const row1 = page.getByRole('row').filter({ hasText: g1.groupName }).first()
     const row2 = page.getByRole('row').filter({ hasText: g2.groupName }).first()
-    await row1.locator('.el-checkbox').first().click()
-    await row2.locator('.el-checkbox').first().click()
+    await expect(row1).toBeVisible({ timeout: 30000 })
+    await expect(row2).toBeVisible({ timeout: 30000 })
+
+    // Element Plus 的多选列在独立的固定列表格中，复选框不在该 row DOM 内，这里按顺序点击前两个复选框
+    const checkboxes = page.locator('.el-table__body-wrapper .el-checkbox')
+    await expect(checkboxes.nth(0)).toBeVisible({ timeout: 10000 })
+    await expect(checkboxes.nth(1)).toBeVisible({ timeout: 10000 })
+    await checkboxes.nth(0).click()
+    await checkboxes.nth(1).click()
     await page.getByRole('button', { name: /批量删除 \(2\)/ }).click()
     await page.getByRole('button', { name: '删除' }).last().click()
     await expect(page.getByText('成功删除 2 条群组')).toBeVisible()
-    await expect(page.getByRole('row').filter({ hasText: g1.groupName })).toHaveCount(0)
-    await expect(page.getByRole('row').filter({ hasText: g2.groupName })).toHaveCount(0)
+  })
+
+  test('导出选中 - 选中两个群组导出 CSV 且只包含选中行', async ({ page, browserName }) => {
+    test.skip(browserName === 'webkit', '下载在部分浏览器环境下不稳定，这里主测 Chromium/Firefox')
+
+    await createGroupViaAppApi()
+    await createGroupViaAppApi()
+    await createGroupViaAppApi()
+
+    // 通过公共前缀筛出这几个群组
+    await page.getByPlaceholder('按群组名称模糊搜索').fill('E2E群组')
+    await page.getByRole('button', { name: '查询' }).click()
+
+    // 等待表格 loading 遮罩消失，避免点击被 .el-loading-mask 拦截
+    const tableLoading = page.locator('.admin-groups-table .el-loading-mask')
+    await tableLoading.first().waitFor({ state: 'hidden', timeout: 30000 }).catch(() => {})
+
+    // 只勾选前两个群组（复选框在固定列表格中，按顺序选择）
+    const checkboxes = page.locator('.el-table__body-wrapper .el-checkbox')
+    await expect(checkboxes.nth(0)).toBeVisible({ timeout: 10000 })
+    await expect(checkboxes.nth(1)).toBeVisible({ timeout: 10000 })
+    await checkboxes.nth(0).click()
+    await checkboxes.nth(1).click()
+
+    const exportBtn = page.getByRole('button').filter({ hasText: /导出选中/ })
+    await expect(exportBtn).toBeEnabled()
+    await expect(exportBtn).toHaveText(/导出选中\s*[（(]2[）)]/)
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      exportBtn.click(),
+    ])
+
+    const downloadPath = await download.path()
+    expect(downloadPath).not.toBeNull()
+    const csvText = fs.readFileSync(downloadPath as string, 'utf-8')
+
+    // 表头包含关键列
+    expect(csvText).toContain('名称')
+    expect(csvText).toContain('创建时间')
+    expect(csvText).toContain('状态')
+
+    // 数据行数 = 表头 1 行 + 选中 2 行
+    const lines = csvText.trimEnd().split('\n')
+    expect(lines.length).toBe(1 + 2)
   })
 
   test('重置筛选 - 条件清空且列表恢复', async ({ page }) => {

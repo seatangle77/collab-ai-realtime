@@ -5,6 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { AdminGroup } from '../../types/admin'
 import { listAdminGroups, deleteAdminGroup, deleteAdminGroupsBatch, updateAdminGroup, createAdminGroup } from '../../api/admin/groups'
 import { formatDateTimeToCST } from '../../utils/datetime'
+import { exportRowsToCsv } from '../../utils/csv'
 
 interface Filters {
   name: string
@@ -181,6 +182,36 @@ async function handleBatchDelete() {
   }
 }
 
+function handleExportSelectedCsv() {
+  if (selectedRows.value.length === 0) {
+    ElMessage.warning('请先选择要导出的群组')
+    return
+  }
+
+  const now = new Date()
+  const ts = now.toISOString().slice(0, 19).replace(/[:T]/g, '-')
+  const filename = `群组管理-选中导出-${ts}.csv`
+
+  exportRowsToCsv<AdminGroup>({
+    filename,
+    columns: [
+      { key: 'id', title: 'ID' },
+      { key: 'name', title: '名称' },
+      {
+        key: 'created_at',
+        title: '创建时间',
+        format: (row) => formatDateTimeToCST(row.created_at),
+      },
+      {
+        key: 'is_active',
+        title: '状态',
+        format: (row) => (row.is_active ? '启用' : '停用'),
+      },
+    ],
+    rows: selectedRows.value,
+  })
+}
+
 async function handleDelete(row: AdminGroup) {
   try {
     await ElMessageBox.confirm(`确认删除群组「${row.name}」吗？该操作不可恢复。`, '删除确认', {
@@ -259,6 +290,13 @@ onMounted(() => {
 
     <el-card class="admin-groups-table" shadow="never">
       <div class="admin-groups-toolbar">
+        <el-button
+          type="primary"
+          :disabled="selectedRows.length === 0"
+          @click="handleExportSelectedCsv"
+        >
+          {{ selectedRows.length > 0 ? `导出选中 (${selectedRows.length})` : '导出选中' }}
+        </el-button>
         <el-button
           type="danger"
           :disabled="selectedRows.length === 0"
