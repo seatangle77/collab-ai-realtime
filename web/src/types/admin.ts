@@ -21,6 +21,7 @@ export interface AdminUser {
   created_at: string
   group_ids?: string[]
   group_names?: string[]
+  password_needs_reset?: boolean
 }
 
 export interface AdminGroup {

@@ -88,7 +88,7 @@ test.describe.serial('Admin 用户管理页面', () => {
 
     await createDialog.getByLabel('姓名').fill(shared.initialName)
     await createDialog.getByLabel('邮箱').fill(shared.email)
-    await createDialog.getByLabel('密码').fill('E2eTestPass123')
+    await createDialog.getByLabel('密码').fill('1234')
     await createDialog.getByLabel('设备 Token').fill(shared.initialDeviceToken)
     await createDialog.getByRole('button', { name: '创建' }).click()
 
@@ -211,7 +211,8 @@ test.describe.serial('Admin 用户管理页面', () => {
 
     const row = page.getByRole('row').filter({ hasText: shared.email }).first()
     await expect(row).toBeVisible({ timeout: 30000 })
-  const createdAtCell = row.getByRole('cell').nth(7) // 创建时间列（多选+ID+姓名+邮箱+设备+小组ID+小组名称+创建时间）
+    // 列顺序: 多选(0), ID(1), 姓名(2), 邮箱(3), 设备Token(4), 小组ID(5), 小组名称(6), 密码状态(7), 创建时间(8), 操作(9)
+    const createdAtCell = row.getByRole('cell').nth(8)
     const text = (await createdAtCell.innerText()).trim()
 
     // 不再是原始 ISO 字符串，而是 yyyy-MM-dd HH:mm:ss 形式
@@ -255,7 +256,7 @@ test.describe('Admin 用户管理 - 边界与异常', () => {
     const dialog = page.getByRole('dialog', { name: '新建用户' })
 
     await dialog.getByLabel('邮箱').fill('e2e-validation@example.com')
-    await dialog.getByLabel('密码').fill('Pass123')
+    await dialog.getByLabel('密码').fill('1234')
     await dialog.getByRole('button', { name: '创建' }).click()
 
     await expect(dialog.getByText('请输入姓名')).toBeVisible()
@@ -269,7 +270,7 @@ test.describe('Admin 用户管理 - 边界与异常', () => {
 
     await dialog.getByLabel('姓名').fill('Test')
     await dialog.getByLabel('邮箱').fill('not-an-email')
-    await dialog.getByLabel('密码').fill('Pass123')
+    await dialog.getByLabel('密码').fill('1234')
     await dialog.getByRole('button', { name: '创建' }).click()
 
     await expect(dialog.getByText('邮箱格式不正确')).toBeVisible()
@@ -297,7 +298,7 @@ test.describe('Admin 用户管理 - 边界与异常', () => {
     let dialog = page.getByRole('dialog', { name: '新建用户' })
     await dialog.getByLabel('姓名').fill('First')
     await dialog.getByLabel('邮箱').fill(dupEmail)
-    await dialog.getByLabel('密码').fill('Pass123')
+    await dialog.getByLabel('密码').fill('1234')
     await dialog.getByRole('button', { name: '创建' }).click()
     await expect(page.getByText('创建用户成功')).toBeVisible()
 
@@ -305,10 +306,62 @@ test.describe('Admin 用户管理 - 边界与异常', () => {
     dialog = page.getByRole('dialog', { name: '新建用户' })
     await dialog.getByLabel('姓名').fill('Second')
     await dialog.getByLabel('邮箱').fill(dupEmail)
-    await dialog.getByLabel('密码').fill('Pass456')
+    await dialog.getByLabel('密码').fill('5678')
     await dialog.getByRole('button', { name: '创建' }).click()
 
     await expect(page.getByText('邮箱已被注册')).toBeVisible({ timeout: 8000 })
+  })
+
+  test('标记用户下次必须修改密码后密码状态为需修改', async ({ page }) => {
+    await loginAsAdmin(page)
+    const email = `e2e-mark-reset-${Date.now()}@example.com`
+
+    // 创建一个新用户
+    await page.getByRole('button', { name: '新建用户' }).click()
+    let dialog = page.getByRole('dialog', { name: '新建用户' })
+    await dialog.getByLabel('姓名').fill('MarkReset')
+    await dialog.getByLabel('邮箱').fill(email)
+    await dialog.getByLabel('密码').fill('1234')
+    await dialog.getByRole('button', { name: '创建' }).click()
+    await expect(page.getByText('创建用户成功')).toBeVisible()
+
+    // 筛选出该用户
+    await page.getByPlaceholder('按邮箱模糊搜索').fill(email)
+    await page.getByRole('button', { name: '查询' }).click()
+    let row = page.getByRole('row').filter({ hasText: email }).first()
+    await expect(row).toBeVisible({ timeout: 30000 })
+
+    // 点击“要求修改密码”
+    await row.getByRole('button', { name: '要求修改密码' }).click()
+    await page.getByRole('button', { name: '确定' }).click()
+    await expect(page.getByText('已标记该用户下次登录必须修改密码')).toBeVisible()
+
+    // 重新查询，检查密码状态列显示为“需修改”
+    await page.getByRole('button', { name: '重置' }).click()
+    await page.getByPlaceholder('按邮箱模糊搜索').fill(email)
+    await page.getByRole('button', { name: '查询' }).click()
+    row = page.getByRole('row').filter({ hasText: email }).first()
+    await expect(row).toBeVisible({ timeout: 30000 })
+    await expect(row.getByText('需修改')).toBeVisible()
+  })
+
+  test('创建用户 - 密码必须为 4 位', async ({ page }) => {
+    await loginAsAdmin(page)
+    await page.getByRole('button', { name: '新建用户' }).click()
+    const dialog = page.getByRole('dialog', { name: '新建用户' })
+
+    await dialog.getByLabel('姓名').fill('PwdLen')
+    await dialog.getByLabel('邮箱').fill(`e2e-pwdlen-${Date.now()}@example.com`)
+
+    // 3 位密码
+    await dialog.getByLabel('密码').fill('123')
+    await dialog.getByRole('button', { name: '创建' }).click()
+    await expect(dialog.getByText('密码必须为 4 位')).toBeVisible()
+
+    // 5 位密码
+    await dialog.getByLabel('密码').fill('12345')
+    await dialog.getByRole('button', { name: '创建' }).click()
+    await expect(dialog.getByText('密码必须为 4 位')).toBeVisible()
   })
 
   test('编辑用户 - 姓名为空时表单校验阻止保存', async ({ page }) => {
@@ -318,7 +371,7 @@ test.describe('Admin 用户管理 - 边界与异常', () => {
     const createDialog = page.getByRole('dialog', { name: '新建用户' })
     await createDialog.getByLabel('姓名').fill('Original')
     await createDialog.getByLabel('邮箱').fill(email)
-    await createDialog.getByLabel('密码').fill('Pass123')
+    await createDialog.getByLabel('密码').fill('1234')
     await createDialog.getByRole('button', { name: '创建' }).click()
     await expect(page.getByText('创建用户成功')).toBeVisible()
 
@@ -342,7 +395,7 @@ test.describe('Admin 用户管理 - 边界与异常', () => {
     const createDialog = page.getByRole('dialog', { name: '新建用户' })
     await createDialog.getByLabel('姓名').fill('Keep')
     await createDialog.getByLabel('邮箱').fill(email)
-    await createDialog.getByLabel('密码').fill('Pass123')
+    await createDialog.getByLabel('密码').fill('1234')
     await createDialog.getByRole('button', { name: '创建' }).click()
     await expect(page.getByText('创建用户成功')).toBeVisible()
 
@@ -375,7 +428,7 @@ test.describe('Admin 用户管理 - 边界与异常', () => {
       const dialog = page.getByRole('dialog', { name: '新建用户' })
       await dialog.getByLabel('姓名').fill(name)
       await dialog.getByLabel('邮箱').fill(email)
-      await dialog.getByLabel('密码').fill('Pass123')
+      await dialog.getByLabel('密码').fill('1234')
       await dialog.getByRole('button', { name: '创建' }).click()
     }
     await page.getByPlaceholder('按邮箱模糊搜索').fill(`e2e-batch-del`)
@@ -414,7 +467,7 @@ test.describe('Admin 用户管理 - 边界与异常', () => {
       const dialog = page.getByRole('dialog', { name: '新建用户' })
       await dialog.getByLabel('姓名').fill(name)
       await dialog.getByLabel('邮箱').fill(email)
-      await dialog.getByLabel('密码').fill('Pass123')
+      await dialog.getByLabel('密码').fill('1234')
       await dialog.getByRole('button', { name: '创建' }).click()
       await expect(
         page.locator('.el-message__content').filter({ hasText: '创建用户成功' }).first(),
@@ -497,7 +550,7 @@ test.describe('Admin 用户管理 - 查询条件与组合', () => {
     const dialog = page.getByRole('dialog', { name: '新建用户' })
     await dialog.getByLabel('姓名').fill(`张三-${unique}`)
     await dialog.getByLabel('邮箱').fill(email)
-    await dialog.getByLabel('密码').fill('Pass123')
+    await dialog.getByLabel('密码').fill('1234')
     await dialog.getByRole('button', { name: '创建' }).click()
     await expect(page.getByText('创建用户成功')).toBeVisible()
 
@@ -514,7 +567,7 @@ test.describe('Admin 用户管理 - 查询条件与组合', () => {
     const dialog = page.getByRole('dialog', { name: '新建用户' })
     await dialog.getByLabel('姓名').fill('DeviceUser')
     await dialog.getByLabel('邮箱').fill(email)
-    await dialog.getByLabel('密码').fill('Pass123')
+    await dialog.getByLabel('密码').fill('1234')
     await dialog.getByLabel('设备 Token').fill(`token-${unique}-suffix`)
     await dialog.getByRole('button', { name: '创建' }).click()
     await expect(page.getByText('创建用户成功')).toBeVisible()
@@ -537,7 +590,7 @@ test.describe('Admin 用户管理 - 查询条件与组合', () => {
     const dialog = page.getByRole('dialog', { name: '新建用户' })
     await dialog.getByLabel('姓名').fill(namePart)
     await dialog.getByLabel('邮箱').fill(email)
-    await dialog.getByLabel('密码').fill('Pass123')
+    await dialog.getByLabel('密码').fill('1234')
     await dialog.getByRole('button', { name: '创建' }).click()
     await expect(page.getByText('创建用户成功')).toBeVisible()
 
@@ -553,7 +606,7 @@ test.describe('Admin 用户管理 - 查询条件与组合', () => {
     const dialog = page.getByRole('dialog', { name: '新建用户' })
     await dialog.getByLabel('姓名').fill('RealName')
     await dialog.getByLabel('邮箱').fill(email)
-    await dialog.getByLabel('密码').fill('Pass123')
+    await dialog.getByLabel('密码').fill('1234')
     await dialog.getByRole('button', { name: '创建' }).click()
     await expect(page.getByText('创建用户成功')).toBeVisible()
 
@@ -570,7 +623,7 @@ test.describe('Admin 用户管理 - 查询条件与组合', () => {
     const dialog = page.getByRole('dialog', { name: '新建用户' })
     await dialog.getByLabel('姓名').fill('TCombo')
     await dialog.getByLabel('邮箱').fill(email)
-    await dialog.getByLabel('密码').fill('Pass123')
+    await dialog.getByLabel('密码').fill('1234')
     await dialog.getByLabel('设备 Token').fill(`dev-${tokenPart}`)
     await dialog.getByRole('button', { name: '创建' }).click()
     await expect(page.getByText('创建用户成功')).toBeVisible()
@@ -587,7 +640,7 @@ test.describe('Admin 用户管理 - 查询条件与组合', () => {
     const dialog = page.getByRole('dialog', { name: '新建用户' })
     await dialog.getByLabel('姓名').fill('TNoMatch')
     await dialog.getByLabel('邮箱').fill(email)
-    await dialog.getByLabel('密码').fill('Pass123')
+    await dialog.getByLabel('密码').fill('1234')
     await dialog.getByRole('button', { name: '创建' }).click()
     await expect(page.getByText('创建用户成功')).toBeVisible()
 
@@ -610,7 +663,7 @@ test.describe('Admin 用户管理 - 查询条件与组合', () => {
     const dialog = page.getByRole('dialog', { name: '新建用户' })
     await dialog.getByLabel('姓名').fill('Fuzzy')
     await dialog.getByLabel('邮箱').fill(email)
-    await dialog.getByLabel('密码').fill('Pass123')
+    await dialog.getByLabel('密码').fill('1234')
     await dialog.getByRole('button', { name: '创建' }).click()
     await expect(page.getByText('创建用户成功')).toBeVisible()
 
@@ -626,7 +679,7 @@ test.describe('Admin 用户管理 - 查询条件与组合', () => {
     const dialog = page.getByRole('dialog', { name: '新建用户' })
     await dialog.getByLabel('姓名').fill('TimeHit')
     await dialog.getByLabel('邮箱').fill(email)
-    await dialog.getByLabel('密码').fill('Pass123')
+    await dialog.getByLabel('密码').fill('1234')
     await dialog.getByRole('button', { name: '创建' }).click()
     await expect(page.getByText('创建用户成功')).toBeVisible()
     const createdAt = new Date()
@@ -650,7 +703,7 @@ test.describe('Admin 用户管理 - 查询条件与组合', () => {
     const dialog = page.getByRole('dialog', { name: '新建用户' })
     await dialog.getByLabel('姓名').fill('TimeAfter')
     await dialog.getByLabel('邮箱').fill(email)
-    await dialog.getByLabel('密码').fill('Pass123')
+    await dialog.getByLabel('密码').fill('1234')
     await dialog.getByRole('button', { name: '创建' }).click()
     await expect(page.getByText('创建用户成功')).toBeVisible()
     const createdAt = new Date()
@@ -673,7 +726,7 @@ test.describe('Admin 用户管理 - 查询条件与组合', () => {
     const dialog = page.getByRole('dialog', { name: '新建用户' })
     await dialog.getByLabel('姓名').fill('TimeBefore')
     await dialog.getByLabel('邮箱').fill(email)
-    await dialog.getByLabel('密码').fill('Pass123')
+    await dialog.getByLabel('密码').fill('1234')
     await dialog.getByRole('button', { name: '创建' }).click()
     await expect(page.getByText('创建用户成功')).toBeVisible()
     const createdAt = new Date()
@@ -696,7 +749,7 @@ test.describe('Admin 用户管理 - 查询条件与组合', () => {
     const dialog = page.getByRole('dialog', { name: '新建用户' })
     await dialog.getByLabel('姓名').fill('TimeCombo')
     await dialog.getByLabel('邮箱').fill(email)
-    await dialog.getByLabel('密码').fill('Pass123')
+    await dialog.getByLabel('密码').fill('1234')
     await dialog.getByRole('button', { name: '创建' }).click()
     await expect(page.getByText('创建用户成功')).toBeVisible()
 
@@ -720,7 +773,7 @@ test.describe('Admin 用户管理 - 查询条件与组合', () => {
     const dialog = page.getByRole('dialog', { name: '新建用户' })
     await dialog.getByLabel('姓名').fill('TimeEmailNoMatch')
     await dialog.getByLabel('邮箱').fill(email)
-    await dialog.getByLabel('密码').fill('Pass123')
+    await dialog.getByLabel('密码').fill('1234')
     await dialog.getByRole('button', { name: '创建' }).click()
     await expect(page.getByText('创建用户成功')).toBeVisible()
     const createdAt = new Date()
@@ -743,7 +796,7 @@ test.describe('Admin 用户管理 - 查询条件与组合', () => {
     const dialog = page.getByRole('dialog', { name: '新建用户' })
     await dialog.getByLabel('姓名').fill('TimeEmpty')
     await dialog.getByLabel('邮箱').fill(email)
-    await dialog.getByLabel('密码').fill('Pass123')
+    await dialog.getByLabel('密码').fill('1234')
     await dialog.getByRole('button', { name: '创建' }).click()
     await expect(page.getByText('创建用户成功')).toBeVisible()
 

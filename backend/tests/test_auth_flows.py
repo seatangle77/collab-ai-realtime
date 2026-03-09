@@ -113,13 +113,60 @@ def scenario_me_with_invalid_token() -> bool:
     return _log(ok, "非法 token 调 /me 场景", {"status_code": resp.status_code, "body": resp.json()})
 
 
+def scenario_change_password_flow(ctx: Dict[str, Any]) -> bool:
+    # 使用当前密码登录，确认可以成功
+    resp_login = requests.post(
+        f"{BASE_URL}/api/auth/login",
+        json={"email": ctx["email"], "password": ctx["password"]},
+    )
+    if resp_login.status_code != 200:
+        return _log(False, "改密码前登录失败（期望 200）", resp_login.json())
+
+    data_login = resp_login.json()
+    token = data_login.get("access_token")
+    if not token:
+        return _log(False, "改密码前登录未返回 access_token", data_login)
+
+    # 调用 change-password，将密码从 ctx['password'] 改为 '5678'
+    new_password = "5678"
+    resp_change = requests.post(
+        f"{BASE_URL}/api/auth/change-password",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "old_password": ctx["password"],
+            "new_password": new_password,
+        },
+    )
+    if resp_change.status_code != 200:
+        return _log(False, "调用 /api/auth/change-password 失败（期望 200）", resp_change.json())
+
+    # 用旧密码登录应失败
+    resp_old = requests.post(
+        f"{BASE_URL}/api/auth/login",
+        json={"email": ctx["email"], "password": ctx["password"]},
+    )
+    if resp_old.status_code != 401:
+        return _log(False, "使用旧密码登录应返回 401", {"status_code": resp_old.status_code, "body": resp_old.json()})
+
+    # 用新密码登录应成功
+    resp_new = requests.post(
+        f"{BASE_URL}/api/auth/login",
+        json={"email": ctx["email"], "password": new_password},
+    )
+    if resp_new.status_code != 200:
+        return _log(False, "使用新密码登录失败（期望 200）", resp_new.json())
+
+    ctx["password"] = new_password
+    return _log(True, "修改密码完整流程场景", {"old_password": "****", "new_password": new_password})
+
+
 def run_all() -> bool:
     print("=== 开始 Auth 注册/登录流程测试 ===")
 
     ctx: Dict[str, Any] = {
         "name": "测试用户",
         "email": f"test_{uuid.uuid4().hex[:8]}@example.com",
-        "password": "test_password_123",
+        "password": "1234",
         "device_token": "test_device_token",
     }
 
@@ -129,6 +176,7 @@ def run_all() -> bool:
     ok &= scenario_login_success(ctx)
     ok &= scenario_login_wrong_password(ctx)
     ok &= scenario_login_nonexistent_email()
+    ok &= scenario_change_password_flow(ctx)
     ok &= scenario_me_with_valid_token(ctx)
     ok &= scenario_me_without_token()
     ok &= scenario_me_with_invalid_token()

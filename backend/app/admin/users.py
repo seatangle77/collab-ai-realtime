@@ -34,6 +34,7 @@ class AdminUserOut(BaseModel):
     created_at: datetime
     group_ids: list[str] = []
     group_names: list[str] = []
+    password_needs_reset: bool = False
 
 
 class AdminUserUpdate(BaseModel):
@@ -118,7 +119,7 @@ async def list_users(
     # 第一步：只从 users_info 拉取当前页基础信息，保持与旧版接口的性能特征接近
     base_query = text(
         f"""
-        SELECT id, name, email, device_token, created_at
+        SELECT id, name, email, device_token, created_at, password_needs_reset
         FROM users_info
         WHERE {where_sql}
         ORDER BY created_at DESC
@@ -184,6 +185,7 @@ async def list_users(
             "created_at": row["created_at"],
             "group_ids": extra["group_ids"],
             "group_names": extra["group_names"],
+            "password_needs_reset": row.get("password_needs_reset", False),
         }
         items.append(AdminUserOut.model_validate(payload))
 
@@ -205,7 +207,7 @@ async def get_user_detail(
     result = await db.execute(
         text(
             """
-            SELECT id, name, email, device_token, created_at
+            SELECT id, name, email, device_token, created_at, password_needs_reset
             FROM users_info
             WHERE id = :id
             """
@@ -255,7 +257,7 @@ async def update_user(
             UPDATE users_info
             SET {set_sql}
             WHERE id = :id
-            RETURNING id, name, email, device_token, created_at
+            RETURNING id, name, email, device_token, created_at, password_needs_reset
             """
         ),
         params,
@@ -311,4 +313,61 @@ async def batch_delete_users(
         deleted += result.rowcount
     await db.commit()
     return BatchDeleteResponse(deleted=deleted)
+
+
+@router.post(
+    "/{user_id}/mark-password-reset",
+    response_model=AdminUserOut,
+    dependencies=[Depends(require_admin)],
+)
+async def mark_password_reset(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> AdminUserOut:
+    result = await db.execute(
+        text(
+            """
+            UPDATE users_info
+            SET password_needs_reset = TRUE
+            WHERE id = :id
+            RETURNING id, name, email, device_token, created_at, password_needs_reset
+            """
+        ),
+        {"id": user_id},
+    )
+    row = result.mappings().first()
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="用户不存在",
+        )
+    await db.commit()
+    return AdminUserOut.model_validate(dict(row))
+
+
+@router.post(
+    "/{user_id}/impersonate",
+    dependencies=[Depends(require_admin)],
+)
+async def impersonate_user(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    # 确认用户存在
+    result = await db.execute(
+        text("SELECT id FROM users_info WHERE id = :id"),
+        {"id": user_id},
+    )
+    row = result.mappings().first()
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="用户不存在",
+        )
+
+    # 生成 impersonate token，sub 为用户 ID，额外带上 impersonated_by 字段
+    from ..auth import _create_access_token  # 局部导入避免循环依赖
+
+    access_token = _create_access_token({"sub": user_id, "impersonated_by": "admin"})
+    return {"access_token": access_token, "token_type": "bearer"}
 

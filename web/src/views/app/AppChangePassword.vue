@@ -1,99 +1,108 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { appLogin } from '../../api/appAuth'
+import { useRouter } from 'vue-router'
+import { changeAppPassword } from '../../api/appAuth'
 
 const router = useRouter()
-const route = useRoute()
 
-const email = ref('')
-const password = ref('')
+const oldPassword = ref('')
+const newPassword = ref('')
+const confirmPassword = ref('')
 const loading = ref(false)
 const error = ref('')
+const success = ref('')
 
 async function handleSubmit() {
   error.value = ''
-  if (!email.value.trim() || !password.value) {
-    error.value = '请输入邮箱和密码'
+  success.value = ''
+
+  if (!oldPassword.value) {
+    error.value = '请输入旧密码'
+    return
+  }
+  if (!newPassword.value || newPassword.value.length !== 4) {
+    error.value = '新密码必须为 4 位'
+    return
+  }
+  if (newPassword.value !== confirmPassword.value) {
+    error.value = '两次输入的新密码不一致'
     return
   }
 
   loading.value = true
   try {
-    const res = await appLogin({
-      email: email.value.trim(),
-      password: password.value,
+    const res = await changeAppPassword({
+      old_password: oldPassword.value,
+      new_password: newPassword.value,
     })
+
     if (typeof window !== 'undefined') {
-      window.localStorage.setItem('app_access_token', res.access_token)
-      window.localStorage.setItem('app_user', JSON.stringify(res.user))
+      window.localStorage.setItem('app_user', JSON.stringify(res))
     }
 
-    const needsReset = !!res.user.password_needs_reset
-    if (needsReset) {
-      await router.push('/app/change-password')
-      return
-    }
-
-    const redirect = (route.query.redirect as string | undefined) || '/app'
-    await router.push(redirect)
+    success.value = '密码修改成功'
+    setTimeout(() => {
+      router.push('/app')
+    }, 600)
   } catch (e: any) {
-    error.value = e?.message || '登录失败，请稍后重试'
+    error.value = e?.message || '修改密码失败，请稍后重试'
   } finally {
     loading.value = false
   }
-}
-
-function goRegister() {
-  const redirect = (route.query.redirect as string | undefined) || '/app'
-  router.push({ path: '/app/register', query: { redirect } })
 }
 </script>
 
 <template>
   <div class="auth-page">
     <div class="auth-card">
-      <h1 class="auth-title">用户登录</h1>
-      <p class="auth-subtitle">使用注册邮箱登录 Collab AI</p>
+      <h1 class="auth-title">修改密码</h1>
+      <p class="auth-subtitle">出于安全原因，请更新您的登录密码</p>
 
       <form class="auth-form" @submit.prevent="handleSubmit">
         <label class="auth-label">
-          邮箱
+          旧密码
           <input
-            v-model="email"
+            v-model="oldPassword"
             class="auth-input"
-            type="email"
-            placeholder="you@example.com"
-            autocomplete="email"
+            type="password"
+            placeholder="当前 4 位密码"
+            autocomplete="current-password"
           />
         </label>
 
         <label class="auth-label">
-          密码
+          新密码
           <input
-            v-model="password"
+            v-model="newPassword"
             class="auth-input"
             type="password"
-            placeholder="4 位密码"
-            autocomplete="current-password"
+            placeholder="新的 4 位密码"
+            autocomplete="new-password"
+          />
+        </label>
+
+        <label class="auth-label">
+          确认新密码
+          <input
+            v-model="confirmPassword"
+            class="auth-input"
+            type="password"
+            placeholder="再次输入新的 4 位密码"
+            autocomplete="new-password"
           />
         </label>
 
         <p v-if="error" class="auth-error">
           {{ error }}
         </p>
+        <p v-if="success" class="auth-success">
+          {{ success }}
+        </p>
 
         <button class="auth-button" type="submit" :disabled="loading">
-          {{ loading ? '登录中...' : '登录' }}
+          {{ loading ? '提交中...' : '保存新密码' }}
         </button>
       </form>
-
-      <p class="auth-footer">
-        还没有账号？
-        <button type="button" class="auth-link" @click="goRegister">
-          立即注册
-        </button>
-      </p>
     </div>
   </div>
 </template>
@@ -104,18 +113,18 @@ function goRegister() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: radial-gradient(circle at top, #4f46e5 0, #020617 45%, #020617 100%);
+  background: radial-gradient(circle at top, #0f766e 0, #020617 45%, #020617 100%);
   color: #e5e7eb;
 }
 
 .auth-card {
   width: 100%;
-  max-width: 420px;
+  max-width: 430px;
   padding: 28px 26px 30px;
   border-radius: 18px;
-  background: rgba(15, 23, 42, 0.92);
-  box-shadow: 0 22px 45px rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(16px);
+  background: rgba(15, 23, 42, 0.94);
+  box-shadow: 0 22px 45px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(18px);
 }
 
 .auth-title {
@@ -155,8 +164,8 @@ function goRegister() {
 }
 
 .auth-input:focus {
-  border-color: #4f46e5;
-  box-shadow: 0 0 0 1px rgba(79, 70, 229, 0.5);
+  border-color: #14b8a6;
+  box-shadow: 0 0 0 1px rgba(20, 184, 166, 0.5);
   background: rgba(15, 23, 42, 0.98);
 }
 
@@ -164,6 +173,12 @@ function goRegister() {
   margin: 0;
   font-size: 13px;
   color: #fca5a5;
+}
+
+.auth-success {
+  margin: 0;
+  font-size: 13px;
+  color: #bbf7d0;
 }
 
 .auth-button {
@@ -174,8 +189,8 @@ function goRegister() {
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
-  background: linear-gradient(to right, #4f46e5, #6366f1);
-  color: #e5e7eb;
+  background: linear-gradient(to right, #14b8a6, #2dd4bf);
+  color: #022c22;
   transition: transform 0.1s ease, box-shadow 0.1s ease, opacity 0.1s ease;
 }
 
@@ -187,22 +202,6 @@ function goRegister() {
 .auth-button:disabled {
   opacity: 0.6;
   cursor: default;
-}
-
-.auth-footer {
-  margin-top: 16px;
-  font-size: 13px;
-  color: #9ca3af;
-}
-
-.auth-link {
-  border: none;
-  background: none;
-  color: #e5e7eb;
-  cursor: pointer;
-  text-decoration: underline;
-  padding: 0 2px;
-  font-size: 13px;
 }
 </style>
 

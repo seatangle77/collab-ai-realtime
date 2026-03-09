@@ -45,12 +45,18 @@ class UserOut(BaseModel):
     email: str
     device_token: str | None = None
     created_at: datetime
+    password_needs_reset: bool = False
 
 
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserOut
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
 
 
 def _hash_password(plain_password: str) -> str:
@@ -93,7 +99,7 @@ async def get_current_user(
     result = await db.execute(
         text(
             """
-            SELECT id, name, email, device_token, created_at
+            SELECT id, name, email, device_token, created_at, password_needs_reset
             FROM users_info
             WHERE id = :user_id
             """
@@ -108,6 +114,12 @@ async def get_current_user(
 
 @router.post("/register", response_model=UserOut)
 async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db)) -> UserOut:
+    # 简单密码策略：必须为 4 位
+    if len(payload.password) != 4:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="密码必须为 4 位",
+        )
     # 检查 email 是否已存在
     existing = await db.execute(
         text("SELECT id FROM users_info WHERE email = :email"),
@@ -122,13 +134,13 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
     # 使用 UTC 时间写入 created_at，与 admin list_users 的 created_from/created_to 比较语义一致
     now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
 
-    # 插入新用户
+    # 插入新用户（password_needs_reset 默认为 FALSE）
     result = await db.execute(
         text(
             """
             INSERT INTO users_info (id, name, email, device_token, password_hash, created_at)
             VALUES (:id, :name, :email, :device_token, :password_hash, :created_at)
-            RETURNING id, name, email, device_token, created_at
+            RETURNING id, name, email, device_token, created_at, password_needs_reset
             """
         ),
         {
@@ -150,7 +162,7 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)) -> To
     result = await db.execute(
         text(
             """
-            SELECT id, name, email, device_token, created_at, password_hash
+            SELECT id, name, email, device_token, created_at, password_hash, password_needs_reset
             FROM users_info
             WHERE email = :email
             """
@@ -170,6 +182,7 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)) -> To
         "email": row["email"],
         "device_token": row["device_token"],
         "created_at": row["created_at"],
+        "password_needs_reset": row.get("password_needs_reset", False),
     }
     access_token = _create_access_token({"sub": row["id"]})
     return TokenResponse(access_token=access_token, user=UserOut.model_validate(user_data))
@@ -178,4 +191,73 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)) -> To
 @router.get("/me", response_model=UserOut)
 async def me(current_user: Mapping[str, Any] = Depends(get_current_user)) -> UserOut:
     return UserOut.model_validate(dict(current_user))
+
+
+@router.post("/change-password", response_model=UserOut)
+async def change_password(
+    payload: ChangePasswordRequest,
+    current_user: Mapping[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> UserOut:
+    user_id = current_user["id"]
+
+    # 查询当前密码哈希
+    result = await db.execute(
+        text(
+            """
+            SELECT password_hash
+            FROM users_info
+            WHERE id = :id
+            """
+        ),
+        {"id": user_id},
+    )
+    row = result.mappings().first()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+
+    # 校验旧密码
+    if not _verify_password(payload.old_password, row["password_hash"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="旧密码不正确",
+        )
+
+    # 校验新密码长度为 4 位
+    if len(payload.new_password) != 4:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="密码必须为 4 位",
+        )
+
+    # 更新密码哈希并清除重置标记
+    await db.execute(
+        text(
+            """
+            UPDATE users_info
+            SET password_hash = :password_hash,
+                password_needs_reset = FALSE
+            WHERE id = :id
+            """
+        ),
+        {
+            "id": user_id,
+            "password_hash": _hash_password(payload.new_password),
+        },
+    )
+    await db.commit()
+
+    # 返回最新用户信息
+    result2 = await db.execute(
+        text(
+            """
+            SELECT id, name, email, device_token, created_at, password_needs_reset
+            FROM users_info
+            WHERE id = :id
+            """
+        ),
+        {"id": user_id},
+    )
+    row2 = result2.mappings().one()
+    return UserOut.model_validate(dict(row2))
 

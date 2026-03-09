@@ -21,6 +21,11 @@ const routes: RouteRecordRaw[] = [
     name: 'AppRegister',
     component: () => import('../views/app/AppRegister.vue'),
   },
+  {
+    path: '/app/change-password',
+    name: 'AppChangePassword',
+    component: () => import('../views/app/AppChangePassword.vue'),
+  },
   // 用户端 APP 路由
   {
     path: '/app',
@@ -94,15 +99,41 @@ router.beforeEach((to, _from, next) => {
   }
 
   const token = window.localStorage.getItem('app_access_token')
+  const userRaw = window.localStorage.getItem('app_user')
+  let needsReset = false
+  if (userRaw) {
+    try {
+      const parsed = JSON.parse(userRaw)
+      needsReset = !!parsed?.password_needs_reset
+    } catch {
+      needsReset = false
+    }
+  }
 
-  // 已登录用户访问登录/注册页，直接重定向到 App 首页
+  // 已登录用户访问登录/注册页
   if (token && publicAppPaths.includes(to.path)) {
-    next('/app')
+    if (needsReset) {
+      next('/app/change-password')
+    } else {
+      next('/app')
+    }
     return
   }
 
+  // 已登录且需要修改密码时，强制跳转到改密码页（仅允许访问该页）
+  if (token && needsReset) {
+    if (to.path === '/app/change-password' || to.path.startsWith('/admin')) {
+      next()
+      return
+    }
+    if (to.path.startsWith('/app')) {
+      next('/app/change-password')
+      return
+    }
+  }
+
   // 未登录访问受保护的 /app 路由时，跳转到登录页
-  if (to.path.startsWith('/app') && !publicAppPaths.includes(to.path)) {
+  if (to.path.startsWith('/app') && !publicAppPaths.includes(to.path) && to.path !== '/app/change-password') {
     if (!token) {
       next({
         path: '/app/login',

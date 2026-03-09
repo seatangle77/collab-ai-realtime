@@ -4,7 +4,7 @@ const API_BASE = process.env.API_BASE_URL || 'http://localhost:8000'
 
 async function registerUserForE2E() {
   const email = `app-e2e-${Date.now()}@example.com`
-  const password = 'Pass123'
+  const password = '1234'
   const name = 'App E2E User'
 
   const res = await fetch(`${API_BASE}/api/auth/register`, {
@@ -27,11 +27,11 @@ test.describe('App 用户注册与登录', () => {
 
     const name = `用户${Date.now()}`
     const email = `app-e2e-${Date.now()}@example.com`
-    const password = 'Pass123'
+    const password = '1234'
 
     await page.getByLabel('昵称').fill(name)
     await page.getByLabel('邮箱').fill(email)
-    await page.getByPlaceholder('至少 6 位密码').fill(password)
+    await page.getByPlaceholder('4 位密码').fill(password)
     await page.getByPlaceholder('再次输入密码').fill(password)
 
     await page.getByRole('button', { name: '注册' }).click()
@@ -111,14 +111,14 @@ test.describe('App 用户注册与登录', () => {
 
     // 密码过短
     await page.getByLabel('邮箱').fill('validate@example.com')
-    await page.getByPlaceholder('至少 6 位密码').fill('123')
+    await page.getByPlaceholder('4 位密码').fill('123')
     await page.getByPlaceholder('再次输入密码').fill('123')
     await page.getByRole('button', { name: '注册' }).click()
-    await expect(page.getByText('请输入至少 6 位密码')).toBeVisible()
+    await expect(page.getByText('请输入 4 位密码')).toBeVisible()
 
     // 确认密码不一致
-    await page.getByPlaceholder('至少 6 位密码').fill('Pass123')
-    await page.getByPlaceholder('再次输入密码').fill('Pass1234')
+    await page.getByPlaceholder('4 位密码').fill('1234')
+    await page.getByPlaceholder('再次输入密码').fill('5678')
     await page.getByRole('button', { name: '注册' }).click()
     await expect(page.getByText('两次输入的密码不一致')).toBeVisible()
   })
@@ -129,7 +129,7 @@ test.describe('App 用户注册与登录', () => {
     await page.goto('/app/register')
     await page.getByLabel('昵称').fill('重复用户')
     await page.getByLabel('邮箱').fill(email)
-    await page.getByPlaceholder('至少 6 位密码').fill(password)
+    await page.getByPlaceholder('4 位密码').fill(password)
     await page.getByPlaceholder('再次输入密码').fill(password)
     await page.getByRole('button', { name: '注册' }).click()
 
@@ -142,7 +142,7 @@ test.describe('App 用户注册与登录', () => {
 
     await page.goto('/app/login')
     await page.getByLabel('邮箱').fill(email)
-    await page.getByLabel('密码').fill('SomePass123')
+    await page.getByLabel('密码').fill('9999')
     await page.getByRole('button', { name: '登录' }).click()
 
     // 未注册邮箱不应登录成功，仍在登录页

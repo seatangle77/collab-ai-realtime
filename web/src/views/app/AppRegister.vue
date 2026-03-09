@@ -26,8 +26,8 @@ async function handleSubmit() {
     error.value = '请输入邮箱'
     return
   }
-  if (!password.value || password.value.length < 6) {
-    error.value = '请输入至少 6 位密码'
+  if (!password.value || password.value.length !== 4) {
+    error.value = '请输入 4 位密码'
     return
   }
   if (password.value !== confirmPassword.value) {
@@ -95,7 +95,7 @@ function goLogin() {
             v-model="password"
             class="auth-input"
             type="password"
-            placeholder="至少 6 位密码"
+            placeholder="4 位密码"
             autocomplete="new-password"
           />
         </label>

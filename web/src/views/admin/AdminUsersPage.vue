@@ -66,7 +66,19 @@ const createRules: FormRules<typeof createForm> = {
     { required: true, message: '请输入邮箱', trigger: 'blur' },
     { type: 'email', message: '邮箱格式不正确', trigger: ['blur', 'change'] },
   ],
-  password: [{ required: true, message: '请输入初始密码', trigger: 'blur' }],
+  password: [
+    { required: true, message: '请输入初始密码', trigger: 'blur' },
+    {
+      validator: (_rule, value, callback) => {
+        if (!value || value.length !== 4) {
+          callback(new Error('密码必须为 4 位'))
+        } else {
+          callback()
+        }
+      },
+      trigger: 'blur',
+    },
+  ],
 }
 
 const editRules: FormRules<typeof editForm> = {
@@ -321,6 +333,42 @@ async function handleDelete(row: AdminUser) {
   }
 }
 
+async function handleImpersonate(row: AdminUser) {
+  try {
+    const { impersonateUser } = await import('../../api/admin/users')
+    const res = await impersonateUser(row.id)
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('app_access_token', res.access_token)
+      window.open('/app', '_blank')
+    }
+  } catch (e: any) {
+    console.error(e)
+    ElMessage.error(e?.message || '以该用户身份打开 App 失败')
+  }
+}
+
+async function handleMarkPasswordReset(row: AdminUser) {
+  try {
+    await ElMessageBox.confirm(
+      `确认要求用户「${row.name || row.email}」下次登录时修改密码吗？`,
+      '标记修改密码',
+      { type: 'warning', confirmButtonText: '确定', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+
+  try {
+    const { markUserPasswordReset } = await import('../../api/admin/users')
+    await markUserPasswordReset(row.id)
+    ElMessage.success('已标记该用户下次登录必须修改密码')
+    fetchUsers()
+  } catch (e: any) {
+    console.error(e)
+    ElMessage.error(e?.message || '标记用户下次必须修改密码失败')
+  }
+}
+
 onMounted(() => {
   fetchUsers()
 })
@@ -440,15 +488,37 @@ onMounted(() => {
             <span v-else>-</span>
           </template>
         </el-table-column>
+        <el-table-column label="密码状态" min-width="120">
+          <template #default="{ row }">
+            <el-tag
+              v-if="row.password_needs_reset"
+              type="warning"
+              effect="light"
+              size="small"
+            >
+              需修改
+            </el-tag>
+            <el-tag
+              v-else
+              type="success"
+              effect="light"
+              size="small"
+            >
+              正常
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="创建时间" min-width="180" show-overflow-tooltip>
           <template #default="{ row }">
             {{ formatDateTimeToCST(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" min-width="160" fixed="right">
+        <el-table-column label="操作" min-width="260" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="openEditDialog(row)">编辑</el-button>
             <el-button type="danger" link size="small" @click="handleDelete(row)">删除</el-button>
+            <el-button type="primary" link size="small" @click="handleImpersonate(row)">以此身份打开 App</el-button>
+            <el-button type="warning" link size="small" @click="handleMarkPasswordReset(row)">要求修改密码</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -476,7 +546,7 @@ onMounted(() => {
           <el-input v-model="createForm.email" />
         </el-form-item>
         <el-form-item label="密码" prop="password">
-          <el-input v-model="createForm.password" type="password" show-password />
+          <el-input v-model="createForm.password" type="password" show-password placeholder="4 位密码" />
         </el-form-item>
         <el-form-item label="设备 Token">
           <el-input v-model="createForm.device_token" />

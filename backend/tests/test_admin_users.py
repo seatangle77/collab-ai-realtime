@@ -24,7 +24,7 @@ def _log(ok: bool, message: str, extra: Any | None = None) -> bool:
 def register_dummy_user(label: str) -> Dict[str, Any]:
     """通过业务接口注册一个普通用户，返回完整用户 JSON。"""
     email = f"admin_test_{label}_{uuid.uuid4().hex[:6]}@example.com"
-    password = "test_password_123"
+    password = "1234"
 
     r = requests.post(
         f"{BASE_URL}/api/auth/register",
@@ -526,6 +526,75 @@ def scenario_admin_batch_delete_users_too_many() -> bool:
     return _log(ok, "admin 批量删除用户 ids 超过 100 返回 422 场景", {"status_code": r.status_code, "body": r.text})
 
 
+def scenario_admin_impersonate_user(ctx: Dict[str, Any]) -> bool:
+    """管理员以某个用户身份登录，并用 token 调 /api/auth/me 验证。"""
+    target_user = ctx["users"][0]
+
+    r = requests.post(
+        f"{BASE_URL}/api/admin/users/{target_user['id']}/impersonate",
+        headers=ADMIN_HEADERS,
+    )
+    if r.status_code != 200:
+        return _log(
+            False,
+            "admin impersonate 用户失败（期望 200）",
+            {"status_code": r.status_code, "body": r.text},
+        )
+
+    data = r.json()
+    token = data.get("access_token")
+    if not token:
+        return _log(False, "impersonate 接口未返回 access_token", data)
+
+    r_me = requests.get(
+        f"{BASE_URL}/api/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    if r_me.status_code != 200:
+        return _log(
+            False,
+            "impersonate token 调 /me 失败（期望 200）",
+            {"status_code": r_me.status_code, "body": r_me.text},
+        )
+
+    me = r_me.json()
+    ok = me.get("id") == target_user["id"] and me.get("email") == target_user["email"]
+    return _log(ok, "admin impersonate 用户成功场景", {"impersonate": data, "me": me})
+
+
+def scenario_admin_mark_password_reset_and_verify(ctx: Dict[str, Any]) -> bool:
+    """管理员标记某用户下次必须修改密码，并在后台详情中看到该标记。"""
+    target_user = ctx["users"][1]
+
+    r = requests.post(
+        f"{BASE_URL}/api/admin/users/{target_user['id']}/mark-password-reset",
+        headers=ADMIN_HEADERS,
+    )
+    if r.status_code != 200:
+        return _log(
+            False,
+            "admin 标记用户下次必须改密码失败（期望 200）",
+            {"status_code": r.status_code, "body": r.text},
+        )
+    data = r.json()
+    ok = data.get("password_needs_reset") is True
+
+    r_detail = requests.get(
+        f"{BASE_URL}/api/admin/users/{target_user['id']}",
+        headers=ADMIN_HEADERS,
+    )
+    if r_detail.status_code != 200:
+        return _log(
+            False,
+            "admin 标记后获取用户详情失败（期望 200）",
+            {"status_code": r_detail.status_code, "body": r_detail.text},
+        )
+    detail = r_detail.json()
+    ok &= detail.get("password_needs_reset") is True
+
+    return _log(ok, "admin 标记用户下次必须改密码场景", {"mark": data, "detail": detail})
+
+
 # ---------- 场景：管理员 token 缺失 / 错误 ----------
 
 
@@ -569,6 +638,8 @@ def run_all() -> bool:
     ok &= scenario_admin_batch_delete_users_partial()
     ok &= scenario_admin_batch_delete_users_too_many()
     ok &= scenario_admin_missing_or_wrong_token()
+    ok &= scenario_admin_impersonate_user(ctx)
+    ok &= scenario_admin_mark_password_reset_and_verify(ctx)
 
     print("\n=== Admin Users 测试结果: {} ===".format("全部通过 ✅" if ok else "有失败 ❌"))
     return ok

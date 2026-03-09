@@ -49,4 +49,16 @@ export async function updateAdminUser(id: string, payload: UpdateAdminUserPayloa
   return http.patch<AdminUser>(`/api/admin/users/${id}`, payload)
 }
 
+export interface ImpersonateResponse {
+  access_token: string
+  token_type: string
+}
+
+export async function impersonateUser(id: string): Promise<ImpersonateResponse> {
+  return http.post<ImpersonateResponse>(`/api/admin/users/${id}/impersonate`)
+}
+
+export async function markUserPasswordReset(id: string): Promise<AdminUser> {
+  return http.post<AdminUser>(`/api/admin/users/${id}/mark-password-reset`)
+}
 
