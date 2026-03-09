@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Mapping
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +28,14 @@ class GroupSummary(BaseModel):
     is_active: bool
     member_count: int
     my_role: str
+
+
+class GroupDiscoverItem(BaseModel):
+    id: str
+    name: str
+    created_at: datetime
+    is_active: bool
+    member_count: int
 
 
 class GroupMember(BaseModel):
@@ -171,6 +179,60 @@ async def list_my_groups(
         )
         for row in rows
     ]
+
+
+@router.get("/discover", response_model=list[GroupDiscoverItem])
+async def discover_groups(
+    name: str | None = None,
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    current_user: Mapping[str, Any] = Depends(get_current_user),
+) -> list[GroupDiscoverItem]:
+    """
+    列出当前用户可以加入的群组：
+    - 群组为 active
+    - 当前用户不是该群的活跃成员
+    - 当前活跃成员数未达到上限
+    - 可选按名称模糊过滤
+    """
+    where_clauses = ["g.is_active = TRUE"]
+    params: dict[str, Any] = {
+        "user_id": current_user["id"],
+        "max_members": MAX_GROUP_MEMBERS,
+        "limit": limit,
+    }
+
+    if name:
+        where_clauses.append("g.name ILIKE :name")
+        params["name"] = f"%{name}%"
+
+    where_sql = " AND ".join(where_clauses)
+
+    query = text(
+        f"""
+        SELECT
+            g.id,
+            g.name,
+            g.created_at,
+            g.is_active,
+            COUNT(gm_all.user_id) AS member_count
+        FROM groups AS g
+        LEFT JOIN group_memberships AS gm_all
+            ON gm_all.group_id = g.id AND gm_all.status = 'active'
+        LEFT JOIN group_memberships AS gm_me
+            ON gm_me.group_id = g.id AND gm_me.user_id = :user_id AND gm_me.status = 'active'
+        WHERE {where_sql}
+          AND gm_me.user_id IS NULL
+        GROUP BY g.id, g.name, g.created_at, g.is_active
+        HAVING COUNT(gm_all.user_id) < :max_members
+        ORDER BY g.created_at DESC
+        LIMIT :limit
+        """
+    )
+
+    result = await db.execute(query, params)
+    rows = result.mappings().all()
+    return [GroupDiscoverItem.model_validate(dict(row)) for row in rows]
 
 
 @router.get("/{group_id}", response_model=GroupDetail)
