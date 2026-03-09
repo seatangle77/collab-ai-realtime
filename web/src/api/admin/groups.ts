@@ -1,5 +1,5 @@
 import { http } from '../http'
-import type { AdminGroup, Page } from '../../types/admin'
+import type { AdminGroup, BatchDeleteResponse, Page } from '../../types/admin'
 
 export interface ListAdminGroupsParams {
   page?: number
@@ -35,6 +35,10 @@ export async function createAdminGroup(payload: CreateAdminGroupPayload): Promis
 
 export async function deleteAdminGroup(id: string): Promise<void> {
   await http.delete<void>(`/api/admin/groups/${id}`)
+}
+
+export async function deleteAdminGroupsBatch(ids: string[]): Promise<BatchDeleteResponse> {
+  return http.post<BatchDeleteResponse>('/api/admin/groups/batch-delete', { ids })
 }
 
 export interface UpdateAdminGroupPayload {

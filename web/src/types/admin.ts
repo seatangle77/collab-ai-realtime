@@ -1,3 +1,7 @@
+export interface BatchDeleteResponse {
+  deleted: number
+}
+
 export interface PageMeta {
   total: number
   page: number
@@ -33,11 +37,14 @@ export interface AdminMembership {
   role: string
   status: string
   created_at: string
+  group_name?: string
+  user_name?: string
 }
 
 export interface AdminChatSession {
   id: string
   group_id: string
+  group_name?: string | null
   session_title: string
   created_at: string
   last_updated: string

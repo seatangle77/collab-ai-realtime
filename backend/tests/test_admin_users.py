@@ -58,9 +58,10 @@ def setup_users(ctx: Dict[str, Any]) -> bool:
 
 
 def scenario_admin_list_users_basic(ctx: Dict[str, Any]) -> bool:
+    # 用 email 过滤出准备阶段用户，避免 created_at 排序导致不在首页（注册现用 UTC 存库）
     r = requests.get(
         f"{BASE_URL}/api/admin/users",
-        params={"page": 1, "page_size": 10},
+        params={"page": 1, "page_size": 10, "email": "admin_test_"},
         headers=ADMIN_HEADERS,
     )
     if r.status_code != 200:
@@ -148,10 +149,10 @@ def scenario_admin_users_group_info_and_group_name_filters(ctx: Dict[str, Any]) 
     except requests.HTTPError as exc:  # noqa: BLE001
         return _log(False, "admin 创建测试成员关系失败", str(exc))
 
-    # 1）基础列表中应返回 group_ids/group_names，并且聚合结果符合预期
+    # 1）基础列表中应返回 group_ids/group_names，并且聚合结果符合预期（用 email 过滤出准备阶段用户）
     r_list = requests.get(
         f"{BASE_URL}/api/admin/users",
-        params={"page": 1, "page_size": 50},
+        params={"page": 1, "page_size": 50, "email": "admin_test_"},
         headers=ADMIN_HEADERS,
     )
     if r_list.status_code != 200:
@@ -463,6 +464,68 @@ def scenario_admin_delete_user_not_found() -> bool:
     return _log(ok, "admin 删除不存在用户返回 404 场景", {"status_code": r.status_code, "body": r.text})
 
 
+# ---------- 场景：批量删除用户 ----------
+
+
+def scenario_admin_batch_delete_users_success() -> bool:
+    u1 = register_dummy_user("BatchDel1")
+    u2 = register_dummy_user("BatchDel2")
+    ids = [u1["id"], u2["id"]]
+
+    r = requests.post(
+        f"{BASE_URL}/api/admin/users/batch-delete",
+        json={"ids": ids},
+        headers=ADMIN_HEADERS,
+    )
+    if r.status_code != 200:
+        return _log(False, "admin 批量删除用户失败（期望 200）", {"status_code": r.status_code, "body": r.text})
+    data = r.json()
+    if data.get("deleted") != 2:
+        return _log(False, "admin 批量删除用户应返回 deleted=2", data)
+
+    for uid in ids:
+        r2 = requests.get(f"{BASE_URL}/api/admin/users/{uid}", headers=ADMIN_HEADERS)
+        if r2.status_code != 404:
+            return _log(False, f"批量删除后用户 {uid} 应 404", {"status_code": r2.status_code})
+    return _log(True, "admin 批量删除用户成功场景")
+
+
+def scenario_admin_batch_delete_users_empty_ids() -> bool:
+    r = requests.post(
+        f"{BASE_URL}/api/admin/users/batch-delete",
+        json={"ids": []},
+        headers=ADMIN_HEADERS,
+    )
+    ok = r.status_code == 422
+    return _log(ok, "admin 批量删除用户 ids 为空返回 422 场景", {"status_code": r.status_code, "body": r.text})
+
+
+def scenario_admin_batch_delete_users_partial() -> bool:
+    u = register_dummy_user("BatchDelPartial")
+    r = requests.post(
+        f"{BASE_URL}/api/admin/users/batch-delete",
+        json={"ids": [u["id"], "non-existent-uuid-1111"]},
+        headers=ADMIN_HEADERS,
+    )
+    if r.status_code != 200:
+        return _log(False, "admin 批量删除用户（含不存在的 id）应返回 200", {"status_code": r.status_code, "body": r.text})
+    data = r.json()
+    if data.get("deleted") != 1:
+        return _log(False, "admin 批量删除仅删除存在的 1 条", data)
+    return _log(True, "admin 批量删除用户部分存在部分不存在场景")
+
+
+def scenario_admin_batch_delete_users_too_many() -> bool:
+    """单次超过 100 条 ids 应返回 422。"""
+    r = requests.post(
+        f"{BASE_URL}/api/admin/users/batch-delete",
+        json={"ids": [f"id-{i}" for i in range(101)]},
+        headers=ADMIN_HEADERS,
+    )
+    ok = r.status_code == 422
+    return _log(ok, "admin 批量删除用户 ids 超过 100 返回 422 场景", {"status_code": r.status_code, "body": r.text})
+
+
 # ---------- 场景：管理员 token 缺失 / 错误 ----------
 
 
@@ -486,7 +549,7 @@ def scenario_admin_missing_or_wrong_token() -> bool:
 # ---------- 总入口 ----------
 
 
-def run_all() -> None:
+def run_all() -> bool:
     print("=== 开始 Admin Users 后台接口测试 ===")
     ctx: Dict[str, Any] = {}
 
@@ -501,11 +564,17 @@ def run_all() -> None:
     ok &= scenario_admin_update_user_no_fields(ctx)
     ok &= scenario_admin_delete_user_success()
     ok &= scenario_admin_delete_user_not_found()
+    ok &= scenario_admin_batch_delete_users_success()
+    ok &= scenario_admin_batch_delete_users_empty_ids()
+    ok &= scenario_admin_batch_delete_users_partial()
+    ok &= scenario_admin_batch_delete_users_too_many()
     ok &= scenario_admin_missing_or_wrong_token()
 
     print("\n=== Admin Users 测试结果: {} ===".format("全部通过 ✅" if ok else "有失败 ❌"))
+    return ok
 
 
 if __name__ == "__main__":
-    run_all()
+    import sys
+    sys.exit(0 if run_all() else 1)
 

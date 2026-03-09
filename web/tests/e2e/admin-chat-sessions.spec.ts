@@ -6,6 +6,7 @@ const API_BASE = process.env.API_BASE_URL || 'http://localhost:8000'
 type ChatSessionItem = {
   id: string
   group_id: string
+  group_name: string | null
   session_title: string
   created_at: string
   last_updated: string
@@ -129,6 +130,7 @@ async function setupChatSessionsFixture() {
 
   return {
     groupId,
+    groupName: sessions[0]?.group_name ?? null,
     activeSessionTitle: '第二次会话',
     endedSessionTitle: '第一次会话',
     sessions,
@@ -139,6 +141,7 @@ async function setupChatSessionsFixture() {
 
 const shared: {
   groupId: string
+  groupName: string | null
   activeSessionTitle: string
   endedSessionTitle: string
   sessions: ChatSessionItem[]
@@ -166,7 +169,11 @@ test.describe.serial('Admin 会话管理页面 - 查询与时间', () => {
     await page.getByRole('button', { name: '查询' }).click()
 
     const rows = page.getByRole('row').filter({ hasText: shared.groupId })
-    await expect(rows.first()).toBeVisible()
+    const firstRow = rows.first()
+    await expect(firstRow).toBeVisible()
+    if (shared.groupName) {
+      await expect(firstRow).toContainText(shared.groupName)
+    }
   })
 
   test('2. 按会话标题模糊查询', async ({ page }) => {
@@ -246,7 +253,8 @@ test.describe('Admin 会话管理页面 - 新建与编辑会话', () => {
 
   test('通过后台页面新建会话（未设置开始时间）', async ({ page }) => {
     const owner = await registerAndLogin('admin-ui-create-default')
-    const { groupId } = await createGroup(owner.accessToken, `会话管理新建默认-${Date.now()}`)
+    const groupName = `会话管理新建默认-${Date.now()}`
+    const { groupId } = await createGroup(owner.accessToken, groupName)
     const title = '后台E2E-新建-默认时间'
 
     await page.getByRole('button', { name: '新建会话' }).click()
@@ -268,12 +276,15 @@ test.describe('Admin 会话管理页面 - 新建与编辑会话', () => {
     await page.getByRole('button', { name: '查询' }).click()
 
     const rows = page.getByRole('row').filter({ hasText: title })
-    await expect(rows.first()).toBeVisible()
+    const firstRow = rows.first()
+    await expect(firstRow).toBeVisible()
+    await expect(firstRow).toContainText(groupName)
   })
 
   test('通过后台页面新建会话并显式设置开始时间', async ({ page }) => {
     const owner = await registerAndLogin('admin-ui-create-with-start')
-    const { groupId } = await createGroup(owner.accessToken, `会话管理新建带开始-${Date.now()}`)
+    const groupName = `会话管理新建带开始-${Date.now()}`
+    const { groupId } = await createGroup(owner.accessToken, groupName)
     const title = '后台E2E-新建-显式开始时间'
 
     // 我们设定一个比当前时间早 1 小时的开始时间，便于与默认 NOW 区分
@@ -302,7 +313,9 @@ test.describe('Admin 会话管理页面 - 新建与编辑会话', () => {
     await page.getByRole('button', { name: '查询' }).click()
 
     const rows = page.getByRole('row').filter({ hasText: title })
-    await expect(rows.first()).toBeVisible()
+    const firstRow = rows.first()
+    await expect(firstRow).toBeVisible()
+    await expect(firstRow).toContainText(groupName)
   })
 
   test('编辑会话时可以修改创建时间', async ({ page }) => {
@@ -480,6 +493,30 @@ test.describe('Admin 会话管理 - 查询组合与时间边界', () => {
 
     await expect(page.getByPlaceholder('按群组 ID 精确查询')).toHaveValue('')
     await expect(page.getByPlaceholder('按会话标题模糊搜索')).toHaveValue('')
+  })
+
+  test('批量删除 - 未选时按钮禁用', async ({ page }) => {
+    await expect(page.getByRole('button', { name: '批量删除' })).toBeDisabled()
+  })
+
+  test('批量删除 - 选中两个会话并删除', async ({ page }) => {
+    const owner = await registerAndLogin('admin-batch-del-sess')
+    const { groupId } = await createGroup(owner.accessToken, `批量删除会话群-${Date.now()}`)
+    const title1 = '批量删除会话1'
+    const title2 = '批量删除会话2'
+    await createSession(owner.accessToken, groupId, title1)
+    await createSession(owner.accessToken, groupId, title2)
+    await page.getByPlaceholder('按群组 ID 精确查询').fill(groupId)
+    await page.getByRole('button', { name: '查询' }).click()
+    const row1 = page.getByRole('row').filter({ hasText: title1 }).first()
+    const row2 = page.getByRole('row').filter({ hasText: title2 }).first()
+    await row1.locator('.el-checkbox').first().click()
+    await row2.locator('.el-checkbox').first().click()
+    await page.getByRole('button', { name: /批量删除 \(2\)/ }).click()
+    await page.getByRole('button', { name: '删除' }).last().click()
+    await expect(page.getByText('成功删除 2 条会话')).toBeVisible()
+    await expect(page.getByRole('row').filter({ hasText: title1 })).toHaveCount(0)
+    await expect(page.getByRole('row').filter({ hasText: title2 })).toHaveCount(0)
   })
 })
 

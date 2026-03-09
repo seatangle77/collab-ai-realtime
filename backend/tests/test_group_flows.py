@@ -166,7 +166,7 @@ def scenario_kick_member_by_non_leader_forbidden(ctx: Dict[str, Any]) -> bool:
     return _log(ok, "非 leader 踢人被禁止场景", {"status_code": r.status_code, "body": r.json()})
 
 
-def run_all() -> None:
+def run_all() -> bool:
     print("=== 开始 Group 组队相关功能测试 ===")
 
     ctx: Dict[str, Any] = {}
@@ -189,8 +189,10 @@ def run_all() -> None:
     ok &= scenario_kick_member_by_non_leader_forbidden(ctx)
 
     print("\n=== Group 测试结果: {} ===".format("全部通过 ✅" if ok else "有失败 ❌"))
+    return ok
 
 
 if __name__ == "__main__":
-    run_all()
+    import sys
+    sys.exit(0 if run_all() else 1)
 

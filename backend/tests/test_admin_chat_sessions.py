@@ -125,10 +125,20 @@ def scenario_admin_list_chat_sessions_basic(ctx: Dict[str, Any]) -> bool:
     data = r.json()
     ok = isinstance(data.get("items"), list) and isinstance(data.get("meta"), dict)
 
-    ids = {item["id"] for item in data["items"]}
+    items = data.get("items", [])
+    ids = {item["id"] for item in items}
     ok = ok and (ctx["session_id_1"] in ids or ctx["session_id_2"] in ids)
 
-    return _log(ok, "admin 基础分页列出会话场景", data)
+    # 校验新增字段 group_name：字段存在且类型为 str 或 None
+    for item in items:
+        if "group_name" not in item:
+            ok = False
+            break
+        if item["group_name"] is not None and not isinstance(item["group_name"], str):
+            ok = False
+            break
+
+    return _log(ok, "admin 基础分页列出会话场景（含 group_name）", data)
 
 
 # ---------- 场景：管理员按条件过滤会话 ----------
@@ -147,9 +157,21 @@ def scenario_admin_list_chat_sessions_filters(ctx: Dict[str, Any]) -> bool:
     if r.status_code != 200:
         return _log(False, "admin 按 group_id 过滤会话失败（期望 200）", {"status_code": r.status_code, "body": r.text})
     data = r.json()
+    items = data.get("items", [])
     ok &= _log(
-        all(item["group_id"] == group_id for item in data["items"]) and len(data["items"]) >= 2,
+        all(item["group_id"] == group_id for item in items) and len(items) >= 2,
         "admin 按 group_id 过滤会话场景",
+        data,
+    )
+
+    # 在按 group_id 过滤结果中，至少有一条记录的 group_name 非空，用于简单验证群组名称回填正确
+    has_non_empty_group_name = any(
+        (item.get("group_name") is not None) and isinstance(item.get("group_name"), str) and item["group_name"] != ""
+        for item in items
+    )
+    ok &= _log(
+        has_non_empty_group_name,
+        "admin 按 group_id 过滤结果包含至少一条带有效 group_name 的会话",
         data,
     )
 
@@ -829,6 +851,65 @@ def scenario_admin_delete_chat_session_not_found() -> bool:
     return _log(ok, "admin 删除不存在会话返回 404 场景", {"status_code": r.status_code, "body": r.text})
 
 
+# ---------- 场景：批量删除会话 ----------
+
+
+def scenario_admin_batch_delete_chat_sessions_success() -> bool:
+    info = register_and_login("batch_del_sess")
+    access_token = info["access_token"]
+    group_detail = create_group(access_token, name="批量删除会话测试群")
+    group_id = group_detail["group"]["id"]
+    s1 = create_session(access_token, group_id, title="批量删除会话1")
+    s2 = create_session(access_token, group_id, title="批量删除会话2")
+    ids = [s1["id"], s2["id"]]
+
+    r = requests.post(
+        f"{BASE_URL}/api/admin/chat-sessions/batch-delete",
+        json={"ids": ids},
+        headers=ADMIN_HEADERS,
+    )
+    if r.status_code != 200:
+        return _log(False, "admin 批量删除会话失败（期望 200）", {"status_code": r.status_code, "body": r.text})
+    data = r.json()
+    if data.get("deleted") != 2:
+        return _log(False, "admin 批量删除会话应返回 deleted=2", data)
+
+    for sid in ids:
+        r2 = requests.get(f"{BASE_URL}/api/admin/chat-sessions/{sid}", headers=ADMIN_HEADERS)
+        if r2.status_code != 404:
+            return _log(False, f"批量删除后会话 {sid} 应 404", {"status_code": r2.status_code})
+    return _log(True, "admin 批量删除会话成功场景")
+
+
+def scenario_admin_batch_delete_chat_sessions_empty_ids() -> bool:
+    r = requests.post(
+        f"{BASE_URL}/api/admin/chat-sessions/batch-delete",
+        json={"ids": []},
+        headers=ADMIN_HEADERS,
+    )
+    ok = r.status_code == 422
+    return _log(ok, "admin 批量删除会话 ids 为空返回 422 场景", {"status_code": r.status_code, "body": r.text})
+
+
+def scenario_admin_batch_delete_chat_sessions_partial() -> bool:
+    info = register_and_login("batch_del_sess_partial")
+    access_token = info["access_token"]
+    group_detail = create_group(access_token, name="批量删除会话部分测试群")
+    group_id = group_detail["group"]["id"]
+    s = create_session(access_token, group_id, title="批量删除会话部分")
+    r = requests.post(
+        f"{BASE_URL}/api/admin/chat-sessions/batch-delete",
+        json={"ids": [s["id"], "non-existent-session-uuid-1111"]},
+        headers=ADMIN_HEADERS,
+    )
+    if r.status_code != 200:
+        return _log(False, "admin 批量删除会话（含不存在的 id）应返回 200", {"status_code": r.status_code, "body": r.text})
+    data = r.json()
+    if data.get("deleted") != 1:
+        return _log(False, "admin 批量删除会话仅删除存在的 1 条", data)
+    return _log(True, "admin 批量删除会话部分存在部分不存在场景")
+
+
 # ---------- 场景：管理员 token 缺失 / 错误 ----------
 
 
@@ -889,7 +970,7 @@ def scenario_admin_missing_or_wrong_token() -> bool:
 # ---------- 总入口 ----------
 
 
-def run_all() -> None:
+def run_all() -> bool:
     print("=== 开始 Admin Chat Sessions 后台会话接口测试 ===")
     ctx: Dict[str, Any] = {}
 
@@ -911,11 +992,16 @@ def run_all() -> None:
     ok &= scenario_admin_update_chat_session_no_fields(ctx)
     ok &= scenario_admin_delete_chat_session_success(ctx)
     ok &= scenario_admin_delete_chat_session_not_found()
+    ok &= scenario_admin_batch_delete_chat_sessions_success()
+    ok &= scenario_admin_batch_delete_chat_sessions_empty_ids()
+    ok &= scenario_admin_batch_delete_chat_sessions_partial()
     ok &= scenario_admin_missing_or_wrong_token()
 
     print("\n=== Admin Chat Sessions 测试结果: {} ===".format("全部通过 ✅" if ok else "有失败 ❌"))
+    return ok
 
 
 if __name__ == "__main__":
-    run_all()
+    import sys
+    sys.exit(0 if run_all() else 1)
 

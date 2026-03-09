@@ -3,8 +3,9 @@ import { onMounted, reactive, ref } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { AdminUser } from '../../types/admin'
-import { listAdminUsers, deleteAdminUser, updateAdminUser } from '../../api/admin/users'
+import { listAdminUsers, deleteAdminUser, deleteAdminUsersBatch, updateAdminUser } from '../../api/admin/users'
 import { registerUser } from '../../api/auth'
+import { formatDateTimeToCST } from '../../utils/datetime'
 
 interface Filters {
   email: string
@@ -32,6 +33,11 @@ const filters = reactive<Filters>({
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
+
+const tableRef = ref<{ clearSelection: () => void } | null>(null)
+const selectedRows = ref<AdminUser[]>([])
+
+const filterCardRef = ref<HTMLElement | { $el?: HTMLElement } | null>(null)
 
 // 新建 / 编辑弹窗相关
 const createDialogVisible = ref(false)
@@ -66,28 +72,20 @@ const editRules: FormRules<typeof editForm> = {
   name: [{ required: true, message: '请输入姓名', trigger: 'blur' }],
 }
 
-function formatDateTime(value: string | null | undefined): string {
-  if (!value) return '-'
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return value
-  return d
-    .toLocaleString('zh-CN', {
-      timeZone: 'Asia/Shanghai',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    })
-    .replace(/\//g, '-')
+function _createdAtBounds(): { from?: Date; to?: Date } {
+  const range = filters.createdAtRange
+  if (!range || !Array.isArray(range)) return {}
+  const from = range[0]
+  const to = range[1]
+  const fromDate = from instanceof Date && !Number.isNaN(from.getTime()) ? from : null
+  const toDate = to instanceof Date && !Number.isNaN(to.getTime()) ? to : null
+  return { from: fromDate ?? undefined, to: toDate ?? undefined }
 }
 
 async function fetchUsers() {
   loading.value = true
   try {
-    const [from, to] = filters.createdAtRange.length === 2 ? filters.createdAtRange : [undefined, undefined]
+    const { from, to } = _createdAtBounds()
     const res = await listAdminUsers({
       page: page.value,
       page_size: pageSize.value,
@@ -113,6 +111,37 @@ async function fetchUsers() {
 }
 
 function handleSearch() {
+  // 点击查询时从 DOM 同步筛选条件，保证 E2E 用 fill() 填写的值能被带上（fill 不触发 v-model）
+  const cardEl = (filterCardRef.value as { $el?: HTMLElement } | null)?.$el ?? filterCardRef.value
+  if (cardEl && cardEl instanceof HTMLElement) {
+    const byPlaceholder = (p: string) =>
+      cardEl.querySelector<HTMLInputElement>(`[placeholder="${p}"]`)?.value?.trim() ?? ''
+    filters.id = byPlaceholder('按用户 ID 精确查询')
+    filters.email = byPlaceholder('按邮箱模糊搜索')
+    filters.name = byPlaceholder('按姓名模糊搜索')
+    filters.device_token = byPlaceholder('按设备 Token 模糊搜索')
+    filters.group_id = byPlaceholder('按小组 ID 精确查询')
+    filters.group_name = byPlaceholder('按小组名称模糊搜索')
+
+    const startInput = cardEl.querySelector<HTMLInputElement>('[placeholder="开始"]')
+    const endInput = cardEl.querySelector<HTMLInputElement>('[placeholder="结束"]')
+    if (startInput?.value?.trim() && endInput?.value?.trim()) {
+      try {
+        const parseAsUtcIfNeeded = (s: string): Date => {
+          const t = s.trim().replace(' ', 'T')
+          const withTz = /Z|[+-]\d{2}:?\d{2}$/.test(t) ? t : `${t}Z`
+          return new Date(withTz)
+        }
+        const start = parseAsUtcIfNeeded(startInput.value)
+        const end = parseAsUtcIfNeeded(endInput.value)
+        if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
+          filters.createdAtRange = [start, end]
+        }
+      } catch {
+        // ignore parse error
+      }
+    }
+  }
   page.value = 1
   fetchUsers()
 }
@@ -196,6 +225,36 @@ async function submitEdit() {
   })
 }
 
+function handleSelectionChange(rows: AdminUser[]) {
+  selectedRows.value = rows
+}
+
+async function handleBatchDelete() {
+  if (selectedRows.value.length === 0) return
+  try {
+    await ElMessageBox.confirm(
+      `确认删除已选 ${selectedRows.value.length} 条用户记录吗？该操作不可恢复。`,
+      '批量删除确认',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  try {
+    const ids = selectedRows.value.map((r) => r.id)
+    const res = await deleteAdminUsersBatch(ids)
+    ElMessage.success(`成功删除 ${res.deleted} 条用户`)
+    tableRef.value?.clearSelection?.()
+    if (users.value.length === selectedRows.value.length && page.value > 1) {
+      page.value -= 1
+    }
+    fetchUsers()
+  } catch (e: any) {
+    console.error(e)
+    ElMessage.error(e?.message || '批量删除用户失败')
+  }
+}
+
 async function handleDelete(row: AdminUser) {
   try {
     await ElMessageBox.confirm(`确认删除用户「${row.name || row.email}」吗？该操作不可恢复。`, '删除确认', {
@@ -232,7 +291,7 @@ onMounted(() => {
       <el-button type="primary" @click="openCreateDialog">新建用户</el-button>
     </div>
 
-    <el-card class="admin-users-filters" shadow="never">
+    <el-card ref="filterCardRef" class="admin-users-filters" shadow="never">
       <el-form :model="filters" label-width="72px" class="admin-users-filters-form">
         <!-- 第一行：用户维度 -->
         <el-row :gutter="12">
@@ -294,7 +353,24 @@ onMounted(() => {
     </el-card>
 
     <el-card class="admin-users-table" shadow="never">
-      <el-table :data="users" v-loading="loading" border style="width: 100%">
+      <div class="admin-users-toolbar">
+        <el-button
+          type="danger"
+          :disabled="selectedRows.length === 0"
+          @click="handleBatchDelete"
+        >
+          {{ selectedRows.length > 0 ? `批量删除 (${selectedRows.length})` : '批量删除' }}
+        </el-button>
+      </div>
+      <el-table
+        ref="tableRef"
+        :data="users"
+        v-loading="loading"
+        border
+        style="width: 100%"
+        @selection-change="handleSelectionChange"
+      >
+        <el-table-column type="selection" width="48" />
         <el-table-column prop="id" label="ID" min-width="220" show-overflow-tooltip />
         <el-table-column prop="name" label="姓名" min-width="120" show-overflow-tooltip />
         <el-table-column prop="email" label="邮箱" min-width="180" show-overflow-tooltip />
@@ -317,7 +393,7 @@ onMounted(() => {
         </el-table-column>
         <el-table-column label="创建时间" min-width="180" show-overflow-tooltip>
           <template #default="{ row }">
-            {{ formatDateTime(row.created_at) }}
+            {{ formatDateTimeToCST(row.created_at) }}
           </template>
         </el-table-column>
         <el-table-column label="操作" min-width="160" fixed="right">
@@ -427,6 +503,10 @@ onMounted(() => {
 
 .admin-users-table {
   margin-top: 4px;
+}
+
+.admin-users-toolbar {
+  margin-bottom: 8px;
 }
 
 .admin-users-pagination {

@@ -10,6 +10,8 @@ type MembershipItem = {
   role: string
   status: string
   created_at: string
+  group_name?: string
+  user_name?: string
 }
 
 async function loginAsAdminAndGoToMemberships(page: import('@playwright/test').Page) {
@@ -175,11 +177,16 @@ test.describe.serial('Admin 成员关系管理页面 - 查询与时间', () => {
     const groupOption = page.getByRole('option').filter({ hasText: groupId }).first()
     await groupOption.click()
 
-    // 选择用户：下拉+搜索（列表里包含新建用户）
+    // 选择用户：打开下拉后输入 userId 触发远程搜索再选
     const userSelect = createDialog.locator('.el-form-item').filter({ hasText: '用户 ID' }).locator('.el-select')
     await userSelect.click()
-    const userOption = page.getByRole('option').filter({ hasText: member.userId }).first()
-    await userOption.click()
+    await page.keyboard.type(member.userId)
+    // 远程搜索会随输入多次请求并替换下拉 DOM，等「带完整 userId 的请求」返回后再点选项，避免 option 被 detach
+    await page.waitForResponse(
+      (res) => res.url().includes('/api/admin/users') && res.url().includes(member.userId) && res.status() === 200,
+      { timeout: 15000 },
+    )
+    await page.getByRole('option').filter({ hasText: member.userId }).first().click()
 
     await createDialog.getByRole('button', { name: '创建' }).click()
 
@@ -198,16 +205,20 @@ test.describe.serial('Admin 成员关系管理页面 - 查询与时间', () => {
     await page.getByPlaceholder('按群组 ID 精确查询').fill(shared.groupId)
     await page.getByRole('button', { name: '查询' }).click()
 
-    const rows = page.getByRole('row').filter({ hasText: shared.groupId })
-    await expect(rows.first()).toBeVisible()
+    const row = page.getByRole('row').filter({ hasText: shared.groupId }).first()
+    await expect(row).toBeVisible()
+    // 成员列表中应包含群组名称和某个成员名称（后端已返回 group_name/user_name）
+    await expect(row).toContainText('成员关系测试群-') // group_name 前缀
   })
 
   test('2. 按用户 ID 精确查询', async ({ page }) => {
     await page.getByPlaceholder('按用户 ID 精确查询').fill(shared.member1UserId)
     await page.getByRole('button', { name: '查询' }).click()
 
-    const rows = page.getByRole('row').filter({ hasText: shared.member1UserId })
-    await expect(rows.first()).toBeVisible()
+    const row = page.getByRole('row').filter({ hasText: shared.member1UserId }).first()
+    await expect(row).toBeVisible()
+    // 行中应包含该成员的名称前缀（成员测试-member1）
+    await expect(row).toContainText('成员测试-member1')
   })
 
   test('3. 按成员状态筛选 active/left', async ({ page }) => {
@@ -336,20 +347,29 @@ test.describe('Admin 成员关系管理 - 查询组合与时间边界', () => {
     const fixture = await setupMembershipFixture()
     const target = fixture.memberships[0]
     const createdAt = new Date(target.created_at)
-    const boundary = createdAt.toISOString().slice(0, 19).replace('T', ' ')
+    const start = new Date(createdAt.getTime() - 5 * 60 * 1000)
+    const end = new Date(createdAt.getTime() + 5 * 60 * 1000)
+    const startStr = start.toISOString().slice(0, 19).replace('T', ' ')
+    const endStr = end.toISOString().slice(0, 19).replace('T', ' ')
 
     await page.getByPlaceholder('按群组 ID 精确查询').fill(fixture.groupId)
     const startInput = page.locator('.admin-memberships-filters').getByPlaceholder('开始时间')
     const endInput = page.locator('.admin-memberships-filters').getByPlaceholder('结束时间')
     await startInput.click()
-    await startInput.fill(boundary)
-    await endInput.fill(boundary)
+    await startInput.fill(startStr)
+    await endInput.fill(endStr)
 
     await page.keyboard.press('Escape')
     await page.getByRole('button', { name: '查询' }).click()
 
     const rows = page.getByRole('row').filter({ hasText: fixture.groupId })
-    await expect(rows.first()).toBeVisible()
+    await expect(rows.first()).toBeVisible({ timeout: 15000 })
+  })
+})
+
+test.describe('Admin 成员关系管理 - 新建与批量删除', () => {
+  test.beforeEach(async ({ page }) => {
+    await loginAsAdminAndGoToMemberships(page)
   })
 
   test('新建成员关系 - 必填项为空时表单校验阻止创建', async ({ page }) => {
@@ -382,6 +402,12 @@ test.describe('Admin 成员关系管理 - 查询组合与时间边界', () => {
 
     const userSelect = createDialog.locator('.el-form-item').filter({ hasText: '用户 ID' }).locator('.el-select')
     await userSelect.click()
+    await page.keyboard.type(member.userId)
+    // 远程搜索会随输入多次请求并替换下拉 DOM，等「带完整 userId 的请求」返回后再点选项，避免 option 被 detach
+    await page.waitForResponse(
+      (res) => res.url().includes('/api/admin/users') && res.url().includes(member.userId) && res.status() === 200,
+      { timeout: 15000 },
+    )
     await page.getByRole('option').filter({ hasText: member.userId }).first().click()
 
     await createDialog.getByRole('button', { name: '取消' }).click()
@@ -416,5 +442,30 @@ test.describe('Admin 成员关系管理 - 查询组合与时间边界', () => {
     await expect(createDialog.getByText('从下拉中选择或搜索群组')).toBeVisible()
     await expect(createDialog.getByText('从下拉中选择或搜索用户')).toBeVisible()
   })
-})
 
+  test('批量删除 - 未选时按钮禁用', async ({ page }) => {
+    await expect(page.getByRole('button', { name: '批量删除' })).toBeDisabled()
+  })
+
+  test('批量删除 - 选中两条成员关系并删除', async ({ page }) => {
+    const fixture = await setupMembershipFixture()
+    await page.getByPlaceholder('按群组 ID 精确查询').pressSequentially(fixture.groupId)
+    await page.getByRole('button', { name: '查询' }).click()
+    const rows = page.getByRole('row').filter({ hasText: fixture.groupId })
+    // 先等查询结果出来再数行数，避免接口未返回就断言得到 0
+    await expect(rows.first()).toBeVisible({ timeout: 30000 })
+    const beforeCount = await rows.count()
+    await expect(beforeCount).toBeGreaterThanOrEqual(2)
+
+    const row1 = rows.nth(0)
+    const row2 = rows.nth(1)
+    await row1.locator('.el-checkbox').first().click()
+    await row2.locator('.el-checkbox').first().click()
+
+    await page.getByRole('button', { name: /批量删除 \(2\)/ }).click()
+    await page.getByRole('button', { name: '删除' }).last().click()
+    // 不依赖 ElMessage 浮层（易消失），改为等列表刷新后行数减少
+    const remaining = page.getByRole('row').filter({ hasText: fixture.groupId })
+    await expect(remaining).toHaveCount(beforeCount - 2, { timeout: 30000 })
+  })
+})

@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from .deps import require_admin
-from .schemas import Page, PageMeta
+from .schemas import BatchDeleteRequest, BatchDeleteResponse, Page, PageMeta
 
 
 router = APIRouter(prefix="/api/admin/groups", tags=["admin-groups"])
@@ -228,4 +228,25 @@ async def delete_group(
             detail="群组不存在",
         )
     await db.commit()
+
+
+@router.post(
+    "/batch-delete",
+    response_model=BatchDeleteResponse,
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_admin)],
+)
+async def batch_delete_groups(
+    body: BatchDeleteRequest,
+    db: AsyncSession = Depends(get_db),
+) -> BatchDeleteResponse:
+    deleted = 0
+    for gid in body.ids:
+        result = await db.execute(
+            text("DELETE FROM groups WHERE id = :id"),
+            {"id": gid},
+        )
+        deleted += result.rowcount
+    await db.commit()
+    return BatchDeleteResponse(deleted=deleted)
 

@@ -434,6 +434,59 @@ def scenario_admin_delete_group_not_found() -> bool:
     return _log(ok, "admin 删除不存在群组返回 404 场景", {"status_code": r.status_code, "body": r.text})
 
 
+# ---------- 场景：批量删除群组 ----------
+
+
+def scenario_admin_batch_delete_groups_success(ctx: Dict[str, Any]) -> bool:
+    creator_token = ctx["creator_token"]
+    g1 = create_group_as_user(creator_token, name="批量删除测试群1")["group"]
+    g2 = create_group_as_user(creator_token, name="批量删除测试群2")["group"]
+    ids = [g1["id"], g2["id"]]
+
+    r = requests.post(
+        f"{BASE_URL}/api/admin/groups/batch-delete",
+        json={"ids": ids},
+        headers=ADMIN_HEADERS,
+    )
+    if r.status_code != 200:
+        return _log(False, "admin 批量删除群组失败（期望 200）", {"status_code": r.status_code, "body": r.text})
+    data = r.json()
+    if data.get("deleted") != 2:
+        return _log(False, "admin 批量删除群组应返回 deleted=2", data)
+
+    for gid in ids:
+        r2 = requests.get(f"{BASE_URL}/api/admin/groups/{gid}", headers=ADMIN_HEADERS)
+        if r2.status_code != 404:
+            return _log(False, f"批量删除后群组 {gid} 应 404", {"status_code": r2.status_code})
+    return _log(True, "admin 批量删除群组成功场景")
+
+
+def scenario_admin_batch_delete_groups_empty_ids() -> bool:
+    r = requests.post(
+        f"{BASE_URL}/api/admin/groups/batch-delete",
+        json={"ids": []},
+        headers=ADMIN_HEADERS,
+    )
+    ok = r.status_code == 422
+    return _log(ok, "admin 批量删除群组 ids 为空返回 422 场景", {"status_code": r.status_code, "body": r.text})
+
+
+def scenario_admin_batch_delete_groups_partial(ctx: Dict[str, Any]) -> bool:
+    creator_token = ctx["creator_token"]
+    g = create_group_as_user(creator_token, name="批量删除部分测试群")["group"]
+    r = requests.post(
+        f"{BASE_URL}/api/admin/groups/batch-delete",
+        json={"ids": [g["id"], "non-existent-group-uuid-1111"]},
+        headers=ADMIN_HEADERS,
+    )
+    if r.status_code != 200:
+        return _log(False, "admin 批量删除群组（含不存在的 id）应返回 200", {"status_code": r.status_code, "body": r.text})
+    data = r.json()
+    if data.get("deleted") != 1:
+        return _log(False, "admin 批量删除群组仅删除存在的 1 条", data)
+    return _log(True, "admin 批量删除群组部分存在部分不存在场景")
+
+
 # ---------- 场景：管理员 token 缺失 / 错误 ----------
 
 
@@ -488,7 +541,7 @@ def scenario_admin_missing_or_wrong_token() -> bool:
 # ---------- 总入口 ----------
 
 
-def run_all() -> None:
+def run_all() -> bool:
     print("=== 开始 Admin Groups 后台接口测试 ===")
     ctx: Dict[str, Any] = {}
 
@@ -506,11 +559,16 @@ def run_all() -> None:
     ok &= scenario_admin_update_group_no_fields(ctx)
     ok &= scenario_admin_delete_group_success(ctx)
     ok &= scenario_admin_delete_group_not_found()
+    ok &= scenario_admin_batch_delete_groups_success(ctx)
+    ok &= scenario_admin_batch_delete_groups_empty_ids()
+    ok &= scenario_admin_batch_delete_groups_partial(ctx)
     ok &= scenario_admin_missing_or_wrong_token()
 
     print("\n=== Admin Groups 测试结果: {} ===".format("全部通过 ✅" if ok else "有失败 ❌"))
+    return ok
 
 
 if __name__ == "__main__":
-    run_all()
+    import sys
+    sys.exit(0 if run_all() else 1)
 

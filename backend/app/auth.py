@@ -119,12 +119,15 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
     # 生成用户 ID（沿用现有 u001/u002 风格）
     user_id = f"u{uuid.uuid4().hex[:8]}"
 
+    # 使用 UTC 时间写入 created_at，与 admin list_users 的 created_from/created_to 比较语义一致
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+
     # 插入新用户
     result = await db.execute(
         text(
             """
             INSERT INTO users_info (id, name, email, device_token, password_hash, created_at)
-            VALUES (:id, :name, :email, :device_token, :password_hash, NOW())
+            VALUES (:id, :name, :email, :device_token, :password_hash, :created_at)
             RETURNING id, name, email, device_token, created_at
             """
         ),
@@ -134,6 +137,7 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
             "email": payload.email,
             "device_token": payload.device_token,
             "password_hash": _hash_password(payload.password),
+            "created_at": now_utc,
         },
     )
     await db.commit()

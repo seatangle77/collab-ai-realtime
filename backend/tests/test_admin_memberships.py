@@ -136,7 +136,82 @@ def scenario_admin_list_memberships_basic(ctx: Dict[str, Any]) -> bool:
     returned_ids = {item["id"] for item in data["items"]}
     ok = ok and bool(existing_ids & returned_ids)
 
-    return _log(ok, "admin 基础分页列出成员关系场景", data)
+    # 新增字段：每条记录都应该带有 group_name / user_name
+    for item in data["items"]:
+        if "group_name" not in item or "user_name" not in item:
+            return _log(False, "admin 列表返回缺少 group_name/user_name 字段", item)
+        if not isinstance(item["group_name"], str) or not isinstance(item["user_name"], str):
+            return _log(False, "admin 列表返回的 group_name/user_name 类型错误", item)
+
+    return _log(ok, "admin 基础分页列出成员关系场景（含名称字段）", data)
+
+
+def scenario_admin_list_memberships_with_names(ctx: Dict[str, Any]) -> bool:
+    """
+    验证：
+    1）按 group_id 查询时，每条记录都带有 group_name/user_name；
+    2）准备阶段创建的群“成员测试群”的成员记录，其 group_name 与 user_name 与预期一致。
+    """
+    group_id = ctx["group_id"]
+    leader_user_id = ctx["leader_user_id"]
+    member1_user_id = ctx["member1_user_id"]
+    member2_user_id = ctx["member2_user_id"]
+
+    r = requests.get(
+        f"{BASE_URL}/api/admin/memberships",
+        params={"group_id": group_id, "page": 1, "page_size": 50},
+        headers=ADMIN_HEADERS,
+    )
+    if r.status_code != 200:
+        return _log(
+            False,
+            "admin 按 group_id 获取成员关系列表（验证名称字段）失败（期望 200）",
+            {"status_code": r.status_code, "body": r.text},
+        )
+
+    data = r.json()
+    items: List[Dict[str, Any]] = data.get("items", [])
+    if not items:
+        return _log(False, "admin 按 group_id 获取成员关系列表为空，无法验证名称字段", data)
+
+    # 1）所有记录都应具有非空的 group_name/user_name 字段
+    for item in items:
+        if "group_name" not in item or "user_name" not in item:
+            return _log(False, "admin 按 group_id 列表返回缺少 group_name/user_name 字段", item)
+        if not isinstance(item["group_name"], str) or not isinstance(item["user_name"], str):
+            return _log(False, "admin 按 group_id 列表返回的 group_name/user_name 类型错误", item)
+        if not item["group_name"]:
+            return _log(False, "admin 按 group_id 列表返回的 group_name 为空字符串", item)
+
+    # 2）针对已知用户校验名称正确性
+    expected_group_name = "成员测试群"
+    expected_leader_name = "成员测试用户-leader"
+    expected_member1_name = "成员测试用户-member1"
+    expected_member2_name = "成员测试用户-member2"
+
+    def _find_by_user(uid: str) -> Dict[str, Any] | None:
+        for it in items:
+            if it.get("user_id") == uid:
+                return it
+        return None
+
+    leader_item = _find_by_user(leader_user_id)
+    member1_item = _find_by_user(member1_user_id)
+    member2_item = _find_by_user(member2_user_id)
+
+    if not (leader_item and member1_item and member2_item):
+        return _log(
+            False,
+            "admin 按 group_id 返回的成员关系列表中缺少 leader/member1/member2 记录",
+            {"items": items},
+        )
+
+    ok = True
+    ok &= leader_item["group_name"] == expected_group_name and leader_item["user_name"] == expected_leader_name
+    ok &= member1_item["group_name"] == expected_group_name and member1_item["user_name"] == expected_member1_name
+    ok &= member2_item["group_name"] == expected_group_name and member2_item["user_name"] == expected_member2_name
+
+    return _log(ok, "admin 按 group_id 返回的成员关系列表包含正确的 group_name/user_name 场景", data)
 
 
 # ---------- 场景：管理员按条件过滤成员关系 ----------
@@ -824,6 +899,77 @@ def scenario_admin_delete_membership_not_found() -> bool:
     return _log(ok, "admin 删除不存在成员关系返回 404 场景", {"status_code": r.status_code, "body": r.text})
 
 
+# ---------- 场景：批量删除成员关系 ----------
+
+
+def scenario_admin_batch_delete_memberships_success(ctx: Dict[str, Any]) -> bool:
+    temp_info = register_and_login("batch_del_1")
+    temp_info2 = register_and_login("batch_del_2")
+    group_id = ctx["group_id"]
+    join_group(temp_info["access_token"], group_id)
+    join_group(temp_info2["access_token"], group_id)
+
+    r = requests.get(
+        f"{BASE_URL}/api/admin/memberships",
+        params={"group_id": group_id, "page": 1, "page_size": 20},
+        headers=ADMIN_HEADERS,
+    )
+    r.raise_for_status()
+    items = r.json()["items"]
+    ids = [m["id"] for m in items if m["user_id"] in (temp_info["user"]["id"], temp_info2["user"]["id"])]
+    if len(ids) < 2:
+        return _log(False, "准备批量删除的成员关系不足 2 条", {"items": items})
+
+    r2 = requests.post(
+        f"{BASE_URL}/api/admin/memberships/batch-delete",
+        json={"ids": ids},
+        headers=ADMIN_HEADERS,
+    )
+    if r2.status_code != 200:
+        return _log(False, "admin 批量删除成员关系失败（期望 200）", {"status_code": r2.status_code, "body": r2.text})
+    data = r2.json()
+    if data.get("deleted") != len(ids):
+        return _log(False, "admin 批量删除成员关系应返回 deleted 与请求数量一致", data)
+    return _log(True, "admin 批量删除成员关系成功场景")
+
+
+def scenario_admin_batch_delete_memberships_empty_ids() -> bool:
+    r = requests.post(
+        f"{BASE_URL}/api/admin/memberships/batch-delete",
+        json={"ids": []},
+        headers=ADMIN_HEADERS,
+    )
+    ok = r.status_code == 422
+    return _log(ok, "admin 批量删除成员关系 ids 为空返回 422 场景", {"status_code": r.status_code, "body": r.text})
+
+
+def scenario_admin_batch_delete_memberships_partial(ctx: Dict[str, Any]) -> bool:
+    temp_info = register_and_login("batch_del_partial")
+    group_id = ctx["group_id"]
+    join_group(temp_info["access_token"], group_id)
+    r = requests.get(
+        f"{BASE_URL}/api/admin/memberships",
+        params={"group_id": group_id, "user_id": temp_info["user"]["id"], "page": 1, "page_size": 5},
+        headers=ADMIN_HEADERS,
+    )
+    r.raise_for_status()
+    items = r.json()["items"]
+    if not items:
+        return _log(False, "未找到临时成员的 membership", None)
+    mid = items[0]["id"]
+    r2 = requests.post(
+        f"{BASE_URL}/api/admin/memberships/batch-delete",
+        json={"ids": [mid, "non-existent-membership-uuid-1111"]},
+        headers=ADMIN_HEADERS,
+    )
+    if r2.status_code != 200:
+        return _log(False, "admin 批量删除成员关系（含不存在的 id）应返回 200", {"status_code": r2.status_code, "body": r2.text})
+    data = r2.json()
+    if data.get("deleted") != 1:
+        return _log(False, "admin 批量删除成员关系仅删除存在的 1 条", data)
+    return _log(True, "admin 批量删除成员关系部分存在部分不存在场景")
+
+
 # ---------- 场景：管理员 token 缺失 / 错误 ----------
 
 
@@ -888,13 +1034,14 @@ def scenario_admin_missing_or_wrong_token() -> bool:
 # ---------- 总入口 ----------
 
 
-def run_all() -> None:
+def run_all() -> bool:
     print("=== 开始 Admin Memberships 后台成员关系接口测试 ===")
     ctx: Dict[str, Any] = {}
 
     ok = True
     ok &= setup_memberships(ctx)
     ok &= scenario_admin_list_memberships_basic(ctx)
+    ok &= scenario_admin_list_memberships_with_names(ctx)
     ok &= scenario_admin_list_memberships_filters(ctx)
     ok &= scenario_admin_list_memberships_created_time_filter(ctx)
     ok &= scenario_admin_create_membership_success(ctx)
@@ -910,11 +1057,16 @@ def run_all() -> None:
     ok &= scenario_admin_update_membership_no_fields(ctx)
     ok &= scenario_admin_delete_membership_success(ctx)
     ok &= scenario_admin_delete_membership_not_found()
+    ok &= scenario_admin_batch_delete_memberships_success(ctx)
+    ok &= scenario_admin_batch_delete_memberships_empty_ids()
+    ok &= scenario_admin_batch_delete_memberships_partial(ctx)
     ok &= scenario_admin_missing_or_wrong_token()
 
     print("\n=== Admin Memberships 测试结果: {} ===".format("全部通过 ✅" if ok else "有失败 ❌"))
+    return ok
 
 
 if __name__ == "__main__":
-    run_all()
+    import sys
+    sys.exit(0 if run_all() else 1)
 

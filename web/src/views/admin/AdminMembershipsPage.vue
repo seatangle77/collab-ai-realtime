@@ -3,9 +3,10 @@ import { onMounted, reactive, ref } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { AdminGroup, AdminMembership, AdminUser } from '../../types/admin'
-import { listAdminMemberships, updateAdminMembership, deleteAdminMembership, createAdminMembership } from '../../api/admin/memberships'
+import { listAdminMemberships, updateAdminMembership, deleteAdminMembership, deleteAdminMembershipsBatch, createAdminMembership } from '../../api/admin/memberships'
 import { listAdminGroups } from '../../api/admin/groups'
 import { listAdminUsers } from '../../api/admin/users'
+import { formatDateTimeToCST } from '../../utils/datetime'
 
 interface Filters {
   group_id: string
@@ -27,6 +28,12 @@ const filters = reactive<Filters>({
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
+
+const tableRef = ref<{ clearSelection: () => void } | null>(null)
+const selectedRows = ref<AdminMembership[]>([])
+
+const filterCardRef = ref<HTMLElement | { $el?: HTMLElement } | null>(null)
+const filterStatusRef = ref<{ modelValue?: string } | null>(null)
 
 const createDialogVisible = ref(false)
 const createFormRef = ref<FormInstance>()
@@ -62,10 +69,20 @@ const editRules: FormRules<typeof editForm> = {
   status: [{ required: true, message: '请选择状态', trigger: 'change' }],
 }
 
+function _createdAtBounds(): { from?: Date; to?: Date } {
+  const range = filters.createdAtRange
+  if (!range || !Array.isArray(range)) return {}
+  const from = range[0]
+  const to = range[1]
+  const fromDate = from instanceof Date && !Number.isNaN(from.getTime()) ? from : null
+  const toDate = to instanceof Date && !Number.isNaN(to.getTime()) ? to : null
+  return { from: fromDate ?? undefined, to: toDate ?? undefined }
+}
+
 async function fetchMemberships() {
   loading.value = true
   try {
-    const [from, to] = filters.createdAtRange.length === 2 ? filters.createdAtRange : [undefined, undefined]
+    const { from, to } = _createdAtBounds()
     const res = await listAdminMemberships({
       page: page.value,
       page_size: pageSize.value,
@@ -88,6 +105,17 @@ async function fetchMemberships() {
 }
 
 function handleSearch() {
+  const cardEl = (filterCardRef.value as { $el?: HTMLElement } | null)?.$el ?? filterCardRef.value
+  if (cardEl && cardEl instanceof HTMLElement) {
+    const groupInput = cardEl.querySelector<HTMLInputElement>('[placeholder="按群组 ID 精确查询"]')
+    const userInput = cardEl.querySelector<HTMLInputElement>('[placeholder="按用户 ID 精确查询"]')
+    if (groupInput) filters.group_id = (groupInput.value ?? '').trim()
+    if (userInput) filters.user_id = (userInput.value ?? '').trim()
+  }
+  if (filterStatusRef.value && 'modelValue' in filterStatusRef.value) {
+    const v = (filterStatusRef.value as { modelValue?: string }).modelValue
+    filters.status = (v ?? '').trim()
+  }
   page.value = 1
   fetchMemberships()
 }
@@ -158,6 +186,30 @@ async function loadInitialUserOptions() {
   }
 }
 
+async function onUserSearch(query: string) {
+  if (!query || !query.trim()) {
+    loadInitialUserOptions()
+    return
+  }
+  userLoading.value = true
+  try {
+    const trimmed = query.trim()
+    const res = await listAdminUsers({
+      page: 1,
+      page_size: 20,
+      id: /^u[a-f0-9]+$/i.test(trimmed) ? trimmed : undefined,
+      email: /^u[a-f0-9]+$/i.test(trimmed) ? undefined : trimmed,
+      name: undefined,
+    })
+    userOptions.value = res.items
+  } catch (e: any) {
+    console.error(e)
+    userOptions.value = []
+  } finally {
+    userLoading.value = false
+  }
+}
+
 function openEditDialog(row: AdminMembership) {
   editForm.id = row.id
   editForm.role = row.role
@@ -214,6 +266,36 @@ async function submitCreate() {
   })
 }
 
+function handleSelectionChange(rows: AdminMembership[]) {
+  selectedRows.value = rows
+}
+
+async function handleBatchDelete() {
+  if (selectedRows.value.length === 0) return
+  try {
+    await ElMessageBox.confirm(
+      `确认删除已选 ${selectedRows.value.length} 条成员关系记录吗？该操作不可恢复。`,
+      '批量删除确认',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  try {
+    const ids = selectedRows.value.map((r) => r.id)
+    const res = await deleteAdminMembershipsBatch(ids)
+    ElMessage.success(`成功删除 ${res.deleted} 条成员关系`)
+    tableRef.value?.clearSelection?.()
+    if (memberships.value.length === selectedRows.value.length && page.value > 1) {
+      page.value -= 1
+    }
+    fetchMemberships()
+  } catch (e: any) {
+    console.error(e)
+    ElMessage.error(e?.message || '批量删除成员关系失败')
+  }
+}
+
 async function handleDelete(row: AdminMembership) {
   try {
     await ElMessageBox.confirm(
@@ -254,7 +336,7 @@ onMounted(() => {
       <el-button type="primary" @click="openCreateDialog">新建成员关系</el-button>
     </div>
 
-    <el-card class="admin-memberships-filters" shadow="never">
+    <el-card ref="filterCardRef" class="admin-memberships-filters" shadow="never">
       <el-form :model="filters" label-width="96px" class="admin-memberships-filters-form">
         <el-row :gutter="12">
           <el-col :span="6">
@@ -269,7 +351,7 @@ onMounted(() => {
           </el-col>
           <el-col :span="5">
             <el-form-item label="成员状态">
-              <el-select v-model="filters.status" placeholder="全部" clearable style="width: 100%">
+              <el-select ref="filterStatusRef" v-model="filters.status" placeholder="全部" clearable style="width: 100%">
                 <el-option label="全部" value="" />
                 <el-option label="有效 (active)" value="active" />
                 <el-option label="已退出 (left)" value="left" />
@@ -303,10 +385,43 @@ onMounted(() => {
     </el-card>
 
     <el-card class="admin-memberships-table" shadow="never">
-      <el-table :data="memberships" v-loading="loading" border style="width: 100%">
+      <div class="admin-memberships-toolbar">
+        <el-button
+          type="danger"
+          :disabled="selectedRows.length === 0"
+          @click="handleBatchDelete"
+        >
+          {{ selectedRows.length > 0 ? `批量删除 (${selectedRows.length})` : '批量删除' }}
+        </el-button>
+      </div>
+      <el-table
+        ref="tableRef"
+        :data="memberships"
+        v-loading="loading"
+        border
+        style="width: 100%"
+        @selection-change="handleSelectionChange"
+      >
+        <el-table-column type="selection" width="48" />
         <el-table-column prop="id" label="ID" min-width="200" show-overflow-tooltip />
-        <el-table-column prop="group_id" label="群组 ID" min-width="200" show-overflow-tooltip />
-        <el-table-column prop="user_id" label="用户 ID" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="group_id" label="群组 ID" min-width="180" show-overflow-tooltip />
+        <el-table-column label="群组名称" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.group_name">
+              {{ row.group_name }}
+            </span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="user_id" label="用户 ID" min-width="180" show-overflow-tooltip />
+        <el-table-column label="用户名称" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.user_name">
+              {{ row.user_name }}
+            </span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="role" label="角色" min-width="120">
           <template #default="{ row }">
             <el-tag :type="row.role === 'leader' ? 'warning' : 'info'">
@@ -324,7 +439,11 @@ onMounted(() => {
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" min-width="200" show-overflow-tooltip />
+        <el-table-column label="创建时间" min-width="200" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ formatDateTimeToCST(row.created_at) }}
+          </template>
+        </el-table-column>
         <el-table-column label="操作" min-width="180" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="openEditDialog(row)">编辑</el-button>
@@ -369,6 +488,9 @@ onMounted(() => {
             v-model="createForm.user_id"
             filterable
             clearable
+            remote
+            :remote-method="onUserSearch"
+            :loading="userLoading"
             placeholder="从下拉中选择或搜索用户"
             style="width: 100%"
           >
@@ -466,6 +588,10 @@ onMounted(() => {
 
 .admin-memberships-table {
   margin-top: 4px;
+}
+
+.admin-memberships-toolbar {
+  margin-bottom: 8px;
 }
 
 .admin-memberships-pagination {

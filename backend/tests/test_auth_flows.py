@@ -113,7 +113,7 @@ def scenario_me_with_invalid_token() -> bool:
     return _log(ok, "非法 token 调 /me 场景", {"status_code": resp.status_code, "body": resp.json()})
 
 
-def run_all() -> None:
+def run_all() -> bool:
     print("=== 开始 Auth 注册/登录流程测试 ===")
 
     ctx: Dict[str, Any] = {
@@ -134,8 +134,10 @@ def run_all() -> None:
     ok &= scenario_me_with_invalid_token()
 
     print("\n=== 测试结果: {} ===".format("全部通过 ✅" if ok else "有失败 ❌"))
+    return ok
 
 
 if __name__ == "__main__":
-    run_all()
+    import sys
+    sys.exit(0 if run_all() else 1)
 

@@ -1,5 +1,5 @@
 import { http } from '../http'
-import type { AdminMembership, Page } from '../../types/admin'
+import type { AdminMembership, BatchDeleteResponse, Page } from '../../types/admin'
 
 export interface ListAdminMembershipsParams {
   page?: number
@@ -51,5 +51,9 @@ export async function updateAdminMembership(
 
 export async function deleteAdminMembership(id: string): Promise<void> {
   await http.delete<void>(`/api/admin/memberships/${id}`)
+}
+
+export async function deleteAdminMembershipsBatch(ids: string[]): Promise<BatchDeleteResponse> {
+  return http.post<BatchDeleteResponse>('/api/admin/memberships/batch-delete', { ids })
 }
 

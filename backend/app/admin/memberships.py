@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_db
 from ..groups import MAX_GROUP_MEMBERS
 from .deps import require_admin
-from .schemas import Page, PageMeta
+from .schemas import BatchDeleteRequest, BatchDeleteResponse, Page, PageMeta
 
 
 router = APIRouter(prefix="/api/admin/memberships", tags=["admin-memberships"])
@@ -30,6 +30,8 @@ class AdminMembershipOut(BaseModel):
     role: str
     status: str
     created_at: datetime
+    group_name: str | None = None
+    user_name: str | None = None
 
 
 class AdminMembershipUpdate(BaseModel):
@@ -69,35 +71,45 @@ async def list_memberships(
     params: dict[str, Any] = {}
 
     if group_id:
-        where_clauses.append("group_id = :group_id")
+        where_clauses.append("gm.group_id = :group_id")
         params["group_id"] = group_id
     if user_id:
-        where_clauses.append("user_id = :user_id")
+        where_clauses.append("gm.user_id = :user_id")
         params["user_id"] = user_id
     if status_filter:
-        where_clauses.append("status = :status")
+        where_clauses.append("gm.status = :status")
         params["status"] = status_filter
     if created_from:
-        where_clauses.append("created_at >= :created_from")
+        where_clauses.append("gm.created_at >= :created_from")
         params["created_from"] = _to_utc_naive(created_from)
     if created_to:
-        where_clauses.append("created_at <= :created_to")
+        where_clauses.append("gm.created_at <= :created_to")
         params["created_to"] = _to_utc_naive(created_to)
 
     where_sql = " AND ".join(where_clauses)
 
     count_result = await db.execute(
-        text(f"SELECT COUNT(*) AS cnt FROM group_memberships WHERE {where_sql}"),
+        text(f"SELECT COUNT(*) AS cnt FROM group_memberships gm WHERE {where_sql}"),
         params,
     )
     total = count_result.scalar_one()
 
     query = text(
         f"""
-        SELECT id, group_id, user_id, role, status, created_at
-        FROM group_memberships
+        SELECT
+          gm.id,
+          gm.group_id,
+          gm.user_id,
+          gm.role,
+          gm.status,
+          gm.created_at,
+          g.name AS group_name,
+          u.name AS user_name
+        FROM group_memberships gm
+        JOIN groups g ON g.id = gm.group_id
+        JOIN users_info u ON u.id = gm.user_id
         WHERE {where_sql}
-        ORDER BY created_at DESC
+        ORDER BY gm.created_at DESC
         LIMIT :limit OFFSET :offset
         """
     )
@@ -391,4 +403,25 @@ async def delete_membership(
             detail="成员关系不存在",
         )
     await db.commit()
+
+
+@router.post(
+    "/batch-delete",
+    response_model=BatchDeleteResponse,
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_admin)],
+)
+async def batch_delete_memberships(
+    body: BatchDeleteRequest,
+    db: AsyncSession = Depends(get_db),
+) -> BatchDeleteResponse:
+    deleted = 0
+    for mid in body.ids:
+        result = await db.execute(
+            text("DELETE FROM group_memberships WHERE id = :id"),
+            {"id": mid},
+        )
+        deleted += result.rowcount
+    await db.commit()
+    return BatchDeleteResponse(deleted=deleted)
 

@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from .deps import require_admin
-from .schemas import Page, PageMeta
+from .schemas import BatchDeleteRequest, BatchDeleteResponse, Page, PageMeta
 
 
 router = APIRouter(prefix="/api/admin/users", tags=["admin-users"])
@@ -290,4 +290,25 @@ async def delete_user(
             detail="用户不存在",
         )
     await db.commit()
+
+
+@router.post(
+    "/batch-delete",
+    response_model=BatchDeleteResponse,
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_admin)],
+)
+async def batch_delete_users(
+    body: BatchDeleteRequest,
+    db: AsyncSession = Depends(get_db),
+) -> BatchDeleteResponse:
+    deleted = 0
+    for uid in body.ids:
+        result = await db.execute(
+            text("DELETE FROM users_info WHERE id = :id"),
+            {"id": uid},
+        )
+        deleted += result.rowcount
+    await db.commit()
+    return BatchDeleteResponse(deleted=deleted)
 

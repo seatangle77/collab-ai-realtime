@@ -7,9 +7,11 @@ import {
   listAdminChatSessions,
   updateAdminChatSession,
   deleteAdminChatSession,
+  deleteAdminChatSessionsBatch,
   createAdminChatSession,
 } from '../../api/admin/chat-sessions'
 import { listAdminGroups } from '../../api/admin/groups'
+import { formatDateTimeToCST } from '../../utils/datetime'
 
 interface Filters {
   group_id: string
@@ -35,6 +37,9 @@ const filters = reactive<Filters>({
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
+
+const tableRef = ref<{ clearSelection: () => void } | null>(null)
+const selectedRows = ref<AdminChatSession[]>([])
 
 const createDialogVisible = ref(false)
 const createFormRef = ref<FormInstance>()
@@ -220,6 +225,36 @@ async function submitCreate() {
   })
 }
 
+function handleSelectionChange(rows: AdminChatSession[]) {
+  selectedRows.value = rows
+}
+
+async function handleBatchDelete() {
+  if (selectedRows.value.length === 0) return
+  try {
+    await ElMessageBox.confirm(
+      `确认删除已选 ${selectedRows.value.length} 条会话记录吗？该操作不可恢复。`,
+      '批量删除确认',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  try {
+    const ids = selectedRows.value.map((r) => r.id)
+    const res = await deleteAdminChatSessionsBatch(ids)
+    ElMessage.success(`成功删除 ${res.deleted} 条会话`)
+    tableRef.value?.clearSelection?.()
+    if (sessions.value.length === selectedRows.value.length && page.value > 1) {
+      page.value -= 1
+    }
+    fetchSessions()
+  } catch (e: any) {
+    console.error(e)
+    ElMessage.error(e?.message || '批量删除会话失败')
+  }
+}
+
 async function handleDelete(row: AdminChatSession) {
   try {
     await ElMessageBox.confirm(`确认删除会话「${row.session_title || row.id}」吗？该操作不可恢复。`, '删除确认', {
@@ -331,12 +366,42 @@ onMounted(() => {
     </el-card>
 
     <el-card class="admin-chat-sessions-table" shadow="never">
-      <el-table :data="sessions" v-loading="loading" border style="width: 100%">
+      <div class="admin-chat-sessions-toolbar">
+        <el-button
+          type="danger"
+          :disabled="selectedRows.length === 0"
+          @click="handleBatchDelete"
+        >
+          {{ selectedRows.length > 0 ? `批量删除 (${selectedRows.length})` : '批量删除' }}
+        </el-button>
+      </div>
+      <el-table
+        ref="tableRef"
+        :data="sessions"
+        v-loading="loading"
+        border
+        style="width: 100%"
+        @selection-change="handleSelectionChange"
+      >
+        <el-table-column type="selection" width="48" />
         <el-table-column prop="id" label="ID" min-width="200" show-overflow-tooltip />
         <el-table-column prop="group_id" label="群组 ID" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="group_name" label="群组名称" min-width="200" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ row.group_name || '-' }}
+          </template>
+        </el-table-column>
         <el-table-column prop="session_title" label="会话标题" min-width="200" show-overflow-tooltip />
-        <el-table-column prop="created_at" label="创建时间" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="last_updated" label="最后更新时间" min-width="180" show-overflow-tooltip />
+        <el-table-column label="创建时间" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ formatDateTimeToCST(row.created_at) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="最后更新时间" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ formatDateTimeToCST(row.last_updated) }}
+          </template>
+        </el-table-column>
         <el-table-column label="状态" min-width="120">
           <template #default="{ row }">
             <el-tag
@@ -354,7 +419,11 @@ onMounted(() => {
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="ended_at" label="结束时间" min-width="180" show-overflow-tooltip />
+        <el-table-column label="结束时间" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ formatDateTimeToCST(row.ended_at) }}
+          </template>
+        </el-table-column>
         <el-table-column label="操作" min-width="180" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="openEditDialog(row)">编辑</el-button>
@@ -488,6 +557,10 @@ onMounted(() => {
 
 .admin-chat-sessions-table {
   margin-top: 4px;
+}
+
+.admin-chat-sessions-toolbar {
+  margin-bottom: 8px;
 }
 
 .admin-chat-sessions-pagination {

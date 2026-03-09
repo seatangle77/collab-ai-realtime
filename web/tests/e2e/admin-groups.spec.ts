@@ -334,6 +334,26 @@ test.describe('Admin 群组管理 - 查询与边界', () => {
     await expect(page.getByRole('row').filter({ hasText: created.groupName })).toBeVisible()
   })
 
+  test('批量删除 - 未选时按钮禁用', async ({ page }) => {
+    await expect(page.getByRole('button', { name: '批量删除' })).toBeDisabled()
+  })
+
+  test('批量删除 - 选中两个群组并删除', async ({ page }) => {
+    const g1 = await createGroupViaAppApi()
+    const g2 = await createGroupViaAppApi()
+    await page.getByPlaceholder('按群组名称模糊搜索').fill('E2E群组')
+    await page.getByRole('button', { name: '查询' }).click()
+    const row1 = page.getByRole('row').filter({ hasText: g1.groupName }).first()
+    const row2 = page.getByRole('row').filter({ hasText: g2.groupName }).first()
+    await row1.locator('.el-checkbox').first().click()
+    await row2.locator('.el-checkbox').first().click()
+    await page.getByRole('button', { name: /批量删除 \(2\)/ }).click()
+    await page.getByRole('button', { name: '删除' }).last().click()
+    await expect(page.getByText('成功删除 2 条群组')).toBeVisible()
+    await expect(page.getByRole('row').filter({ hasText: g1.groupName })).toHaveCount(0)
+    await expect(page.getByRole('row').filter({ hasText: g2.groupName })).toHaveCount(0)
+  })
+
   test('重置筛选 - 条件清空且列表恢复', async ({ page }) => {
     await page.getByPlaceholder('按群组名称模糊搜索').fill('不存在的群组名')
     await page.getByRole('button', { name: '查询' }).click()

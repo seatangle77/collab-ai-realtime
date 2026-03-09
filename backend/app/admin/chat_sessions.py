@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_db
 from ..groups import _get_group_or_404
 from .deps import require_admin
-from .schemas import Page, PageMeta
+from .schemas import BatchDeleteRequest, BatchDeleteResponse, Page, PageMeta
 
 
 router = APIRouter(prefix="/api/admin/chat-sessions", tags=["admin-chat-sessions"])
@@ -27,6 +27,7 @@ def _to_utc_naive(dt: datetime) -> datetime:
 class AdminChatSessionOut(BaseModel):
     id: str
     group_id: str
+    group_name: str | None = None
     session_title: str
     created_at: Any
     last_updated: Any
@@ -81,7 +82,7 @@ async def list_chat_sessions(
     params: dict[str, Any] = {}
 
     if group_id:
-        where_clauses.append("group_id = :group_id")
+        where_clauses.append("cs.group_id = :group_id")
         params["group_id"] = group_id
 
     # 状态优先：若显式传入 status（status_param），则按照 not_started/ongoing/ended 三态进行筛选；
@@ -89,57 +90,66 @@ async def list_chat_sessions(
     if status_param is not None:
         # not_started: 认为是尚未有任何更新/结束的会话，使用 created_at == last_updated 且尚未结束 近似 表示
         if status_param == "not_started":
-            where_clauses.append("ended_at IS NULL AND created_at = last_updated")
+            where_clauses.append("cs.ended_at IS NULL AND cs.created_at = cs.last_updated")
         # ongoing: 认为是已经有过更新但尚未结束的会话
         elif status_param == "ongoing":
-            where_clauses.append("ended_at IS NULL AND created_at <> last_updated")
+            where_clauses.append("cs.ended_at IS NULL AND cs.created_at <> cs.last_updated")
         # ended: 结束时间非空即视为已结束
         elif status_param == "ended":
-            where_clauses.append("ended_at IS NOT NULL")
+            where_clauses.append("cs.ended_at IS NOT NULL")
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="无效的会话状态",
             )
     elif is_active is not None:
-        where_clauses.append("is_active = :is_active")
+        where_clauses.append("cs.is_active = :is_active")
         params["is_active"] = is_active
     if title:
-        where_clauses.append("session_title ILIKE :title")
+        where_clauses.append("cs.session_title ILIKE :title")
         params["title"] = f"%{title}%"
     if created_from:
-        where_clauses.append("created_at >= :created_from")
+        where_clauses.append("cs.created_at >= :created_from")
         params["created_from"] = _to_utc_naive(created_from)
     if created_to:
-        where_clauses.append("created_at <= :created_to")
+        where_clauses.append("cs.created_at <= :created_to")
         params["created_to"] = _to_utc_naive(created_to)
     if last_updated_from:
-        where_clauses.append("last_updated >= :last_updated_from")
+        where_clauses.append("cs.last_updated >= :last_updated_from")
         params["last_updated_from"] = _to_utc_naive(last_updated_from)
     if last_updated_to:
-        where_clauses.append("last_updated <= :last_updated_to")
+        where_clauses.append("cs.last_updated <= :last_updated_to")
         params["last_updated_to"] = _to_utc_naive(last_updated_to)
     if ended_from:
-        where_clauses.append("ended_at >= :ended_from")
+        where_clauses.append("cs.ended_at >= :ended_from")
         params["ended_from"] = _to_utc_naive(ended_from)
     if ended_to:
-        where_clauses.append("ended_at <= :ended_to")
+        where_clauses.append("cs.ended_at <= :ended_to")
         params["ended_to"] = _to_utc_naive(ended_to)
 
     where_sql = " AND ".join(where_clauses)
 
     count_result = await db.execute(
-        text(f"SELECT COUNT(*) AS cnt FROM chat_sessions WHERE {where_sql}"),
+        text(f"SELECT COUNT(*) AS cnt FROM chat_sessions cs WHERE {where_sql}"),
         params,
     )
     total = count_result.scalar_one()
 
     query = text(
         f"""
-        SELECT id, group_id, session_title, created_at, last_updated, is_active, ended_at
-        FROM chat_sessions
+        SELECT
+            cs.id,
+            cs.group_id,
+            cs.session_title,
+            cs.created_at,
+            cs.last_updated,
+            cs.is_active,
+            cs.ended_at,
+            g.name AS group_name
+        FROM chat_sessions cs
+        JOIN groups g ON g.id = cs.group_id
         WHERE {where_sql}
-        ORDER BY last_updated DESC, created_at DESC
+        ORDER BY cs.last_updated DESC, cs.created_at DESC
         LIMIT :limit OFFSET :offset
         """
     )
@@ -331,4 +341,25 @@ async def delete_chat_session(
             detail="会话不存在",
         )
     await db.commit()
+
+
+@router.post(
+    "/batch-delete",
+    response_model=BatchDeleteResponse,
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_admin)],
+)
+async def batch_delete_chat_sessions(
+    body: BatchDeleteRequest,
+    db: AsyncSession = Depends(get_db),
+) -> BatchDeleteResponse:
+    deleted = 0
+    for sid in body.ids:
+        result = await db.execute(
+            text("DELETE FROM chat_sessions WHERE id = :id"),
+            {"id": sid},
+        )
+        deleted += result.rowcount
+    await db.commit()
+    return BatchDeleteResponse(deleted=deleted)
 

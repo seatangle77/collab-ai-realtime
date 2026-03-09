@@ -1,5 +1,5 @@
 import { http } from '../http'
-import type { AdminChatSession, Page } from '../../types/admin'
+import type { AdminChatSession, BatchDeleteResponse, Page } from '../../types/admin'
 
 export interface ListAdminChatSessionsParams {
   page?: number
@@ -64,5 +64,9 @@ export async function updateAdminChatSession(
 
 export async function deleteAdminChatSession(id: string): Promise<void> {
   await http.delete<void>(`/api/admin/chat-sessions/${id}`)
+}
+
+export async function deleteAdminChatSessionsBatch(ids: string[]): Promise<BatchDeleteResponse> {
+  return http.post<BatchDeleteResponse>('/api/admin/chat-sessions/batch-delete', { ids })
 }
 

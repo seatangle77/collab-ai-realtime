@@ -3,7 +3,8 @@ import { onMounted, reactive, ref } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { AdminGroup } from '../../types/admin'
-import { listAdminGroups, deleteAdminGroup, updateAdminGroup, createAdminGroup } from '../../api/admin/groups'
+import { listAdminGroups, deleteAdminGroup, deleteAdminGroupsBatch, updateAdminGroup, createAdminGroup } from '../../api/admin/groups'
+import { formatDateTimeToCST } from '../../utils/datetime'
 
 interface Filters {
   name: string
@@ -23,6 +24,9 @@ const filters = reactive<Filters>({
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
+
+const tableRef = ref<{ clearSelection: () => void } | null>(null)
+const selectedRows = ref<AdminGroup[]>([])
 
 const editDialogVisible = ref(false)
 const editFormRef = ref<FormInstance>()
@@ -147,6 +151,36 @@ async function submitCreate() {
   })
 }
 
+function handleSelectionChange(rows: AdminGroup[]) {
+  selectedRows.value = rows
+}
+
+async function handleBatchDelete() {
+  if (selectedRows.value.length === 0) return
+  try {
+    await ElMessageBox.confirm(
+      `确认删除已选 ${selectedRows.value.length} 条群组记录吗？该操作不可恢复。`,
+      '批量删除确认',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  try {
+    const ids = selectedRows.value.map((r) => r.id)
+    const res = await deleteAdminGroupsBatch(ids)
+    ElMessage.success(`成功删除 ${res.deleted} 条群组`)
+    tableRef.value?.clearSelection?.()
+    if (groups.value.length === selectedRows.value.length && page.value > 1) {
+      page.value -= 1
+    }
+    fetchGroups()
+  } catch (e: any) {
+    console.error(e)
+    ElMessage.error(e?.message || '批量删除群组失败')
+  }
+}
+
 async function handleDelete(row: AdminGroup) {
   try {
     await ElMessageBox.confirm(`确认删除群组「${row.name}」吗？该操作不可恢复。`, '删除确认', {
@@ -224,10 +258,31 @@ onMounted(() => {
     </el-card>
 
     <el-card class="admin-groups-table" shadow="never">
-      <el-table :data="groups" v-loading="loading" border style="width: 100%">
+      <div class="admin-groups-toolbar">
+        <el-button
+          type="danger"
+          :disabled="selectedRows.length === 0"
+          @click="handleBatchDelete"
+        >
+          {{ selectedRows.length > 0 ? `批量删除 (${selectedRows.length})` : '批量删除' }}
+        </el-button>
+      </div>
+      <el-table
+        ref="tableRef"
+        :data="groups"
+        v-loading="loading"
+        border
+        style="width: 100%"
+        @selection-change="handleSelectionChange"
+      >
+        <el-table-column type="selection" width="48" />
         <el-table-column prop="id" label="ID" min-width="200" show-overflow-tooltip />
         <el-table-column prop="name" label="名称" min-width="160" show-overflow-tooltip />
-        <el-table-column prop="created_at" label="创建时间" min-width="180" show-overflow-tooltip />
+        <el-table-column label="创建时间" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ formatDateTimeToCST(row.created_at) }}
+          </template>
+        </el-table-column>
         <el-table-column label="状态" min-width="100">
           <template #default="{ row }">
             <el-tag :type="row.is_active ? 'success' : 'info'">
@@ -326,6 +381,10 @@ onMounted(() => {
 
 .admin-groups-table {
   margin-top: 4px;
+}
+
+.admin-groups-toolbar {
+  margin-bottom: 8px;
 }
 
 .admin-groups-pagination {

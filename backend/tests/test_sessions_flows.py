@@ -288,7 +288,7 @@ def scenario_transcripts_permissions(ctx: Dict[str, Any]) -> bool:
 # ---------- 总入口 ----------
 
 
-def run_all() -> None:
+def run_all() -> bool:
     print("=== 开始 Sessions 会话相关功能测试 ===")
     ctx: Dict[str, Any] = {}
 
@@ -296,7 +296,7 @@ def run_all() -> None:
     ok &= setup_group_with_members(ctx)
     if not ok:
         print("准备阶段失败，后续场景跳过 ❌")
-        return
+        return False
 
     ok &= scenario_create_sessions(ctx)
     ok &= scenario_list_sessions(ctx)
@@ -305,8 +305,10 @@ def run_all() -> None:
     ok &= scenario_transcripts_permissions(ctx)
 
     print("\n=== Sessions 测试结果: {} ===".format("全部通过 ✅" if ok else "有失败 ❌"))
+    return ok
 
 
 if __name__ == "__main__":
-    run_all()
+    import sys
+    sys.exit(0 if run_all() else 1)
 
