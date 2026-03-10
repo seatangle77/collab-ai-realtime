@@ -24,7 +24,8 @@ def _log(ok: bool, message: str, extra: Any | None = None) -> bool:
 def register_and_login(label: str) -> Dict[str, Any]:
     """注册并登录一个用户，返回 dict：{ user, access_token }。"""
     email = f"admin_member_{label}_{uuid.uuid4().hex[:6]}@example.com"
-    password = "test_password_123"
+    # 与 /api/auth/register 的密码规则保持一致：必须为 4 位
+    password = "1234"
 
     r = requests.post(
         f"{BASE_URL}/api/auth/register",
