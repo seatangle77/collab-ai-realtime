@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { formatDateTimeToCST } from '../../utils/datetime'
+import { listMyGroups } from '../../api/appGroups'
 import {
   type AppChatSession,
   type AppTranscript,
@@ -75,15 +76,20 @@ const activeFilter = ref<SessionFilter>('active')
 const includeEndedLoaded = ref(false)
 const allSessionsCache = ref<AppChatSession[] | null>(null)
 
+const myGroups = ref<AppGroupSummary[]>([])
+const groupsLoading = ref(false)
+
 const createDialogVisible = ref(false)
 const createFormRef = ref<FormInstance>()
 const createForm = reactive({
   sessionTitle: '',
   plannedStart: null as string | null,
+  groupId: '' as string,
 })
 
 const createRules: FormRules<typeof createForm> = {
   sessionTitle: [{ required: true, message: '请输入会话标题', trigger: 'blur' }],
+  groupId: [{ required: true, message: '请选择所属群组', trigger: 'change' }],
 }
 
 const editDialogVisible = ref(false)
@@ -165,6 +171,29 @@ async function fetchSessions(filter: SessionFilter = activeFilter.value) {
   }
 }
 
+async function fetchMyGroupsForSessions() {
+  groupsLoading.value = true
+  try {
+    const data = await listMyGroups()
+    // 只保留 id/name 字段
+    myGroups.value = data.map((g) => ({ id: g.id, name: g.name }))
+
+    // 如果当前没有已选群组，但用户有群组，默认选第一个群组
+    if (!currentGroup.value && myGroups.value.length) {
+      const first = myGroups.value[0]
+      currentGroup.value = { id: first.id, name: first.name }
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('app_current_group', JSON.stringify(currentGroup.value))
+      }
+    }
+  } catch (err) {
+    console.error(err)
+    ElMessage.error(extractErrorMessage(err))
+  } finally {
+    groupsLoading.value = false
+  }
+}
+
 function handleFilterChange(filter: SessionFilter) {
   if (activeFilter.value === filter) return
   activeFilter.value = filter
@@ -177,13 +206,24 @@ function handleFilterChange(filter: SessionFilter) {
   }
 }
 
-function openCreateDialog() {
-  if (!currentGroup.value) {
-    ElMessage.info('请先在「我的群组」中选择或加入一个群组')
+async function openCreateDialog() {
+  // 确保群组列表已加载（无论当前是否在 loading 中，都先等一次拉取结束）
+  if (!myGroups.value.length) {
+    await fetchMyGroupsForSessions()
+  }
+  if (!myGroups.value.length) {
+    ElMessage.info('你还没有加入任何群组，请先在「我的群组」中创建或加入群组')
     return
   }
+
+  // 默认选当前群组；若当前群组不在列表中，则选第一个
+  const currentId = currentGroup.value?.id
+  const defaultId =
+    currentId && myGroups.value.some((g) => g.id === currentId) ? currentId : myGroups.value[0].id
+
   createForm.sessionTitle = ''
   createForm.plannedStart = null
+  createForm.groupId = defaultId
   createDialogVisible.value = true
 }
 
@@ -192,17 +232,34 @@ async function submitCreate() {
   await createFormRef.value.validate(async (valid) => {
     if (!valid) return
     try {
+      const targetGroupId = createForm.groupId
       const options: Parameters<typeof createSession>[2] = {}
       if (createForm.plannedStart) {
         options.createdAt = createForm.plannedStart
         options.lastUpdatedAt = createForm.plannedStart
       }
-      const created = await createSession(currentGroup.value!.id, createForm.sessionTitle, options)
+      const created = await createSession(targetGroupId, createForm.sessionTitle, options)
       ElMessage.success('创建会话成功')
       createDialogVisible.value = false
-      // 将新建的会话插入当前列表顶部，保证立即可见
-      sessions.value = [created, ...sessions.value]
-      // 再次拉取以与服务端状态对齐（例如排序规则）
+
+      const currentId = currentGroup.value?.id
+
+      // 若新建会话在当前群组下，直接插入列表顶部保证立即可见
+      if (currentId && currentId === targetGroupId) {
+        sessions.value = [created, ...sessions.value]
+      } else {
+        // 否则自动切换当前群组到目标群组
+        const g = myGroups.value.find((x) => x.id === targetGroupId)
+        if (g) {
+          const cg = { id: g.id, name: g.name }
+          currentGroup.value = cg
+          if (typeof window !== 'undefined') {
+            window.localStorage.setItem('app_current_group', JSON.stringify(cg))
+          }
+        }
+      }
+
+      // 再次拉取以与服务端状态对齐（例如排序规则/最新状态）
       void fetchSessions(activeFilter.value)
     } catch (err) {
       console.error(err)
@@ -283,6 +340,7 @@ function goToGroups() {
 }
 
 onMounted(() => {
+  void fetchMyGroupsForSessions()
   if (currentGroup.value) {
     void fetchSessions('active')
   }
@@ -394,6 +452,21 @@ onMounted(() => {
 
     <el-dialog v-model="createDialogVisible" title="新建会话" width="420px">
       <el-form ref="createFormRef" :model="createForm" :rules="createRules" label-width="80px">
+        <el-form-item label="所属群组" prop="groupId">
+          <el-select
+            v-model="createForm.groupId"
+            placeholder="请选择所属群组"
+            :loading="groupsLoading"
+            :disabled="!myGroups.length"
+          >
+            <el-option
+              v-for="g in myGroups"
+              :key="g.id"
+              :label="g.name"
+              :value="g.id"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="会话标题" prop="sessionTitle">
           <el-input v-model="createForm.sessionTitle" placeholder="请输入这次会话的标题" />
         </el-form-item>
