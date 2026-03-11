@@ -46,6 +46,11 @@ const routes: RouteRecordRaw[] = [
         name: 'AppSessions',
         component: () => import('../views/app/AppSessions.vue'),
       },
+      {
+        path: 'voice-profile',
+        name: 'AppVoiceProfile',
+        component: () => import('../views/app/AppVoiceProfile.vue'),
+      },
     ],
   },
   // 管理后台路由
@@ -81,6 +86,16 @@ const routes: RouteRecordRaw[] = [
         path: 'chat-sessions',
         name: 'AdminChatSessions',
         component: () => import('../views/admin/AdminChatSessionsPage.vue'),
+      },
+      {
+        path: 'voice-profiles',
+        name: 'AdminVoiceProfiles',
+        component: () => import('../views/admin/AdminVoiceProfilesPage.vue'),
+      },
+      {
+        path: 'voice-profiles/:id',
+        name: 'AdminVoiceProfileDetail',
+        component: () => import('../views/admin/AdminVoiceProfileDetail.vue'),
       },
     ],
   },

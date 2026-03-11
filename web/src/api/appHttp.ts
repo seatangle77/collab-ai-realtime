@@ -32,6 +32,12 @@ async function request<T>(url: string, init: RequestInit = {}, config: AppHttpCo
 
   if (response.status === 401 || response.status === 403) {
     if (typeof window !== 'undefined') {
+      try {
+        const { ElMessage } = await import('element-plus')
+        ElMessage.error('登录已过期或未授权，请重新登录')
+      } catch {
+        // ElementPlus 未加载时忽略
+      }
       const redirect = encodeURIComponent(window.location.pathname + window.location.search)
       window.location.href = `/app/login?redirect=${redirect}`
     }
@@ -57,6 +63,15 @@ export const appHttp = {
       url,
       {
         method: 'POST',
+        body: body != null ? JSON.stringify(body) : undefined,
+      },
+      config,
+    ),
+  put: <T>(url: string, body?: unknown, config?: AppHttpConfig) =>
+    request<T>(
+      url,
+      {
+        method: 'PUT',
         body: body != null ? JSON.stringify(body) : undefined,
       },
       config,

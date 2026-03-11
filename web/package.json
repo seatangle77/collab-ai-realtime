@@ -13,10 +13,12 @@
     "test:e2e:groups": "playwright test tests/e2e/admin-groups.spec.ts",
     "test:e2e:memberships": "playwright test tests/e2e/admin-memberships.spec.ts",
     "test:e2e:chat-sessions": "playwright test tests/e2e/admin-chat-sessions.spec.ts",
+    "test:e2e:voice-profiles": "playwright test tests/e2e/admin-voice-profiles.spec.ts",
     "test:e2e:app-auth": "playwright test tests/e2e/app-auth.spec.ts",
     "test:e2e:app-main": "playwright test tests/e2e/app-main.spec.ts",
     "test:e2e:app-groups": "playwright test tests/e2e/app-groups.spec.ts",
-    "test:e2e:app-sessions": "playwright test tests/e2e/app-sessions.spec.ts"
+    "test:e2e:app-sessions": "playwright test tests/e2e/app-sessions.spec.ts",
+    "test:e2e:app-voice-profile": "playwright test tests/e2e/app-voice-profile.spec.ts"
   },
   "dependencies": {
     "vue": "^3.5.25",

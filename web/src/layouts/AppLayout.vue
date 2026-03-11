@@ -21,6 +21,7 @@ const tabs = computed(() => [
   { path: '/app', label: '首页' },
   { path: '/app/groups', label: '我的群组' },
   { path: '/app/sessions', label: '我的会话' },
+  { path: '/app/voice-profile', label: '我的声纹' },
 ])
 
 const active = computed(() => (route.path.startsWith('/app') ? route.path : '/app'))
@@ -52,12 +53,6 @@ const currentGroup = computed<AppGroupSummary | null>(() => {
   }
 })
 
-function go(path: string) {
-  if (path !== route.path) {
-    router.push(path)
-  }
-}
-
 function goAuth() {
   router.push('/app/login')
 }
@@ -77,16 +72,15 @@ function logout() {
     <header class="app-header">
       <div class="app-logo">Collab AI</div>
       <nav class="app-nav">
-        <button
+        <RouterLink
           v-for="tab in tabs"
           :key="tab.path"
+          :to="tab.path"
           class="app-nav-item"
           :data-active="active === tab.path"
-          type="button"
-          @click="go(tab.path)"
         >
           {{ tab.label }}
-        </button>
+        </RouterLink>
       </nav>
       <div class="app-header-right">
         <div v-if="isLoggedIn && currentUser" class="app-user-info">
@@ -162,6 +156,7 @@ function logout() {
 }
 
 .app-nav-item {
+  display: inline-block;
   border-radius: 999px;
   border: 1px solid transparent;
   padding: 8px 16px;
@@ -169,6 +164,7 @@ function logout() {
   background: transparent;
   cursor: pointer;
   color: #4b5563;
+  text-decoration: none;
   transition:
     background-color 0.18s ease,
     border-color 0.18s ease,

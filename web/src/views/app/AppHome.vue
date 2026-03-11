@@ -52,7 +52,7 @@ const currentGroup = computed<AppGroupSummary | null>(() => {
       </p>
       <p class="app-home-desc">
         这里将是普通用户使用协作与会话功能的入口。你可以在「我的群组」中加入或管理协作群组，
-        并在「我的会话」中查看与 Collab AI 的历史会话。
+        在「我的会话」中查看与 Collab AI 的历史会话，在「我的声纹」中管理声纹样本并生成声纹。
       </p>
     </div>
   </div>

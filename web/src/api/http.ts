@@ -60,6 +60,15 @@ export const http = {
       },
       config,
     ),
+  put: <T>(url: string, body?: unknown, config?: HttpConfig) =>
+    request<T>(
+      url,
+      {
+        method: 'PUT',
+        body: body != null ? JSON.stringify(body) : undefined,
+      },
+      config,
+    ),
   patch: <T>(url: string, body?: unknown, config?: HttpConfig) =>
     request<T>(
       url,

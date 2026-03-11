@@ -53,5 +53,33 @@ export interface AdminChatSession {
   ended_at: string | null
 }
 
+export interface AdminVoiceProfileSummary {
+  id: string
+  user_id: string
+  user_name?: string | null
+  user_email?: string | null
+  primary_group_id?: string | null
+  primary_group_name?: string | null
+  sample_count: number
+  has_embedding: boolean
+  created_at: string
+}
 
+/** 声纹配置详情中的 profile 部分（与后端 VoiceProfileOut 一致） */
+export interface AdminVoiceProfileDetailProfile {
+  id: string
+  user_id: string
+  sample_audio_urls: string[]
+  created_at: string
+  voice_embedding: Record<string, unknown> | null
+}
+
+/** 后台 GET 详情接口返回：嵌套 profile + 用户/小组信息 */
+export interface AdminVoiceProfileDetail {
+  profile: AdminVoiceProfileDetailProfile
+  user_name?: string | null
+  user_email?: string | null
+  primary_group_id?: string | null
+  primary_group_name?: string | null
+}
 
