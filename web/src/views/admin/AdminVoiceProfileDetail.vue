@@ -6,6 +6,7 @@ import {
   getAdminVoiceProfileDetail,
   updateAdminVoiceProfileSamples,
   generateAdminVoiceProfileEmbedding,
+  uploadAdminVoiceProfileSample,
 } from '../../api/admin/voice-profiles'
 import type { AdminVoiceProfileDetail } from '../../types/admin'
 import { formatDateTimeToCST } from '../../utils/datetime'
@@ -21,11 +22,18 @@ function goBackToList() {
 const loading = ref(false)
 const savingSamples = ref(false)
 const generating = ref(false)
+const isRecording = ref(false)
+const isUploading = ref(false)
 
 const detail = ref<AdminVoiceProfileDetail | null>(null)
 const editableUrls = ref<string[]>([])
 
 const newUrlInput = ref('')
+const recordedChunks = ref<BlobPart[]>([])
+const recordingDuration = ref(0)
+const previewUrl = ref<string | null>(null)
+const mediaRecorder = ref<MediaRecorder | null>(null)
+let recordingTimer: number | undefined
 
 const hasEmbedding = computed(() => !!detail.value?.profile.voice_embedding)
 
@@ -111,6 +119,98 @@ async function handleGenerateEmbedding() {
   }
 }
 
+async function startRecording() {
+  if (isRecording.value) return
+  if (editableUrls.value.length >= 5) {
+    ElMessage.warning('已达到最多 5 条样本，无法继续录音')
+    return
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    const mr = new MediaRecorder(stream, { mimeType: 'audio/webm' })
+    recordedChunks.value = []
+    recordingDuration.value = 0
+
+    mr.ondataavailable = (event: BlobEvent) => {
+      if (event.data.size > 0) {
+        recordedChunks.value.push(event.data)
+      }
+    }
+
+    mr.onstop = () => {
+      window.clearInterval(recordingTimer)
+      if (previewUrl.value) {
+        URL.revokeObjectURL(previewUrl.value)
+        previewUrl.value = null
+      }
+      if (recordedChunks.value.length) {
+        const blob = new Blob(recordedChunks.value, { type: 'audio/webm' })
+        previewUrl.value = URL.createObjectURL(blob)
+      }
+    }
+
+    mr.start()
+    isRecording.value = true
+    mediaRecorder.value = mr
+
+    recordingTimer = window.setInterval(() => {
+      recordingDuration.value += 1
+    }, 1000)
+  } catch (err: any) {
+    console.error(err)
+    ElMessage.error('无法访问麦克风，请检查浏览器权限设置')
+  }
+}
+
+function stopRecording() {
+  if (!isRecording.value || !mediaRecorder.value) return
+  mediaRecorder.value.stop()
+  mediaRecorder.value.stream.getTracks().forEach((t) => t.stop())
+  isRecording.value = false
+}
+
+function resetRecording() {
+  if (isRecording.value) {
+    stopRecording()
+  }
+  recordedChunks.value = []
+  recordingDuration.value = 0
+  if (previewUrl.value) {
+    URL.revokeObjectURL(previewUrl.value)
+    previewUrl.value = null
+  }
+}
+
+async function handleUploadRecordedSample() {
+  if (!detail.value) return
+  if (!recordedChunks.value.length) {
+    ElMessage.warning('请先录制一段音频')
+    return
+  }
+  if (editableUrls.value.length >= 5) {
+    ElMessage.warning('已达到最多 5 条样本')
+    return
+  }
+
+  const blob = new Blob(recordedChunks.value, { type: 'audio/webm' })
+  const file = new File([blob], `voice-sample-${Date.now()}.webm`, { type: blob.type })
+
+  isUploading.value = true
+  try {
+    const { url } = await uploadAdminVoiceProfileSample(detail.value.profile.id, file)
+    editableUrls.value = [...editableUrls.value, url]
+    await handleSaveSamples()
+    ElMessage.success('录音已上传并添加到样本列表')
+    resetRecording()
+  } catch (err: any) {
+    console.error(err)
+    ElMessage.error(err?.message || '上传录音失败')
+  } finally {
+    isUploading.value = false
+  }
+}
+
 onMounted(() => {
   void fetchDetail()
 })
@@ -149,7 +249,46 @@ onMounted(() => {
         </el-descriptions>
 
         <el-divider content-position="left">样本列表</el-divider>
-        <p class="hint">增删样本 URL 后保存，再可点击「重新生成声纹」。</p>
+        <p class="hint">
+          可以直接在页面录音上传，或手动编辑样本 URL。增删样本后保存，再可点击「重新生成声纹」。
+        </p>
+        <el-card class="record-card" shadow="never">
+          <div class="record-controls">
+            <el-button
+              type="primary"
+              size="default"
+              :disabled="isRecording || editableUrls.length >= 10"
+              @click="startRecording"
+            >
+              开始录音
+            </el-button>
+            <el-button type="warning" size="default" :disabled="!isRecording" @click="stopRecording">
+              停止
+            </el-button>
+            <el-button
+              size="default"
+              :disabled="isRecording || !recordedChunks.length"
+              @click="resetRecording"
+            >
+              重录
+            </el-button>
+            <span v-if="isRecording" class="recording-indicator">录音中... {{ recordingDuration }}s</span>
+            <span v-else class="recording-hint">每段建议控制在 10–15 秒内</span>
+          </div>
+          <div v-if="previewUrl" class="record-preview">
+            <p class="preview-title">录音预览</p>
+            <audio :src="previewUrl" controls class="preview-audio" />
+            <el-button
+              type="success"
+              size="default"
+              :loading="isUploading"
+              :disabled="editableUrls.length >= 10"
+              @click="handleUploadRecordedSample"
+            >
+              上传并添加为样本
+            </el-button>
+          </div>
+        </el-card>
         <div class="samples-editor">
           <div class="samples-list">
             <div
@@ -159,6 +298,12 @@ onMounted(() => {
             >
               <span class="sample-index">样本 {{ idx + 1 }}</span>
               <el-input v-model="editableUrls[idx]" size="default" class="sample-input" />
+              <audio
+                v-if="url"
+                :src="url"
+                controls
+                class="sample-audio"
+              />
               <el-button type="danger" plain size="default" @click="handleRemoveUrl(idx)">删除</el-button>
             </div>
             <div v-if="editableUrls.length === 0" class="samples-empty">暂无样本，请在下行添加 URL。</div>
@@ -277,6 +422,47 @@ onMounted(() => {
   color: #6b7280;
 }
 
+.record-card {
+  border-radius: 10px;
+  background: #f9fafb;
+  margin-bottom: 12px;
+}
+
+.record-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+}
+
+.recording-indicator {
+  font-size: 13px;
+  color: #dc2626;
+}
+
+.recording-hint {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.record-preview {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+}
+
+.preview-title {
+  margin: 0;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.preview-audio {
+  flex-shrink: 0;
+}
+
 .samples-editor {
   display: flex;
   flex-direction: column;
@@ -306,6 +492,11 @@ onMounted(() => {
 .sample-input {
   flex: 1;
   min-width: 0;
+}
+
+.sample-audio {
+  flex-shrink: 0;
+  max-width: 160px;
 }
 
 .samples-empty {

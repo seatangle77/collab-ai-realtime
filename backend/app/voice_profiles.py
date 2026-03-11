@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import json
+import shutil
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Mapping
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import get_current_user
+from .config_voice import VOICE_AUDIO_BASE_DIR, VOICE_AUDIO_PUBLIC_BASE_URL
 from .db import get_db
 
 
@@ -31,10 +34,22 @@ class UpdateSamplesRequest(BaseModel):
     @field_validator("sample_audio_urls")
     @classmethod
     def validate_sample_audio_urls(cls, v: list[str]) -> list[str]:
-        max_samples = 10
+        max_samples = 5
         if len(v) > max_samples:
             raise ValueError(f"最多支持 {max_samples} 条语音样本")
         return v
+
+
+class UploadAudioResponse(BaseModel):
+    url: str
+
+
+ALLOWED_AUDIO_CONTENT_TYPES: set[str] = {
+    "audio/webm",
+    "audio/ogg",
+    "audio/mpeg",
+    "audio/wav",
+}
 
 
 def _utc_now_naive() -> datetime:
@@ -212,4 +227,59 @@ async def generate_my_voice_embedding(
 
     await db.commit()
     return _row_to_profile(row)
+
+
+@router.post(
+    "/me/upload-audio",
+    response_model=UploadAudioResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def upload_my_voice_sample(
+    file: UploadFile = File(...),
+    current_user: Mapping[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> UploadAudioResponse:
+    """
+    上传一段音频到挂载的对象存储目录，并返回可访问的 URL。
+    不直接修改样本列表，前端拿到 URL 后再调用 /me/samples 进行保存。
+    """
+    user_id = current_user["id"]
+    profile = await _get_or_create_profile(user_id=user_id, db=db)
+
+    if len(profile.sample_audio_urls) >= 5:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="最多支持 5 条语音样本",
+        )
+
+    if file.content_type not in ALLOWED_AUDIO_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="不支持的音频格式",
+        )
+
+    ext = ".webm"
+    if file.content_type == "audio/mpeg":
+        ext = ".mp3"
+    elif file.content_type == "audio/wav":
+        ext = ".wav"
+    elif file.content_type == "audio/ogg":
+        ext = ".ogg"
+
+    filename = f"{uuid.uuid4().hex}{ext}"
+
+    base_dir: Path = VOICE_AUDIO_BASE_DIR
+    dest_dir = base_dir / user_id
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest_path = dest_dir / filename
+
+    try:
+        with dest_path.open("wb") as f:
+            shutil.copyfileobj(file.file, f)
+    finally:
+        file.file.close()
+
+    public_url = f"{VOICE_AUDIO_PUBLIC_BASE_URL}/{user_id}/{filename}"
+    return UploadAudioResponse(url=public_url)
+
 

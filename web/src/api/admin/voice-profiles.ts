@@ -16,6 +16,10 @@ export interface ListAdminVoiceProfilesParams {
 
 export type AdminVoiceProfilePage = Page<AdminVoiceProfileSummary>
 
+export interface AdminUploadAudioResponse {
+  url: string
+}
+
 export async function listAdminVoiceProfiles(
   params: ListAdminVoiceProfilesParams,
 ): Promise<AdminVoiceProfilePage> {
@@ -49,4 +53,16 @@ export async function generateAdminVoiceProfileEmbedding(
 ): Promise<AdminVoiceProfileDetailProfile> {
   return http.post<AdminVoiceProfileDetailProfile>(`/api/admin/voice-profiles/${id}/generate-embedding`)
 }
+
+export async function uploadAdminVoiceProfileSample(
+  id: string,
+  file: File,
+): Promise<AdminUploadAudioResponse> {
+  const formData = new FormData()
+  formData.append('file', file)
+
+  // 同样不手动设置 Content-Type，避免 multipart 边界缺失导致后端解析失败
+  return http.post<AdminUploadAudioResponse>(`/api/admin/voice-profiles/${id}/upload-audio`, formData)
+}
+
 

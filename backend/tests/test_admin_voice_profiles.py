@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import uuid
 from typing import Any, Dict, Tuple
 
@@ -162,6 +163,26 @@ def scenario_admin_update_samples_and_generate_embedding() -> bool:
     ok &= isinstance(emb, dict) and emb.get("generated_at") is not None
 
     return _log(ok, "admin 更新样本并生成声纹场景", {"updated": updated, "generated": gen})
+
+
+def scenario_admin_update_samples_too_many() -> bool:
+  """
+  管理端通过 samples 接口一次性写入超过 5 条样本时应被拒绝。
+  """
+  _, profile = _create_profile_with_samples("AdminTooManySamples", sample_count=0)
+
+  urls = [f"https://example.com/admin-too-many-{i}.wav" for i in range(6)]
+  r_update = requests.put(
+      f"{BASE_URL}/api/admin/voice-profiles/{profile['id']}/samples",
+      headers=ADMIN_HEADERS,
+      json={"sample_audio_urls": urls},
+  )
+  ok = r_update.status_code in (400, 422)
+  return _log(
+      ok,
+      "admin 一次性写入超过 5 条样本被拒绝场景",
+      {"status_code": r_update.status_code, "body": r_update.text},
+  )
 
 
 def scenario_admin_generate_embedding_without_samples() -> bool:
@@ -349,6 +370,167 @@ def scenario_admin_missing_or_wrong_token() -> bool:
     return ok
 
 
+def scenario_admin_upload_audio_success() -> bool:
+    """
+    管理端为已有声纹配置上传音频成功场景。
+    """
+    user, profile = _create_profile_with_samples("AdminUploadOk", sample_count=1)
+
+    dummy_audio = io.BytesIO(b"RIFF....fakewav")
+    files = {
+        "file": ("sample.wav", dummy_audio, "audio/wav"),
+    }
+
+    r = requests.post(
+        f"{BASE_URL}/api/admin/voice-profiles/{profile['id']}/upload-audio",
+        headers=ADMIN_HEADERS,
+        files=files,
+    )
+    if r.status_code != 200:
+        return _log(
+            False,
+            "admin 上传音频失败（期望 200）",
+            {"status_code": r.status_code, "body": r.text},
+        )
+
+    data = r.json()
+    url = data.get("url")
+
+    ok = True
+    ok &= isinstance(url, str) and len(url) > 0
+    ok &= "/audio/voice-profiles/" in url
+    ok &= user["id"] in url
+
+    # 验证 upload 接口本身不会修改样本列表，需要单独调用 samples 接口
+    r_detail_before = requests.get(
+        f"{BASE_URL}/api/admin/voice-profiles/{profile['id']}",
+        headers=ADMIN_HEADERS,
+    )
+    r_detail_before.raise_for_status()
+    profile_before = r_detail_before.json()["profile"]
+
+    r_update = requests.put(
+        f"{BASE_URL}/api/admin/voice-profiles/{profile['id']}/samples",
+        headers=ADMIN_HEADERS,
+        json={"sample_audio_urls": profile_before["sample_audio_urls"] + [url]},
+    )
+    if r_update.status_code != 200:
+        return _log(
+            False,
+            "admin 使用上传 URL 更新样本失败（期望 200）",
+            {"status_code": r_update.status_code, "body": r_update.text},
+        )
+
+    r_detail_after = requests.get(
+        f"{BASE_URL}/api/admin/voice-profiles/{profile['id']}",
+        headers=ADMIN_HEADERS,
+    )
+    r_detail_after.raise_for_status()
+    profile_after = r_detail_after.json()["profile"]
+
+    ok &= len(profile_after["sample_audio_urls"]) == len(profile_before["sample_audio_urls"]) + 1
+    ok &= url in profile_after["sample_audio_urls"]
+
+    return _log(ok, "admin 上传音频并通过 samples 接口写入样本列表场景", {"upload": data, "after": profile_after})
+
+
+def scenario_admin_upload_audio_too_many_samples() -> bool:
+    """
+    管理端为已有 5 条样本的配置上传音频会被拒绝。
+    """
+    _, profile = _create_profile_with_samples("AdminUploadTooMany", sample_count=5)
+
+    dummy_audio = io.BytesIO(b"RIFF....fakewav")
+    files = {
+        "file": ("sample.wav", dummy_audio, "audio/wav"),
+    }
+
+    r = requests.post(
+        f"{BASE_URL}/api/admin/voice-profiles/{profile['id']}/upload-audio",
+        headers=ADMIN_HEADERS,
+        files=files,
+    )
+    ok = r.status_code == 400
+    return _log(
+        ok,
+        "admin 为已满 5 条样本的配置上传音频被拒绝场景",
+        {"status_code": r.status_code, "body": r.text},
+    )
+
+
+def scenario_admin_upload_audio_invalid_mime() -> bool:
+    """
+    管理端上传不支持的文件类型将被拒绝。
+    """
+    _, profile = _create_profile_with_samples("AdminUploadBadMime", sample_count=0)
+
+    dummy = io.BytesIO(b"hello")
+    files = {
+        "file": ("note.txt", dummy, "text/plain"),
+    }
+
+    r = requests.post(
+        f"{BASE_URL}/api/admin/voice-profiles/{profile['id']}/upload-audio",
+        headers=ADMIN_HEADERS,
+        files=files,
+    )
+    ok = r.status_code == 400
+    return _log(
+        ok,
+        "admin 上传不支持的文件类型被拒绝场景",
+        {"status_code": r.status_code, "body": r.text},
+    )
+
+
+def scenario_admin_upload_audio_not_found_or_unauthorized() -> bool:
+    """
+    管理端上传音频时，404 与鉴权错误的边界场景。
+    """
+    dummy_audio = io.BytesIO(b"RIFF....fakewav")
+    files = {
+        "file": ("sample.wav", dummy_audio, "audio/wav"),
+    }
+
+    ok = True
+
+    # 不存在的 profile_id
+    r_not_found = requests.post(
+        f"{BASE_URL}/api/admin/voice-profiles/non-existent-profile-id-999/upload-audio",
+        headers=ADMIN_HEADERS,
+        files=files,
+    )
+    ok &= _log(
+        r_not_found.status_code == 404,
+        "admin 为不存在的声纹配置上传音频返回 404 场景",
+        {"status_code": r_not_found.status_code, "body": r_not_found.text},
+    )
+
+    # 缺少 admin token
+    r_no_token = requests.post(
+        f"{BASE_URL}/api/admin/voice-profiles/non-existent-profile-id-999/upload-audio",
+        files=files,
+    )
+    ok &= _log(
+        r_no_token.status_code == 403,
+        "缺少 X-Admin-Token 上传音频被禁止场景",
+        {"status_code": r_no_token.status_code, "body": r_no_token.text},
+    )
+
+    # 错误 admin token
+    r_bad_token = requests.post(
+        f"{BASE_URL}/api/admin/voice-profiles/non-existent-profile-id-999/upload-audio",
+        headers={"X-Admin-Token": "WrongKey"},
+        files=files,
+    )
+    ok &= _log(
+        r_bad_token.status_code == 403,
+        "错误 X-Admin-Token 上传音频被禁止场景",
+        {"status_code": r_bad_token.status_code, "body": r_bad_token.text},
+    )
+
+    return ok
+
+
 def run_all() -> bool:
     print("=== 开始 Admin Voice Profiles 后台接口测试 ===")
 
@@ -356,11 +538,16 @@ def run_all() -> bool:
     ok &= scenario_admin_list_voice_profiles_basic()
     ok &= scenario_admin_filters_and_detail()
     ok &= scenario_admin_update_samples_and_generate_embedding()
+    ok &= scenario_admin_update_samples_too_many()
     ok &= scenario_admin_generate_embedding_without_samples()
     ok &= scenario_admin_list_voice_profiles_no_results()
     ok &= scenario_admin_flags_filters()
     ok &= scenario_admin_not_found_cases()
     ok &= scenario_admin_missing_or_wrong_token()
+    ok &= scenario_admin_upload_audio_success()
+    ok &= scenario_admin_upload_audio_too_many_samples()
+    ok &= scenario_admin_upload_audio_invalid_mime()
+    ok &= scenario_admin_upload_audio_not_found_or_unauthorized()
 
     print("\n=== Admin Voice Profiles 测试结果: {} ===".format("全部通过 ✅" if ok else "有失败 ❌"))
     return ok

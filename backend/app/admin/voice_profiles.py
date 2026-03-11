@@ -3,14 +3,17 @@ from __future__ import annotations
 from typing import Any, Mapping
 import json
 from datetime import datetime, timezone
+from pathlib import Path
+import shutil
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..config_voice import VOICE_AUDIO_BASE_DIR, VOICE_AUDIO_PUBLIC_BASE_URL
 from ..db import get_db
-from ..voice_profiles import VoiceProfileOut, _row_to_profile
+from ..voice_profiles import ALLOWED_AUDIO_CONTENT_TYPES, VoiceProfileOut, _row_to_profile
 from .deps import require_admin
 from .schemas import Page, PageMeta
 
@@ -141,6 +144,10 @@ class AdminVoiceProfileDetail(BaseModel):
     primary_group_name: str | None = None
 
 
+class AdminUploadAudioResponse(BaseModel):
+    url: str
+
+
 @router.get(
     "/{profile_id}",
     response_model=AdminVoiceProfileDetail,
@@ -207,6 +214,12 @@ async def admin_update_samples(
     payload: AdminUpdateSamplesRequest,
     db: AsyncSession = Depends(get_db),
 ) -> VoiceProfileOut:
+    max_samples = 5
+    if len(payload.sample_audio_urls) > max_samples:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"最多支持 {max_samples} 条语音样本",
+        )
     result = await db.execute(
         text(
             """
@@ -292,4 +305,74 @@ async def admin_generate_embedding(
 
     await db.commit()
     return _row_to_profile(row2)
+
+
+@router.post(
+    "/{profile_id}/upload-audio",
+    response_model=AdminUploadAudioResponse,
+)
+async def admin_upload_audio_sample(
+    profile_id: str,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+) -> AdminUploadAudioResponse:
+    """
+    管理端为指定声纹配置上传一段音频，写入挂载目录并返回可访问的 URL。
+    不直接修改样本列表，由前端在拿到 URL 后调用 /samples 接口进行保存。
+    """
+    result = await db.execute(
+        text(
+            """
+            SELECT id, user_id, voice_embedding, sample_audio_urls, created_at
+            FROM user_voice_profiles
+            WHERE id = :id
+            """
+        ),
+        {"id": profile_id},
+    )
+    row = result.mappings().first()
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="声纹配置不存在",
+        )
+
+    profile = _row_to_profile(row)
+
+    if len(profile.sample_audio_urls) >= 5:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="最多支持 5 条语音样本",
+        )
+
+    if file.content_type not in ALLOWED_AUDIO_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="不支持的音频格式",
+        )
+
+    ext = ".webm"
+    if file.content_type == "audio/mpeg":
+        ext = ".mp3"
+    elif file.content_type == "audio/wav":
+        ext = ".wav"
+    elif file.content_type == "audio/ogg":
+        ext = ".ogg"
+
+    filename = f"{profile.user_id}-{datetime.now(timezone.utc).timestamp():.0f}{ext}"
+
+    base_dir: Path = VOICE_AUDIO_BASE_DIR
+    dest_dir = base_dir / profile.user_id
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest_path = dest_dir / filename
+
+    try:
+        with dest_path.open("wb") as f:
+            shutil.copyfileobj(file.file, f)
+    finally:
+        file.file.close()
+
+    public_url = f"{VOICE_AUDIO_PUBLIC_BASE_URL}/{profile.user_id}/{filename}"
+    return AdminUploadAudioResponse(url=public_url)
+
 

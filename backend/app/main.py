@@ -3,7 +3,9 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
+from .config_voice import VOICE_AUDIO_BASE_DIR
 from .db import DBNotConfiguredError, ping_db
 from .routes import router as db_router
 from .auth import router as auth_router
@@ -47,6 +49,14 @@ app.include_router(admin_groups_router)
 app.include_router(admin_memberships_router)
 app.include_router(admin_chat_sessions_router)
 app.include_router(admin_voice_profiles_router)
+
+# 本地开发环境下直接通过 FastAPI 提供音频静态访问能力，
+# 与生产环境中通过 Nginx 映射 /audio/voice-profiles 到挂载目录的行为保持一致。
+app.mount(
+    "/audio/voice-profiles",
+    StaticFiles(directory=str(VOICE_AUDIO_BASE_DIR), check_dir=False),
+    name="voice-audio",
+)
 
 
 @app.exception_handler(DBNotConfiguredError)

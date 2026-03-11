@@ -87,6 +87,55 @@ async function createAppVoiceUser(options: {
   return { email, password, name, sampleCount: finalSampleCount, hasEmbedding }
 }
 
+async function setupFakeMediaRecorder(page: import('@playwright/test').Page) {
+  await page.addInitScript(() => {
+    // @ts-expect-error override in test environment
+    window.navigator.mediaDevices = window.navigator.mediaDevices || ({} as MediaDevices)
+    // @ts-expect-error test polyfill
+    window.navigator.mediaDevices.getUserMedia = async () => {
+      return {
+        getTracks() {
+          return [
+            {
+              stop() {
+                // no-op for tests
+              },
+            },
+          ]
+        },
+      } as unknown as MediaStream
+    }
+
+    class FakeMediaRecorder {
+      stream: MediaStream
+      ondataavailable: ((event: BlobEvent) => void) | null = null
+      onstop: (() => void) | null = null
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      constructor(stream: MediaStream, _options?: any) {
+        this.stream = stream
+      }
+
+      start() {
+        const blob = new Blob(['fake-audio'], { type: 'audio/webm' })
+        const event = { data: blob } as BlobEvent
+        if (this.ondataavailable) {
+          this.ondataavailable(event)
+        }
+      }
+
+      stop() {
+        if (this.onstop) {
+          this.onstop()
+        }
+      }
+    }
+
+    // @ts-expect-error assign polyfill
+    window.MediaRecorder = FakeMediaRecorder as any
+  })
+}
+
 // --- 鉴权与导航 ---
 
 test.describe('App 我的声纹 - 鉴权与导航', () => {
@@ -238,31 +287,33 @@ test.describe('App 我的声纹 - 边界', () => {
     await expect(page.getByText(/声纹已生成|声纹已重新生成/)).toBeVisible({ timeout: 15000 })
   })
 
-  test('10 条样本保存成功', async ({ page }) => {
-    const user = await createAppVoiceUser({ label: 'ten', sampleCount: 0 })
+  test('5 条样本保存成功', async ({ page }) => {
+    const user = await createAppVoiceUser({ label: 'five', sampleCount: 0 })
     await loginViaUI(page, user)
     await page.goto('/app/voice-profile')
 
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 5; i++) {
       await page.getByPlaceholder('输入样本 URL').fill(`https://example.com/s${i}.wav`)
       await page.getByRole('button', { name: '添加样本' }).click()
     }
-    await expect(page.getByText('样本 10')).toBeVisible()
+    await expect(page.getByText('样本 5')).toBeVisible()
     await page.getByRole('button', { name: '保存样本列表' }).click()
     await expect(page.getByText('样本列表已保存')).toBeVisible({ timeout: 15000 })
+    // 样本 5 行里应该有音频预览
+    await expect(page.locator('.sample-row').nth(4).locator('audio')).toBeVisible()
   })
 
-  test('超过 10 条保存时后端报错', async ({ page }) => {
-    const user = await createAppVoiceUser({ label: 'over10', sampleCount: 10 })
+  test('超过 5 条保存时后端报错', async ({ page }) => {
+    const user = await createAppVoiceUser({ label: 'over5', sampleCount: 5 })
     await loginViaUI(page, user)
     await page.goto('/app/voice-profile')
 
     await page.getByPlaceholder('输入样本 URL').fill('https://example.com/extra.wav')
     await page.getByRole('button', { name: '添加样本' }).click()
-    await expect(page.getByText('样本 11')).toBeVisible()
+    await expect(page.getByText('样本 6')).toBeVisible()
     await page.getByRole('button', { name: '保存样本列表' }).click()
-    // 后端会返回「最多支持 10 条语音样本」，前端统一展示在全局 Message
-    await expect(page.locator('.el-message')).toContainText('最多支持 10 条语音样本', {
+    // 后端会返回「最多支持 5 条语音样本」，前端统一展示在全局 Message
+    await expect(page.locator('.el-message')).toContainText('最多支持 5 条语音样本', {
       timeout: 15000,
     })
   })
@@ -381,5 +432,65 @@ test.describe('App 我的声纹 - 极端与交互', () => {
     await expect(page.getByText('样本 1')).toBeVisible()
     await expect(page.getByText('样本 2')).toBeVisible()
     await expect(page.locator('.sample-input input').first()).toHaveValue('https://a-modified.wav')
+  })
+
+  test('录音上传：成功上传并写入样本列表', async ({ page }) => {
+    const user = await createAppVoiceUser({ label: 'record-ok', sampleCount: 0 })
+    await setupFakeMediaRecorder(page)
+    await loginViaUI(page, user)
+    await page.goto('/app/voice-profile')
+
+    // 为了稳定起见，这里直接模拟上传接口成功返回，避免依赖后端对 multipart 的解析行为
+    await page.route('**/api/voice-profile/me/upload-audio', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ url: 'https://example.com/e2e-record-ok.wav' }),
+      }),
+    )
+
+    await expect(page.getByText('录音采集')).toBeVisible()
+
+    await page.getByRole('button', { name: '开始录音' }).click()
+    await page.getByRole('button', { name: '停止' }).click()
+
+    await expect(page.getByText('录音预览')).toBeVisible()
+    await expect(page.locator('audio')).toBeVisible()
+
+    const beforeCount = await page.locator('.sample-row').count()
+
+    await page.getByRole('button', { name: '上传并添加为样本' }).click()
+    // 上传成功后应当至少新增一条样本记录
+    await expect
+      .poll(async () => page.locator('.sample-row').count(), { timeout: 15000 })
+      .toBeGreaterThan(beforeCount)
+  })
+
+  test('录音上传：接口失败展示错误信息', async ({ page }) => {
+    const user = await createAppVoiceUser({ label: 'record-fail', sampleCount: 0 })
+    await setupFakeMediaRecorder(page)
+    await loginViaUI(page, user)
+    await page.goto('/app/voice-profile')
+
+    await page.route('**/api/voice-profile/me/upload-audio', (route) =>
+      route.fulfill({ status: 500, body: 'upload error' }),
+    )
+
+    await page.getByRole('button', { name: '开始录音' }).click()
+    await page.getByRole('button', { name: '停止' }).click()
+    await expect(page.getByText('录音预览')).toBeVisible()
+
+    await page.getByRole('button', { name: '上传并添加为样本' }).click()
+    await expect(page.getByText(/上传录音失败|upload error/)).toBeVisible({ timeout: 10000 })
+  })
+
+  test('录音采集：样本已满时禁止继续录音', async ({ page }) => {
+    const user = await createAppVoiceUser({ label: 'record-full', sampleCount: 5 })
+    await setupFakeMediaRecorder(page)
+    await loginViaUI(page, user)
+    await page.goto('/app/voice-profile')
+
+    const startBtn = page.getByRole('button', { name: '开始录音' })
+    await expect(startBtn).toBeDisabled()
   })
 })

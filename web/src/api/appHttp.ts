@@ -17,8 +17,15 @@ async function request<T>(url: string, init: RequestInit = {}, config: AppHttpCo
   const token = getAppToken()
 
   const headers: HeadersInit = {
-    'Content-Type': 'application/json',
     ...(init.headers ?? {}),
+  }
+
+  // 仅在 body 不是 FormData 时默认使用 application/json
+  const isFormData =
+    typeof FormData !== 'undefined' && init.body != null && init.body instanceof FormData
+  if (!isFormData && (init.method === 'POST' || init.method === 'PUT' || init.method === 'PATCH')) {
+    ;(headers as Record<string, string>)['Content-Type'] =
+      (headers as Record<string, string>)['Content-Type'] ?? 'application/json'
   }
 
   if (token) {
@@ -63,7 +70,12 @@ export const appHttp = {
       url,
       {
         method: 'POST',
-        body: body != null ? JSON.stringify(body) : undefined,
+        body:
+          body != null
+            ? typeof FormData !== 'undefined' && body instanceof FormData
+              ? (body as FormData)
+              : JSON.stringify(body)
+            : undefined,
       },
       config,
     ),
@@ -72,7 +84,12 @@ export const appHttp = {
       url,
       {
         method: 'PUT',
-        body: body != null ? JSON.stringify(body) : undefined,
+        body:
+          body != null
+            ? typeof FormData !== 'undefined' && body instanceof FormData
+              ? (body as FormData)
+              : JSON.stringify(body)
+            : undefined,
       },
       config,
     ),
@@ -81,7 +98,12 @@ export const appHttp = {
       url,
       {
         method: 'PATCH',
-        body: body != null ? JSON.stringify(body) : undefined,
+        body:
+          body != null
+            ? typeof FormData !== 'undefined' && body instanceof FormData
+              ? (body as FormData)
+              : JSON.stringify(body)
+            : undefined,
       },
       config,
     ),
