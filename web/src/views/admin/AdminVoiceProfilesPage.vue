@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import type { AdminVoiceProfileSummary } from '../../api/admin/voice-profiles'
+import type { AdminVoiceProfileSummary } from '../../types/admin'
 import { listAdminVoiceProfiles } from '../../api/admin/voice-profiles'
 import { formatDateTimeToCST } from '../../utils/datetime'
 import type { PageMeta } from '../../types/admin'

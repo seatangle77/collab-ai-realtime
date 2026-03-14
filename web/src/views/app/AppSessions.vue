@@ -180,7 +180,7 @@ async function fetchMyGroupsForSessions() {
 
     // 如果当前没有已选群组，但用户有群组，默认选第一个群组
     if (!currentGroup.value && myGroups.value.length) {
-      const first = myGroups.value[0]
+      const first = myGroups.value[0]!
       currentGroup.value = { id: first.id, name: first.name }
       if (typeof window !== 'undefined') {
         window.localStorage.setItem('app_current_group', JSON.stringify(currentGroup.value))
@@ -219,7 +219,7 @@ async function openCreateDialog() {
   // 默认选当前群组；若当前群组不在列表中，则选第一个
   const currentId = currentGroup.value?.id
   const defaultId =
-    currentId && myGroups.value.some((g) => g.id === currentId) ? currentId : myGroups.value[0].id
+    currentId && myGroups.value.some((g) => g.id === currentId) ? currentId : myGroups.value[0]!.id
 
   createForm.sessionTitle = ''
   createForm.plannedStart = null

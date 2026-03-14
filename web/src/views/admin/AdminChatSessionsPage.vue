@@ -9,6 +9,7 @@ import {
   deleteAdminChatSession,
   deleteAdminChatSessionsBatch,
   createAdminChatSession,
+  type CreateAdminChatSessionPayload,
 } from '../../api/admin/chat-sessions'
 import { listAdminGroups } from '../../api/admin/groups'
 import { formatDateTimeToCST } from '../../utils/datetime'
@@ -199,7 +200,7 @@ async function submitCreate() {
   await createFormRef.value.validate(async (valid) => {
     if (!valid) return
     try {
-      const payload: Record<string, any> = {
+      const payload: CreateAdminChatSessionPayload = {
         group_id: createForm.group_id,
         session_title: createForm.session_title,
       }

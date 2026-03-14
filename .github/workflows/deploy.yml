@@ -1,0 +1,63 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. 拉取代码
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. 安装 Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      # 3. 构建前端
+      - name: Build frontend
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      # 4. 将前端构建产物上传到服务器
+      - name: Upload frontend dist
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          source: "web/dist/"
+          target: "/var/www/collab-ai-realtime/web-dist/"
+          strip_components: 2
+
+      # 5. SSH 服务器：更新后端代码并重启服务
+      - name: Deploy backend & restart
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            set -e
+            cd /var/www/collab-ai-realtime
+
+            # 拉取最新代码
+            git pull origin main
+
+            # 更新 Python 依赖
+            source venv/bin/activate
+            pip install -r backend/requirements.txt -q
+
+            # 重启后端服务
+            systemctl restart collab-backend
+
+            echo "✅ 部署完成"

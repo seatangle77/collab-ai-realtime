@@ -124,6 +124,7 @@ async function fetchMyGroups() {
       : null
 
     const next = existing ?? data[0]
+    if (!next) return
     activeGroupId.value = next.id
     if (!currentGroup.value || currentGroup.value.id !== next.id) {
       const cg = { id: next.id, name: next.name }
