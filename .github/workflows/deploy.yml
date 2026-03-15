@@ -55,11 +55,13 @@ jobs:
             git reset --hard origin/main
 
             # 更新 Python 依赖
-            source backend/venv/bin/activate
-            pip install -r backend/requirements.txt -q
+            cd backend
+            source venv/bin/activate
+            pip install -r requirements.txt -q
 
             # 重启后端
             pkill -f uvicorn || true
-            nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 --app-dir backend > /tmp/backend.log 2>&1 &
+            nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 > /tmp/backend.log 2>&1 &
+            disown
 
             echo "✅ 部署完成"
