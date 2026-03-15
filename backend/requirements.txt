@@ -6,3 +6,4 @@ pydantic-settings
 greenlet
 python-jose[cryptography]
 requests
+python-multipart
