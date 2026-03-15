@@ -37,7 +37,7 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           source: "web/dist/"
           target: "/root/workspace/collab-ai-realtime/web/"
-          strip_components: 2
+          strip_components: 1
 
       # 5. SSH 服务器：更新后端代码并重启服务
       - name: Deploy backend & restart
