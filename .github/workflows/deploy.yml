@@ -51,7 +51,8 @@ jobs:
             cd /root/workspace/collab-ai-realtime
 
             # 拉取最新代码
-            git pull origin main
+            git fetch origin main
+            git reset --hard origin/main
 
             # 更新 Python 依赖
             source backend/venv/bin/activate
