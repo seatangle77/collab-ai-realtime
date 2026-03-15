@@ -36,7 +36,7 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           source: "web/dist/"
-          target: "/var/www/collab-ai-realtime/web-dist/"
+          target: "/root/workspace/collab-ai-realtime/web/"
           strip_components: 2
 
       # 5. SSH 服务器：更新后端代码并重启服务
@@ -48,16 +48,17 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
             set -e
-            cd /var/www/collab-ai-realtime
+            cd /root/workspace/collab-ai-realtime
 
             # 拉取最新代码
             git pull origin main
 
             # 更新 Python 依赖
-            source venv/bin/activate
+            source backend/venv/bin/activate
             pip install -r backend/requirements.txt -q
 
-            # 重启后端服务
-            systemctl restart collab-backend
+            # 重启后端
+            pkill -f uvicorn || true
+            nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 --app-dir backend > /tmp/backend.log 2>&1 &
 
             echo "✅ 部署完成"
