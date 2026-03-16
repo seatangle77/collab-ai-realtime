@@ -21,7 +21,7 @@ class SessionCreate(BaseModel):
     created_at: datetime | None = None
     last_updated: datetime | None = None
     ended_at: datetime | None = None
-    is_active: bool | None = None
+    status: str | None = None
 
 
 class ChatSessionOut(BaseModel):
@@ -30,7 +30,8 @@ class ChatSessionOut(BaseModel):
     created_at: datetime
     last_updated: datetime
     session_title: str
-    is_active: bool | None = None
+    status: str | None = None
+    started_at: datetime | None = None
     ended_at: datetime | None = None
 
 
@@ -51,7 +52,6 @@ async def create_session(
     """
     await _get_group_or_404(group_id, db)
 
-    # 当前用户是否是群成员（active）
     membership_result = await db.execute(
         text(
             """
@@ -69,19 +69,18 @@ async def create_session(
 
     session_id = f"s{uuid.uuid4().hex[:8]}"
 
-    # 如果前端没有显式传入任何时间 / 状态字段，则保持原有行为：全部由数据库 NOW() 决定。
     if (
         payload.created_at is None
         and payload.last_updated is None
         and payload.ended_at is None
-        and payload.is_active is None
+        and payload.status is None
     ):
         result = await db.execute(
             text(
                 """
-                INSERT INTO chat_sessions (id, group_id, created_at, last_updated, session_title)
-                VALUES (:id, :group_id, NOW(), NOW(), :title)
-                RETURNING id, group_id, created_at, last_updated, session_title, is_active, ended_at
+                INSERT INTO chat_sessions (id, group_id, created_at, last_updated, session_title, status)
+                VALUES (:id, :group_id, NOW(), NOW(), :title, 'not_started')
+                RETURNING id, group_id, created_at, last_updated, session_title, status, started_at, ended_at
                 """
             ),
             {"id": session_id, "group_id": group_id, "title": payload.session_title},
@@ -90,13 +89,12 @@ async def create_session(
         created_at = payload.created_at
         last_updated = payload.last_updated or created_at
 
-        # 若传入 ended_at 且未显式传 is_active，则视为已结束
-        if payload.is_active is not None:
-            is_active = payload.is_active
+        if payload.status is not None:
+            session_status = payload.status
         elif payload.ended_at is not None:
-            is_active = False
+            session_status = "ended"
         else:
-            is_active = True
+            session_status = "not_started"
 
         result = await db.execute(
             text(
@@ -107,7 +105,7 @@ async def create_session(
                     created_at,
                     last_updated,
                     session_title,
-                    is_active,
+                    status,
                     ended_at
                 )
                 VALUES (
@@ -116,10 +114,10 @@ async def create_session(
                     COALESCE(:created_at, NOW()),
                     COALESCE(:last_updated, COALESCE(:created_at, NOW())),
                     :title,
-                    :is_active,
+                    :status,
                     :ended_at
                 )
-                RETURNING id, group_id, created_at, last_updated, session_title, is_active, ended_at
+                RETURNING id, group_id, created_at, last_updated, session_title, status, started_at, ended_at
                 """
             ),
             {
@@ -128,7 +126,7 @@ async def create_session(
                 "title": payload.session_title,
                 "created_at": created_at,
                 "last_updated": last_updated,
-                "is_active": is_active,
+                "status": session_status,
                 "ended_at": payload.ended_at,
             },
         )
@@ -171,24 +169,23 @@ async def list_group_sessions(
     if include_ended:
         query = text(
             """
-            SELECT id, group_id, created_at, last_updated, session_title, is_active, ended_at
+            SELECT id, group_id, created_at, last_updated, session_title, status, started_at, ended_at
             FROM chat_sessions
             WHERE group_id = :group_id
             ORDER BY last_updated DESC, created_at DESC
             """
         )
-        params = {"group_id": group_id}
     else:
         query = text(
             """
-            SELECT id, group_id, created_at, last_updated, session_title, is_active, ended_at
+            SELECT id, group_id, created_at, last_updated, session_title, status, started_at, ended_at
             FROM chat_sessions
             WHERE group_id = :group_id
-              AND (is_active = TRUE OR is_active IS NULL)
+              AND status != 'ended'
             ORDER BY last_updated DESC, created_at DESC
             """
         )
-        params = {"group_id": group_id}
+    params = {"group_id": group_id}
 
     result = await db.execute(query, params)
     rows = result.mappings().all()
@@ -222,7 +219,7 @@ async def _get_session_and_group(
     result = await db.execute(
         text(
             """
-            SELECT id, group_id, created_at, last_updated, session_title, is_active, ended_at
+            SELECT id, group_id, created_at, last_updated, session_title, status, started_at, ended_at
             FROM chat_sessions
             WHERE id = :session_id
             """
@@ -270,7 +267,6 @@ async def list_session_transcripts(
     查看某次会话下的全部语音转写记录。
     仅该会话所属群组的成员可以访问。
     """
-    # 找到会话所属的 group
     session_result = await db.execute(
         text(
             """
@@ -353,7 +349,6 @@ async def update_session(
         forbidden_detail="仅群组成员可以修改会话信息",
     )
 
-    # 至少需要提供一个字段
     if (
         payload.session_title is None
         and payload.created_at is None
@@ -370,16 +365,8 @@ async def update_session(
     )
 
     if incoming_time_fields:
-        # 仅未开始（not_started）的会话允许修改时间字段：
-        # - 未结束；
-        # - is_active 为 True 或 NULL；
-        # - created_at == last_updated（尚未产生过程更新）。
-        is_not_started = (
-            session_row["ended_at"] is None
-            and (session_row["is_active"] is True or session_row["is_active"] is None)
-            and session_row["created_at"] == session_row["last_updated"]
-        )
-        if not is_not_started:
+        # 仅未开始（not_started）的会话允许修改时间字段
+        if session_row["status"] != "not_started":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="仅未开始的会话可以修改时间",
@@ -395,7 +382,7 @@ async def update_session(
                     last_updated = COALESCE(:last_updated, last_updated),
                     ended_at = COALESCE(:ended_at, ended_at)
                 WHERE id = :session_id
-                RETURNING id, group_id, created_at, last_updated, session_title, is_active, ended_at
+                RETURNING id, group_id, created_at, last_updated, session_title, status, started_at, ended_at
                 """
             ),
             {
@@ -407,7 +394,6 @@ async def update_session(
             },
         )
     else:
-        # 仅更新标题：沿用原有行为，自动刷新 last_updated = NOW()
         new_title = payload.session_title or session_row["session_title"]
         result = await db.execute(
             text(
@@ -416,7 +402,7 @@ async def update_session(
                 SET session_title = :title,
                     last_updated = NOW()
                 WHERE id = :session_id
-                RETURNING id, group_id, created_at, last_updated, session_title, is_active, ended_at
+                RETURNING id, group_id, created_at, last_updated, session_title, status, started_at, ended_at
                 """
             ),
             {"session_id": session_id, "title": new_title},
@@ -436,7 +422,7 @@ async def end_session(
     current_user: Mapping[str, Any] = Depends(get_current_user),
 ) -> ChatSessionOut:
     """
-    标记会话为已结束，设置 is_active = FALSE, ended_at = NOW()。
+    标记会话为已结束，设置 status = 'ended', ended_at = NOW()。
     仅所属群组成员可操作。
     """
     session_row, group_id = await _get_session_and_group(session_id, db)
@@ -452,11 +438,11 @@ async def end_session(
         text(
             """
             UPDATE chat_sessions
-            SET is_active = FALSE,
+            SET status = 'ended',
                 ended_at = NOW(),
                 last_updated = NOW()
             WHERE id = :session_id
-            RETURNING id, group_id, created_at, last_updated, session_title, is_active, ended_at
+            RETURNING id, group_id, created_at, last_updated, session_title, status, started_at, ended_at
             """
         ),
         {"session_id": session_id},
@@ -464,4 +450,3 @@ async def end_session(
     await db.commit()
     row = result.mappings().one()
     return ChatSessionOut.model_validate(dict(row))
-

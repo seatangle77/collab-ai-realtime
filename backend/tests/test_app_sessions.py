@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 import requests
 
 BASE_URL = "http://127.0.0.1:8000"
+RUN_ID = uuid.uuid4().hex[:6]
 
 
 def _log(ok: bool, message: str, extra: Any | None = None) -> bool:
@@ -30,10 +31,10 @@ def register_and_login(label: str) -> Tuple[str, str]:
     r = requests.post(
         f"{BASE_URL}/api/auth/register",
         json={
-            "name": f"会话测试用户-{label}",
+            "name": f"Session User {label} {RUN_ID}",
             "email": email,
             "password": password,
-            "device_token": f"device-session-{label}",
+            "device_token": f"device-session-{label}-{uuid.uuid4().hex[:8]}",
         },
     )
     r.raise_for_status()
@@ -83,7 +84,7 @@ def setup_group_and_sessions(ctx: Dict[str, Any]) -> bool:
     headers_leader = {"Authorization": f"Bearer {leader_token}"}
     r = requests.post(
         f"{BASE_URL}/api/groups",
-        json={"name": "App 会话接口测试群"},
+        json={"name": f"App Session Test Group {RUN_ID}"},
         headers=headers_leader,
     )
     if r.status_code != 201:
@@ -104,7 +105,7 @@ def setup_group_and_sessions(ctx: Dict[str, Any]) -> bool:
     # leader 创建会话 A
     r = requests.post(
         f"{BASE_URL}/api/groups/{group_id}/sessions",
-        json={"session_title": "会话A-将被结束"},
+        json={"session_title": "Session A To End"},
         headers=headers_leader,
     )
     if r.status_code != 201:
@@ -115,7 +116,7 @@ def setup_group_and_sessions(ctx: Dict[str, Any]) -> bool:
     # member 创建会话 B
     r = requests.post(
         f"{BASE_URL}/api/groups/{group_id}/sessions",
-        json={"session_title": "会话B-保持进行中"},
+        json={"session_title": "Session B Ongoing"},
         headers=headers_member,
     )
     if r.status_code != 201:
@@ -159,7 +160,7 @@ def scenario_list_sessions_response_schema(ctx: Dict[str, Any]) -> bool:
 
     # 结构校验
     for item in sessions_default:
-        for key in ["id", "group_id", "created_at", "last_updated", "session_title", "is_active", "ended_at"]:
+        for key in ["id", "group_id", "created_at", "last_updated", "session_title", "status", "ended_at"]:
             if key not in item:
                 return _log(False, f"默认列表返回缺少字段 {key}", item)
 
@@ -190,8 +191,8 @@ def scenario_list_sessions_response_schema(ctx: Dict[str, Any]) -> bool:
         return _log(False, "未在 include_ended 结果中找到会话 A", {"sessions": sessions_all})
 
     ok &= _log(
-        session_a.get("is_active") is False and session_a.get("ended_at") is not None,
-        "已结束会话 A 在列表中具有正确的 is_active/ended_at",
+        session_a.get("status") == "ended" and session_a.get("ended_at") is not None,
+        "已结束会话 A 在列表中具有正确的 status/ended_at",
         session_a,
     )
 
@@ -206,13 +207,13 @@ def scenario_create_session_success_and_forbidden(ctx: Dict[str, Any]) -> bool:
     headers_member = {"Authorization": f"Bearer {ctx['member_token']}"}
     r = requests.post(
         f"{BASE_URL}/api/groups/{group_id}/sessions",
-        json={"session_title": "新建会话-成员创建"},
+        json={"session_title": "New Session Member Created"},
         headers=headers_member,
     )
     if r.status_code != 201:
         return _log(False, "成员创建会话失败（期望 201）", {"status_code": r.status_code, "body": r.text})
     data = r.json()
-    required_keys = {"id", "group_id", "session_title", "created_at", "last_updated", "is_active", "ended_at"}
+    required_keys = {"id", "group_id", "session_title", "created_at", "last_updated", "status", "ended_at"}
     if not required_keys <= data.keys():
         return _log(False, "成员创建会话返回字段不完整", data)
     ok &= _log(True, "成员创建会话成功（带状态字段）", data)
@@ -221,7 +222,7 @@ def scenario_create_session_success_and_forbidden(ctx: Dict[str, Any]) -> bool:
     headers_outsider = {"Authorization": f"Bearer {ctx['outsider_token']}"}
     r = requests.post(
         f"{BASE_URL}/api/groups/{group_id}/sessions",
-        json={"session_title": "不应成功的会话"},
+        json={"session_title": "Should Not Succeed"},
         headers=headers_outsider,
     )
     ok &= _log(r.status_code == 403, "非群成员创建会话被禁止（403）", {"status_code": r.status_code, "body": r.text})
@@ -271,7 +272,7 @@ def scenario_create_session_with_explicit_times(ctx: Dict[str, Any]) -> bool:
     r = requests.post(
         f"{BASE_URL}/api/groups/{group_id}/sessions",
         json={
-            "session_title": "带显式时间的会话",
+            "session_title": "Session With Explicit Times",
             "created_at": created_at,
             "last_updated": last_updated,
             "ended_at": ended_at,
@@ -293,8 +294,8 @@ def scenario_create_session_with_explicit_times(ctx: Dict[str, Any]) -> bool:
 
     ok = (
         data.get("group_id") == group_id
-        and data.get("session_title") == "带显式时间的会话"
-        and data.get("is_active") is False
+        and data.get("session_title") == "Session With Explicit Times"
+        and data.get("status") == "ended"
         and data.get("ended_at") is not None
         and _close_dt(created_resp, created_expected)
         and _close_dt(last_updated_resp, last_updated_expected)
@@ -316,7 +317,7 @@ def scenario_update_not_started_session_times(ctx: Dict[str, Any]) -> bool:
     # 新建一条未开始会话：业务创建接口默认 created_at == last_updated, ended_at=None
     r = requests.post(
         f"{BASE_URL}/api/groups/{group_id}/sessions",
-        json={"session_title": "未开始-可改时间"},
+        json={"session_title": "Not Started Can Change Time"},
         headers=headers_member,
     )
     if r.status_code != 201:
@@ -396,14 +397,14 @@ def scenario_update_session_success_forbidden_404(ctx: Dict[str, Any]) -> bool:
     headers_member = {"Authorization": f"Bearer {ctx['member_token']}"}
     r = requests.patch(
         f"{BASE_URL}/api/sessions/{session_id_b}",
-        json={"session_title": "会话B-新标题"},
+        json={"session_title": "Session B New Title"},
         headers=headers_member,
     )
     if r.status_code != 200:
         return _log(False, "成员更新会话标题失败（期望 200）", {"status_code": r.status_code, "body": r.text})
     data = r.json()
     ok &= _log(
-        data.get("session_title") == "会话B-新标题" and "is_active" in data and "ended_at" in data,
+        data.get("session_title") == "Session B New Title" and "status" in data and "ended_at" in data,
         "成员更新会话标题成功（响应包含状态字段）",
         data,
     )
@@ -412,7 +413,7 @@ def scenario_update_session_success_forbidden_404(ctx: Dict[str, Any]) -> bool:
     headers_outsider = {"Authorization": f"Bearer {ctx['outsider_token']}"}
     r = requests.patch(
         f"{BASE_URL}/api/sessions/{session_id_b}",
-        json={"session_title": "不应成功"},
+        json={"session_title": "Should Not Apply"},
         headers=headers_outsider,
     )
     ok &= _log(r.status_code == 403, "非群成员更新会话被禁止（403）", {"status_code": r.status_code, "body": r.text})
@@ -435,7 +436,7 @@ def scenario_end_session_success_forbidden_404(ctx: Dict[str, Any]) -> bool:
     headers_member = {"Authorization": f"Bearer {ctx['member_token']}"}
     r = requests.post(
         f"{BASE_URL}/api/groups/{ctx['group_id']}/sessions",
-        json={"session_title": "会话C-待结束"},
+        json={"session_title": "Session C To End"},
         headers=headers_member,
     )
     if r.status_code != 201:
@@ -452,8 +453,8 @@ def scenario_end_session_success_forbidden_404(ctx: Dict[str, Any]) -> bool:
     data = r.json()
 
     ok &= _log(
-        data.get("is_active") is False and data.get("ended_at") is not None,
-        "结束会话后响应中 is_active=False 且 ended_at 非空",
+        data.get("status") == "ended" and data.get("ended_at") is not None,
+        "结束会话后响应中 status=ended 且 ended_at 非空",
         data,
     )
 

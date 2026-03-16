@@ -18,7 +18,7 @@ export interface ListAdminChatSessionsParams {
 export interface CreateAdminChatSessionPayload {
   group_id: string
   session_title: string
-  is_active?: boolean | null
+  status?: 'not_started' | 'ongoing' | 'ended'
   created_at?: string
   last_updated?: string
   ended_at?: string | null
@@ -49,7 +49,7 @@ export async function createAdminChatSession(payload: CreateAdminChatSessionPayl
 
 export interface UpdateAdminChatSessionPayload {
   session_title?: string
-  is_active?: boolean
+  status?: 'not_started' | 'ongoing' | 'ended'
   ended_at?: string | null
   created_at?: string
   last_updated?: string

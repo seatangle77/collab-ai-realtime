@@ -6,7 +6,8 @@ export interface AppChatSession {
   created_at: string
   last_updated: string
   session_title: string
-  is_active?: boolean | null
+  status?: 'not_started' | 'ongoing' | 'ended' | null
+  started_at?: string | null
   ended_at?: string | null
 }
 
@@ -40,7 +41,6 @@ export interface CreateSessionOptions {
   createdAt?: string
   lastUpdatedAt?: string
   endedAt?: string
-  isActive?: boolean
 }
 
 export async function createSession(
@@ -55,7 +55,6 @@ export async function createSession(
   if (options.createdAt) payload.created_at = options.createdAt
   if (options.lastUpdatedAt) payload.last_updated = options.lastUpdatedAt
   if (options.endedAt) payload.ended_at = options.endedAt
-  if (typeof options.isActive === 'boolean') payload.is_active = options.isActive
 
   return appHttp.post<AppChatSession>(`/api/groups/${groupId}/sessions`, payload)
 }

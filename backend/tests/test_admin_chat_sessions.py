@@ -7,6 +7,7 @@ from typing import Any, Dict
 import requests
 
 BASE_URL = "http://127.0.0.1:8000"
+RUN_ID = uuid.uuid4().hex[:6]
 
 # 和 app.admin.deps 中的默认值保持一致
 ADMIN_KEY = "TestAdminKey123"
@@ -30,10 +31,10 @@ def register_and_login(label: str) -> Dict[str, Any]:
     r = requests.post(
         f"{BASE_URL}/api/auth/register",
         json={
-            "name": f"会话测试用户-{label}",
+            "name": f"Session User {label} {RUN_ID}",
             "email": email,
             "password": password,
-            "device_token": f"device-session-{label}",
+            "device_token": f"device-session-{label}-{uuid.uuid4().hex[:8]}",
         },
     )
     r.raise_for_status()
@@ -92,13 +93,13 @@ def setup_chat_sessions(ctx: Dict[str, Any]) -> bool:
     info = register_and_login("owner")
     access_token = info["access_token"]
 
-    group_detail = create_group(access_token, name="Admin 会话测试群")
+    group_detail = create_group(access_token, name=f"Admin Session Test Group {RUN_ID}")
     group_id = group_detail["group"]["id"]
     ctx["group_id"] = group_id
 
     # 创建两个会话
-    s1 = create_session(access_token, group_id, title="第一次会话")
-    s2 = create_session(access_token, group_id, title="第二次会话")
+    s1 = create_session(access_token, group_id, title="First Session")
+    s2 = create_session(access_token, group_id, title="Second Session")
     session_id_1 = s1["id"]
     session_id_2 = s2["id"]
 
@@ -176,42 +177,42 @@ def scenario_admin_list_chat_sessions_filters(ctx: Dict[str, Any]) -> bool:
         data,
     )
 
-    # 按 is_active=true 过滤（应该只包含未结束的会话）
+    # 按 status=not_started 过滤（应该只包含未结束的会话）
     r2 = requests.get(
         f"{BASE_URL}/api/admin/chat-sessions",
-        params={"group_id": group_id, "is_active": True, "page": 1, "page_size": 20},
+        params={"group_id": group_id, "status": "not_started", "page": 1, "page_size": 20},
         headers=ADMIN_HEADERS,
     )
     if r2.status_code != 200:
-        return _log(False, "admin 按 is_active=true 过滤会话失败（期望 200）", {"status_code": r2.status_code, "body": r2.text})
+        return _log(False, "admin 按 status=not_started 过滤会话失败（期望 200）", {"status_code": r2.status_code, "body": r2.text})
     data2 = r2.json()
     ids2 = {item["id"] for item in data2["items"]}
     ok &= _log(
         ctx["session_id_2"] in ids2 and ctx["session_id_1"] not in ids2,
-        "admin 按 is_active=true 过滤会话场景",
+        "admin 按 status=not_started 过滤会话场景",
         data2,
     )
 
-    # 按 is_active=false 过滤（应该包含已结束的会话）
+    # 按 status=ended 过滤（应该包含已结束的会话）
     r3 = requests.get(
         f"{BASE_URL}/api/admin/chat-sessions",
-        params={"group_id": group_id, "is_active": False, "page": 1, "page_size": 20},
+        params={"group_id": group_id, "status": "ended", "page": 1, "page_size": 20},
         headers=ADMIN_HEADERS,
     )
     if r3.status_code != 200:
-        return _log(False, "admin 按 is_active=false 过滤会话失败（期望 200）", {"status_code": r3.status_code, "body": r3.text})
+        return _log(False, "admin 按 status=ended 过滤会话失败（期望 200）", {"status_code": r3.status_code, "body": r3.text})
     data3 = r3.json()
     ids3 = {item["id"] for item in data3["items"]}
     ok &= _log(
         ctx["session_id_1"] in ids3,
-        "admin 按 is_active=false 过滤会话场景",
+        "admin 按 status=ended 过滤会话场景",
         data3,
     )
 
     # 按 session_title 模糊搜索
     r4 = requests.get(
         f"{BASE_URL}/api/admin/chat-sessions",
-        params={"session_title": "第一次", "page": 1, "page_size": 10},
+        params={"session_title": "First Session", "page": 1, "page_size": 10},
         headers=ADMIN_HEADERS,
     )
     if r4.status_code != 200:
@@ -380,12 +381,12 @@ def scenario_admin_create_chat_session_success_not_started() -> bool:
     """
     info = register_and_login("admin_create_not_started_owner")
     access_token = info["access_token"]
-    group_detail = create_group(access_token, name="Admin 后台新建未开始会话群")
+    group_detail = create_group(access_token, name=f"Admin New Group Not Started {RUN_ID}")
     group_id = group_detail["group"]["id"]
 
     r = requests.post(
         f"{BASE_URL}/api/admin/chat-sessions",
-        json={"group_id": group_id, "session_title": "后台新建未开始会话"},
+        json={"group_id": group_id, "session_title": "Admin Create Not Started Session"},
         headers=ADMIN_HEADERS,
     )
     if r.status_code != 201:
@@ -397,11 +398,9 @@ def scenario_admin_create_chat_session_success_not_started() -> bool:
     data = r.json()
     ok = (
         data.get("group_id") == group_id
-        and data.get("session_title") == "后台新建未开始会话"
-        # 业务默认 is_active=True，未开始与进行中通过 created_at/last_updated 区分
-        and data.get("is_active") is True
+        and data.get("session_title") == "Admin Create Not Started Session"
+        and data.get("status") == "not_started"
         and data.get("ended_at") is None
-        and data.get("created_at") == data.get("last_updated")
     )
     ok &= _log(ok, "admin 创建未开始会话成功场景", data)
 
@@ -433,15 +432,15 @@ def scenario_admin_create_chat_session_success_ongoing() -> bool:
     """
     info = register_and_login("admin_create_ongoing_owner")
     access_token = info["access_token"]
-    group_detail = create_group(access_token, name="Admin 后台新建进行中会话群")
+    group_detail = create_group(access_token, name=f"Admin New Group Ongoing {RUN_ID}")
     group_id = group_detail["group"]["id"]
 
     r = requests.post(
         f"{BASE_URL}/api/admin/chat-sessions",
         json={
             "group_id": group_id,
-            "session_title": "后台新建进行中会话",
-            "is_active": True,
+            "session_title": "Admin Create Ongoing Session",
+            "status": "ongoing",
         },
         headers=ADMIN_HEADERS,
     )
@@ -454,8 +453,8 @@ def scenario_admin_create_chat_session_success_ongoing() -> bool:
     data = r.json()
     ok = (
         data.get("group_id") == group_id
-        and data.get("session_title") == "后台新建进行中会话"
-        and data.get("is_active") is True
+        and data.get("session_title") == "Admin Create Ongoing Session"
+        and data.get("status") == "ongoing"
         and data.get("ended_at") is None
     )
     ok &= _log(ok, "admin 创建进行中会话成功场景", data)
@@ -492,7 +491,7 @@ def scenario_admin_create_chat_session_with_explicit_times() -> bool:
     """
     info = register_and_login("admin_create_with_times_owner")
     access_token = info["access_token"]
-    group_detail = create_group(access_token, name="Admin 后台新建带时间会话群")
+    group_detail = create_group(access_token, name=f"Admin New Group With Times {RUN_ID}")
     group_id = group_detail["group"]["id"]
 
     # 使用 UTC 时间，但传给后端时用 ISO 字符串（不额外拼接 "Z"，避免出现 "+00:00Z" 这种非法格式）
@@ -505,7 +504,7 @@ def scenario_admin_create_chat_session_with_explicit_times() -> bool:
         f"{BASE_URL}/api/admin/chat-sessions",
         json={
             "group_id": group_id,
-            "session_title": "后台新建带时间会话",
+            "session_title": "Admin Create Session With Times",
             "created_at": created_at,
             "last_updated": last_updated,
             "ended_at": ended_at,
@@ -535,7 +534,7 @@ def scenario_admin_create_chat_session_with_explicit_times() -> bool:
 
     ok = (
         data.get("group_id") == group_id
-        and data.get("is_active") is False  # 传了 ended_at 且未指定 is_active，默认视为已结束
+        and data.get("status") == "ended"  # 传了 ended_at 且未指定 status，默认视为已结束
         and _close(created_resp, created_expected)
         and _close(last_updated_resp, last_updated_expected)
         and ended_value is not None
@@ -603,7 +602,7 @@ def scenario_admin_list_chat_sessions_status_filters_with_status_param(ctx: Dict
         f"{BASE_URL}/api/admin/chat-sessions",
         json={
             "group_id": group_id,
-            "session_title": "后台 status 测试未开始会话",
+            "session_title": "Admin Status Test Not Started Session",
         },
         headers=ADMIN_HEADERS,
     )
@@ -619,7 +618,7 @@ def scenario_admin_list_chat_sessions_status_filters_with_status_param(ctx: Dict
     # not_started：通过 status=not_started + group_id 应至少包含该会话
     r_list = requests.get(
         f"{BASE_URL}/api/admin/chat-sessions",
-        params={"group_id": group_id, "session_title": "status 测试未开始", "page": 1, "page_size": 20},
+        params={"group_id": group_id, "session_title": "Admin Status Test", "page": 1, "page_size": 20},
         headers=ADMIN_HEADERS,
     )
     r_not = requests.get(
@@ -641,10 +640,10 @@ def scenario_admin_list_chat_sessions_status_filters_with_status_param(ctx: Dict
         data_not,
     )
 
-    # ongoing：将准备阶段的 session_id_2 视为进行中，通过 admin 更新标题改变 last_updated
+    # ongoing：将准备阶段的 session_id_2 设为进行中
     r_update_ongoing = requests.patch(
         f"{BASE_URL}/api/admin/chat-sessions/{ctx['session_id_2']}",
-        json={"session_title": "进行中会话（已更新）"},
+        json={"session_title": "Ongoing Session Updated", "status": "ongoing"},
         headers=ADMIN_HEADERS,
     )
     if r_update_ongoing.status_code != 200:
@@ -739,7 +738,7 @@ def scenario_admin_get_chat_session_not_found() -> bool:
 
 def scenario_admin_update_chat_session_title(ctx: Dict[str, Any]) -> bool:
     sid = ctx["session_id_2"]
-    new_title = "管理员改名后的会话"
+    new_title = "Admin Renamed Session"
 
     r = requests.patch(
         f"{BASE_URL}/api/admin/chat-sessions/{sid}",
@@ -774,31 +773,31 @@ def scenario_admin_update_chat_session_flags(ctx: Dict[str, Any]) -> bool:
     r = requests.patch(
         f"{BASE_URL}/api/admin/chat-sessions/{sid}",
         json={
-            "is_active": False,
+            "status": "ended",
             "ended_at": "2026-03-04T12:00:00Z",
         },
         headers=ADMIN_HEADERS,
     )
     if r.status_code != 200:
-        return _log(False, "admin 更新会话 is_active/ended_at 失败（期望 200）", {"status_code": r.status_code, "body": r.text})
+        return _log(False, "admin 更新会话 status/ended_at 失败（期望 200）", {"status_code": r.status_code, "body": r.text})
 
     data = r.json()
-    ok = (data.get("is_active") is False) and (data.get("ended_at") is not None)
-    ok &= _log(ok, "admin 更新会话 is_active/ended_at 场景", data)
+    ok = (data.get("status") == "ended") and (data.get("ended_at") is not None)
+    ok &= _log(ok, "admin 更新会话 status/ended_at 场景", data)
 
-    # 再按 is_active=false 过滤时应能看到该会话
+    # 再按 status=ended 过滤时应能看到该会话
     r2 = requests.get(
         f"{BASE_URL}/api/admin/chat-sessions",
-        params={"group_id": ctx["group_id"], "is_active": False, "page": 1, "page_size": 20},
+        params={"group_id": ctx["group_id"], "status": "ended", "page": 1, "page_size": 20},
         headers=ADMIN_HEADERS,
     )
     if r2.status_code != 200:
-        return _log(False, "admin 更新 flags 后按 is_active=false 过滤失败（期望 200）", {"status_code": r2.status_code, "body": r2.text})
+        return _log(False, "admin 更新 flags 后按 status=ended 过滤失败（期望 200）", {"status_code": r2.status_code, "body": r2.text})
     data2 = r2.json()
     ids2 = {item["id"] for item in data2["items"]}
     ok &= _log(
         sid in ids2,
-        "admin 更新 flags 后按 is_active=false 过滤包含该会话场景",
+        "admin 更新 flags 后按 status=ended 过滤包含该会话场景",
         data2,
     )
     return ok
@@ -822,9 +821,9 @@ def scenario_admin_delete_chat_session_success(ctx: Dict[str, Any]) -> bool:
     # 使用业务接口再创建一个临时会话，仅用于删除测试
     info = register_and_login("temp_session")
     access_token = info["access_token"]
-    group_detail = create_group(access_token, name="临时会话群")
+    group_detail = create_group(access_token, name=f"Temp Session Group {RUN_ID}")
     group_id = group_detail["group"]["id"]
-    session_detail = create_session(access_token, group_id, title="临时会话")
+    session_detail = create_session(access_token, group_id, title="Temp Session")
     sid = session_detail["id"]
 
     r = requests.delete(
@@ -858,10 +857,10 @@ def scenario_admin_delete_chat_session_not_found() -> bool:
 def scenario_admin_batch_delete_chat_sessions_success() -> bool:
     info = register_and_login("batch_del_sess")
     access_token = info["access_token"]
-    group_detail = create_group(access_token, name="批量删除会话测试群")
+    group_detail = create_group(access_token, name=f"Batch Delete Sessions Group {RUN_ID}")
     group_id = group_detail["group"]["id"]
-    s1 = create_session(access_token, group_id, title="批量删除会话1")
-    s2 = create_session(access_token, group_id, title="批量删除会话2")
+    s1 = create_session(access_token, group_id, title="Batch Delete Session 1")
+    s2 = create_session(access_token, group_id, title="Batch Delete Session 2")
     ids = [s1["id"], s2["id"]]
 
     r = requests.post(
@@ -895,9 +894,9 @@ def scenario_admin_batch_delete_chat_sessions_empty_ids() -> bool:
 def scenario_admin_batch_delete_chat_sessions_partial() -> bool:
     info = register_and_login("batch_del_sess_partial")
     access_token = info["access_token"]
-    group_detail = create_group(access_token, name="批量删除会话部分测试群")
+    group_detail = create_group(access_token, name=f"Batch Delete Sessions Partial Group {RUN_ID}")
     group_id = group_detail["group"]["id"]
-    s = create_session(access_token, group_id, title="批量删除会话部分")
+    s = create_session(access_token, group_id, title="Batch Delete Session Partial")
     r = requests.post(
         f"{BASE_URL}/api/admin/chat-sessions/batch-delete",
         json={"ids": [s["id"], "non-existent-session-uuid-1111"]},

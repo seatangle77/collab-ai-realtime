@@ -1,8 +1,10 @@
 import { test, expect } from '@playwright/test'
 import fs from 'fs'
+import { randomUUID } from 'crypto'
 
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY || 'TestAdminKey123'
 const API_BASE = process.env.API_BASE_URL || 'http://localhost:8000'
+const RUN_ID = randomUUID().replace(/-/g, '').slice(0, 6)
 
 type ChatSessionItem = {
   id: string
@@ -11,7 +13,8 @@ type ChatSessionItem = {
   session_title: string
   created_at: string
   last_updated: string
-  is_active: boolean | null
+  status: 'not_started' | 'ongoing' | 'ended' | null
+  started_at: string | null
   ended_at: string | null
 }
 
@@ -25,17 +28,17 @@ async function loginAsAdminAndGoToChatSessions(page: import('@playwright/test').
 }
 
 async function registerAndLogin(label: string): Promise<{ userId: string; accessToken: string }> {
-  const email = `e2e-session-${label}-${Date.now()}@example.com`
+  const email = `e2e-session-${label}-${RUN_ID}-${Date.now()}@example.com`
   const password = 'Pass123!'
 
   const regRes = await fetch(`${API_BASE}/api/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      name: `会话测试-${label}`,
+      name: `Admin Session User ${label} ${RUN_ID}`,
       email,
       password,
-      device_token: `device-session-${label}`,
+      device_token: `device-session-${label}-${RUN_ID}`,
     }),
   })
   if (!regRes.ok) {
@@ -116,10 +119,13 @@ async function fetchAdminChatSessionsByGroup(groupId: string): Promise<ChatSessi
 
 async function setupChatSessionsFixture() {
   const owner = await registerAndLogin('owner')
-  const { groupId } = await createGroup(owner.accessToken, `会话管理测试群-${Date.now()}`)
+  const { groupId } = await createGroup(owner.accessToken, `Admin Session Group ${RUN_ID}`)
 
-  const s1 = await createSession(owner.accessToken, groupId, '第一次会话')
-  const s2 = await createSession(owner.accessToken, groupId, '第二次会话')
+  const activeTitle = `Session Two ${RUN_ID}`
+  const endedTitle = `Session One ${RUN_ID}`
+
+  const s1 = await createSession(owner.accessToken, groupId, endedTitle)
+  const s2 = await createSession(owner.accessToken, groupId, activeTitle)
 
   await endSession(owner.accessToken, s1.id)
 
@@ -132,8 +138,8 @@ async function setupChatSessionsFixture() {
   return {
     groupId,
     groupName: sessions[0]?.group_name ?? null,
-    activeSessionTitle: '第二次会话',
-    endedSessionTitle: '第一次会话',
+    activeSessionTitle: activeTitle,
+    endedSessionTitle: endedTitle,
     sessions,
     earliestCreatedAt,
     latestCreatedAt,
@@ -188,7 +194,7 @@ test.describe.serial('Admin 会话管理页面 - 查询与时间', () => {
   })
 
   test('2. 按会话标题模糊查询', async ({ page }) => {
-    await page.getByPlaceholder('按会话标题模糊搜索').fill('第一次')
+    await page.getByPlaceholder('按会话标题模糊搜索').fill(shared.endedSessionTitle)
     await page.getByRole('button', { name: '查询' }).click()
 
     const rows = page.getByRole('row').filter({ hasText: shared.endedSessionTitle })
@@ -196,17 +202,11 @@ test.describe.serial('Admin 会话管理页面 - 查询与时间', () => {
   })
 
   test('3. 按状态筛选进行中 / 已结束', async ({ page }) => {
-    // 基于真实业务规则从 shared.sessions 里推导状态：
-    // - not_started: ended_at 为 null 且 created_at == last_updated
-    // - ongoing:     ended_at 为 null 且 created_at != last_updated
-    // - ended:       ended_at 非空
     const sessions = shared.sessions
-    const endedSession = sessions.find((s) => s.ended_at !== null)
-    const ongoingSession = sessions.find(
-      (s) => s.ended_at === null && s.created_at !== s.last_updated,
-    )
+    const endedSession = sessions.find((s) => s.status === 'ended')
+    const ongoingSession = sessions.find((s) => s.status === 'ongoing')
 
-    // 先验证「已结束」筛选一定能命中至少一条（fixture 中第一次会话已结束）
+    // 先验证「已结束」筛选一定能命中至少一条（fixture 中 Session One 已结束）
     await page.getByPlaceholder('按群组 ID 精确查询').fill(shared.groupId)
     await page.locator('.admin-chat-sessions-filters .el-select').first().click()
     await page.getByRole('option', { name: '已结束' }).click()
@@ -285,10 +285,10 @@ test.describe('Admin 会话管理页面 - 新建与编辑会话', () => {
   })
 
   test('通过后台页面新建会话（未设置开始时间）', async ({ page }) => {
-    const owner = await registerAndLogin('admin-ui-create-default')
-    const groupName = `会话管理新建默认-${Date.now()}`
+    const owner = await registerAndLogin('create-default')
+    const groupName = `Admin Create Default Group ${RUN_ID}`
     const { groupId } = await createGroup(owner.accessToken, groupName)
-    const title = '后台E2E-新建-默认时间'
+    const title = `Admin E2E Create Default ${RUN_ID}`
 
     await page.getByRole('button', { name: '新建会话' }).click()
 
@@ -300,7 +300,7 @@ test.describe('Admin 会话管理页面 - 新建与编辑会话', () => {
     await page.getByRole('option', { name: new RegExp(groupId) }).click()
 
     await dialog.getByPlaceholder('请输入会话标题').fill(title)
-    // 不设置“开始时间”，让后端使用默认当前时间
+    // 不设置"开始时间"，让后端使用默认当前时间
 
     await dialog.getByRole('button', { name: '创建' }).click()
 
@@ -315,10 +315,10 @@ test.describe('Admin 会话管理页面 - 新建与编辑会话', () => {
   })
 
   test('通过后台页面新建会话并显式设置开始时间', async ({ page }) => {
-    const owner = await registerAndLogin('admin-ui-create-with-start')
-    const groupName = `会话管理新建带开始-${Date.now()}`
+    const owner = await registerAndLogin('create-with-start')
+    const groupName = `Admin Create With Start Group ${RUN_ID}`
     const { groupId } = await createGroup(owner.accessToken, groupName)
-    const title = '后台E2E-新建-显式开始时间'
+    const title = `Admin E2E Create With Start ${RUN_ID}`
 
     // 我们设定一个比当前时间早 1 小时的开始时间，便于与默认 NOW 区分
     const start = new Date(Date.now() - 60 * 60 * 1000)
@@ -352,9 +352,9 @@ test.describe('Admin 会话管理页面 - 新建与编辑会话', () => {
   })
 
   test('编辑会话时可以修改创建时间', async ({ page }) => {
-    const owner = await registerAndLogin('admin-ui-edit-created-at')
-    const { groupId } = await createGroup(owner.accessToken, `会话管理编辑创建时间-${Date.now()}`)
-    const title = '后台E2E-编辑-创建时间'
+    const owner = await registerAndLogin('edit-created-at')
+    const { groupId } = await createGroup(owner.accessToken, `Admin Edit Created At Group ${RUN_ID}`)
+    const title = `Admin E2E Edit Created At ${RUN_ID}`
 
     const created = await createSession(owner.accessToken, groupId, title)
     const beforeItems = await fetchAdminChatSessionsByGroup(groupId)
@@ -383,7 +383,6 @@ test.describe('Admin 会话管理页面 - 新建与编辑会话', () => {
     const afterItems = await fetchAdminChatSessionsByGroup(groupId)
     const after = afterItems.find((s) => s.id === created.id)
     expect(after).toBeDefined()
-    const afterCreatedAt = new Date(after!.created_at)
     const beforeLastUpdated = new Date(before!.last_updated)
     const afterLastUpdated = new Date(after!.last_updated)
 
@@ -393,9 +392,9 @@ test.describe('Admin 会话管理页面 - 新建与编辑会话', () => {
   })
 
   test('编辑会话时回填结束时间后状态变为已结束', async ({ page }) => {
-    const owner = await registerAndLogin('admin-ui-edit-ended-at')
-    const { groupId } = await createGroup(owner.accessToken, `会话管理编辑结束时间-${Date.now()}`)
-    const title = '后台E2E-编辑-结束时间'
+    const owner = await registerAndLogin('edit-ended-at')
+    const { groupId } = await createGroup(owner.accessToken, `Admin Edit Ended At Group ${RUN_ID}`)
+    const title = `Admin E2E Edit Ended At ${RUN_ID}`
 
     const created = await createSession(owner.accessToken, groupId, title)
 
@@ -423,7 +422,7 @@ test.describe('Admin 会话管理页面 - 新建与编辑会话', () => {
 
     await dialog.getByRole('button', { name: '保存' }).click()
 
-    // 列表中状态应显示“已结束”
+    // 列表中状态应显示"已结束"
     await page.getByRole('button', { name: '重置' }).click()
     await page.getByPlaceholder('按群组 ID 精确查询').fill(groupId)
     await page.getByRole('button', { name: '查询' }).click()
@@ -431,7 +430,7 @@ test.describe('Admin 会话管理页面 - 新建与编辑会话', () => {
     const endedRow = page.getByRole('row').filter({ hasText: title }).first()
     await expect(endedRow).toBeVisible()
 
-    // 使用状态筛选“已结束”时也应能命中（通过这一点验证状态更新）
+    // 使用状态筛选"已结束"时也应能命中（通过这一点验证状态更新）
     const statusSelect = page.locator('.admin-chat-sessions-filters .el-select').first()
     await statusSelect.click()
     await page.getByRole('option', { name: '已结束' }).click()
@@ -456,7 +455,7 @@ test.describe('Admin 会话管理 - 查询组合与时间边界', () => {
     const fixture = comboFixture
 
     await page.getByPlaceholder('按群组 ID 精确查询').fill(fixture.groupId)
-    await page.getByPlaceholder('按会话标题模糊搜索').fill('第二次')
+    await page.getByPlaceholder('按会话标题模糊搜索').fill(fixture.activeSessionTitle)
     const statusSelect = page.locator('.admin-chat-sessions-filters .el-select').first()
     await statusSelect.click()
     const ongoingOption = page.getByRole('option', { name: '进行中' })
@@ -464,7 +463,7 @@ test.describe('Admin 会话管理 - 查询组合与时间边界', () => {
     await ongoingOption.click()
     await page.getByRole('button', { name: '查询' }).click()
 
-    const rows = page.getByRole('row').filter({ hasText: '第二次会话' })
+    const rows = page.getByRole('row').filter({ hasText: fixture.activeSessionTitle })
     await expect(rows.first()).toBeVisible()
   })
 
@@ -526,8 +525,8 @@ test.describe('Admin 会话管理 - 查询组合与时间边界', () => {
   })
 
   test('重置筛选 - 条件清空且列表恢复', async ({ page }) => {
-    await page.getByPlaceholder('按群组 ID 精确查询').fill('不存在的群组')
-    await page.getByPlaceholder('按会话标题模糊搜索').fill('不存在的标题')
+    await page.getByPlaceholder('按群组 ID 精确查询').fill('nonexistent-group-id')
+    await page.getByPlaceholder('按会话标题模糊搜索').fill('Nonexistent Session Title')
     await page.getByRole('button', { name: '查询' }).click()
 
     await page.getByRole('button', { name: '重置' }).click()
@@ -540,15 +539,15 @@ test.describe('Admin 会话管理 - 查询组合与时间边界', () => {
     await expect(page.getByRole('button', { name: '批量删除' })).toBeDisabled()
   })
 
-   test('导出选中 - 未选时按钮禁用', async ({ page }) => {
+  test('导出选中 - 未选时按钮禁用', async ({ page }) => {
     await expect(page.getByRole('button', { name: '导出选中' })).toBeDisabled()
   })
 
   test('批量删除 - 选中两个会话并删除', async ({ page }) => {
-    const owner = await registerAndLogin('admin-batch-del-sess')
-    const { groupId } = await createGroup(owner.accessToken, `批量删除会话群-${Date.now()}`)
-    const title1 = '批量删除会话1'
-    const title2 = '批量删除会话2'
+    const owner = await registerAndLogin('batch-del')
+    const { groupId } = await createGroup(owner.accessToken, `Admin Batch Delete Group ${RUN_ID}`)
+    const title1 = `Batch Delete Session One ${RUN_ID}`
+    const title2 = `Batch Delete Session Two ${RUN_ID}`
     await createSession(owner.accessToken, groupId, title1)
     await createSession(owner.accessToken, groupId, title2)
     await page.getByPlaceholder('按群组 ID 精确查询').fill(groupId)
@@ -567,10 +566,10 @@ test.describe('Admin 会话管理 - 查询组合与时间边界', () => {
   test('导出选中 - 选中两个会话导出 CSV 且只包含两行数据', async ({ page, browserName }) => {
     test.skip(browserName === 'webkit', '下载在部分浏览器环境下不稳定，这里主测 Chromium/Firefox')
 
-    const owner = await registerAndLogin('admin-export-sess')
-    const { groupId } = await createGroup(owner.accessToken, `导出会话群-${Date.now()}`)
-    const title1 = '导出测试会话1'
-    const title2 = '导出测试会话2'
+    const owner = await registerAndLogin('export')
+    const { groupId } = await createGroup(owner.accessToken, `Admin Export Group ${RUN_ID}`)
+    const title1 = `Export Session One ${RUN_ID}`
+    const title2 = `Export Session Two ${RUN_ID}`
     await createSession(owner.accessToken, groupId, title1)
     await createSession(owner.accessToken, groupId, title2)
 
@@ -614,4 +613,3 @@ test.describe('Admin 会话管理 - 查询组合与时间边界', () => {
     expect(lines.length).toBe(1 + 2)
   })
 })
-

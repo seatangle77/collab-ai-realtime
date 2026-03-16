@@ -49,7 +49,8 @@ export interface AdminChatSession {
   session_title: string
   created_at: string
   last_updated: string
-  is_active: boolean | null
+  status: 'not_started' | 'ongoing' | 'ended' | null
+  started_at: string | null
   ended_at: string | null
 }
 

@@ -113,11 +113,7 @@ const currentSessionForTranscripts = ref<AppChatSession | null>(null)
 const hasCurrentGroup = computed(() => !!currentGroup.value)
 
 function isNotStartedSession(session: AppChatSession): boolean {
-  return (
-    (session.is_active === true || session.is_active == null) &&
-    session.ended_at == null &&
-    session.created_at === session.last_updated
-  )
+  return session.status === 'not_started'
 }
 
 const filteredSessions = computed(() => {
@@ -128,21 +124,21 @@ const filteredSessions = computed(() => {
     return sessions.value
   }
   // 已结束
-  return sessions.value.filter((s) => s.ended_at != null || s.is_active === false)
+  return sessions.value.filter((s) => s.status === 'ended')
 })
 
 function formatStatus(session: AppChatSession): string {
-  if (session.ended_at != null || session.is_active === false) {
+  if (session.status === 'ended') {
     return '已结束'
   }
-  if (isNotStartedSession(session)) {
+  if (session.status === 'not_started') {
     return '未开始'
   }
   return '进行中'
 }
 
 function canEndSession(session: AppChatSession): boolean {
-  return session.ended_at == null && session.is_active !== false
+  return session.status !== 'ended'
 }
 
 async function fetchSessions(filter: SessionFilter = activeFilter.value) {

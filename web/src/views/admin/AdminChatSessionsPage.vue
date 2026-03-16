@@ -64,7 +64,7 @@ const editFormRef = ref<FormInstance>()
 const editForm = reactive({
   id: '',
   session_title: '',
-  is_active: true as boolean | null,
+  status: 'not_started' as 'not_started' | 'ongoing' | 'ended' | null,
   created_at: null as Date | null,
   ended_at: null as Date | null,
 })
@@ -163,7 +163,7 @@ function openCreateDialog() {
 function openEditDialog(row: AdminChatSession) {
   editForm.id = row.id
   editForm.session_title = row.session_title
-  editForm.is_active = row.is_active
+  editForm.status = row.status
   editForm.created_at = row.created_at ? new Date(row.created_at) : null
   editForm.ended_at = row.ended_at ? new Date(row.ended_at) : null
   editDialogVisible.value = true
@@ -176,7 +176,7 @@ async function submitEdit() {
     try {
       const payload: Record<string, any> = {
         session_title: editForm.session_title,
-        is_active: editForm.is_active,
+        status: editForm.status,
       }
       if (editForm.created_at) {
         payload.created_at = editForm.created_at.toISOString()
@@ -289,12 +289,12 @@ function handleExportSelectedCsv() {
         format: (row) => formatDateTimeToCST(row.last_updated),
       },
       {
-        key: 'is_active',
+        key: 'status',
         title: '状态',
         format: (row) => {
-          if (row.ended_at) return '已结束'
-          if (row.created_at === row.last_updated) return '未开始'
-          return '进行中'
+          if (row.status === 'ended') return '已结束'
+          if (row.status === 'ongoing') return '进行中'
+          return '未开始'
         },
       },
       {
@@ -465,16 +465,16 @@ onMounted(() => {
           <template #default="{ row }">
             <el-tag
               :type="
-                row.ended_at
+                row.status === 'ended'
                   ? 'info'
-                  : row.created_at === row.last_updated
-                    ? 'warning'
-                    : 'success'
+                  : row.status === 'ongoing'
+                    ? 'success'
+                    : 'warning'
               "
             >
-              <span v-if="row.ended_at">已结束</span>
-              <span v-else-if="row.created_at === row.last_updated">未开始</span>
-              <span v-else>进行中</span>
+              <span v-if="row.status === 'ended'">已结束</span>
+              <span v-else-if="row.status === 'ongoing'">进行中</span>
+              <span v-else>未开始</span>
             </el-tag>
           </template>
         </el-table-column>
@@ -549,9 +549,10 @@ onMounted(() => {
           <el-input v-model="editForm.session_title" />
         </el-form-item>
         <el-form-item label="会话状态">
-          <el-select v-model="editForm.is_active" placeholder="请选择状态" style="width: 100%">
-            <el-option label="进行中" :value="true" />
-            <el-option label="已结束" :value="false" />
+          <el-select v-model="editForm.status" placeholder="请选择状态" style="width: 100%">
+            <el-option label="未开始" value="not_started" />
+            <el-option label="进行中" value="ongoing" />
+            <el-option label="已结束" value="ended" />
           </el-select>
         </el-form-item>
         <el-form-item label="创建时间">

@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test'
+import { randomUUID } from 'crypto'
 
 const API_BASE = process.env.API_BASE_URL || 'http://localhost:8000'
+const RUN_ID = randomUUID().replace(/-/g, '').slice(0, 6)
 
 interface AppTestUser {
   email: string
@@ -19,10 +21,9 @@ interface CreatedSession {
 }
 
 async function registerUserForE2E(label: string): Promise<AppTestUser> {
-  const ts = Date.now()
-  const email = `app-sessions-${label}-${ts}@example.com`
+  const email = `app-sessions-${label}-${RUN_ID}-${Date.now()}@example.com`
   const password = '1234'
-  const name = `App Sessions E2E ${label}`
+  const name = `App Sessions User ${label} ${RUN_ID}`
 
   const res = await fetch(`${API_BASE}/api/auth/register`, {
     method: 'POST',
@@ -32,7 +33,7 @@ async function registerUserForE2E(label: string): Promise<AppTestUser> {
 
   if (!res.ok) {
     const text = await res.text()
-    throw new Error(`注册测试用户失败: ${res.status} - ${text}`)
+    throw new Error(`register user failed: ${res.status} - ${text}`)
   }
 
   return { email, password, name }
@@ -46,7 +47,7 @@ async function loginAndGetToken(user: AppTestUser): Promise<{ token: string; use
   })
   if (!res.ok) {
     const text = await res.text()
-    throw new Error(`登录获取 token 失败: ${res.status} - ${text}`)
+    throw new Error(`login failed: ${res.status} - ${text}`)
   }
   const data = (await res.json()) as { access_token: string; user: { id: string } }
   return { token: data.access_token, userId: data.user.id }
@@ -64,7 +65,7 @@ async function createGroupAsUser(user: AppTestUser, name: string): Promise<Creat
   })
   if (!res.ok) {
     const text = await res.text()
-    throw new Error(`创建群组失败: ${res.status} - ${text}`)
+    throw new Error(`create group failed: ${res.status} - ${text}`)
   }
   const data = await res.json()
   return { id: data.group.id, name: data.group.name }
@@ -80,7 +81,7 @@ async function joinGroupViaApi(user: AppTestUser, groupId: string): Promise<void
   })
   if (!res.ok) {
     const text = await res.text()
-    throw new Error(`通过 API 加入群组失败: ${res.status} - ${text}`)
+    throw new Error(`join group failed: ${res.status} - ${text}`)
   }
 }
 
@@ -96,7 +97,7 @@ async function createSessionViaApi(user: AppTestUser, groupId: string, title: st
   })
   if (!res.ok) {
     const text = await res.text()
-    throw new Error(`通过 API 创建会话失败: ${res.status} - ${text}`)
+    throw new Error(`create session failed: ${res.status} - ${text}`)
   }
   const data = await res.json()
   return { id: data.id, title: data.session_title }
@@ -158,7 +159,7 @@ test.describe.serial('App 我的会话页面 - 单用户完整流程', () => {
   test.beforeAll(async () => {
     test.setTimeout(120_000)
     user = await registerUserForE2E('single-user')
-    group = await createGroupAsUser(user, `会话测试群-${Date.now()}`)
+    group = await createGroupAsUser(user, `App Session Group ${RUN_ID}`)
   })
 
   test.beforeEach(async ({ page }) => {
@@ -172,7 +173,7 @@ test.describe.serial('App 我的会话页面 - 单用户完整流程', () => {
     const emptyText = page.getByText('当前筛选条件下暂无会话', { exact: false })
     await expect(emptyText).toBeVisible()
 
-    const title = `E2E 会话-${Date.now()}`
+    const title = `App E2E Session ${RUN_ID}`
     await page.getByRole('button', { name: '新建会话' }).click()
 
     const dialog = page.getByRole('dialog', { name: '新建会话' })
@@ -186,8 +187,8 @@ test.describe.serial('App 我的会话页面 - 单用户完整流程', () => {
   })
 
   test('3. 筛选 Tab：进行中 / 已结束 / 全部', async ({ page }) => {
-    const titleActive = `E2E Filter-Active-${Date.now()}`
-    const titleToEnd = `E2E Filter-Ended-${Date.now()}`
+    const titleActive = `App Filter Active ${RUN_ID}`
+    const titleToEnd = `App Filter Ended ${RUN_ID}`
 
     // 新建两个进行中会话
     for (const t of [titleActive, titleToEnd]) {
@@ -206,7 +207,7 @@ test.describe.serial('App 我的会话页面 - 单用户完整流程', () => {
       .first()
     await expect(itemToEnd).toBeVisible()
     await itemToEnd.getByRole('button', { name: '结束会话' }).click()
-    // 在 Element Plus 的确认弹窗中点击“结束”按钮，避免匹配到顶部 Tab「已结束」或其它按钮
+    // 在 Element Plus 的确认弹窗中点击"结束"按钮，避免匹配到顶部 Tab「已结束」或其它按钮
     const confirmDialog = page.getByRole('dialog', { name: '结束会话' })
     await expect(confirmDialog).toBeVisible()
     await confirmDialog.getByRole('button', { name: '结束' }).click()
@@ -229,7 +230,7 @@ test.describe.serial('App 我的会话页面 - 单用户完整流程', () => {
   })
 
   test('4. 编辑会话成功并刷新列表（含未开始/进行中状态）', async ({ page }) => {
-    const originalTitle = `E2E Rename-Orig-${Date.now()}`
+    const originalTitle = `App Rename Orig ${RUN_ID}`
 
     await page.getByRole('button', { name: '新建会话' }).click()
     const dialog = page.getByRole('dialog', { name: '新建会话' })
@@ -257,7 +258,7 @@ test.describe.serial('App 我的会话页面 - 单用户完整流程', () => {
   })
 
   test('5. 查看转写：无记录时展示空状态', async ({ page }) => {
-    const title = `E2E Transcripts-Empty-${Date.now()}`
+    const title = `App Transcripts Empty ${RUN_ID}`
     await page.getByRole('button', { name: '新建会话' }).click()
     const dialog = page.getByRole('dialog', { name: '新建会话' })
     await dialog.getByLabel('会话标题').fill(title)
@@ -288,8 +289,8 @@ test.describe.serial('App 我的会话页面 - 表单校验与边界', () => {
   test.beforeAll(async () => {
     test.setTimeout(120_000)
     user = await registerUserForE2E('form-boundary')
-    group = await createGroupAsUser(user, `会话表单群-${Date.now()}`)
-    anotherGroup = await createGroupAsUser(user, `会话表单群-2-${Date.now()}`)
+    group = await createGroupAsUser(user, `App Session Form Group ${RUN_ID}`)
+    anotherGroup = await createGroupAsUser(user, `App Session Form Group Two ${RUN_ID}`)
   })
 
   test.beforeEach(async ({ page }) => {
@@ -326,7 +327,7 @@ test.describe.serial('App 我的会话页面 - 表单校验与边界', () => {
   })
 
   test('5.2 新建会话 - 取消时不应产生新会话', async ({ page }) => {
-    const title = `取消新建-${Date.now()}`
+    const title = `App Cancel Create ${RUN_ID}`
 
     const beforeList = await page.locator('.app-sessions-item').allTextContents()
 
@@ -341,7 +342,7 @@ test.describe.serial('App 我的会话页面 - 表单校验与边界', () => {
   })
 
   test('5.3 新建会话 - 多次打开关闭弹窗时表单状态重置', async ({ page }) => {
-    const tempTitle = `临时标题-${Date.now()}`
+    const tempTitle = `App Temp Title ${RUN_ID}`
     const tempTime = '2026-03-10T09:00:00Z'
 
     // 第一次打开并填写
@@ -363,7 +364,7 @@ test.describe.serial('App 我的会话页面 - 表单校验与边界', () => {
   })
 
   test('5.4 新建会话 - 预设开始时间创建成功并立即出现在列表中', async ({ page }) => {
-    const title = `带预设时间-${Date.now()}`
+    const title = `App With Planned Start ${RUN_ID}`
     const planned = '2026-03-10T10:00:00Z'
 
     await page.getByRole('button', { name: '新建会话' }).click()
@@ -383,7 +384,7 @@ test.describe.serial('App 我的会话页面 - 表单校验与边界', () => {
   })
 
   test('5.6 新建会话 - 切换所属群组时自动切换当前群组', async ({ page }) => {
-    const title = `切换群组-${Date.now()}`
+    const title = `App Switch Group ${RUN_ID}`
 
     // 初始使用 group 作为 current_group
     await page.goto('/app/sessions')
@@ -411,8 +412,8 @@ test.describe.serial('App 我的会话页面 - 表单校验与边界', () => {
     await expect(page.getByText(title, { exact: false })).toBeVisible()
   })
 
-  test('5.5 已结束会话的“结束会话”按钮禁用', async ({ page }) => {
-    const title = `待结束-${Date.now()}`
+  test('5.5 已结束会话的"结束会话"按钮禁用', async ({ page }) => {
+    const title = `App To End ${RUN_ID}`
 
     // 创建一个会话
     await page.getByRole('button', { name: '新建会话' }).click()
@@ -432,7 +433,7 @@ test.describe.serial('App 我的会话页面 - 表单校验与边界', () => {
     await confirmDialog.getByRole('button', { name: '结束' }).click()
     await expect(page.getByText('会话已结束')).toBeVisible()
 
-    // 切换到“已结束”Tab，再检查该会话的按钮状态
+    // 切换到"已结束"Tab，再检查该会话的按钮状态
     await page.getByRole('button', { name: '已结束' }).click()
     const endedItem = page.locator('.app-sessions-item').filter({ hasText: title }).first()
     await expect(endedItem).toBeVisible()
@@ -447,7 +448,7 @@ test.describe.serial('App 我的会话页面 - 表单校验与边界', () => {
     await expect(editDialog).toBeVisible()
     await expect(editDialog.getByPlaceholder('仅未开始会话可编辑')).toHaveCount(0)
 
-    const endedNewTitle = `${title}-已编辑`
+    const endedNewTitle = `${title} Edited`
     await editDialog.getByLabel('会话标题').fill(endedNewTitle)
     await editDialog.getByRole('button', { name: '保 存' }).click()
     await expect(page.getByText('更新会话成功')).toBeVisible()
@@ -468,10 +469,10 @@ test.describe.serial('App 我的会话页面 - 多用户与权限边界', () => 
     member = await registerUserForE2E('member')
     outsider = await registerUserForE2E('outsider')
 
-    group = await createGroupAsUser(owner, `会话权限群-${Date.now()}`)
+    group = await createGroupAsUser(owner, `App Session Auth Group ${RUN_ID}`)
     await joinGroupViaApi(member, group.id)
 
-    ownerSession = await createSessionViaApi(owner, group.id, `Owner Session-${Date.now()}`)
+    ownerSession = await createSessionViaApi(owner, group.id, `Owner Session ${RUN_ID}`)
   })
 
   test('6. 群成员可以看到他人创建的会话', async ({ page }) => {
@@ -503,4 +504,3 @@ test.describe.serial('App 我的会话页面 - 多用户与权限边界', () => 
     await expect(page).toHaveURL(/\/app(\/login)?\/?$/)
   })
 })
-
