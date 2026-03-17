@@ -413,6 +413,69 @@ async def update_session(
 
 
 @router.post(
+    "/sessions/{session_id}/start",
+    response_model=ChatSessionOut,
+)
+async def start_session(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: Mapping[str, Any] = Depends(get_current_user),
+) -> ChatSessionOut:
+    """
+    发起讨论：将会话状态从 not_started 改为 ongoing。
+    同一群组内只能有一个 ongoing 会话。
+    """
+    session_row, group_id = await _get_session_and_group(session_id, db)
+    await _get_group_or_404(group_id, db)
+    await _ensure_member_of_group(
+        group_id,
+        current_user["id"],
+        db,
+        forbidden_detail="仅群组成员可以发起会话",
+    )
+
+    if session_row["status"] != "not_started":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="仅未开始的会话可以发起",
+        )
+
+    ongoing_result = await db.execute(
+        text(
+            """
+            SELECT 1 FROM chat_sessions
+            WHERE group_id = :group_id
+              AND status = 'ongoing'
+              AND id != :session_id
+            """
+        ),
+        {"group_id": group_id, "session_id": session_id},
+    )
+    if ongoing_result.first():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="该群组已有进行中的会话",
+        )
+
+    result = await db.execute(
+        text(
+            """
+            UPDATE chat_sessions
+            SET status = 'ongoing',
+                started_at = NOW(),
+                last_updated = NOW()
+            WHERE id = :session_id
+            RETURNING id, group_id, created_at, last_updated, session_title, status, started_at, ended_at
+            """
+        ),
+        {"session_id": session_id},
+    )
+    await db.commit()
+    row = result.mappings().one()
+    return ChatSessionOut.model_validate(dict(row))
+
+
+@router.post(
     "/sessions/{session_id}/end",
     response_model=ChatSessionOut,
 )

@@ -190,6 +190,68 @@ def scenario_update_session_titles(ctx: Dict[str, Any]) -> bool:
     return ok
 
 
+# ---------- 发起会话相关 ----------
+
+
+def scenario_start_session(ctx: Dict[str, Any]) -> bool:
+    ok = True
+    headers_leader = {"Authorization": f"Bearer {ctx['leader_token']}"}
+    headers_member = {"Authorization": f"Bearer {ctx['member_token']}"}
+    headers_outsider = {"Authorization": f"Bearer {ctx['outsider_token']}"}
+
+    # 1. 未登录发起会话 → 401
+    r = requests.post(f"{BASE_URL}/api/sessions/{ctx['session_id_1']}/start")
+    ok &= _log(r.status_code == 401, "未登录发起会话返回 401 场景", {"status_code": r.status_code})
+
+    # 2. outsider 发起会话 → 403
+    r = requests.post(f"{BASE_URL}/api/sessions/{ctx['session_id_1']}/start", headers=headers_outsider)
+    ok &= _log(r.status_code == 403, "outsider 发起会话返回 403 场景", {"status_code": r.status_code, "body": r.text})
+
+    # 3. 发起不存在的会话 → 404
+    r = requests.post(f"{BASE_URL}/api/sessions/nonexistent-session/start", headers=headers_leader)
+    ok &= _log(r.status_code == 404, "发起不存在会话返回 404 场景", {"status_code": r.status_code, "body": r.text})
+
+    # 4. 正常发起 session_id_1（not_started）→ 200，status=ongoing，started_at 非 null
+    r = requests.post(f"{BASE_URL}/api/sessions/{ctx['session_id_1']}/start", headers=headers_leader)
+    if r.status_code != 200:
+        return _log(False, "正常发起会话失败（期望 200）", {"status_code": r.status_code, "text": r.text})
+    data = r.json()
+    ok &= _log(
+        data["status"] == "ongoing" and data["started_at"] is not None,
+        "正常发起会话场景：status=ongoing，started_at 非 null",
+        data,
+    )
+
+    # 5. 再次 start 同一个 ongoing 会话 → 400（状态不是 not_started）
+    r = requests.post(f"{BASE_URL}/api/sessions/{ctx['session_id_1']}/start", headers=headers_leader)
+    ok &= _log(r.status_code == 400, "重复发起 ongoing 会话返回 400 场景", {"status_code": r.status_code, "body": r.text})
+
+    # 6. 同群组已有 ongoing（session_id_1），新建 session_id_3 并尝试 start → 409
+    r = requests.post(
+        f"{BASE_URL}/api/groups/{ctx['group_id']}/sessions",
+        json={"session_title": "Third Session"},
+        headers=headers_member,
+    )
+    if r.status_code != 201:
+        return _log(False, "创建第三个会话失败", {"status_code": r.status_code, "text": r.text})
+    ctx["session_id_3"] = r.json()["id"]
+    r = requests.post(f"{BASE_URL}/api/sessions/{ctx['session_id_3']}/start", headers=headers_member)
+    ok &= _log(r.status_code == 409, "群组已有 ongoing 会话时 start 返回 409 场景", {"status_code": r.status_code, "body": r.text})
+
+    # 7. start 后 list 默认列表中该会话可见（status != ended）
+    r = requests.get(f"{BASE_URL}/api/groups/{ctx['group_id']}/sessions", headers=headers_leader)
+    if r.status_code != 200:
+        return _log(False, "start 后列出会话失败", {"status_code": r.status_code, "text": r.text})
+    ids = {s["id"] for s in r.json()}
+    ok &= _log(ctx["session_id_1"] in ids, "start 后默认列表中会话可见场景", list(ids))
+
+    # 8. start session_id_2（not_started，group 已有 ongoing session_id_1）→ 409
+    r = requests.post(f"{BASE_URL}/api/sessions/{ctx['session_id_2']}/start", headers=headers_member)
+    ok &= _log(r.status_code == 409, "另一 not_started 会话 start 时 409（互斥）场景", {"status_code": r.status_code, "body": r.text})
+
+    return ok
+
+
 # ---------- 结束 / 归档会话相关 ----------
 
 
@@ -302,6 +364,7 @@ def run_all() -> bool:
     ok &= scenario_create_sessions(ctx)
     ok &= scenario_list_sessions(ctx)
     ok &= scenario_update_session_titles(ctx)
+    ok &= scenario_start_session(ctx)
     ok &= scenario_end_session(ctx)
     ok &= scenario_transcripts_permissions(ctx)
 
