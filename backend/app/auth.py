@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import hashlib
-import hmac
 import os
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 
+import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
@@ -18,13 +18,13 @@ from .db import get_db
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
-
 security = HTTPBearer(auto_error=True)
 
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-me")  # 建议线上用环境变量覆盖
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-me")
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 小时
-PASSWORD_SALT = os.getenv("PASSWORD_SALT", "change-me-salt")
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 class RegisterRequest(BaseModel):
@@ -60,17 +60,11 @@ class ChangePasswordRequest(BaseModel):
 
 
 def _hash_password(plain_password: str) -> str:
-    """
-    简化版密码哈希：SHA256(salt + password)。
-    对当前项目足够使用，比明文安全，不再依赖 bcrypt/passlib。
-    """
-    data = (PASSWORD_SALT + plain_password).encode("utf-8")
-    return hashlib.sha256(data).hexdigest()
+    return bcrypt.hashpw(plain_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
 def _verify_password(plain_password: str, hashed_password: str) -> bool:
-    expected = _hash_password(plain_password)
-    return hmac.compare_digest(expected, hashed_password)
+    return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
 
 
 def _create_access_token(data: dict[str, Any], expires_delta: timedelta | None = None) -> str:
@@ -114,13 +108,15 @@ async def get_current_user(
 
 @router.post("/register", response_model=UserOut)
 async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db)) -> UserOut:
-    # 简单密码策略：必须为 4 位
+    # 邮箱格式校验
+    if not _EMAIL_RE.match(payload.email):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="邮箱格式不正确")
+
+    # 密码长度校验：恰好 4 位
     if len(payload.password) != 4:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="密码必须为 4 位",
-        )
-    # 检查 email 是否已存在
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="密码必须为 4 位")
+
+    # 邮箱唯一性
     existing = await db.execute(
         text("SELECT id FROM users_info WHERE email = :email"),
         {"email": payload.email},
@@ -128,13 +124,12 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
     if existing.first():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="邮箱已被注册")
 
-    # 生成用户 ID（沿用现有 u001/u002 风格）
-    user_id = f"u{uuid.uuid4().hex[:8]}"
-
-    # 使用 UTC 时间写入 created_at，与 admin list_users 的 created_from/created_to 比较语义一致
     now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    user_id = f"u{uuid.uuid4().hex[:8]}"
+    group_id = f"g{uuid.uuid4().hex[:8]}"
+    membership_id = f"gm{uuid.uuid4().hex[:8]}"
 
-    # 插入新用户（password_needs_reset 默认为 FALSE）
+    # 写入用户
     result = await db.execute(
         text(
             """
@@ -152,8 +147,40 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
             "created_at": now_utc,
         },
     )
-    await db.commit()
     row = result.mappings().one()
+
+    # 创建默认群组
+    await db.execute(
+        text(
+            """
+            INSERT INTO groups (id, name, is_active, is_default, created_at)
+            VALUES (:id, :name, TRUE, TRUE, :created_at)
+            """
+        ),
+        {
+            "id": group_id,
+            "name": f"{payload.name} 的群组",
+            "created_at": now_utc,
+        },
+    )
+
+    # 创建 owner 成员关系
+    await db.execute(
+        text(
+            """
+            INSERT INTO group_memberships (id, group_id, user_id, role, status, created_at)
+            VALUES (:id, :group_id, :user_id, 'owner', 'active', :created_at)
+            """
+        ),
+        {
+            "id": membership_id,
+            "group_id": group_id,
+            "user_id": user_id,
+            "created_at": now_utc,
+        },
+    )
+
+    await db.commit()
     return UserOut.model_validate(dict(row))
 
 
@@ -201,36 +228,20 @@ async def change_password(
 ) -> UserOut:
     user_id = current_user["id"]
 
-    # 查询当前密码哈希
     result = await db.execute(
-        text(
-            """
-            SELECT password_hash
-            FROM users_info
-            WHERE id = :id
-            """
-        ),
+        text("SELECT password_hash FROM users_info WHERE id = :id"),
         {"id": user_id},
     )
     row = result.mappings().first()
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
 
-    # 校验旧密码
     if not _verify_password(payload.old_password, row["password_hash"]):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="旧密码不正确",
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="旧密码不正确")
 
-    # 校验新密码长度为 4 位
     if len(payload.new_password) != 4:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="密码必须为 4 位",
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="密码必须为 4 位")
 
-    # 更新密码哈希并清除重置标记
     await db.execute(
         text(
             """
@@ -247,7 +258,6 @@ async def change_password(
     )
     await db.commit()
 
-    # 返回最新用户信息
     result2 = await db.execute(
         text(
             """
@@ -260,4 +270,3 @@ async def change_password(
     )
     row2 = result2.mappings().one()
     return UserOut.model_validate(dict(row2))
-

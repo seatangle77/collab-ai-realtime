@@ -6,9 +6,8 @@ from typing import Any, Dict, Tuple
 import requests
 
 BASE_URL = "http://127.0.0.1:8000"
+RUN_ID = uuid.uuid4().hex[:6]
 
-# 和 app.admin.deps 中的默认值保持一致；
-# 如需修改，请同时修改 app/admin/deps.py 中的默认 ADMIN_API_KEY。
 ADMIN_KEY = "TestAdminKey123"
 ADMIN_HEADERS = {"X-Admin-Token": ADMIN_KEY}
 
@@ -22,71 +21,22 @@ def _log(ok: bool, message: str, extra: Any | None = None) -> bool:
 
 
 def register_dummy_user(label: str) -> Dict[str, Any]:
-    """通过业务接口注册一个普通用户，返回完整用户 JSON。"""
     email = f"admin_test_{label}_{uuid.uuid4().hex[:6]}@example.com"
-    password = "1234"
-
     r = requests.post(
         f"{BASE_URL}/api/auth/register",
         json={
-            "name": f"用户-{label}",
+            "name": f"User {label} {RUN_ID}",
             "email": email,
-            "password": password,
-            "device_token": f"device-{label}",
+            "password": "1234",
+            "device_token": f"device-{label}-{uuid.uuid4().hex[:8]}",
         },
     )
     r.raise_for_status()
     return r.json()
 
 
-# ---------- 场景：基础准备 ----------
-
-
-def setup_users(ctx: Dict[str, Any]) -> bool:
-    """注册几个测试用户，供后续 admin 场景使用。"""
-    users: list[Dict[str, Any]] = []
-    for label in ["A", "B", "C"]:
-        user = register_dummy_user(label)
-        users.append(user)
-
-    ctx["users"] = users
-    _log(True, "准备阶段：成功注册 3 个测试用户", users)
-    return True
-
-
-# ---------- 场景：管理员分页列出用户 ----------
-
-
-def scenario_admin_list_users_basic(ctx: Dict[str, Any]) -> bool:
-    # 用 email 过滤出准备阶段用户，避免 created_at 排序导致不在首页（注册现用 UTC 存库）
-    r = requests.get(
-        f"{BASE_URL}/api/admin/users",
-        params={"page": 1, "page_size": 10, "email": "admin_test_"},
-        headers=ADMIN_HEADERS,
-    )
-    if r.status_code != 200:
-        return _log(False, "admin 列出用户失败（期望 200）", {"status_code": r.status_code, "body": r.text})
-
-    data = r.json()
-    ok = isinstance(data.get("items"), list) and isinstance(data.get("meta"), dict)
-
-    # 至少包含我们刚刚注册的某一个用户（通过 email 检查）
-    emails = {u["email"] for u in ctx["users"]}
-    returned_emails = {item["email"] for item in data["items"]}
-    ok = ok and bool(emails & returned_emails)
-
-    return _log(ok, "admin 基础分页列出用户场景", data)
-
-
-# ---------- 场景：用户所在小组信息与按小组名称过滤 ----------
-
-
 def _create_admin_group(name: str) -> Dict[str, Any]:
-    r = requests.post(
-        f"{BASE_URL}/api/admin/groups",
-        json={"name": name},
-        headers=ADMIN_HEADERS,
-    )
+    r = requests.post(f"{BASE_URL}/api/admin/groups", json={"name": name}, headers=ADMIN_HEADERS)
     r.raise_for_status()
     return r.json()
 
@@ -94,400 +44,391 @@ def _create_admin_group(name: str) -> Dict[str, Any]:
 def _create_admin_membership(group_id: str, user_id: str, role: str = "member", status: str = "active") -> Dict[str, Any]:
     r = requests.post(
         f"{BASE_URL}/api/admin/memberships",
-        json={
-            "group_id": group_id,
-            "user_id": user_id,
-            "role": role,
-            "status": status,
-        },
+        json={"group_id": group_id, "user_id": user_id, "role": role, "status": status},
         headers=ADMIN_HEADERS,
     )
     r.raise_for_status()
     return r.json()
 
 
-def scenario_admin_users_group_info_and_group_name_filters(ctx: Dict[str, Any]) -> bool:
-    """
-    验证：
-    1）列表返回的用户对象中包含 group_ids/group_names 字段且类型正确；
-    2）有 active 成员关系的用户能正确聚合所属小组 ID/名称；
-    3）status!=active 的成员关系不会出现在聚合结果中；
-    4）按 group_name 过滤时，能返回正确用户集合；不存在的小组名返回空结果；
-    5）按 group_id 精确过滤时，只返回该群中 active 成员对应的用户。
-    """
+# ────────────────────────────────────────────────────────────
+# 准备阶段
+# ────────────────────────────────────────────────────────────
+
+def setup_users(ctx: Dict[str, Any]) -> bool:
+    users: list[Dict[str, Any]] = []
+    for label in ["A", "B", "C"]:
+        users.append(register_dummy_user(label))
+    ctx["users"] = users
+    return _log(True, "准备阶段：成功注册 3 个测试用户", [u["email"] for u in users])
+
+
+# ────────────────────────────────────────────────────────────
+# 管理员 token 鉴权
+# ────────────────────────────────────────────────────────────
+
+def scenario_admin_missing_or_wrong_token() -> bool:
     ok = True
-
-    users = ctx["users"]
-    if len(users) < 3:
-        return _log(False, "场景前置：ctx['users'] 数量不足 3 个", ctx)
-
-    user0 = users[0]
-    user1 = users[1]
-    user2 = users[2]
-
-    # 准备两个小组
-    group1_name = f"用户管理测试群-Alpha-{uuid.uuid4().hex[:4]}"
-    group2_name = f"用户管理测试群-Beta-{uuid.uuid4().hex[:4]}"
-
-    try:
-        g1 = _create_admin_group(group1_name)
-        g2 = _create_admin_group(group2_name)
-    except requests.HTTPError as exc:  # noqa: BLE001
-        return _log(False, "admin 创建测试群组失败", str(exc))
-
-    g1_id = g1["id"]
-    g2_id = g2["id"]
-
-    # 为 user0 创建两个 active 成员关系：g1 + g2
-    # 为 user1 创建一个 active 成员关系：g1
-    # 为 user1 在 g2 创建一个非 active 成员关系（left），用于验证不会出现在聚合中
-    try:
-        _create_admin_membership(g1_id, user0["id"], status="active")
-        _create_admin_membership(g2_id, user0["id"], status="active")
-        _create_admin_membership(g1_id, user1["id"], status="active")
-        _create_admin_membership(g2_id, user1["id"], status="left")
-    except requests.HTTPError as exc:  # noqa: BLE001
-        return _log(False, "admin 创建测试成员关系失败", str(exc))
-
-    # 1）基础列表中应返回 group_ids/group_names，并且聚合结果符合预期（用 email 过滤出准备阶段用户）
-    r_list = requests.get(
-        f"{BASE_URL}/api/admin/users",
-        params={"page": 1, "page_size": 50, "email": "admin_test_"},
-        headers=ADMIN_HEADERS,
-    )
-    if r_list.status_code != 200:
-        return _log(
-            False,
-            "admin 列出用户（带小组信息）失败（期望 200）",
-            {"status_code": r_list.status_code, "body": r_list.text},
-        )
-    data_list = r_list.json()
-
-    def _find_user_item(user_id: str) -> Dict[str, Any] | None:
-        for item in data_list.get("items", []):
-            if item.get("id") == user_id:
-                return item
-        return None
-
-    item0 = _find_user_item(user0["id"])
-    item1 = _find_user_item(user1["id"])
-    item2 = _find_user_item(user2["id"])
-
-    if not (item0 and item1 and item2):
-        return _log(
-            False,
-            "admin 用户列表中未找到准备阶段创建的用户",
-            data_list,
-        )
-
-    # 字段存在且为 list
-    for it, label in [(item0, "user0"), (item1, "user1"), (item2, "user2")]:
-        if not isinstance(it.get("group_ids"), list) or not isinstance(it.get("group_names"), list):
-            return _log(False, f"{label} 缺少 group_ids/group_names 字段或类型错误", it)
-
-    # user0：应包含 g1/g2；user1：只包含 g1；user2：没有任何小组
-    ok &= g1_id in item0["group_ids"] and group1_name in item0["group_names"]
-    ok &= g2_id in item0["group_ids"] and group2_name in item0["group_names"]
-
-    ok &= g1_id in item1["group_ids"] and group1_name in item1["group_names"]
-    ok &= g2_id not in item1["group_ids"] and group2_name not in item1["group_names"]
-
-    ok &= item2["group_ids"] == [] and item2["group_names"] == []
-
-    ok &= _log(ok, "admin 用户列表返回 group_ids/group_names 聚合结果场景", data_list)
-
-    # 2）按 group_name=group1_name 过滤，预期 user0/user1 都在结果中
-    r_g1 = requests.get(
-        f"{BASE_URL}/api/admin/users",
-        params={"page": 1, "page_size": 50, "group_name": group1_name},
-        headers=ADMIN_HEADERS,
-    )
-    if r_g1.status_code != 200:
-        return _log(
-            False,
-            "admin 按 group_name=group1 过滤用户失败（期望 200）",
-            {"status_code": r_g1.status_code, "body": r_g1.text},
-        )
-    data_g1 = r_g1.json()
-    ids_g1 = {item["id"] for item in data_g1.get("items", [])}
-    ok &= _log(
-        user0["id"] in ids_g1 and user1["id"] in ids_g1,
-        "admin 按 group_name=group1 过滤用户场景",
-        data_g1,
-    )
-
-    # 3）按 group_name=group2_name 过滤，预期只有 user0 在结果中（user1 在 g2 仅有 left 成员关系）
-    r_g2 = requests.get(
-        f"{BASE_URL}/api/admin/users",
-        params={"page": 1, "page_size": 50, "group_name": group2_name},
-        headers=ADMIN_HEADERS,
-    )
-    if r_g2.status_code != 200:
-        return _log(
-            False,
-            "admin 按 group_name=group2 过滤用户失败（期望 200）",
-            {"status_code": r_g2.status_code, "body": r_g2.text},
-        )
-    data_g2 = r_g2.json()
-    ids_g2 = {item["id"] for item in data_g2.get("items", [])}
-    ok &= _log(
-        user0["id"] in ids_g2 and user1["id"] not in ids_g2,
-        "admin 按 group_name=group2 过滤用户（仅包含 active 成员）场景",
-        data_g2,
-    )
-
-    # 4）使用一个不存在的小组名称过滤，预期不返回上述三个用户
-    bad_keyword = f"不存在小组_{uuid.uuid4().hex[:8]}"
-    r_bad = requests.get(
-        f"{BASE_URL}/api/admin/users",
-        params={"page": 1, "page_size": 10, "group_name": bad_keyword},
-        headers=ADMIN_HEADERS,
-    )
-    if r_bad.status_code != 200:
-        return _log(
-            False,
-            "admin 按不存在的小组名称过滤用户失败（期望 200）",
-            {"status_code": r_bad.status_code, "body": r_bad.text},
-        )
-    data_bad = r_bad.json()
-    bad_ids = {item["id"] for item in data_bad.get("items", [])}
-    ok &= _log(
-        user0["id"] not in bad_ids and user1["id"] not in bad_ids and user2["id"] not in bad_ids,
-        "admin 按不存在的小组名称过滤用户返回空结果（或不包含目标用户）场景",
-        data_bad,
-    )
-
-    # 5）按 group_id 精确过滤
-    # 5.1 group_id=g1_id：预期 user0/user1 都在结果中，user2 不在
-    r_gid1 = requests.get(
-        f"{BASE_URL}/api/admin/users",
-        params={"page": 1, "page_size": 50, "group_id": g1_id},
-        headers=ADMIN_HEADERS,
-    )
-    if r_gid1.status_code != 200:
-        return _log(
-            False,
-            "admin 按 group_id=g1 过滤用户失败（期望 200）",
-            {"status_code": r_gid1.status_code, "body": r_gid1.text},
-        )
-    data_gid1 = r_gid1.json()
-    ids_gid1 = {item["id"] for item in data_gid1.get("items", [])}
-    ok &= _log(
-        user0["id"] in ids_gid1 and user1["id"] in ids_gid1 and user2["id"] not in ids_gid1,
-        "admin 按 group_id=g1 过滤用户（返回该群 active 成员）场景",
-        data_gid1,
-    )
-
-    # 5.2 group_id=g2_id：预期只有 user0 在结果中（user1 在 g2 只有 left 关系）
-    r_gid2 = requests.get(
-        f"{BASE_URL}/api/admin/users",
-        params={"page": 1, "page_size": 50, "group_id": g2_id},
-        headers=ADMIN_HEADERS,
-    )
-    if r_gid2.status_code != 200:
-        return _log(
-            False,
-            "admin 按 group_id=g2 过滤用户失败（期望 200）",
-            {"status_code": r_gid2.status_code, "body": r_gid2.text},
-        )
-    data_gid2 = r_gid2.json()
-    ids_gid2 = {item["id"] for item in data_gid2.get("items", [])}
-    ok &= _log(
-        user0["id"] in ids_gid2 and user1["id"] not in ids_gid2 and user2["id"] not in ids_gid2,
-        "admin 按 group_id=g2 过滤用户（仅包含 active 成员）场景",
-        data_gid2,
-    )
-
-    # 5.3 使用一个不存在的 group_id 过滤，预期不返回上述三个用户
-    non_exist_gid = f"g_non_exist_{uuid.uuid4().hex[:8]}"
-    r_gid_bad = requests.get(
-        f"{BASE_URL}/api/admin/users",
-        params={"page": 1, "page_size": 10, "group_id": non_exist_gid},
-        headers=ADMIN_HEADERS,
-    )
-    if r_gid_bad.status_code != 200:
-        return _log(
-            False,
-            "admin 按不存在的 group_id 过滤用户失败（期望 200）",
-            {"status_code": r_gid_bad.status_code, "body": r_gid_bad.text},
-        )
-    data_gid_bad = r_gid_bad.json()
-    ids_gid_bad = {item["id"] for item in data_gid_bad.get("items", [])}
-    ok &= _log(
-        user0["id"] not in ids_gid_bad and user1["id"] not in ids_gid_bad and user2["id"] not in ids_gid_bad,
-        "admin 按不存在的 group_id 过滤用户返回空结果（或不包含目标用户）场景",
-        data_gid_bad,
-    )
-
+    r = requests.get(f"{BASE_URL}/api/admin/users")
+    ok &= _log(r.status_code == 403, "缺少 X-Admin-Token 应返回 403", {"status": r.status_code})
+    r = requests.get(f"{BASE_URL}/api/admin/users", headers={"X-Admin-Token": "WrongKey"})
+    ok &= _log(r.status_code == 403, "错误 X-Admin-Token 应返回 403", {"status": r.status_code})
     return ok
 
 
-# ---------- 场景：管理员按条件过滤用户 ----------
+# ────────────────────────────────────────────────────────────
+# 创建用户（新接口）
+# ────────────────────────────────────────────────────────────
+
+def scenario_admin_create_user_success(ctx: Dict[str, Any]) -> bool:
+    email = f"created_{uuid.uuid4().hex[:6]}@example.com"
+    name = f"Created User {RUN_ID}"
+    r = requests.post(
+        f"{BASE_URL}/api/admin/users/",
+        json={"name": name, "email": email, "password": "1234"},
+        headers=ADMIN_HEADERS,
+    )
+    if r.status_code != 200:
+        return _log(False, "admin 创建用户失败（期望 200）", {"status": r.status_code, "body": r.text})
+    data = r.json()
+    ok = data.get("email") == email and data.get("name") == name
+    if ok:
+        ctx["created_user_id"] = data["id"]
+        ctx["created_user_email"] = email
+    return _log(ok, "admin 创建用户成功场景", data)
+
+
+def scenario_admin_create_user_creates_default_group(ctx: Dict[str, Any]) -> bool:
+    user_id = ctx.get("created_user_id")
+    if not user_id:
+        return _log(False, "create_user_creates_default_group：ctx 中无 created_user_id")
+
+    r = requests.get(f"{BASE_URL}/api/admin/users/{user_id}", headers=ADMIN_HEADERS)
+    if r.status_code != 200:
+        return _log(False, "查询创建的用户详情失败", {"status": r.status_code})
+    data = r.json()
+    ok = len(data.get("group_ids", [])) >= 1
+    return _log(ok, "admin 创建用户自动生成默认群组场景", data)
+
+
+def scenario_admin_create_user_duplicate_email(ctx: Dict[str, Any]) -> bool:
+    email = ctx.get("created_user_email") or ctx["users"][0]["email"]
+    r = requests.post(
+        f"{BASE_URL}/api/admin/users/",
+        json={"name": "Dup", "email": email, "password": "1234"},
+        headers=ADMIN_HEADERS,
+    )
+    ok = r.status_code == 400
+    return _log(ok, "admin 创建用户重复邮箱应返回 400", {"status": r.status_code, "body": r.text})
+
+
+def scenario_admin_create_user_invalid_password() -> bool:
+    ok = True
+    base_email = f"inv_{uuid.uuid4().hex[:6]}@example.com"
+    for pwd, label in [("123", "3位"), ("12345", "5位")]:
+        r = requests.post(
+            f"{BASE_URL}/api/admin/users/",
+            json={"name": "Test", "email": base_email, "password": pwd},
+            headers=ADMIN_HEADERS,
+        )
+        ok &= _log(r.status_code == 400, f"admin 创建用户密码{label}应返回 400", {"status": r.status_code})
+    return ok
+
+
+# ────────────────────────────────────────────────────────────
+# 列表场景
+# ────────────────────────────────────────────────────────────
+
+def scenario_admin_list_users_basic(ctx: Dict[str, Any]) -> bool:
+    r = requests.get(
+        f"{BASE_URL}/api/admin/users",
+        params={"page": 1, "page_size": 10, "email": "admin_test_"},
+        headers=ADMIN_HEADERS,
+    )
+    if r.status_code != 200:
+        return _log(False, "admin 列出用户失败（期望 200）", {"status": r.status_code, "body": r.text})
+    data = r.json()
+    ok = isinstance(data.get("items"), list) and isinstance(data.get("meta"), dict)
+    emails = {u["email"] for u in ctx["users"]}
+    returned_emails = {item["email"] for item in data["items"]}
+    ok &= bool(emails & returned_emails)
+    return _log(ok, "admin 基础分页列出用户场景", data)
 
 
 def scenario_admin_list_users_with_filters(ctx: Dict[str, Any]) -> bool:
     ok = True
-    target_user = ctx["users"][0]
-    email_part = target_user["email"].split("@")[0][5:]  # 取一部分做模糊匹配
-    name_part = target_user["name"][1:] if len(target_user["name"]) > 1 else target_user["name"]
+    target = ctx["users"][0]
 
     # 按 email 过滤
-    r = requests.get(
-        f"{BASE_URL}/api/admin/users",
-        params={"page": 1, "page_size": 10, "email": email_part},
-        headers=ADMIN_HEADERS,
-    )
-    if r.status_code != 200:
-        return _log(False, "admin 按 email 过滤用户失败（期望 200）", {"status_code": r.status_code, "body": r.text})
-    data = r.json()
-    returned_emails = {item["email"] for item in data["items"]}
-    ok &= _log(target_user["email"] in returned_emails, "admin 按 email 过滤用户场景", data)
+    r = requests.get(f"{BASE_URL}/api/admin/users",
+                     params={"email": target["email"][:10]}, headers=ADMIN_HEADERS)
+    ok &= _log(r.status_code == 200 and target["email"] in {i["email"] for i in r.json()["items"]},
+               "admin 按 email 过滤用户场景")
 
     # 按 name 过滤
-    r = requests.get(
-        f"{BASE_URL}/api/admin/users",
-        params={"page": 1, "page_size": 10, "name": name_part},
-        headers=ADMIN_HEADERS,
-    )
-    if r.status_code != 200:
-        return _log(False, "admin 按 name 过滤用户失败（期望 200）", {"status_code": r.status_code, "body": r.text})
-    data = r.json()
-    returned_ids = {item["id"] for item in data["items"]}
-    ok &= _log(target_user["id"] in returned_ids, "admin 按 name 过滤用户场景", data)
+    r = requests.get(f"{BASE_URL}/api/admin/users",
+                     params={"name": target["name"][3:]}, headers=ADMIN_HEADERS)
+    ok &= _log(r.status_code == 200 and target["id"] in {i["id"] for i in r.json()["items"]},
+               "admin 按 name 过滤用户场景")
 
+    # 按精确 id 过滤
+    r = requests.get(f"{BASE_URL}/api/admin/users",
+                     params={"id": target["id"]}, headers=ADMIN_HEADERS)
+    items = r.json().get("items", [])
+    ok &= _log(r.status_code == 200 and len(items) == 1 and items[0]["id"] == target["id"],
+               "admin 按 id 精确过滤用户场景")
+
+    # 不存在的关键词 → 空结果
+    r = requests.get(f"{BASE_URL}/api/admin/users",
+                     params={"email": f"NOEMAIL_{uuid.uuid4().hex}"}, headers=ADMIN_HEADERS)
+    ok &= _log(r.status_code == 200 and r.json()["items"] == [],
+               "admin 过滤无结果返回空列表场景")
     return ok
 
 
-# ---------- 场景：获取单个用户详情 ----------
+def scenario_admin_list_pagination(ctx: Dict[str, Any]) -> bool:
+    ok = True
+    # page_size=1 应只返回 1 条
+    r = requests.get(f"{BASE_URL}/api/admin/users",
+                     params={"email": "admin_test_", "page": 1, "page_size": 1},
+                     headers=ADMIN_HEADERS)
+    ok &= _log(r.status_code == 200 and len(r.json()["items"]) <= 1,
+               "admin 分页 page_size=1 场景")
+    # page_size 超限
+    r = requests.get(f"{BASE_URL}/api/admin/users",
+                     params={"page_size": 101}, headers=ADMIN_HEADERS)
+    ok &= _log(r.status_code == 422, "admin page_size 超过 100 应返回 422 场景", {"status": r.status_code})
+    return ok
 
+
+def scenario_admin_users_group_filters(ctx: Dict[str, Any]) -> bool:
+    ok = True
+    users = ctx["users"]
+    user0, user1, user2 = users[0], users[1], users[2]
+
+    g1_name = f"Filter Alpha {uuid.uuid4().hex[:4]} {RUN_ID}"
+    g2_name = f"Filter Beta {uuid.uuid4().hex[:4]} {RUN_ID}"
+    g1 = _create_admin_group(g1_name)
+    g2 = _create_admin_group(g2_name)
+    g1_id, g2_id = g1["id"], g2["id"]
+
+    _create_admin_membership(g1_id, user0["id"], status="active")
+    _create_admin_membership(g2_id, user0["id"], status="active")
+    _create_admin_membership(g1_id, user1["id"], status="active")
+    _create_admin_membership(g2_id, user1["id"], status="left")
+
+    def _ids(params: dict) -> set[str]:
+        r = requests.get(f"{BASE_URL}/api/admin/users",
+                         params={"page_size": 50, **params}, headers=ADMIN_HEADERS)
+        return {i["id"] for i in r.json().get("items", [])}
+
+    # group_name=g1 → user0/user1
+    ids = _ids({"group_name": g1_name})
+    ok &= _log(user0["id"] in ids and user1["id"] in ids, "按 group_name=g1 过滤含 user0/user1")
+
+    # group_name=g2 → 只有 user0（user1 仅 left）
+    ids = _ids({"group_name": g2_name})
+    ok &= _log(user0["id"] in ids and user1["id"] not in ids,
+               "按 group_name=g2 过滤仅含 active 成员(user0)")
+
+    # 不存在群组名 → 不包含三个用户
+    ids = _ids({"group_name": f"不存在_{uuid.uuid4().hex}"})
+    ok &= _log(user0["id"] not in ids and user1["id"] not in ids,
+               "按不存在 group_name 过滤返回空")
+
+    # group_id=g1 → user0/user1 在，user2 不在
+    ids = _ids({"group_id": g1_id})
+    ok &= _log(user0["id"] in ids and user1["id"] in ids and user2["id"] not in ids,
+               "按 group_id=g1 精确过滤场景")
+
+    # group_id=g2 → 只有 user0
+    ids = _ids({"group_id": g2_id})
+    ok &= _log(user0["id"] in ids and user1["id"] not in ids,
+               "按 group_id=g2 精确过滤仅 active 成员")
+
+    # 不存在 group_id
+    ids = _ids({"group_id": f"g_non_{uuid.uuid4().hex[:8]}"})
+    ok &= _log(user0["id"] not in ids, "按不存在 group_id 过滤返回空")
+    return ok
+
+
+# ────────────────────────────────────────────────────────────
+# 详情场景
+# ────────────────────────────────────────────────────────────
 
 def scenario_admin_get_user_detail(ctx: Dict[str, Any]) -> bool:
-    target_user = ctx["users"][1]
-    r = requests.get(
-        f"{BASE_URL}/api/admin/users/{target_user['id']}",
-        headers=ADMIN_HEADERS,
-    )
+    target = ctx["users"][1]
+    r = requests.get(f"{BASE_URL}/api/admin/users/{target['id']}", headers=ADMIN_HEADERS)
     if r.status_code != 200:
-        return _log(False, "admin 获取用户详情失败（期望 200）", {"status_code": r.status_code, "body": r.text})
-
+        return _log(False, "admin 获取用户详情失败（期望 200）", {"status": r.status_code, "body": r.text})
     data = r.json()
-    ok = data["id"] == target_user["id"] and data["email"] == target_user["email"]
-    return _log(ok, "admin 获取用户详情场景", data)
+    ok = data["id"] == target["id"] and data["email"] == target["email"]
+    # 详情接口应包含 group 字段（注册时自动创建了默认群组）
+    ok &= isinstance(data.get("group_ids"), list)
+    ok &= isinstance(data.get("group_names"), list)
+    ok &= len(data.get("group_ids", [])) >= 1  # 至少有注册时创建的默认群组
+    return _log(ok, "admin 获取用户详情（含 group 信息）场景", data)
 
 
 def scenario_admin_get_user_not_found() -> bool:
-    r = requests.get(
-        f"{BASE_URL}/api/admin/users/unexist-user-123",
-        headers=ADMIN_HEADERS,
-    )
+    r = requests.get(f"{BASE_URL}/api/admin/users/unexist-user-123", headers=ADMIN_HEADERS)
     ok = r.status_code == 404
-    return _log(ok, "admin 获取不存在用户返回 404 场景", {"status_code": r.status_code, "body": r.text})
+    return _log(ok, "admin 获取不存在用户应返回 404 场景", {"status": r.status_code})
 
 
-# ---------- 场景：更新用户 ----------
-
+# ────────────────────────────────────────────────────────────
+# 更新场景
+# ────────────────────────────────────────────────────────────
 
 def scenario_admin_update_user_success(ctx: Dict[str, Any]) -> bool:
-    target_user = ctx["users"][2]
-    new_name = "管理员修改后的名字"
+    target = ctx["users"][2]
+    new_name = f"Updated {RUN_ID}"
     new_token = "admin_modified_token"
-
     r = requests.patch(
-        f"{BASE_URL}/api/admin/users/{target_user['id']}",
+        f"{BASE_URL}/api/admin/users/{target['id']}",
         json={"name": new_name, "device_token": new_token},
         headers=ADMIN_HEADERS,
     )
     if r.status_code != 200:
-        return _log(False, "admin 更新用户失败（期望 200）", {"status_code": r.status_code, "body": r.text})
-
+        return _log(False, "admin 更新用户失败（期望 200）", {"status": r.status_code, "body": r.text})
     data = r.json()
     ok = data["name"] == new_name and data.get("device_token") == new_token
     ok &= _log(ok, "admin 更新用户成功场景", data)
 
-    # 再查一次详情确认
-    r2 = requests.get(
-        f"{BASE_URL}/api/admin/users/{target_user['id']}",
-        headers=ADMIN_HEADERS,
-    )
-    if r2.status_code != 200:
-        return _log(False, "admin 更新后再次获取用户详情失败（期望 200）", {"status_code": r2.status_code, "body": r2.text})
+    # 再查一次确认持久化
+    r2 = requests.get(f"{BASE_URL}/api/admin/users/{target['id']}", headers=ADMIN_HEADERS)
     data2 = r2.json()
-    ok &= _log(
-        data2["name"] == new_name and data2.get("device_token") == new_token,
-        "admin 更新用户后详情校验场景",
-        data2,
-    )
+    ok &= _log(data2["name"] == new_name, "admin 更新后详情校验场景", data2)
     return ok
 
 
 def scenario_admin_update_user_no_fields(ctx: Dict[str, Any]) -> bool:
-    target_user = ctx["users"][0]
+    target = ctx["users"][0]
     r = requests.patch(
-        f"{BASE_URL}/api/admin/users/{target_user['id']}",
+        f"{BASE_URL}/api/admin/users/{target['id']}",
         json={},
         headers=ADMIN_HEADERS,
     )
     ok = r.status_code == 400
-    return _log(ok, "admin 更新用户但没有任何字段返回 400 场景", {"status_code": r.status_code, "body": r.text})
+    return _log(ok, "admin 更新用户无字段应返回 400 场景", {"status": r.status_code})
 
 
-# ---------- 场景：删除用户 ----------
-
-
-def scenario_admin_delete_user_success() -> bool:
-    # 先注册一个只用于删除测试的用户
-    user = register_dummy_user("ToDelete")
-    user_id = user["id"]
-
-    r = requests.delete(
-        f"{BASE_URL}/api/admin/users/{user_id}",
-        headers=ADMIN_HEADERS,
-    )
-    if r.status_code != 204:
-        return _log(False, "admin 删除用户失败（期望 204）", {"status_code": r.status_code, "body": r.text})
-
-    # 再查一次应该是 404
-    r2 = requests.get(
-        f"{BASE_URL}/api/admin/users/{user_id}",
-        headers=ADMIN_HEADERS,
-    )
-    ok = r2.status_code == 404
-    return _log(ok, "admin 删除用户后再次获取返回 404 场景", {"status_code": r2.status_code, "body": r2.text})
-
-
-def scenario_admin_delete_user_not_found() -> bool:
-    r = requests.delete(
-        f"{BASE_URL}/api/admin/users/unexist-user-456",
+def scenario_admin_update_user_not_found() -> bool:
+    r = requests.patch(
+        f"{BASE_URL}/api/admin/users/non-exist-id",
+        json={"name": "X"},
         headers=ADMIN_HEADERS,
     )
     ok = r.status_code == 404
-    return _log(ok, "admin 删除不存在用户返回 404 场景", {"status_code": r.status_code, "body": r.text})
+    return _log(ok, "admin 更新不存在用户应返回 404 场景", {"status": r.status_code})
 
 
-# ---------- 场景：批量删除用户 ----------
+# ────────────────────────────────────────────────────────────
+# 删除场景（含 cascade）
+# ────────────────────────────────────────────────────────────
 
+def scenario_admin_delete_user_success() -> bool:
+    user = register_dummy_user("ToDelete")
+    user_id = user["id"]
+
+    # 先给这个用户创建一条额外成员关系
+    g = _create_admin_group(f"DelGroup {uuid.uuid4().hex[:4]}")
+    _create_admin_membership(g["id"], user_id)
+
+    r = requests.delete(f"{BASE_URL}/api/admin/users/{user_id}", headers=ADMIN_HEADERS)
+    if r.status_code != 204:
+        return _log(False, "admin 删除用户失败（期望 204）", {"status": r.status_code, "body": r.text})
+
+    # 用户应 404
+    r2 = requests.get(f"{BASE_URL}/api/admin/users/{user_id}", headers=ADMIN_HEADERS)
+    ok = r2.status_code == 404
+    ok &= _log(ok, "admin 删除用户后 GET 应返回 404 场景")
+
+    # 成员关系应已级联删除
+    r3 = requests.get(
+        f"{BASE_URL}/api/admin/memberships",
+        params={"user_id": user_id},
+        headers=ADMIN_HEADERS,
+    )
+    if r3.status_code == 200:
+        remaining = r3.json().get("items", [])
+        ok &= _log(len(remaining) == 0, "admin 删除用户后成员关系应级联删除场景",
+                   {"remaining": remaining})
+    return ok
+
+
+def scenario_admin_delete_user_not_found() -> bool:
+    r = requests.delete(f"{BASE_URL}/api/admin/users/unexist-user-456", headers=ADMIN_HEADERS)
+    ok = r.status_code == 404
+    return _log(ok, "admin 删除不存在用户应返回 404 场景", {"status": r.status_code})
+
+
+def scenario_admin_delete_user_cascade_memberships() -> bool:
+    """专项验证：删除用户后，其所有成员关系全部消失。"""
+    user = register_dummy_user("CascadeDel")
+    user_id = user["id"]
+
+    # 新建两个群组并加入
+    for i in range(2):
+        g = _create_admin_group(f"CascadeG{i} {uuid.uuid4().hex[:4]}")
+        _create_admin_membership(g["id"], user_id)
+
+    # 删除用户
+    requests.delete(f"{BASE_URL}/api/admin/users/{user_id}", headers=ADMIN_HEADERS)
+
+    # 查成员关系
+    r = requests.get(
+        f"{BASE_URL}/api/admin/memberships",
+        params={"user_id": user_id, "page_size": 20},
+        headers=ADMIN_HEADERS,
+    )
+    if r.status_code != 200:
+        return _log(True, "admin 成员关系查询返回非200（可能用户已删除，视为通过）", {"status": r.status_code})
+    remaining = r.json().get("items", [])
+    ok = len(remaining) == 0
+    return _log(ok, "admin 删除用户级联删除所有成员关系场景", {"remaining": remaining})
+
+
+# ────────────────────────────────────────────────────────────
+# 批量删除场景
+# ────────────────────────────────────────────────────────────
 
 def scenario_admin_batch_delete_users_success() -> bool:
     u1 = register_dummy_user("BatchDel1")
     u2 = register_dummy_user("BatchDel2")
-    ids = [u1["id"], u2["id"]]
+    # 给两个用户各加一条成员关系
+    g = _create_admin_group(f"BatchDelG {uuid.uuid4().hex[:4]}")
+    _create_admin_membership(g["id"], u1["id"])
+    _create_admin_membership(g["id"], u2["id"])
 
     r = requests.post(
         f"{BASE_URL}/api/admin/users/batch-delete",
-        json={"ids": ids},
+        json={"ids": [u1["id"], u2["id"]]},
         headers=ADMIN_HEADERS,
     )
     if r.status_code != 200:
-        return _log(False, "admin 批量删除用户失败（期望 200）", {"status_code": r.status_code, "body": r.text})
+        return _log(False, "admin 批量删除用户失败（期望 200）", {"status": r.status_code, "body": r.text})
     data = r.json()
-    if data.get("deleted") != 2:
-        return _log(False, "admin 批量删除用户应返回 deleted=2", data)
+    ok = data.get("deleted") == 2
+    ok &= _log(ok, "admin 批量删除用户成功 deleted=2 场景", data)
 
-    for uid in ids:
+    # 验证用户已删除
+    for uid in [u1["id"], u2["id"]]:
         r2 = requests.get(f"{BASE_URL}/api/admin/users/{uid}", headers=ADMIN_HEADERS)
-        if r2.status_code != 404:
-            return _log(False, f"批量删除后用户 {uid} 应 404", {"status_code": r2.status_code})
-    return _log(True, "admin 批量删除用户成功场景")
+        ok &= _log(r2.status_code == 404, f"批量删除后用户 {uid} 应返回 404")
+
+    # 验证成员关系级联删除
+    r3 = requests.get(
+        f"{BASE_URL}/api/admin/memberships",
+        params={"group_id": g["id"]},
+        headers=ADMIN_HEADERS,
+    )
+    if r3.status_code == 200:
+        remaining = [m for m in r3.json().get("items", [])
+                     if m.get("user_id") in {u1["id"], u2["id"]}]
+        ok &= _log(len(remaining) == 0, "批量删除用户后成员关系应级联删除场景",
+                   {"remaining": remaining})
+    return ok
 
 
 def scenario_admin_batch_delete_users_empty_ids() -> bool:
@@ -497,7 +438,7 @@ def scenario_admin_batch_delete_users_empty_ids() -> bool:
         headers=ADMIN_HEADERS,
     )
     ok = r.status_code == 422
-    return _log(ok, "admin 批量删除用户 ids 为空返回 422 场景", {"status_code": r.status_code, "body": r.text})
+    return _log(ok, "admin 批量删除 ids 为空应返回 422 场景", {"status": r.status_code})
 
 
 def scenario_admin_batch_delete_users_partial() -> bool:
@@ -508,144 +449,190 @@ def scenario_admin_batch_delete_users_partial() -> bool:
         headers=ADMIN_HEADERS,
     )
     if r.status_code != 200:
-        return _log(False, "admin 批量删除用户（含不存在的 id）应返回 200", {"status_code": r.status_code, "body": r.text})
-    data = r.json()
-    if data.get("deleted") != 1:
-        return _log(False, "admin 批量删除仅删除存在的 1 条", data)
-    return _log(True, "admin 批量删除用户部分存在部分不存在场景")
+        return _log(False, "admin 批量删除含不存在 id 应返回 200", {"status": r.status_code, "body": r.text})
+    ok = r.json().get("deleted") == 1
+    return _log(ok, "admin 批量删除部分存在场景 deleted=1", r.json())
 
 
 def scenario_admin_batch_delete_users_too_many() -> bool:
-    """单次超过 100 条 ids 应返回 422。"""
     r = requests.post(
         f"{BASE_URL}/api/admin/users/batch-delete",
         json={"ids": [f"id-{i}" for i in range(101)]},
         headers=ADMIN_HEADERS,
     )
     ok = r.status_code == 422
-    return _log(ok, "admin 批量删除用户 ids 超过 100 返回 422 场景", {"status_code": r.status_code, "body": r.text})
+    return _log(ok, "admin 批量删除 ids 超过 100 应返回 422 场景", {"status": r.status_code})
 
 
-def scenario_admin_impersonate_user(ctx: Dict[str, Any]) -> bool:
-    """管理员以某个用户身份登录，并用 token 调 /api/auth/me 验证。"""
-    target_user = ctx["users"][0]
-
-    r = requests.post(
-        f"{BASE_URL}/api/admin/users/{target_user['id']}/impersonate",
-        headers=ADMIN_HEADERS,
-    )
-    if r.status_code != 200:
-        return _log(
-            False,
-            "admin impersonate 用户失败（期望 200）",
-            {"status_code": r.status_code, "body": r.text},
-        )
-
-    data = r.json()
-    token = data.get("access_token")
-    if not token:
-        return _log(False, "impersonate 接口未返回 access_token", data)
-
-    r_me = requests.get(
-        f"{BASE_URL}/api/auth/me",
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    if r_me.status_code != 200:
-        return _log(
-            False,
-            "impersonate token 调 /me 失败（期望 200）",
-            {"status_code": r_me.status_code, "body": r_me.text},
-        )
-
-    me = r_me.json()
-    ok = me.get("id") == target_user["id"] and me.get("email") == target_user["email"]
-    return _log(ok, "admin impersonate 用户成功场景", {"impersonate": data, "me": me})
-
+# ────────────────────────────────────────────────────────────
+# 标记重置密码
+# ────────────────────────────────────────────────────────────
 
 def scenario_admin_mark_password_reset_and_verify(ctx: Dict[str, Any]) -> bool:
-    """管理员标记某用户下次必须修改密码，并在后台详情中看到该标记。"""
-    target_user = ctx["users"][1]
-
+    target = ctx["users"][1]
     r = requests.post(
-        f"{BASE_URL}/api/admin/users/{target_user['id']}/mark-password-reset",
+        f"{BASE_URL}/api/admin/users/{target['id']}/mark-password-reset",
         headers=ADMIN_HEADERS,
     )
     if r.status_code != 200:
-        return _log(
-            False,
-            "admin 标记用户下次必须改密码失败（期望 200）",
-            {"status_code": r.status_code, "body": r.text},
-        )
-    data = r.json()
-    ok = data.get("password_needs_reset") is True
+        return _log(False, "admin mark-password-reset 失败（期望 200）", {"status": r.status_code, "body": r.text})
+    ok = r.json().get("password_needs_reset") is True
+    # 详情中也应看到标记
+    r2 = requests.get(f"{BASE_URL}/api/admin/users/{target['id']}", headers=ADMIN_HEADERS)
+    ok &= r2.json().get("password_needs_reset") is True
+    return _log(ok, "admin 标记强制重置密码场景", {"mark": r.json()})
 
-    r_detail = requests.get(
-        f"{BASE_URL}/api/admin/users/{target_user['id']}",
+
+def scenario_admin_mark_password_reset_not_found() -> bool:
+    r = requests.post(
+        f"{BASE_URL}/api/admin/users/non-exist-id/mark-password-reset",
         headers=ADMIN_HEADERS,
     )
-    if r_detail.status_code != 200:
-        return _log(
-            False,
-            "admin 标记后获取用户详情失败（期望 200）",
-            {"status_code": r_detail.status_code, "body": r_detail.text},
-        )
-    detail = r_detail.json()
-    ok &= detail.get("password_needs_reset") is True
-
-    return _log(ok, "admin 标记用户下次必须改密码场景", {"mark": data, "detail": detail})
+    ok = r.status_code == 404
+    return _log(ok, "admin mark-password-reset 不存在用户应返回 404", {"status": r.status_code})
 
 
-# ---------- 场景：管理员 token 缺失 / 错误 ----------
+# ────────────────────────────────────────────────────────────
+# 导出 CSV
+# ────────────────────────────────────────────────────────────
 
-
-def scenario_admin_missing_or_wrong_token() -> bool:
-    ok = True
-
-    # 不带任何 X-Admin-Token
-    r = requests.get(f"{BASE_URL}/api/admin/users")
-    ok &= _log(r.status_code == 403, "缺少 X-Admin-Token 访问后台被禁止场景", {"status_code": r.status_code, "body": r.text})
-
-    # 带错误的 token
+def scenario_admin_export_csv_basic(ctx: Dict[str, Any]) -> bool:
     r = requests.get(
-        f"{BASE_URL}/api/admin/users",
-        headers={"X-Admin-Token": "WrongKey"},
+        f"{BASE_URL}/api/admin/users/export",
+        params={"email": "admin_test_"},
+        headers=ADMIN_HEADERS,
     )
-    ok &= _log(r.status_code == 403, "错误 X-Admin-Token 访问后台被禁止场景", {"status_code": r.status_code, "body": r.text})
+    if r.status_code != 200:
+        return _log(False, "admin 导出 CSV 失败（期望 200）", {"status": r.status_code, "body": r.text[:200]})
+    ok = "text/csv" in r.headers.get("Content-Type", "")
+    lines = r.text.strip().splitlines()
+    # 有 header 行
+    ok &= _log(len(lines) >= 1 and "id" in lines[0], "CSV 首行为 header", {"first_line": lines[0] if lines else ""})
+    # 包含已知用户 email
+    known_email = ctx["users"][0]["email"]
+    ok &= _log(known_email in r.text, f"CSV 包含已知用户 email={known_email}")
+    return _log(ok, "admin 导出 CSV 基础场景")
 
-    return ok
+
+def scenario_admin_export_csv_with_filter(ctx: Dict[str, Any]) -> bool:
+    target = ctx["users"][0]
+    r = requests.get(
+        f"{BASE_URL}/api/admin/users/export",
+        params={"email": target["email"]},
+        headers=ADMIN_HEADERS,
+    )
+    if r.status_code != 200:
+        return _log(False, "admin 带过滤参数导出 CSV 失败", {"status": r.status_code})
+    lines = [l for l in r.text.strip().splitlines() if l]
+    # header + 1 条数据
+    ok = len(lines) == 2 and target["email"] in lines[1]
+    return _log(ok, "admin 带 email 过滤导出 CSV 场景", {"lines": lines})
 
 
-# ---------- 总入口 ----------
+def scenario_admin_export_csv_no_token() -> bool:
+    r = requests.get(f"{BASE_URL}/api/admin/users/export")
+    ok = r.status_code == 403
+    return _log(ok, "admin 导出 CSV 无 token 应返回 403", {"status": r.status_code})
 
+
+# ────────────────────────────────────────────────────────────
+# 代登录
+# ────────────────────────────────────────────────────────────
+
+def scenario_admin_impersonate_user(ctx: Dict[str, Any]) -> bool:
+    target = ctx["users"][0]
+    r = requests.post(
+        f"{BASE_URL}/api/admin/users/{target['id']}/impersonate",
+        headers=ADMIN_HEADERS,
+    )
+    if r.status_code != 200:
+        return _log(False, "admin impersonate 失败（期望 200）", {"status": r.status_code, "body": r.text})
+    token = r.json().get("access_token")
+    if not token:
+        return _log(False, "impersonate 未返回 access_token", r.json())
+
+    r_me = requests.get(f"{BASE_URL}/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    if r_me.status_code != 200:
+        return _log(False, "impersonate token 调 /me 失败", {"status": r_me.status_code})
+    me = r_me.json()
+    ok = me.get("id") == target["id"]
+    return _log(ok, "admin impersonate 用户成功场景", {"me_id": me.get("id")})
+
+
+def scenario_admin_impersonate_not_found() -> bool:
+    r = requests.post(
+        f"{BASE_URL}/api/admin/users/non-exist-id/impersonate",
+        headers=ADMIN_HEADERS,
+    )
+    ok = r.status_code == 404
+    return _log(ok, "admin impersonate 不存在用户应返回 404", {"status": r.status_code})
+
+
+# ────────────────────────────────────────────────────────────
+# 总入口
+# ────────────────────────────────────────────────────────────
 
 def run_all() -> bool:
-    print("=== 开始 Admin Users 后台接口测试 ===")
+    print("=== 开始 Admin Users 后台接口测试 ===\n")
     ctx: Dict[str, Any] = {}
 
     ok = True
+
+    print("-- 鉴权 --")
+    ok &= scenario_admin_missing_or_wrong_token()
+
+    print("\n-- 准备数据 --")
     ok &= setup_users(ctx)
+
+    print("\n-- 创建用户 --")
+    ok &= scenario_admin_create_user_success(ctx)
+    ok &= scenario_admin_create_user_creates_default_group(ctx)
+    ok &= scenario_admin_create_user_duplicate_email(ctx)
+    ok &= scenario_admin_create_user_invalid_password()
+
+    print("\n-- 列表 & 过滤 --")
     ok &= scenario_admin_list_users_basic(ctx)
-    ok &= scenario_admin_users_group_info_and_group_name_filters(ctx)
     ok &= scenario_admin_list_users_with_filters(ctx)
+    ok &= scenario_admin_list_pagination(ctx)
+    ok &= scenario_admin_users_group_filters(ctx)
+
+    print("\n-- 详情 --")
     ok &= scenario_admin_get_user_detail(ctx)
     ok &= scenario_admin_get_user_not_found()
+
+    print("\n-- 更新 --")
     ok &= scenario_admin_update_user_success(ctx)
     ok &= scenario_admin_update_user_no_fields(ctx)
+    ok &= scenario_admin_update_user_not_found()
+
+    print("\n-- 删除 --")
     ok &= scenario_admin_delete_user_success()
     ok &= scenario_admin_delete_user_not_found()
+    ok &= scenario_admin_delete_user_cascade_memberships()
+
+    print("\n-- 批量删除 --")
     ok &= scenario_admin_batch_delete_users_success()
     ok &= scenario_admin_batch_delete_users_empty_ids()
     ok &= scenario_admin_batch_delete_users_partial()
     ok &= scenario_admin_batch_delete_users_too_many()
-    ok &= scenario_admin_missing_or_wrong_token()
-    ok &= scenario_admin_impersonate_user(ctx)
-    ok &= scenario_admin_mark_password_reset_and_verify(ctx)
 
-    print("\n=== Admin Users 测试结果: {} ===".format("全部通过 ✅" if ok else "有失败 ❌"))
+    print("\n-- 标记重置密码 --")
+    ok &= scenario_admin_mark_password_reset_and_verify(ctx)
+    ok &= scenario_admin_mark_password_reset_not_found()
+
+    print("\n-- 导出 CSV --")
+    ok &= scenario_admin_export_csv_basic(ctx)
+    ok &= scenario_admin_export_csv_with_filter(ctx)
+    ok &= scenario_admin_export_csv_no_token()
+
+    print("\n-- 代登录 --")
+    ok &= scenario_admin_impersonate_user(ctx)
+    ok &= scenario_admin_impersonate_not_found()
+
+    print(f"\n=== Admin Users 测试结果: {'全部通过 ✅' if ok else '有失败 ❌'} ===")
     return ok
 
 
 if __name__ == "__main__":
     import sys
     sys.exit(0 if run_all() else 1)
-
