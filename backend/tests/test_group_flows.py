@@ -6,6 +6,7 @@ from typing import Any, Dict, Tuple
 import requests
 
 BASE_URL = "http://127.0.0.1:8000"
+RUN_ID = uuid.uuid4().hex[:6]
 
 # 和 app.admin.deps 中的默认值保持一致，用于在场景中切换群组启用状态
 ADMIN_KEY = "TestAdminKey123"
@@ -32,7 +33,7 @@ def register_and_login(name: str, email_suffix: str) -> Tuple[str, str]:
             "name": name,
             "email": email,
             "password": password,
-            "device_token": "test_device_token",
+            "device_token": f"device-{email_suffix}-{uuid.uuid4().hex[:8]}",
         },
     )
     r.raise_for_status()
@@ -53,7 +54,7 @@ def scenario_create_group_as_leader(ctx: Dict[str, Any]) -> bool:
     headers = {"Authorization": f"Bearer {ctx['leader_token']}"}
     r = requests.post(
         f"{BASE_URL}/api/groups",
-        json={"name": "初始组名"},
+        json={"name": f"Initial Group {RUN_ID}"},
         headers=headers,
     )
     if r.status_code != 201:
@@ -67,7 +68,7 @@ def scenario_create_group_as_leader(ctx: Dict[str, Any]) -> bool:
     data = r.json()
     ctx["group_id"] = data["group"]["id"]
     ok = (
-        data["group"]["name"] == "初始组名"
+        data["group"]["name"] == f"Initial Group {RUN_ID}"
         and data["member_count"] == 1
         and data["my_role"] == "leader"
     )
@@ -124,14 +125,14 @@ def scenario_rename_group_by_leader(ctx: Dict[str, Any]) -> bool:
     headers = {"Authorization": f"Bearer {ctx['leader_token']}"}
     r = requests.patch(
         f"{BASE_URL}/api/groups/{ctx['group_id']}",
-        json={"name": "新的组名"},
+        json={"name": f"Renamed Group {RUN_ID}"},
         headers=headers,
     )
     if r.status_code != 200:
         return _log(False, "leader 修改组名失败（期望 200）", r.json())
 
     data = r.json()
-    ok = data["group"]["name"] == "新的组名"
+    ok = data["group"]["name"] == f"Renamed Group {RUN_ID}"
     return _log(ok, "leader 修改组名场景", data)
 
 
@@ -139,7 +140,7 @@ def scenario_rename_group_by_member_forbidden(ctx: Dict[str, Any]) -> bool:
     headers = {"Authorization": f"Bearer {ctx['third_token']}"}
     r = requests.patch(
         f"{BASE_URL}/api/groups/{ctx['group_id']}",
-        json={"name": "不应该生效的名字"},
+        json={"name": "Should Not Apply"},
         headers=headers,
     )
     ok = r.status_code == 403
@@ -241,7 +242,7 @@ def scenario_discover_name_filter(ctx: Dict[str, Any]) -> bool:
     headers_leader = {"Authorization": f"Bearer {ctx['leader_token']}"}
     abc_ids = []
     for i in range(2):
-        name = f"Discover测试群-ABC-{i + 1}"
+        name = f"Discover Test Group ABC {i + 1} {RUN_ID}"
         r = requests.post(
             f"{BASE_URL}/api/groups",
             json={"name": name},
@@ -253,7 +254,7 @@ def scenario_discover_name_filter(ctx: Dict[str, Any]) -> bool:
     # 再创建一个不含该前缀的群
     r_other = requests.post(
         f"{BASE_URL}/api/groups",
-        json={"name": "Discover测试群-XYZ-1"},
+        json={"name": f"Discover Test Group XYZ 1 {RUN_ID}"},
         headers=headers_leader,
     )
     r_other.raise_for_status()
@@ -322,11 +323,11 @@ def scenario_discover_excludes_full_groups() -> bool:
     已经满员的群组不会出现在任何用户的 discover 列表中。
     """
     # 创建一个群并补满 3 人
-    leader_token, _ = register_and_login("满员群组-群主", "discover_full_leader")
+    leader_token, _ = register_and_login(f"Full Group Leader {RUN_ID}", "discover_full_leader")
     headers_leader = {"Authorization": f"Bearer {leader_token}"}
     r = requests.post(
         f"{BASE_URL}/api/groups",
-        json={"name": "满员测试群"},
+        json={"name": f"Full Member Test Group {RUN_ID}"},
         headers=headers_leader,
     )
     r.raise_for_status()
@@ -334,7 +335,7 @@ def scenario_discover_excludes_full_groups() -> bool:
 
     # 再注册两个成员并加入该群，使其达到上限 3 人
     for label in ("a", "b"):
-        member_token, _ = register_and_login(f"满员成员-{label}", f"discover_full_{label}")
+        member_token, _ = register_and_login(f"Full Group Member {label} {RUN_ID}", f"discover_full_{label}")
         headers_member = {"Authorization": f"Bearer {member_token}"}
         r_join = requests.post(f"{BASE_URL}/api/groups/{group_id}/join", headers=headers_member)
         if r_join.status_code != 200:
@@ -345,7 +346,7 @@ def scenario_discover_excludes_full_groups() -> bool:
             )
 
     # 第四个用户既不在群内，也用于调用 discover
-    viewer_token, _ = register_and_login("满员群组-浏览用户", "discover_full_viewer")
+    viewer_token, _ = register_and_login(f"Full Group Viewer {RUN_ID}", "discover_full_viewer")
     headers_viewer = {"Authorization": f"Bearer {viewer_token}"}
 
     r = requests.get(f"{BASE_URL}/api/groups/discover", headers=headers_viewer)
@@ -372,11 +373,11 @@ def scenario_discover_inactive_groups_hidden() -> bool:
     is_active = False 的群组应从 discover 列表中隐藏。
     """
     # 新建一个群
-    leader_token, _ = register_and_login("停用群组-群主", "discover_inactive_leader")
+    leader_token, _ = register_and_login(f"Inactive Group Leader {RUN_ID}", "discover_inactive_leader")
     headers_leader = {"Authorization": f"Bearer {leader_token}"}
     r = requests.post(
         f"{BASE_URL}/api/groups",
-        json={"name": "停用测试群"},
+        json={"name": f"Inactive Test Group {RUN_ID}"},
         headers=headers_leader,
     )
     r.raise_for_status()
@@ -396,7 +397,7 @@ def scenario_discover_inactive_groups_hidden() -> bool:
         )
 
     # 用一个未加入该群的普通用户查看 discover
-    viewer_token, _ = register_and_login("停用群组-浏览用户", "discover_inactive_viewer")
+    viewer_token, _ = register_and_login(f"Inactive Group Viewer {RUN_ID}", "discover_inactive_viewer")
     headers_viewer = {"Authorization": f"Bearer {viewer_token}"}
     r = requests.get(f"{BASE_URL}/api/groups/discover", headers=headers_viewer)
     if r.status_code != 200:
@@ -416,17 +417,17 @@ def scenario_discover_rejoin_left_group() -> bool:
     """
     用户离开某群后，该群应重新出现在该用户的 discover 列表中。
     """
-    leader_token, _ = register_and_login("离开群组-群主", "discover_left_leader")
+    leader_token, _ = register_and_login(f"Leave Group Leader {RUN_ID}", "discover_left_leader")
     headers_leader = {"Authorization": f"Bearer {leader_token}"}
     r = requests.post(
         f"{BASE_URL}/api/groups",
-        json={"name": "可再次加入的测试群"},
+        json={"name": f"Rejoinable Test Group {RUN_ID}"},
         headers=headers_leader,
     )
     r.raise_for_status()
     group_id = r.json()["group"]["id"]
 
-    member_token, _ = register_and_login("离开群组-成员", "discover_left_member")
+    member_token, _ = register_and_login(f"Leave Group Member {RUN_ID}", "discover_left_member")
     headers_member = {"Authorization": f"Bearer {member_token}"}
 
     # 成员先加入该群
@@ -495,11 +496,11 @@ def run_all() -> bool:
 
     ctx: Dict[str, Any] = {}
 
-    ctx["leader_token"], ctx["leader_user_id"] = register_and_login("组长用户", "leader")
-    ctx["second_token"], ctx["second_user_id"] = register_and_login("第二成员", "second")
-    ctx["third_token"], ctx["third_user_id"] = register_and_login("第三成员", "third")
-    ctx["fourth_token"], ctx["fourth_user_id"] = register_and_login("第四成员", "fourth")
-    ctx["discover_token"], ctx["discover_user_id"] = register_and_login("发现用户", "discover")
+    ctx["leader_token"], ctx["leader_user_id"] = register_and_login(f"Alice Chen {RUN_ID}", "leader")
+    ctx["second_token"], ctx["second_user_id"] = register_and_login(f"Bob Wang {RUN_ID}", "second")
+    ctx["third_token"], ctx["third_user_id"] = register_and_login(f"Carol Liu {RUN_ID}", "third")
+    ctx["fourth_token"], ctx["fourth_user_id"] = register_and_login(f"David Zhang {RUN_ID}", "fourth")
+    ctx["discover_token"], ctx["discover_user_id"] = register_and_login(f"Eve Yang {RUN_ID}", "discover")
 
     ok = True
     ok &= scenario_create_group_as_leader(ctx)

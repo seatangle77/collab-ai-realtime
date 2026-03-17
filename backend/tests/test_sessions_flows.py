@@ -6,6 +6,7 @@ from typing import Any, Dict, Tuple
 import requests
 
 BASE_URL = "http://127.0.0.1:8000"
+RUN_ID = uuid.uuid4().hex[:6]
 
 
 def _log(ok: bool, message: str, extra: Any | None = None) -> bool:
@@ -19,7 +20,7 @@ def _log(ok: bool, message: str, extra: Any | None = None) -> bool:
 def register_and_login(name: str, email_suffix: str) -> Tuple[str, str]:
     """注册一个用户并登录，返回 (access_token, user_id)。"""
     email = f"test_{email_suffix}_{uuid.uuid4().hex[:6]}@example.com"
-    password = "test_password_123"
+    password = "1234"
 
     r = requests.post(
         f"{BASE_URL}/api/auth/register",
@@ -27,7 +28,7 @@ def register_and_login(name: str, email_suffix: str) -> Tuple[str, str]:
             "name": name,
             "email": email,
             "password": password,
-            "device_token": "test_device_token",
+            "device_token": f"device-sessions-{email_suffix}-{uuid.uuid4().hex[:8]}",
         },
     )
     r.raise_for_status()
@@ -49,15 +50,15 @@ def register_and_login(name: str, email_suffix: str) -> Tuple[str, str]:
 
 def setup_group_with_members(ctx: Dict[str, Any]) -> bool:
     # 注册 & 登录 3 个用户
-    ctx["leader_token"], ctx["leader_user_id"] = register_and_login("组长用户", "leader")
-    ctx["member_token"], ctx["member_user_id"] = register_and_login("第二成员", "member")
-    ctx["outsider_token"], ctx["outsider_user_id"] = register_and_login("路人用户", "outsider")
+    ctx["leader_token"], ctx["leader_user_id"] = register_and_login(f"Alice Chen {RUN_ID}", "leader")
+    ctx["member_token"], ctx["member_user_id"] = register_and_login(f"Bob Wang {RUN_ID}", "member")
+    ctx["outsider_token"], ctx["outsider_user_id"] = register_and_login(f"Carol Liu {RUN_ID}", "outsider")
 
     # leader 创建 group
     headers_leader = {"Authorization": f"Bearer {ctx['leader_token']}"}
     r = requests.post(
         f"{BASE_URL}/api/groups",
-        json={"name": "会话测试群组"},
+        json={"name": f"Session Test Group {RUN_ID}"},
         headers=headers_leader,
     )
     if r.status_code != 201:
@@ -84,7 +85,7 @@ def scenario_create_sessions(ctx: Dict[str, Any]) -> bool:
     headers_leader = {"Authorization": f"Bearer {ctx['leader_token']}"}
     r = requests.post(
         f"{BASE_URL}/api/groups/{ctx['group_id']}/sessions",
-        json={"session_title": "第一次会话"},
+        json={"session_title": "First Session"},
         headers=headers_leader,
     )
     if r.status_code != 201:
@@ -97,7 +98,7 @@ def scenario_create_sessions(ctx: Dict[str, Any]) -> bool:
     headers_member = {"Authorization": f"Bearer {ctx['member_token']}"}
     r = requests.post(
         f"{BASE_URL}/api/groups/{ctx['group_id']}/sessions",
-        json={"session_title": "第二次会话"},
+        json={"session_title": "Second Session"},
         headers=headers_member,
     )
     if r.status_code != 201:
@@ -110,7 +111,7 @@ def scenario_create_sessions(ctx: Dict[str, Any]) -> bool:
     headers_outsider = {"Authorization": f"Bearer {ctx['outsider_token']}"}
     r = requests.post(
         f"{BASE_URL}/api/groups/{ctx['group_id']}/sessions",
-        json={"session_title": "不应该成功的会话"},
+        json={"session_title": "Should Fail Session"},
         headers=headers_outsider,
     )
     ok &= _log(r.status_code == 403, "outsider 创建会话被禁止场景", {"status_code": r.status_code, "body": r.text})
@@ -149,31 +150,31 @@ def scenario_update_session_titles(ctx: Dict[str, Any]) -> bool:
     headers_leader = {"Authorization": f"Bearer {ctx['leader_token']}"}
     r = requests.patch(
         f"{BASE_URL}/api/sessions/{ctx['session_id_1']}",
-        json={"session_title": "会话1-改名"},
+        json={"session_title": "Session 1 Renamed"},
         headers=headers_leader,
     )
     if r.status_code != 200:
         return _log(False, "leader 更新会话标题失败", {"status_code": r.status_code, "text": r.text})
     data = r.json()
-    ok &= _log(data["session_title"] == "会话1-改名", "leader 更新会话标题场景", data)
+    ok &= _log(data["session_title"] == "Session 1 Renamed", "leader 更新会话标题场景", data)
 
     # member 更新自己创建的会话标题
     headers_member = {"Authorization": f"Bearer {ctx['member_token']}"}
     r = requests.patch(
         f"{BASE_URL}/api/sessions/{ctx['session_id_2']}",
-        json={"session_title": "会话2-改名"},
+        json={"session_title": "Session 2 Renamed"},
         headers=headers_member,
     )
     if r.status_code != 200:
         return _log(False, "member 更新会话标题失败", {"status_code": r.status_code, "text": r.text})
     data = r.json()
-    ok &= _log(data["session_title"] == "会话2-改名", "member 更新会话标题场景", data)
+    ok &= _log(data["session_title"] == "Session 2 Renamed", "member 更新会话标题场景", data)
 
     # outsider 更新任意会话标题应失败
     headers_outsider = {"Authorization": f"Bearer {ctx['outsider_token']}"}
     r = requests.patch(
         f"{BASE_URL}/api/sessions/{ctx['session_id_1']}",
-        json={"session_title": "不应该成功"},
+        json={"session_title": "Should Not Apply"},
         headers=headers_outsider,
     )
     ok &= _log(r.status_code == 403, "outsider 更新会话标题被禁止场景", {"status_code": r.status_code, "body": r.text})

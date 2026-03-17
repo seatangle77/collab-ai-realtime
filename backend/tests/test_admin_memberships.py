@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 import requests
 
 BASE_URL = "http://127.0.0.1:8000"
+RUN_ID = uuid.uuid4().hex[:6]
 
 # 和 app.admin.deps 中的默认值保持一致
 ADMIN_KEY = "TestAdminKey123"
@@ -30,10 +31,10 @@ def register_and_login(label: str) -> Dict[str, Any]:
     r = requests.post(
         f"{BASE_URL}/api/auth/register",
         json={
-            "name": f"成员测试用户-{label}",
+            "name": f"Member User {label} {RUN_ID}",
             "email": email,
             "password": password,
-            "device_token": f"device-membership-{label}",
+            "device_token": f"device-membership-{label}-{uuid.uuid4().hex[:8]}",
         },
     )
     r.raise_for_status()
@@ -88,7 +89,7 @@ def setup_memberships(ctx: Dict[str, Any]) -> bool:
     ctx["member2_user_id"] = info_member2["user"]["id"]
 
     # leader 创建群
-    group_detail = create_group(info_leader["access_token"], name="成员测试群")
+    group_detail = create_group(info_leader["access_token"], name=f"Membership Test Group {RUN_ID}")
     group_id = group_detail["group"]["id"]
     ctx["group_id"] = group_id
 
@@ -185,10 +186,10 @@ def scenario_admin_list_memberships_with_names(ctx: Dict[str, Any]) -> bool:
             return _log(False, "admin 按 group_id 列表返回的 group_name 为空字符串", item)
 
     # 2）针对已知用户校验名称正确性
-    expected_group_name = "成员测试群"
-    expected_leader_name = "成员测试用户-leader"
-    expected_member1_name = "成员测试用户-member1"
-    expected_member2_name = "成员测试用户-member2"
+    expected_group_name = f"Membership Test Group {RUN_ID}"
+    expected_leader_name = f"Member User leader {RUN_ID}"
+    expected_member1_name = f"Member User member1 {RUN_ID}"
+    expected_member2_name = f"Member User member2 {RUN_ID}"
 
     def _find_by_user(uid: str) -> Dict[str, Any] | None:
         for it in items:
@@ -416,7 +417,7 @@ def scenario_admin_create_membership_success(_ctx: Dict[str, Any]) -> bool:
     """
     # leader 创建群
     info_leader = register_and_login("create_success_leader")
-    group_detail = create_group(info_leader["access_token"], name="admin 创建成员关系-成功场景")
+    group_detail = create_group(info_leader["access_token"], name=f"Admin Create Membership Success {RUN_ID}")
     group_id = group_detail["group"]["id"]
 
     # 再注册一个成员用户
@@ -503,7 +504,7 @@ def scenario_admin_create_membership_group_full() -> bool:
     """
     # 创建 leader + 群
     info_leader = register_and_login("group_full_leader")
-    group_detail = create_group(info_leader["access_token"], name="成员关系-满员群")
+    group_detail = create_group(info_leader["access_token"], name=f"Membership Full Group {RUN_ID}")
     group_id = group_detail["group"]["id"]
 
     # 再注册若干成员并通过业务 join 接口加入，直到达到上限
@@ -539,7 +540,7 @@ def scenario_admin_create_membership_reactivate_existing() -> bool:
     """
     # 独立构造一个群组和成员关系，避免污染其它场景
     info_leader = register_and_login("reactivate_leader")
-    group_detail = create_group(info_leader["access_token"], name="成员关系-复活场景群")
+    group_detail = create_group(info_leader["access_token"], name=f"Membership Reactivate Group {RUN_ID}")
     group_id = group_detail["group"]["id"]
 
     info_member = register_and_login("reactivate_member")
@@ -626,7 +627,7 @@ def scenario_admin_create_membership_in_inactive_group() -> bool:
     """
     # 创建群组
     info_leader = register_and_login("inactive_group_leader")
-    group_detail = create_group(info_leader["access_token"], name="成员关系-关闭群")
+    group_detail = create_group(info_leader["access_token"], name=f"Membership Closed Group {RUN_ID}")
     group_id = group_detail["group"]["id"]
 
     # 将群组设为 inactive

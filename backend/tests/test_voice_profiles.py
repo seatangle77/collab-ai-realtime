@@ -6,6 +6,7 @@ from typing import Any, Dict, Tuple
 import requests
 
 BASE_URL = "http://127.0.0.1:8000"
+RUN_ID = uuid.uuid4().hex[:6]
 
 
 def _log(ok: bool, message: str, extra: Any | None = None) -> bool:
@@ -25,10 +26,10 @@ def register_dummy_user_with_token(label: str) -> Tuple[Dict[str, Any], str]:
     r = requests.post(
         f"{BASE_URL}/api/auth/register",
         json={
-            "name": f"声纹用户-{label}",
+            "name": f"Voice User {label} {RUN_ID}",
             "email": email,
             "password": password,
-            "device_token": f"device-{label}",
+            "device_token": f"device-{label}-{uuid.uuid4().hex[:8]}",
         },
     )
     r.raise_for_status()

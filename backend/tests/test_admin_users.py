@@ -335,6 +335,7 @@ def scenario_admin_delete_user_success() -> bool:
     g = _create_admin_group(f"DelGroup {uuid.uuid4().hex[:4]}")
     _create_admin_membership(g["id"], user_id)
 
+    # 删除用户（同时会触发 speech_transcripts UPDATE，无数据时应静默成功）
     r = requests.delete(f"{BASE_URL}/api/admin/users/{user_id}", headers=ADMIN_HEADERS)
     if r.status_code != 204:
         return _log(False, "admin 删除用户失败（期望 204）", {"status": r.status_code, "body": r.text})
@@ -401,6 +402,7 @@ def scenario_admin_batch_delete_users_success() -> bool:
     _create_admin_membership(g["id"], u1["id"])
     _create_admin_membership(g["id"], u2["id"])
 
+    # 批量删除（同时会触发 speech_transcripts UPDATE，无数据时应静默成功）
     r = requests.post(
         f"{BASE_URL}/api/admin/users/batch-delete",
         json={"ids": [u1["id"], u2["id"]]},
@@ -506,8 +508,14 @@ def scenario_admin_export_csv_basic(ctx: Dict[str, Any]) -> bool:
         return _log(False, "admin 导出 CSV 失败（期望 200）", {"status": r.status_code, "body": r.text[:200]})
     ok = "text/csv" in r.headers.get("Content-Type", "")
     lines = r.text.strip().splitlines()
-    # 有 header 行
-    ok &= _log(len(lines) >= 1 and "id" in lines[0], "CSV 首行为 header", {"first_line": lines[0] if lines else ""})
+    # header 行格式验证：含 groups 列，不含 group_ids/group_names
+    header = lines[0] if lines else ""
+    ok &= _log("groups" in header, "CSV header 含 groups 列", {"header": header})
+    ok &= _log("group_ids" not in header, "CSV header 不含旧 group_ids 列", {"header": header})
+    ok &= _log("group_names" not in header, "CSV header 不含旧 group_names 列", {"header": header})
+    # 含标准列
+    for col in ["id", "name", "email", "device_token", "password_needs_reset", "created_at"]:
+        ok &= _log(col in header, f"CSV header 含 {col} 列", {"header": header})
     # 包含已知用户 email
     known_email = ctx["users"][0]["email"]
     ok &= _log(known_email in r.text, f"CSV 包含已知用户 email={known_email}")
@@ -523,9 +531,13 @@ def scenario_admin_export_csv_with_filter(ctx: Dict[str, Any]) -> bool:
     )
     if r.status_code != 200:
         return _log(False, "admin 带过滤参数导出 CSV 失败", {"status": r.status_code})
-    lines = [l for l in r.text.strip().splitlines() if l]
+    lines = [ln for ln in r.text.strip().splitlines() if ln]
+    ok = True
     # header + 1 条数据
-    ok = len(lines) == 2 and target["email"] in lines[1]
+    ok &= _log(len(lines) == 2, "admin 带 email 过滤 CSV 应只有 header+1 行", {"line_count": len(lines)})
+    ok &= _log(target["email"] in lines[1], "数据行包含目标 email", {"data_line": lines[1] if len(lines) > 1 else ""})
+    # groups 列存在于 header
+    ok &= _log("groups" in lines[0], "CSV header 含 groups 列")
     return _log(ok, "admin 带 email 过滤导出 CSV 场景", {"lines": lines})
 
 
@@ -533,6 +545,66 @@ def scenario_admin_export_csv_no_token() -> bool:
     r = requests.get(f"{BASE_URL}/api/admin/users/export")
     ok = r.status_code == 403
     return _log(ok, "admin 导出 CSV 无 token 应返回 403", {"status": r.status_code})
+
+
+# ────────────────────────────────────────────────────────────
+# 删除无 FK 报错（含会话场景）
+# ────────────────────────────────────────────────────────────
+
+def scenario_admin_delete_user_fk_no_error() -> bool:
+    """注册用户 → admin 获取默认群组 → 创建会话 → 删除用户 → 断言 204（无 FK 报错）。"""
+    user = register_dummy_user("FKDelTest")
+    user_id = user["id"]
+
+    # 获取用户默认群组
+    r = requests.get(f"{BASE_URL}/api/admin/users/{user_id}", headers=ADMIN_HEADERS)
+    if r.status_code != 200:
+        return _log(False, "FK删除场景：获取用户详情失败", {"status": r.status_code})
+    group_ids = r.json().get("group_ids", [])
+    if not group_ids:
+        return _log(False, "FK删除场景：用户无默认群组", r.json())
+    group_id = group_ids[0]
+
+    # 在该群组中创建一个会话（模拟有关联数据）
+    r2 = requests.post(
+        f"{BASE_URL}/api/admin/chat-sessions/",
+        json={"group_id": group_id, "session_title": f"FK Test Session {RUN_ID}"},
+        headers=ADMIN_HEADERS,
+    )
+    if r2.status_code != 201:
+        return _log(False, "FK删除场景：创建会话失败", {"status": r2.status_code, "body": r2.text})
+
+    # 删除用户（group_memberships 级联 + speech_transcripts 软更新）
+    r3 = requests.delete(f"{BASE_URL}/api/admin/users/{user_id}", headers=ADMIN_HEADERS)
+    ok = r3.status_code == 204
+    return _log(ok, "admin 删除有成员关系和会话的用户无 FK 报错场景", {"status": r3.status_code})
+
+
+def scenario_admin_batch_delete_fk_no_error() -> bool:
+    """注册2用户 → 默认群组各创建会话 → 批量删除 → 断言 deleted=2（无 FK 报错）。"""
+    u1 = register_dummy_user("FKBatchDel1")
+    u2 = register_dummy_user("FKBatchDel2")
+
+    # 在 u1 的默认群组中创建会话
+    r = requests.get(f"{BASE_URL}/api/admin/users/{u1['id']}", headers=ADMIN_HEADERS)
+    group_ids = r.json().get("group_ids", []) if r.status_code == 200 else []
+    if group_ids:
+        requests.post(
+            f"{BASE_URL}/api/admin/chat-sessions/",
+            json={"group_id": group_ids[0], "session_title": f"FK Batch Session {RUN_ID}"},
+            headers=ADMIN_HEADERS,
+        )
+
+    r = requests.post(
+        f"{BASE_URL}/api/admin/users/batch-delete",
+        json={"ids": [u1["id"], u2["id"]]},
+        headers=ADMIN_HEADERS,
+    )
+    ok = r.status_code == 200 and r.json().get("deleted") == 2
+    return _log(
+        ok, "admin 批量删除有成员关系和会话的用户无 FK 报错场景",
+        {"status": r.status_code, "deleted": r.json().get("deleted") if r.status_code == 200 else r.text},
+    )
 
 
 # ────────────────────────────────────────────────────────────
@@ -609,12 +681,14 @@ def run_all() -> bool:
     ok &= scenario_admin_delete_user_success()
     ok &= scenario_admin_delete_user_not_found()
     ok &= scenario_admin_delete_user_cascade_memberships()
+    ok &= scenario_admin_delete_user_fk_no_error()
 
     print("\n-- 批量删除 --")
     ok &= scenario_admin_batch_delete_users_success()
     ok &= scenario_admin_batch_delete_users_empty_ids()
     ok &= scenario_admin_batch_delete_users_partial()
     ok &= scenario_admin_batch_delete_users_too_many()
+    ok &= scenario_admin_batch_delete_fk_no_error()
 
     print("\n-- 标记重置密码 --")
     ok &= scenario_admin_mark_password_reset_and_verify(ctx)

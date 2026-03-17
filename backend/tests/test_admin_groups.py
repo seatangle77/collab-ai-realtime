@@ -6,6 +6,7 @@ from typing import Any, Dict, List
 import requests
 
 BASE_URL = "http://127.0.0.1:8000"
+RUN_ID = uuid.uuid4().hex[:6]
 
 # 和 app.admin.deps 中的默认值保持一致
 ADMIN_KEY = "TestAdminKey123"
@@ -29,10 +30,10 @@ def register_and_login_for_groups(label: str) -> Dict[str, Any]:
     r = requests.post(
         f"{BASE_URL}/api/auth/register",
         json={
-            "name": f"群组测试用户-{label}",
+            "name": f"Group Test User {label} {RUN_ID}",
             "email": email,
             "password": password,
-            "device_token": f"device-group-{label}",
+            "device_token": f"device-group-{label}-{uuid.uuid4().hex[:8]}",
         },
     )
     r.raise_for_status()
@@ -73,7 +74,7 @@ def setup_groups(ctx: Dict[str, Any]) -> bool:
     for i in range(1, 4):
         group_detail = create_group_as_user(
             auth_info["access_token"],
-            name=f"管理测试群-{i}",
+            name=f"Admin Test Group {i} {RUN_ID}",
         )
         groups.append(group_detail["group"])
 
@@ -174,7 +175,7 @@ def scenario_admin_list_groups_with_filters(ctx: Dict[str, Any]) -> bool:
 
 
 def scenario_admin_create_group_success(ctx: Dict[str, Any]) -> bool:
-    name = "后台创建群-成功场景"
+    name = f"Backend Create Group {RUN_ID}"
     r = requests.post(
         f"{BASE_URL}/api/admin/groups",
         json={"name": name},
@@ -219,7 +220,7 @@ def scenario_admin_create_group_with_inactive() -> bool:
     """
     显式传 is_active=false 创建群组，并通过列表过滤校验其状态。
     """
-    name = "后台创建群-初始停用"
+    name = f"Backend Create Inactive Group {RUN_ID}"
     r = requests.post(
         f"{BASE_URL}/api/admin/groups",
         json={"name": name, "is_active": False},
@@ -330,7 +331,7 @@ def scenario_admin_get_group_not_found() -> bool:
 def scenario_admin_update_group_success(ctx: Dict[str, Any]) -> bool:
     target_group = ctx["groups"][2]
     gid = target_group["id"]
-    new_name = "管理员修改后的群名"
+    new_name = f"Admin Updated Group Name {RUN_ID}"
 
     r = requests.patch(
         f"{BASE_URL}/api/admin/groups/{gid}",
@@ -407,7 +408,7 @@ def scenario_admin_update_group_no_fields(ctx: Dict[str, Any]) -> bool:
 def scenario_admin_delete_group_success(ctx: Dict[str, Any]) -> bool:
     # 单独创建一个用于删除测试的群
     creator_token = ctx["creator_token"]
-    group_detail = create_group_as_user(creator_token, name="待删除测试群")
+    group_detail = create_group_as_user(creator_token, name=f"To Delete Test Group {RUN_ID}")
     gid = group_detail["group"]["id"]
 
     r = requests.delete(
@@ -440,8 +441,8 @@ def scenario_admin_delete_group_not_found() -> bool:
 
 def scenario_admin_batch_delete_groups_success(ctx: Dict[str, Any]) -> bool:
     creator_token = ctx["creator_token"]
-    g1 = create_group_as_user(creator_token, name="批量删除测试群1")["group"]
-    g2 = create_group_as_user(creator_token, name="批量删除测试群2")["group"]
+    g1 = create_group_as_user(creator_token, name=f"Batch Delete Group 1 {RUN_ID}")["group"]
+    g2 = create_group_as_user(creator_token, name=f"Batch Delete Group 2 {RUN_ID}")["group"]
     ids = [g1["id"], g2["id"]]
 
     r = requests.post(
@@ -474,7 +475,7 @@ def scenario_admin_batch_delete_groups_empty_ids() -> bool:
 
 def scenario_admin_batch_delete_groups_partial(ctx: Dict[str, Any]) -> bool:
     creator_token = ctx["creator_token"]
-    g = create_group_as_user(creator_token, name="批量删除部分测试群")["group"]
+    g = create_group_as_user(creator_token, name=f"Batch Delete Partial Group {RUN_ID}")["group"]
     r = requests.post(
         f"{BASE_URL}/api/admin/groups/batch-delete",
         json={"ids": [g["id"], "non-existent-group-uuid-1111"]},

@@ -194,7 +194,7 @@ async def export_users_csv(
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["id", "name", "email", "device_token", "group_ids", "group_names", "password_needs_reset", "created_at"])
+    writer.writerow(["id", "name", "email", "device_token", "groups", "password_needs_reset", "created_at"])
     for row in rows:
         extra = group_info.get(row["id"], {"group_ids": [], "group_names": []})
         writer.writerow([
@@ -202,7 +202,6 @@ async def export_users_csv(
             row["name"],
             row["email"],
             row["device_token"] or "",
-            "|".join(extra["group_ids"]),
             "|".join(extra["group_names"]),
             row.get("password_needs_reset", False),
             row["created_at"].isoformat() if row["created_at"] else "",
@@ -419,7 +418,16 @@ async def delete_user(
     user_id: str,
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    # 先级联删除成员关系
+    # 先更新 speech_transcripts 说话人标注
+    await db.execute(
+        text("""
+            UPDATE speech_transcripts
+            SET speaker = '已删除用户', speaker_user_id = NULL
+            WHERE speaker_user_id = :id
+        """),
+        {"id": user_id},
+    )
+    # 级联删除成员关系
     await db.execute(
         text("DELETE FROM group_memberships WHERE user_id = :id"),
         {"id": user_id},
@@ -441,6 +449,15 @@ async def batch_delete_users(
     body: BatchDeleteRequest,
     db: AsyncSession = Depends(get_db),
 ) -> BatchDeleteResponse:
+    # 先更新 speech_transcripts 说话人标注
+    await db.execute(
+        text("""
+            UPDATE speech_transcripts
+            SET speaker = '已删除用户', speaker_user_id = NULL
+            WHERE speaker_user_id = ANY(:ids)
+        """),
+        {"ids": body.ids},
+    )
     # 批量删除成员关系
     await db.execute(
         text("DELETE FROM group_memberships WHERE user_id = ANY(:ids)"),
