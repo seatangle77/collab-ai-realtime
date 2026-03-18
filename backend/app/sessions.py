@@ -198,10 +198,11 @@ class TranscriptOut(BaseModel):
     session_id: str
     user_id: str | None = None
     speaker: str | None = None
-    text: str
+    text: str | None = None
     start: Any
     end: Any
-    duration: int | None = None
+    duration: float | None = None
+    confidence: float | None = None
     created_at: datetime
 
 
@@ -312,6 +313,7 @@ async def list_session_transcripts(
                 start,
                 "end",
                 duration,
+                confidence,
                 created_at
             FROM speech_transcripts
             WHERE session_id = :session_id
