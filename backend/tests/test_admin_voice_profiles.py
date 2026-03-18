@@ -130,6 +130,9 @@ def scenario_admin_filters_and_detail() -> bool:
     ) == 1
     # 详情中也应返回用户名称/邮箱字段
     ok &= detail.get("user_name") is not None or detail.get("user_email") is not None
+    # 验证 profile 内含 embedding_status 和 embedding_updated_at 字段
+    ok &= "embedding_status" in detail.get("profile", {})
+    ok &= "embedding_updated_at" in detail.get("profile", {})
 
     return _log(ok, "admin 获取声纹配置详情场景", detail)
 
@@ -162,6 +165,12 @@ def scenario_admin_update_samples_and_generate_embedding() -> bool:
 
     emb = gen.get("voice_embedding") or {}
     ok &= isinstance(emb, dict) and emb.get("generated_at") is not None
+    # 验证 embedding_status 和 embedding_updated_at 字段
+    ok &= gen.get("embedding_status") == "ready"
+    ok &= gen.get("embedding_updated_at") is not None
+    # 验证 update_samples 返回的字段也包含 embedding_status
+    ok &= "embedding_status" in updated
+    ok &= "embedding_updated_at" in updated
 
     return _log(ok, "admin 更新样本并生成声纹场景", {"updated": updated, "generated": gen})
 
@@ -532,6 +541,78 @@ def scenario_admin_upload_audio_not_found_or_unauthorized() -> bool:
     return ok
 
 
+def scenario_admin_batch_delete_success() -> bool:
+    """批量删除 2 条声纹配置，验证 deleted=2，删除后 GET 返回 404。"""
+    _, profile1 = _create_profile_with_samples("BatchDel1", sample_count=0)
+    _, profile2 = _create_profile_with_samples("BatchDel2", sample_count=0)
+
+    r = requests.post(
+        f"{BASE_URL}/api/admin/voice-profiles/batch-delete",
+        headers=ADMIN_HEADERS,
+        json={"ids": [profile1["id"], profile2["id"]]},
+    )
+    if r.status_code != 200:
+        return _log(False, "admin batch-delete 声纹配置失败（期望 200）", {"status": r.status_code, "body": r.text})
+
+    ok = r.json().get("deleted") == 2
+
+    # 删除后 GET 详情应 404
+    r1 = requests.get(f"{BASE_URL}/api/admin/voice-profiles/{profile1['id']}", headers=ADMIN_HEADERS)
+    r2 = requests.get(f"{BASE_URL}/api/admin/voice-profiles/{profile2['id']}", headers=ADMIN_HEADERS)
+    ok &= r1.status_code == 404
+    ok &= r2.status_code == 404
+
+    return _log(ok, "admin batch-delete 声纹配置成功场景", r.json())
+
+
+def scenario_admin_batch_delete_invalid_ids() -> bool:
+    """混合有效+无效 ID：deleted 只统计实际删除数；全无效 ID：deleted=0。"""
+    _, profile = _create_profile_with_samples("BatchDelMix", sample_count=0)
+
+    ok = True
+
+    # 混合：1 个有效 + 1 个不存在
+    r_mix = requests.post(
+        f"{BASE_URL}/api/admin/voice-profiles/batch-delete",
+        headers=ADMIN_HEADERS,
+        json={"ids": [profile["id"], "non-existent-id-xyz"]},
+    )
+    ok &= r_mix.status_code == 200
+    ok &= r_mix.json().get("deleted") == 1
+
+    # 全无效
+    r_none = requests.post(
+        f"{BASE_URL}/api/admin/voice-profiles/batch-delete",
+        headers=ADMIN_HEADERS,
+        json={"ids": ["ghost-id-1", "ghost-id-2"]},
+    )
+    ok &= r_none.status_code == 200
+    ok &= r_none.json().get("deleted") == 0
+
+    return _log(ok, "admin batch-delete 混合/全无效 ID 场景", {"mix": r_mix.json(), "none": r_none.json()})
+
+
+def scenario_admin_batch_delete_validation() -> bool:
+    """ids 为空 / 超 100 条应返回 400/422。"""
+    ok = True
+
+    r_empty = requests.post(
+        f"{BASE_URL}/api/admin/voice-profiles/batch-delete",
+        headers=ADMIN_HEADERS,
+        json={"ids": []},
+    )
+    ok &= _log(r_empty.status_code in (400, 422), "admin batch-delete ids 为空被拒绝场景", {"status": r_empty.status_code})
+
+    r_over = requests.post(
+        f"{BASE_URL}/api/admin/voice-profiles/batch-delete",
+        headers=ADMIN_HEADERS,
+        json={"ids": [f"fake-id-{i}" for i in range(101)]},
+    )
+    ok &= _log(r_over.status_code in (400, 422), "admin batch-delete ids 超 100 条被拒绝场景", {"status": r_over.status_code})
+
+    return ok
+
+
 def run_all() -> bool:
     print("=== 开始 Admin Voice Profiles 后台接口测试 ===")
 
@@ -549,6 +630,9 @@ def run_all() -> bool:
     ok &= scenario_admin_upload_audio_too_many_samples()
     ok &= scenario_admin_upload_audio_invalid_mime()
     ok &= scenario_admin_upload_audio_not_found_or_unauthorized()
+    ok &= scenario_admin_batch_delete_success()
+    ok &= scenario_admin_batch_delete_invalid_ids()
+    ok &= scenario_admin_batch_delete_validation()
 
     print("\n=== Admin Voice Profiles 测试结果: {} ===".format("全部通过 ✅" if ok else "有失败 ❌"))
     return ok

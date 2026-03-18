@@ -15,7 +15,7 @@ from ..config_voice import VOICE_AUDIO_BASE_DIR, VOICE_AUDIO_PUBLIC_BASE_URL
 from ..db import get_db
 from ..voice_profiles import ALLOWED_AUDIO_CONTENT_TYPES, VoiceProfileOut, _row_to_profile
 from .deps import require_admin
-from .schemas import Page, PageMeta
+from .schemas import BatchDeleteRequest, BatchDeleteResponse, Page, PageMeta
 
 
 router = APIRouter(
@@ -148,6 +148,26 @@ class AdminUploadAudioResponse(BaseModel):
     url: str
 
 
+@router.post(
+    "/batch-delete",
+    response_model=BatchDeleteResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def batch_delete_voice_profiles(
+    body: BatchDeleteRequest,
+    db: AsyncSession = Depends(get_db),
+) -> BatchDeleteResponse:
+    deleted = 0
+    for pid in body.ids:
+        result = await db.execute(
+            text("DELETE FROM user_voice_profiles WHERE id = :id"),
+            {"id": pid},
+        )
+        deleted += result.rowcount
+    await db.commit()
+    return BatchDeleteResponse(deleted=deleted)
+
+
 @router.get(
     "/{profile_id}",
     response_model=AdminVoiceProfileDetail,
@@ -165,6 +185,8 @@ async def get_voice_profile_detail(
               p.voice_embedding,
               p.sample_audio_urls,
               p.created_at,
+              p.embedding_status,
+              p.embedding_updated_at,
               u.name AS user_name,
               u.email AS user_email,
               g.group_id AS primary_group_id,
@@ -226,7 +248,8 @@ async def admin_update_samples(
             UPDATE user_voice_profiles
             SET sample_audio_urls = CAST(:sample_audio_urls AS jsonb)
             WHERE id = :id
-            RETURNING id, user_id, voice_embedding, sample_audio_urls, created_at
+            RETURNING id, user_id, voice_embedding, sample_audio_urls, created_at,
+                      embedding_status, embedding_updated_at
             """
         ),
         {
@@ -256,7 +279,8 @@ async def admin_generate_embedding(
     result = await db.execute(
         text(
             """
-            SELECT id, user_id, voice_embedding, sample_audio_urls, created_at
+            SELECT id, user_id, voice_embedding, sample_audio_urls, created_at,
+                   embedding_status, embedding_updated_at
             FROM user_voice_profiles
             WHERE id = :id
             """
@@ -286,9 +310,12 @@ async def admin_generate_embedding(
         text(
             """
             UPDATE user_voice_profiles
-            SET voice_embedding = CAST(:voice_embedding AS jsonb)
+            SET voice_embedding = CAST(:voice_embedding AS jsonb),
+                embedding_status = 'ready',
+                embedding_updated_at = NOW()
             WHERE id = :id
-            RETURNING id, user_id, voice_embedding, sample_audio_urls, created_at
+            RETURNING id, user_id, voice_embedding, sample_audio_urls, created_at,
+                      embedding_status, embedding_updated_at
             """
         ),
         {
@@ -323,7 +350,8 @@ async def admin_upload_audio_sample(
     result = await db.execute(
         text(
             """
-            SELECT id, user_id, voice_embedding, sample_audio_urls, created_at
+            SELECT id, user_id, voice_embedding, sample_audio_urls, created_at,
+                   embedding_status, embedding_updated_at
             FROM user_voice_profiles
             WHERE id = :id
             """

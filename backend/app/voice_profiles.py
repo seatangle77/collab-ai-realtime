@@ -26,6 +26,8 @@ class VoiceProfileOut(BaseModel):
     sample_audio_urls: list[str] = Field(default_factory=list)
     created_at: datetime
     voice_embedding: dict[str, Any] | None = None
+    embedding_status: str = "not_generated"
+    embedding_updated_at: datetime | None = None
 
 
 class UpdateSamplesRequest(BaseModel):
@@ -73,6 +75,8 @@ def _row_to_profile(row: Mapping[str, Any]) -> VoiceProfileOut:
         "sample_audio_urls": urls,
         "created_at": row["created_at"],
         "voice_embedding": row.get("voice_embedding"),
+        "embedding_status": row.get("embedding_status") or "not_generated",
+        "embedding_updated_at": row.get("embedding_updated_at"),
     }
     return VoiceProfileOut.model_validate(payload)
 
@@ -84,7 +88,8 @@ async def _get_or_create_profile(
     result = await db.execute(
         text(
             """
-            SELECT id, user_id, voice_embedding, sample_audio_urls, created_at
+            SELECT id, user_id, voice_embedding, sample_audio_urls, created_at,
+                   embedding_status, embedding_updated_at
             FROM user_voice_profiles
             WHERE user_id = :user_id
             LIMIT 1
@@ -104,7 +109,8 @@ async def _get_or_create_profile(
             """
             INSERT INTO user_voice_profiles (id, user_id, sample_audio_urls, created_at)
             VALUES (:id, :user_id, CAST(:sample_audio_urls AS jsonb), :created_at)
-            RETURNING id, user_id, voice_embedding, sample_audio_urls, created_at
+            RETURNING id, user_id, voice_embedding, sample_audio_urls, created_at,
+                      embedding_status, embedding_updated_at
             """
         ),
         {
@@ -157,7 +163,8 @@ async def update_my_voice_samples(
             UPDATE user_voice_profiles
             SET sample_audio_urls = CAST(:sample_audio_urls AS jsonb)
             WHERE id = :id
-            RETURNING id, user_id, voice_embedding, sample_audio_urls, created_at
+            RETURNING id, user_id, voice_embedding, sample_audio_urls, created_at,
+                      embedding_status, embedding_updated_at
             """
         ),
         {
@@ -208,9 +215,12 @@ async def generate_my_voice_embedding(
         text(
             """
             UPDATE user_voice_profiles
-            SET voice_embedding = CAST(:voice_embedding AS jsonb)
+            SET voice_embedding = CAST(:voice_embedding AS jsonb),
+                embedding_status = 'ready',
+                embedding_updated_at = NOW()
             WHERE id = :id
-            RETURNING id, user_id, voice_embedding, sample_audio_urls, created_at
+            RETURNING id, user_id, voice_embedding, sample_audio_urls, created_at,
+                      embedding_status, embedding_updated_at
             """
         ),
         {
