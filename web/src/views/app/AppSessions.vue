@@ -336,7 +336,13 @@ function goToGroups() {
 }
 
 function goToDetail(session: AppChatSession) {
-  router.push({ name: 'AppSessionDetail', params: { id: session.id }, state: { session } })
+  // 通过 history state 传递当前会话详情到会话详情页，避免重复请求。
+  // Vue Router 对 state 使用较窄的类型定义，这里显式断言为 any 以兼容 AppChatSession 结构。
+  router.push({
+    name: 'AppSessionDetail',
+    params: { id: session.id },
+    state: { session } as any,
+  })
 }
 
 onMounted(() => {

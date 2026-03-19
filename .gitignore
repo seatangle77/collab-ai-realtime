@@ -9,3 +9,11 @@ __pycache__/
 
 web/node_modules/
 web/dist/
+
+# Local voice sample audio (generated at runtime/tests)
+local-voice-audio/
+backend/local-voice-audio/
+
+# Claude / AI assistant metadata
+.claude/
+web/.claude/

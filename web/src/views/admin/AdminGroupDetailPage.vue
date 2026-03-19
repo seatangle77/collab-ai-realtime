@@ -67,7 +67,6 @@ async function submitEditGroup() {
 
 // ── 编辑成员 dialog ───────────────────────────────────────
 const editMemberVisible = ref(false)
-const editMemberFormRef = ref<FormInstance>()
 const editMemberForm = reactive({ id: '', role: 'member', status: 'active' })
 
 function openEditMember(row: AdminMembership) {
@@ -388,7 +387,7 @@ onMounted(async () => {
 
     <!-- 编辑成员 dialog -->
     <el-dialog v-model="editMemberVisible" title="编辑成员关系" width="380px">
-      <el-form ref="editMemberFormRef" :model="editMemberForm" label-width="80px">
+      <el-form :model="editMemberForm" label-width="80px">
         <el-form-item label="角色">
           <el-select v-model="editMemberForm.role" style="width: 100%">
             <el-option label="群主 (leader)" value="leader" />
