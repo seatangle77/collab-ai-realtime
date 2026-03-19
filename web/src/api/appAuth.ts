@@ -37,6 +37,6 @@ export async function fetchAppMe(): Promise<AdminUser> {
 }
 
 export async function changeAppPassword(payload: ChangePasswordPayload): Promise<AdminUser> {
-  return appHttp.post<AdminUser>('/api/auth/change-password', payload)
+  return appHttp.post<AdminUser>('/api/auth/change-password', payload, { noRedirectOn401: true })
 }
 

@@ -1,5 +1,7 @@
 export interface AppHttpConfig {
   baseURL?: string
+  /** 设为 true 时，401/403 响应不触发跳转登录页，直接抛出错误（用于认证类接口自行处理错误） */
+  noRedirectOn401?: boolean
 }
 
 const defaultConfig: AppHttpConfig = {
@@ -38,7 +40,9 @@ async function request<T>(url: string, init: RequestInit = {}, config: AppHttpCo
   })
 
   if (response.status === 401 || response.status === 403) {
-    if (typeof window !== 'undefined') {
+    // 有 token 且未禁用重定向 → session 过期，跳登录页
+    // 无 token 或设置了 noRedirectOn401 → 认证端点业务错误（如密码错误），直接抛出由调用方处理
+    if (token && typeof window !== 'undefined' && !finalConfig.noRedirectOn401) {
       try {
         const { ElMessage } = await import('element-plus')
         ElMessage.error('登录已过期或未授权，请重新登录')
@@ -47,8 +51,10 @@ async function request<T>(url: string, init: RequestInit = {}, config: AppHttpCo
       }
       const redirect = encodeURIComponent(window.location.pathname + window.location.search)
       window.location.href = `/app/login?redirect=${redirect}`
+      throw new Error('未授权访问用户端接口')
     }
-    throw new Error('未授权访问用户端接口')
+    const text = await response.text().catch(() => '')
+    throw new Error(text || `请求失败，状态码 ${response.status}`)
   }
 
   if (!response.ok) {

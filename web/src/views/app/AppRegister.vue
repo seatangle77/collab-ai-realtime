@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { appRegister } from '../../api/appAuth'
+import { extractErrorMessage } from '../../utils/error'
 
 const router = useRouter()
 const route = useRoute()
@@ -47,8 +48,8 @@ async function handleSubmit() {
       const redirect = (route.query.redirect as string | undefined) || '/app'
       router.push({ path: '/app/login', query: { redirect } })
     }, 800)
-  } catch (e: any) {
-    error.value = e?.message || '注册失败，请稍后重试'
+  } catch (e: unknown) {
+    error.value = extractErrorMessage(e) || '注册失败，请稍后重试'
   } finally {
     loading.value = false
   }

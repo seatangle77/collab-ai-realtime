@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { changeAppPassword } from '../../api/appAuth'
+import { extractErrorMessage } from '../../utils/error'
 
 const router = useRouter()
 
@@ -44,8 +45,8 @@ async function handleSubmit() {
     setTimeout(() => {
       router.push('/app')
     }, 600)
-  } catch (e: any) {
-    error.value = e?.message || '修改密码失败，请稍后重试'
+  } catch (e: unknown) {
+    error.value = extractErrorMessage(e) || '修改密码失败，请稍后重试'
   } finally {
     loading.value = false
   }
