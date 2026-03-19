@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { AdminChatSession, AdminGroup } from '../../types/admin'
@@ -23,6 +24,8 @@ interface Filters {
   lastUpdatedRange: Date[] | []
   endedAtRange: Date[] | []
 }
+
+const router = useRouter()
 
 const loading = ref(false)
 const sessions = ref<AdminChatSession[]>([])
@@ -483,8 +486,9 @@ onMounted(() => {
             {{ formatDateTimeToCST(row.ended_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" min-width="180" fixed="right">
+        <el-table-column label="操作" min-width="220" fixed="right">
           <template #default="{ row }">
+            <el-button type="primary" link size="small" @click="router.push('/admin/chat-sessions/' + row.id)">详情</el-button>
             <el-button type="primary" link size="small" @click="openEditDialog(row)">编辑</el-button>
             <el-button type="danger" link size="small" @click="handleDelete(row)">删除</el-button>
           </template>

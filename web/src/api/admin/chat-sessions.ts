@@ -70,3 +70,7 @@ export async function deleteAdminChatSessionsBatch(ids: string[]): Promise<Batch
   return http.post<BatchDeleteResponse>('/api/admin/chat-sessions/batch-delete', { ids })
 }
 
+export async function getAdminChatSession(id: string): Promise<AdminChatSession> {
+  return http.get<AdminChatSession>(`/api/admin/chat-sessions/${id}`)
+}
+

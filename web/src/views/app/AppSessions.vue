@@ -335,6 +335,10 @@ function goToGroups() {
   router.push('/app/groups')
 }
 
+function goToDetail(session: AppChatSession) {
+  router.push({ name: 'AppSessionDetail', params: { id: session.id }, state: { session } })
+}
+
 onMounted(() => {
   void fetchMyGroupsForSessions()
   if (currentGroup.value) {
@@ -426,6 +430,9 @@ onMounted(() => {
               </div>
             </div>
             <div class="app-sessions-item-actions">
+              <button type="button" class="app-sessions-secondary-btn" @click="goToDetail(session)">
+                查看详情
+              </button>
               <button type="button" class="app-sessions-secondary-btn" @click="openTranscripts(session)">
                 查看转写
               </button>

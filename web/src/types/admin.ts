@@ -54,6 +54,23 @@ export interface AdminChatSession {
   ended_at: string | null
 }
 
+export interface AdminTranscript {
+  transcript_id: string
+  group_id: string
+  session_id: string
+  user_id: string | null
+  speaker: string | null
+  text: string | null
+  start: string
+  end: string
+  duration: number | null
+  confidence: number | null
+  is_edited: boolean
+  created_at: string
+  audio_url: string | null
+  original_text: string | null
+}
+
 export interface AdminVoiceProfileSummary {
   id: string
   user_id: string

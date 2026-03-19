@@ -87,6 +87,10 @@ export async function endSession(sessionId: string): Promise<AppChatSession> {
   return appHttp.post<AppChatSession>(`/api/sessions/${sessionId}/end`)
 }
 
+export async function startSession(sessionId: string): Promise<AppChatSession> {
+  return appHttp.post<AppChatSession>(`/api/sessions/${sessionId}/start`)
+}
+
 export async function listSessionTranscripts(sessionId: string): Promise<AppTranscript[]> {
   return appHttp.get<AppTranscript[]>(`/api/sessions/${sessionId}/transcripts`)
 }

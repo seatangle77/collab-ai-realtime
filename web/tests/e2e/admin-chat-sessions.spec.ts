@@ -29,7 +29,7 @@ async function loginAsAdminAndGoToChatSessions(page: import('@playwright/test').
 
 async function registerAndLogin(label: string): Promise<{ userId: string; accessToken: string }> {
   const email = `e2e-session-${label}-${RUN_ID}-${Date.now()}@example.com`
-  const password = 'Pass123!'
+  const password = '1234'
 
   const regRes = await fetch(`${API_BASE}/api/auth/register`, {
     method: 'POST',
