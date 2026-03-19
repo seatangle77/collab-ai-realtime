@@ -49,3 +49,7 @@ export interface UpdateAdminGroupPayload {
 export async function updateAdminGroup(id: string, payload: UpdateAdminGroupPayload): Promise<AdminGroup> {
   return http.patch<AdminGroup>(`/api/admin/groups/${id}`, payload)
 }
+
+export async function getAdminGroup(id: string): Promise<AdminGroup> {
+  return http.get<AdminGroup>(`/api/admin/groups/${id}`)
+}

@@ -1,4 +1,5 @@
 import { appHttp } from './appHttp'
+import type { AppHttpConfig } from './appHttp'
 
 export interface AppChatSession {
   id: string
@@ -27,6 +28,7 @@ export interface AppTranscript {
 export async function listGroupSessions(
   groupId: string,
   options: { includeEnded?: boolean } = {},
+  config?: AppHttpConfig,
 ): Promise<AppChatSession[]> {
   const params = new URLSearchParams()
   if (options.includeEnded) {
@@ -34,7 +36,7 @@ export async function listGroupSessions(
   }
   const qs = params.toString()
   const url = `/api/groups/${groupId}/sessions` + (qs ? `?${qs}` : '')
-  return appHttp.get<AppChatSession[]>(url)
+  return appHttp.get<AppChatSession[]>(url, config)
 }
 
 export interface CreateSessionOptions {

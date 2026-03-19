@@ -42,6 +42,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('../views/app/AppGroups.vue'),
       },
       {
+        path: 'groups/:id',
+        name: 'AppGroupDetail',
+        component: () => import('../views/app/AppGroupDetail.vue'),
+      },
+      {
         path: 'sessions',
         name: 'AppSessions',
         component: () => import('../views/app/AppSessions.vue'),
@@ -76,6 +81,11 @@ const routes: RouteRecordRaw[] = [
         path: 'groups',
         name: 'AdminGroups',
         component: () => import('../views/admin/AdminGroupsPage.vue'),
+      },
+      {
+        path: 'groups/:id',
+        name: 'AdminGroupDetail',
+        component: () => import('../views/admin/AdminGroupDetailPage.vue'),
       },
       {
         path: 'memberships',

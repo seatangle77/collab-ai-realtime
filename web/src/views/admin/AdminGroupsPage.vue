@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { AdminGroup } from '../../types/admin'
@@ -236,6 +237,8 @@ async function handleDelete(row: AdminGroup) {
   }
 }
 
+const router = useRouter()
+
 onMounted(() => {
   fetchGroups()
 })
@@ -328,8 +331,9 @@ onMounted(() => {
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" min-width="160" fixed="right">
+        <el-table-column label="操作" min-width="200" fixed="right">
           <template #default="{ row }">
+            <el-button type="primary" link size="small" @click="router.push('/admin/groups/' + row.id)">详情</el-button>
             <el-button type="primary" link size="small" @click="openEditDialog(row)">编辑</el-button>
             <el-button type="danger" link size="small" @click="handleDelete(row)">删除</el-button>
           </template>

@@ -1,4 +1,5 @@
 import { appHttp } from './appHttp'
+import type { AppHttpConfig } from './appHttp'
 
 export interface AppGroup {
   id: string
@@ -35,8 +36,8 @@ export async function listMyGroups(): Promise<AppGroupSummary[]> {
   return appHttp.get<AppGroupSummary[]>('/api/groups/my')
 }
 
-export async function getGroupDetail(groupId: string): Promise<AppGroupDetail> {
-  return appHttp.get<AppGroupDetail>(`/api/groups/${groupId}`)
+export async function getGroupDetail(groupId: string, config?: AppHttpConfig): Promise<AppGroupDetail> {
+  return appHttp.get<AppGroupDetail>(`/api/groups/${groupId}`, config)
 }
 
 export async function createGroup(payload: CreateGroupPayload): Promise<AppGroupDetail> {

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { formatDateTimeToCST } from '../../utils/datetime'
@@ -74,6 +75,7 @@ function extractErrorMessage(err: unknown): string {
   return msg
 }
 
+const router = useRouter()
 const currentUser = ref<AppUser | null>(loadUserFromStorage())
 const currentGroup = ref<AppCurrentGroup | null>(loadCurrentGroupFromStorage())
 
@@ -477,6 +479,7 @@ onMounted(() => {
             <el-button size="small" @click="handleRefresh">刷新</el-button>
             <el-button v-if="isLeader" size="small" @click="handleRenameGroup">修改名称</el-button>
             <el-button size="small" type="danger" @click="handleLeaveCurrentGroup">退出群组</el-button>
+            <el-button size="small" type="primary" @click="router.push('/app/groups/' + activeGroupDetail.group.id)">进入群组</el-button>
           </div>
         </div>
 
