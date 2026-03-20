@@ -6,6 +6,26 @@ test.setTimeout(60_000)
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY || 'TestAdminKey123'
 const API_BASE = process.env.API_BASE_URL || 'http://localhost:8000'
 
+/**
+ * 必须限定在主滚动区的 tbody：Element Plus 在列 fixed="right" 时会再渲染一套镜像 .el-table__body，
+ * 用 `.el-table__body tbody tr` 会匹配到两套行，多选时第二次点击容易点到镜像行或顺序错乱，导致勾选全丢、批量删除一直 disabled。
+ */
+const ADMIN_VOICE_PROFILE_TABLE_BODY_ROW =
+  '.admin-voice-profiles-table .el-table__body-wrapper .el-table__body tbody tr'
+
+function getVoiceProfileRowByUserId(page: import('@playwright/test').Page, userId: string) {
+  return voiceProfileRowsByUserId(page, userId).first()
+}
+
+function voiceProfileRowsByUserId(page: import('@playwright/test').Page, userId: string) {
+  return page
+    .locator(ADMIN_VOICE_PROFILE_TABLE_BODY_ROW)
+    .filter({
+      // 只精确匹配 user_id 列的 cell，避免 hasText 命中错误行
+      has: page.getByRole('cell', { name: userId, exact: true }),
+    })
+}
+
 async function setupFakeMediaRecorder(page: import('@playwright/test').Page) {
   await page.addInitScript(() => {
     // @ts-expect-error override for tests
@@ -53,6 +73,26 @@ async function setupFakeMediaRecorder(page: import('@playwright/test').Page) {
     // @ts-expect-error assign polyfill
     window.MediaRecorder = FakeMediaRecorder as any
   })
+}
+
+/**
+ * 勾选主表数据行。
+ * EP 的行 checkbox 在部分渲染下是隐藏 input，force click 不稳定；
+ * 直接设 checked 并派发 change，确保触发表格 selection-change 链路。
+ */
+async function selectVoiceProfileTableRow(row: import('@playwright/test').Locator) {
+  await row.getByRole('checkbox').first().evaluate((input) => {
+    const el = input as HTMLInputElement
+    if (!el.checked) {
+      el.checked = true
+      el.dispatchEvent(new Event('change', { bubbles: true }))
+    }
+  })
+}
+
+/** 勾选后依赖 Vue 更新 disabled；用 poll 避免偶发早于下一帧断言失败 */
+async function expectBatchDeleteButtonEnabled(batchBtn: import('@playwright/test').Locator) {
+  await expect.poll(async () => batchBtn.isEnabled(), { timeout: 20000 }).toBeTruthy()
 }
 
 /** 登录并进入声纹管理页 */
@@ -201,7 +241,7 @@ test.describe.serial('Admin 声纹管理 - 主流程', () => {
     await page.locator('.admin-voice-profiles-filters .el-select').first().click()
     await page.getByRole('option', { name: '有样本' }).click()
     await page.getByRole('button', { name: '查询' }).click()
-    const bodyRows = page.locator('.admin-voice-profiles-table .el-table__body tbody tr')
+    const bodyRows = page.locator(ADMIN_VOICE_PROFILE_TABLE_BODY_ROW)
     await expect(bodyRows.first()).toBeVisible({ timeout: 10000 })
     const count = await bodyRows.count()
     expect(count).toBeGreaterThanOrEqual(2)
@@ -249,8 +289,8 @@ test.describe.serial('Admin 声纹管理 - 主流程', () => {
   test('8. 从列表进入详情', async ({ page }) => {
     await page.getByPlaceholder('按用户 ID 精确查询').fill(shared.withSamples.userId)
     await page.getByRole('button', { name: '查询' }).click()
-    await expect(page.locator('.admin-voice-profiles-table .el-table__body tbody tr').first()).toBeVisible({ timeout: 10000 })
-    const row = page.locator('.admin-voice-profiles-table .el-table__body tbody tr').filter({
+    await expect(page.locator(ADMIN_VOICE_PROFILE_TABLE_BODY_ROW).first()).toBeVisible({ timeout: 10000 })
+    const row = page.locator(ADMIN_VOICE_PROFILE_TABLE_BODY_ROW).filter({
       has: page.getByRole('cell', { name: shared.withSamples.userId, exact: true }),
     }).first()
     await row.getByRole('button', { name: '查看详情' }).click()
@@ -265,6 +305,9 @@ test.describe.serial('Admin 声纹管理 - 主流程', () => {
     await expect(page.getByText(shared.withSamples.userId)).toBeVisible()
     await expect(page.getByText('样本列表').first()).toBeVisible()
     await expect(page.getByText('声纹状态').first()).toBeVisible()
+    await expect(page.getByText('样本数量：2/5（最多 5 条）')).toBeVisible()
+    await expect(page.getByText('嵌入状态：未生成')).toBeVisible()
+    await expect(page.getByText('最近更新：-')).toBeVisible()
     await expect(page.getByPlaceholder('输入样本 URL')).toBeVisible()
     await expect(page.getByRole('button', { name: '添加样本' })).toBeVisible()
     await expect(page.getByRole('button', { name: '保存样本列表' })).toBeVisible()
@@ -282,7 +325,7 @@ test.describe.serial('Admin 声纹管理 - 主流程', () => {
     }
     await page.getByPlaceholder('按用户 ID 精确查询').fill(shared.withSamples.userId)
     await page.getByRole('button', { name: '查询' }).click()
-    const row = page.locator('.admin-voice-profiles-table .el-table__body tbody tr').filter({
+    const row = page.locator(ADMIN_VOICE_PROFILE_TABLE_BODY_ROW).filter({
       has: page.getByRole('cell', { name: shared.withSamples.userId, exact: true }),
     }).first()
     await row.getByRole('button', { name: '查看详情' }).click()
@@ -295,6 +338,10 @@ test.describe.serial('Admin 声纹管理 - 主流程', () => {
   test('10.1 详情边界：无样本（或样本很少）时可以正常添加', async ({ page }) => {
     await page.goto(`/admin/voice-profiles/${shared.noSamples.profileId}`)
 
+    await expect(page.getByText('样本数量：0/5（最多 5 条）')).toBeVisible()
+    await expect(page.getByText('嵌入状态：未生成')).toBeVisible()
+    await expect(page.getByText('最近更新：-')).toBeVisible()
+
     const beforeCount = await page.locator('.sample-row').count()
 
     await page.getByPlaceholder('输入样本 URL').fill('https://example.com/one.wav')
@@ -302,12 +349,19 @@ test.describe.serial('Admin 声纹管理 - 主流程', () => {
 
     const afterCount = await page.locator('.sample-row').count()
     expect(afterCount).toBeGreaterThanOrEqual(beforeCount + 1)
+
+    await expect(page.getByText('样本数量：1/5（最多 5 条）')).toBeVisible()
+    await expect(page.getByText('嵌入状态：未生成')).toBeVisible()
+    await expect(page.getByText('最近更新：-')).toBeVisible()
   })
 
   test('10.2 详情：无样本时点重新生成提示', async ({ page }) => {
     await page.goto(`/admin/voice-profiles/${shared.noSamples.profileId}`)
     await page.getByRole('button', { name: '重新生成声纹' }).click()
     await expect(page.getByText('当前没有任何样本，请先添加样本 URL 后再生成声纹')).toBeVisible()
+
+    await expect(page.getByText('嵌入状态：未生成')).toBeVisible()
+    await expect(page.getByText('最近更新：-')).toBeVisible()
   })
 
   test('11. 详情：添加样本并保存', async ({ page }) => {
@@ -316,8 +370,18 @@ test.describe.serial('Admin 声纹管理 - 主流程', () => {
     await page.getByPlaceholder('输入样本 URL').fill('https://example.com/e2e-new.wav')
     await page.getByRole('button', { name: '添加样本' }).click()
     await expect(page.getByText('样本 1')).toBeVisible()
+    const samplesPut = page.waitForResponse(
+      (r) =>
+        r.url().includes(`/api/admin/voice-profiles/${shared.noSamples.profileId}/samples`) &&
+        r.request().method() === 'PUT' &&
+        r.status() === 200,
+    )
     await page.getByRole('button', { name: '保存样本列表' }).click()
-    await expect(page.getByText('样本列表已保存')).toBeVisible({ timeout: 15000 })
+    await samplesPut
+    // 成功态以接口与页面数据为准；ElMessage 可能已自动关闭，避免依赖 toast 文案
+    await expect(page.getByText('样本数量：1/5（最多 5 条）')).toBeVisible({ timeout: 15000 })
+    await expect(page.getByText('嵌入状态：未生成')).toBeVisible()
+    await expect(page.getByText('最近更新：-')).toBeVisible()
     // 管理端详情中样本行也应出现音频预览
     await expect(page.locator('.sample-row').first().locator('audio')).toBeVisible()
   })
@@ -328,9 +392,17 @@ test.describe.serial('Admin 声纹管理 - 主流程', () => {
     await page.getByRole('button', { name: '重新生成声纹' }).click()
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible()
+    const genReq = page.waitForResponse(
+      (r) =>
+        r.url().includes(`/api/admin/voice-profiles/${shared.withSamples.profileId}/generate-embedding`) &&
+        r.request().method() === 'POST' &&
+        r.status() === 200,
+    )
     await dialog.getByRole('button', { name: '生成' }).click()
-    await expect(page.getByText('声纹已生成')).toBeVisible()
+    await genReq
     await expect(page.getByText('已生成').first()).toBeVisible()
+    await expect(page.getByText('嵌入状态：已就绪')).toBeVisible()
+    await expect(page.getByText('最近更新：-')).toHaveCount(0)
   })
 
   test('13. 详情：重新生成时取消确认', async ({ page }) => {
@@ -342,12 +414,14 @@ test.describe.serial('Admin 声纹管理 - 主流程', () => {
     await dialog.getByRole('button', { name: '取消' }).click()
     await expect(page.getByRole('dialog')).not.toBeVisible()
     await expect(page.getByText('已生成').first()).toBeVisible()
+    await expect(page.getByText('嵌入状态：已就绪')).toBeVisible()
+    await expect(page.getByText('最近更新：-')).toHaveCount(0)
   })
 
   test('14. 列表边界：用户 ID 查无结果', async ({ page }) => {
     await page.getByPlaceholder('按用户 ID 精确查询').fill('00000000-0000-0000-0000-000000000000')
     await page.getByRole('button', { name: '查询' }).click()
-    const bodyRows = page.locator('.admin-voice-profiles-table .el-table__body tbody tr')
+    const bodyRows = page.locator(ADMIN_VOICE_PROFILE_TABLE_BODY_ROW)
     await expect(bodyRows).toHaveCount(0)
   })
 
@@ -356,7 +430,7 @@ test.describe.serial('Admin 声纹管理 - 主流程', () => {
     await page.locator('.admin-voice-profiles-filters .el-select').nth(1).click()
     await page.getByRole('option', { name: '未生成' }).click()
     await page.getByRole('button', { name: '查询' }).click()
-    const bodyRows = page.locator('.admin-voice-profiles-table .el-table__body tbody tr')
+    const bodyRows = page.locator(ADMIN_VOICE_PROFILE_TABLE_BODY_ROW)
     await expect(bodyRows).toHaveCount(0)
   })
 
@@ -457,5 +531,162 @@ test.describe.serial('Admin 声纹管理 - 主流程', () => {
     await expect
       .poll(async () => page.locator('.sample-row').count(), { timeout: 5000 })
       .toBe(beforeCount)
+  })
+
+  test('22. 列表：批量删除按钮初始禁用', async ({ page }) => {
+    const batchBtn = page.getByRole('button', { name: '批量删除' })
+    await expect(batchBtn).toBeDisabled()
+  })
+
+  test('23. 列表：选择行后批量删除按钮启用', async ({ page }) => {
+    const batchBtn = page.getByRole('button', { name: '批量删除' })
+    const row = getVoiceProfileRowByUserId(page, shared.withSamples.userId)
+    await expect(row).toBeVisible()
+    await selectVoiceProfileTableRow(row)
+    await expectBatchDeleteButtonEnabled(batchBtn)
+  })
+
+  test('24. 列表：取消批量删除不应删除数据', async ({ page }) => {
+    const batchBtn = page.getByRole('button', { name: '批量删除' })
+    const row1 = getVoiceProfileRowByUserId(page, shared.withSamples.userId)
+    const row2 = getVoiceProfileRowByUserId(page, shared.withEmbedding.userId)
+
+    await selectVoiceProfileTableRow(row1)
+    await selectVoiceProfileTableRow(row2)
+    await expectBatchDeleteButtonEnabled(batchBtn)
+
+    await batchBtn.click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible()
+    await dialog.getByRole('button', { name: '取消' }).click()
+    await expect(dialog).not.toBeVisible()
+
+    await expect(
+      voiceProfileRowsByUserId(page, shared.withSamples.userId),
+    ).toHaveCount(1)
+    await expect(
+      voiceProfileRowsByUserId(page, shared.withEmbedding.userId),
+    ).toHaveCount(1)
+  })
+
+  test('25. 列表：批量删除接口失败应提示且不应删除', async ({ page }) => {
+    await page.route('**/api/admin/voice-profiles/batch-delete', (route) =>
+      route.fulfill({
+        status: 500,
+        body: 'batch delete error',
+      }),
+    )
+
+    const batchBtn = page.getByRole('button', { name: '批量删除' })
+    const row = getVoiceProfileRowByUserId(page, shared.withSamples.userId)
+    await selectVoiceProfileTableRow(row)
+    await expectBatchDeleteButtonEnabled(batchBtn)
+
+    await batchBtn.click()
+    const dialog = page.getByRole('dialog')
+    await dialog.getByRole('button', { name: '删除' }).click()
+
+    await expect(page.getByText('batch delete error')).toBeVisible({ timeout: 10000 })
+
+    await expect(
+      getVoiceProfileRowByUserId(page, shared.withSamples.userId),
+    ).toHaveCount(1)
+  })
+
+  test('26. 列表：批量删除成功应删除所选行', async ({ page }) => {
+    const batchBtn = page.getByRole('button', { name: '批量删除' })
+    const row1 = getVoiceProfileRowByUserId(page, shared.withSamples.userId)
+    const row2 = getVoiceProfileRowByUserId(page, shared.withEmbedding.userId)
+
+    await selectVoiceProfileTableRow(row1)
+    await selectVoiceProfileTableRow(row2)
+    await expectBatchDeleteButtonEnabled(batchBtn)
+
+    await batchBtn.click()
+    const dialog = page.getByRole('dialog')
+    await dialog.getByRole('button', { name: '删除' }).click()
+
+    await expect(page.getByText('已删除 2 条声纹配置')).toBeVisible({ timeout: 15000 })
+
+    await expect(
+      voiceProfileRowsByUserId(page, shared.withSamples.userId),
+    ).toHaveCount(0)
+    await expect(
+      voiceProfileRowsByUserId(page, shared.withEmbedding.userId),
+    ).toHaveCount(0)
+  })
+
+  test('27. 列表极端：删除导致当前页空时应自动回退分页', async ({ page }) => {
+    let deletedOnPage2 = false
+
+    await page.route(/\/api\/admin\/voice-profiles(?:\?|$)/, async (route) => {
+      const url = new URL(route.request().url())
+      const pageParam = Number(url.searchParams.get('page') || '1')
+      const pageSizeParam = Number(url.searchParams.get('page_size') || '20')
+
+      const mkItem = (id: string, userId: string) => ({
+        id,
+        user_id: userId,
+        user_name: userId,
+        user_email: `${userId}@example.com`,
+        primary_group_id: null,
+        primary_group_name: null,
+        sample_count: 0,
+        has_embedding: false,
+        created_at: new Date().toISOString(),
+      })
+
+      if (pageParam === 2) {
+        const items = deletedOnPage2 ? [] : [mkItem('vp-del-target', 'u-page2')]
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            items,
+            // page_size=10 时，删除前 total=11 才会让第 2 页有且仅有 1 条
+            meta: { total: deletedOnPage2 ? 10 : 11, page: 2, page_size: pageSizeParam },
+          }),
+        })
+      }
+
+      // pageParam === 1
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          items: Array.from({ length: 10 }, (_, i) => mkItem(`vp-keep-${i + 1}`, `u-keep-${i + 1}`)),
+          meta: { total: 10, page: 1, page_size: pageSizeParam },
+        }),
+      })
+    })
+
+    await page.route('**/api/admin/voice-profiles/batch-delete', (route) =>
+      {
+        deletedOnPage2 = true
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ deleted: 1 }),
+        })
+      },
+    )
+
+    // 页面分页器仅支持 [10,20,50,100]，使用 2 会在挂载时被组件归一并触发额外请求，导致断言不稳定
+    await page.goto('/admin/voice-profiles?page=2&page_size=10')
+    await expect(page.locator(ADMIN_VOICE_PROFILE_TABLE_BODY_ROW)).toHaveCount(1)
+
+    const batchBtn = page.getByRole('button', { name: '批量删除' })
+    const row = page
+      .locator(ADMIN_VOICE_PROFILE_TABLE_BODY_ROW)
+      .first()
+    await selectVoiceProfileTableRow(row)
+    await expectBatchDeleteButtonEnabled(batchBtn)
+
+    await batchBtn.click()
+    const dialog = page.getByRole('dialog')
+    await dialog.getByRole('button', { name: '删除' }).click()
+
+    // 删除后当前页应回退到有数据的页（page=1，10 条）
+    await expect(page.locator(ADMIN_VOICE_PROFILE_TABLE_BODY_ROW)).toHaveCount(10)
   })
 })

@@ -2,10 +2,10 @@
 import { onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { AdminVoiceProfileSummary } from '../../types/admin'
-import { listAdminVoiceProfiles } from '../../api/admin/voice-profiles'
+import { batchDeleteAdminVoiceProfiles, listAdminVoiceProfiles } from '../../api/admin/voice-profiles'
 import { formatDateTimeToCST } from '../../utils/datetime'
 import type { PageMeta } from '../../types/admin'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 interface Filters {
   user_id: string
@@ -19,6 +19,9 @@ const route = useRoute()
 const loading = ref(false)
 const profiles = ref<AdminVoiceProfileSummary[]>([])
 const meta = ref<PageMeta | null>(null)
+const selectedRows = ref<AdminVoiceProfileSummary[]>([])
+const batchDeleting = ref(false)
+const tableRef = ref<any>(null)
 
 const filters = reactive<Filters>({
   user_id: '',
@@ -28,6 +31,12 @@ const filters = reactive<Filters>({
 
 const page = ref(1)
 const pageSize = ref(20)
+
+/** 仅在「筛选/分页/删除成功」等语境变化时调用；不要放在 fetchProfiles 里，否则会与列表二次请求、用户勾选竞态 */
+function clearListSelection() {
+  selectedRows.value = []
+  tableRef.value?.clearSelection?.()
+}
 
 async function fetchProfiles() {
   loading.value = true
@@ -63,6 +72,7 @@ async function fetchProfiles() {
 
 function handleSearch() {
   page.value = 1
+  clearListSelection()
   void fetchProfiles()
 }
 
@@ -71,17 +81,21 @@ function handleReset() {
   filters.has_samples = ''
   filters.has_embedding = ''
   page.value = 1
+  clearListSelection()
   void fetchProfiles()
 }
 
+/** 仅用户操作分页时由 @current-change 调用；不要用 v-model，否则接口回写 page 会触发二次 fetch */
 function handlePageChange(p: number) {
   page.value = p
+  clearListSelection()
   void fetchProfiles()
 }
 
 function handlePageSizeChange(size: number) {
   pageSize.value = size
   page.value = 1
+  clearListSelection()
   void fetchProfiles()
 }
 
@@ -97,6 +111,43 @@ function goDetail(row: AdminVoiceProfileSummary) {
       ...(filters.has_embedding ? { has_embedding: filters.has_embedding } : {}),
     },
   })
+}
+
+function handleSelectionChange(rows: AdminVoiceProfileSummary[]) {
+  selectedRows.value = rows
+}
+
+async function handleBatchDelete() {
+  const ids = selectedRows.value.map((r) => r.id)
+  if (!ids.length) return
+
+  try {
+    await ElMessageBox.confirm(`确定删除选中的 ${ids.length} 条声纹配置吗？`, '批量删除', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
+
+  batchDeleting.value = true
+  try {
+    const res = await batchDeleteAdminVoiceProfiles(ids)
+    ElMessage.success(`已删除 ${res.deleted} 条声纹配置`)
+
+    clearListSelection()
+    await fetchProfiles()
+    if (profiles.value.length === 0 && page.value > 1) {
+      page.value -= 1
+      await fetchProfiles()
+    }
+  } catch (err: any) {
+    console.error(err)
+    ElMessage.error(err?.message || '批量删除失败')
+  } finally {
+    batchDeleting.value = false
+  }
 }
 
 onMounted(() => {
@@ -153,7 +204,26 @@ onMounted(() => {
     </el-card>
 
     <el-card class="admin-voice-profiles-table" shadow="never">
-      <el-table :data="profiles" v-loading="loading" border style="width: 100%">
+      <div class="admin-voice-profiles-actions">
+        <el-button
+          type="danger"
+          :disabled="!selectedRows.length || batchDeleting"
+          :loading="batchDeleting"
+          @click="handleBatchDelete"
+        >
+          批量删除
+        </el-button>
+      </div>
+      <el-table
+        ref="tableRef"
+        :data="profiles"
+        row-key="id"
+        v-loading="loading"
+        border
+        style="width: 100%"
+        @selection-change="handleSelectionChange"
+      >
+        <el-table-column type="selection" width="55" />
         <el-table-column label="用户" min-width="220" show-overflow-tooltip>
           <template #default="{ row }">
             <span v-if="row.user_name">
@@ -209,8 +279,8 @@ onMounted(() => {
       <div class="admin-voice-profiles-pagination">
         <el-pagination
           v-if="meta"
-          v-model:current-page="page"
-          v-model:page-size="pageSize"
+          :current-page="page"
+          :page-size="pageSize"
           :total="meta.total"
           :page-sizes="[10, 20, 50, 100]"
           layout="total, sizes, prev, pager, next, jumper"
@@ -253,6 +323,12 @@ onMounted(() => {
 
 .admin-voice-profiles-table {
   margin-top: 4px;
+}
+
+.admin-voice-profiles-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
 }
 
 .admin-voice-profiles-pagination {

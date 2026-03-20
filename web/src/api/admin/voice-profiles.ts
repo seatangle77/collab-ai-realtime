@@ -4,6 +4,7 @@ import type {
   AdminVoiceProfileSummary,
   AdminVoiceProfileDetail,
   AdminVoiceProfileDetailProfile,
+  BatchDeleteResponse,
 } from '../../types/admin'
 
 export interface ListAdminVoiceProfilesParams {
@@ -63,6 +64,10 @@ export async function uploadAdminVoiceProfileSample(
 
   // 同样不手动设置 Content-Type，避免 multipart 边界缺失导致后端解析失败
   return http.post<AdminUploadAudioResponse>(`/api/admin/voice-profiles/${id}/upload-audio`, formData)
+}
+
+export async function batchDeleteAdminVoiceProfiles(ids: string[]): Promise<BatchDeleteResponse> {
+  return http.post<BatchDeleteResponse>('/api/admin/voice-profiles/batch-delete', { ids })
 }
 
 

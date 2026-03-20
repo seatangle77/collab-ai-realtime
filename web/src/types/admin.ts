@@ -90,6 +90,8 @@ export interface AdminVoiceProfileDetailProfile {
   sample_audio_urls: string[]
   created_at: string
   voice_embedding: Record<string, unknown> | null
+  embedding_status: string
+  embedding_updated_at: string | null
 }
 
 /** 后台 GET 详情接口返回：嵌套 profile + 用户/小组信息 */

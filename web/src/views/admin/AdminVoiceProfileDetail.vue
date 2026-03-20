@@ -37,11 +37,24 @@ let recordingTimer: number | undefined
 
 const hasEmbedding = computed(() => !!detail.value?.profile.voice_embedding)
 
+function parseEmbeddingStatusLabel(): string {
+  const status = detail.value?.profile.embedding_status
+  if (status === 'not_generated') return '未生成'
+  if (status === 'ready') return '已就绪'
+  return status || '-'
+}
+
 function parseGeneratedAt(): string | null {
   const emb = detail.value?.profile.voice_embedding
   if (!emb) return null
   const raw = (emb as any).generated_at
   if (typeof raw !== 'string') return null
+  return formatDateTimeToCST(raw)
+}
+
+function parseEmbeddingUpdatedAt(): string {
+  const raw = detail.value?.profile.embedding_updated_at
+  if (!raw) return '-'
   return formatDateTimeToCST(raw)
 }
 
@@ -257,7 +270,7 @@ onMounted(() => {
             <el-button
               type="primary"
               size="default"
-              :disabled="isRecording || editableUrls.length >= 10"
+              :disabled="isRecording"
               @click="startRecording"
             >
               开始录音
@@ -282,7 +295,7 @@ onMounted(() => {
               type="success"
               size="default"
               :loading="isUploading"
-              :disabled="editableUrls.length >= 10"
+              :disabled="editableUrls.length >= 5"
               @click="handleUploadRecordedSample"
             >
               上传并添加为样本
@@ -290,6 +303,7 @@ onMounted(() => {
           </div>
         </el-card>
         <div class="samples-editor">
+          <p class="samples-count-tip">样本数量：{{ editableUrls.length }}/5（最多 5 条）</p>
           <div class="samples-list">
             <div
               v-for="(url, idx) in editableUrls"
@@ -333,7 +347,9 @@ onMounted(() => {
               <el-tag v-if="hasEmbedding" type="success" size="small" effect="light">已生成</el-tag>
               <el-tag v-else type="info" size="small" effect="light">未生成</el-tag>
             </span>
+            <span class="meta-item">嵌入状态：{{ parseEmbeddingStatusLabel() }}</span>
             <span class="meta-item">创建：{{ formatDateTimeToCST(detail.profile.created_at) }}</span>
+            <span class="meta-item">最近更新：{{ parseEmbeddingUpdatedAt() }}</span>
             <span v-if="parseGeneratedAt()" class="meta-item">最近生成：{{ parseGeneratedAt() }}</span>
           </div>
           <el-button type="primary" size="default" :loading="generating" @click="handleGenerateEmbedding">
@@ -473,6 +489,12 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 0;
+}
+
+.samples-count-tip {
+  margin: 0 0 2px;
+  font-size: 12px;
+  color: #6b7280;
 }
 
 .sample-row {

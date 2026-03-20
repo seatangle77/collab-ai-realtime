@@ -181,6 +181,9 @@ test.describe.serial('App 我的声纹 - 主流程', () => {
     await expect(page.getByText('样本列表', { exact: true })).toBeVisible()
     await expect(page.getByText('暂无样本，请在下行添加 URL。')).toBeVisible()
     await expect(page.getByText('未生成').first()).toBeVisible()
+    await expect(page.getByText('样本数量：0/5（最多 5 条）')).toBeVisible()
+    await expect(page.getByText('嵌入状态：未生成')).toBeVisible()
+    await expect(page.getByText('最近更新：-')).toBeVisible()
     await expect(page.getByRole('button', { name: '生成声纹' })).toBeVisible()
     await expect(page.getByPlaceholder('输入样本 URL')).toBeVisible()
     await expect(page.getByRole('button', { name: '添加样本' })).toBeVisible()
@@ -196,6 +199,9 @@ test.describe.serial('App 我的声纹 - 主流程', () => {
     await expect(page.getByText('样本 1')).toBeVisible()
     await page.getByRole('button', { name: '保存样本列表' }).click()
     await expect(page.getByText('样本列表已保存')).toBeVisible({ timeout: 15000 })
+    await expect(page.getByText('样本数量：1/5（最多 5 条）')).toBeVisible()
+    await expect(page.getByText('嵌入状态：未生成')).toBeVisible()
+    await expect(page.getByText('最近更新：-')).toBeVisible()
   })
 
   test('首次生成声纹', async ({ page }) => {
@@ -206,6 +212,8 @@ test.describe.serial('App 我的声纹 - 主流程', () => {
     // 只校验状态 Tag，避免 strict 模式冲突
     await expect(page.getByText('已生成').first()).toBeVisible()
     await expect(page.getByRole('button', { name: '重新生成声纹' })).toBeVisible()
+    await expect(page.getByText('嵌入状态：已就绪')).toBeVisible()
+    await expect(page.getByText('最近更新：-')).toHaveCount(0)
   })
 
   test('重新生成声纹确认', async ({ page }) => {
@@ -217,6 +225,8 @@ test.describe.serial('App 我的声纹 - 主流程', () => {
     await expect(dialog).toBeVisible()
     await dialog.getByRole('button', { name: '生成' }).click()
     await expect(page.getByText('声纹已重新生成')).toBeVisible({ timeout: 15000 })
+    await expect(page.getByText('嵌入状态：已就绪')).toBeVisible()
+    await expect(page.getByText('最近更新：-')).toHaveCount(0)
   })
 
   test('重新生成声纹取消', async ({ page }) => {
@@ -229,6 +239,8 @@ test.describe.serial('App 我的声纹 - 主流程', () => {
     await page.getByRole('dialog').getByRole('button', { name: '取消' }).click()
     await expect(page.getByRole('dialog')).not.toBeVisible()
     await expect(page.getByText('已生成').first()).toBeVisible()
+    await expect(page.getByText('嵌入状态：已就绪')).toBeVisible()
+    await expect(page.getByText('最近更新：-')).toHaveCount(0)
   })
 
   test('折叠展示声纹元数据', async ({ page }) => {
@@ -271,6 +283,9 @@ test.describe('App 我的声纹 - 边界', () => {
 
     await page.getByRole('button', { name: '生成声纹' }).click()
     await expect(page.getByText('请先添加样本 URL 后再生成声纹')).toBeVisible()
+    await expect(page.getByText('样本数量：0/5（最多 5 条）')).toBeVisible()
+    await expect(page.getByText('嵌入状态：未生成')).toBeVisible()
+    await expect(page.getByText('最近更新：-')).toBeVisible()
   })
 
   test('1 条样本可保存并生成', async ({ page }) => {
@@ -299,6 +314,7 @@ test.describe('App 我的声纹 - 边界', () => {
     await expect(page.getByText('样本 5')).toBeVisible()
     await page.getByRole('button', { name: '保存样本列表' }).click()
     await expect(page.getByText('样本列表已保存')).toBeVisible({ timeout: 15000 })
+    await expect(page.getByText('样本数量：5/5（最多 5 条）')).toBeVisible()
     // 样本 5 行里应该有音频预览
     await expect(page.locator('.sample-row').nth(4).locator('audio')).toBeVisible()
   })
@@ -340,6 +356,9 @@ test.describe('App 我的声纹 - 边界', () => {
     await expect(page.getByText('暂无样本，请在下行添加 URL。')).toBeVisible()
     await page.getByRole('button', { name: '保存样本列表' }).click()
     await expect(page.getByText('样本列表已保存')).toBeVisible({ timeout: 15000 })
+    await expect(page.getByText('样本数量：0/5（最多 5 条）')).toBeVisible()
+    await expect(page.getByText('嵌入状态：未生成')).toBeVisible()
+    await expect(page.getByText('最近更新：-')).toBeVisible()
   })
 
   test('刷新后数据仍在', async ({ page }) => {
@@ -353,6 +372,7 @@ test.describe('App 我的声纹 - 边界', () => {
     await expect(page).toHaveURL(/\/app\/voice-profile/)
     await expect(page.getByText('样本 1')).toBeVisible({ timeout: 10000 })
     await expect(page.getByText('样本 2')).toBeVisible()
+    await expect(page.getByText('样本数量：2/5（最多 5 条）')).toBeVisible()
   })
 })
 
@@ -464,6 +484,7 @@ test.describe('App 我的声纹 - 极端与交互', () => {
     await expect
       .poll(async () => page.locator('.sample-row').count(), { timeout: 15000 })
       .toBeGreaterThan(beforeCount)
+    await expect(page.getByText('样本数量：1/5（最多 5 条）')).toBeVisible()
   })
 
   test('录音上传：接口失败展示错误信息', async ({ page }) => {
