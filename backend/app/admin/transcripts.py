@@ -118,7 +118,14 @@ async def create_transcript(
     )
     await db.commit()
     row = result.mappings().one()
-    return AdminTranscriptOut.model_validate(dict(row))
+    payload_dict = dict(row)
+
+    # 广播给所有连接该 session 的 WS 客户端
+    from ..ws_sessions import broadcast_transcript
+    from ..transcript_realtime import _row_to_ws_payload
+    await broadcast_transcript(payload.session_id, _row_to_ws_payload(payload_dict))
+
+    return AdminTranscriptOut.model_validate(payload_dict)
 
 
 # ── 列表 ────────────────────────────────────────────────────────────────────

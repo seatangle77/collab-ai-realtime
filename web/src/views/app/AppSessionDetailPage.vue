@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -24,6 +24,45 @@ const transcripts = ref<AppTranscript[]>([])
 const pageLoading = ref(true)
 const transcriptsLoading = ref(false)
 const error = ref('')
+/** 里程碑 3/6：WS 状态 + 指数退避重连 */
+const wsStatus = ref<'connecting' | 'connected' | 'reconnecting' | 'disconnected'>('disconnected')
+const wsErrorMessage = ref('')
+const lastPongAt = ref<number | null>(null)
+const reconnectAttempt = ref(0)
+const isRecording = ref(false)
+const lastChunkAckSeq = ref<number | null>(null)
+const transcriptsListEl = ref<HTMLElement | null>(null)
+
+const wsStatusLabel = computed(() => {
+  switch (wsStatus.value) {
+    case 'connecting':
+      return '连接中'
+    case 'connected':
+      return '已连接'
+    case 'reconnecting':
+      return reconnectAttempt.value > 0
+        ? `连接中断，正在重连（第 ${reconnectAttempt.value} 次）`
+        : '连接中断（待恢复）'
+    case 'disconnected':
+      return '已断开'
+    default:
+      return ''
+  }
+})
+
+const BASE_RECONNECT_DELAY_MS = 1000
+const MAX_RECONNECT_DELAY_MS = 30_000
+const MAX_RECONNECT_TRIES = 5
+
+let ws: WebSocket | null = null
+let pingTimer: ReturnType<typeof setInterval> | null = null
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+let unmounted = false
+/** 为 true 时不自动重连（页面卸载、主动关闭） */
+let wsIntentionalClose = false
+let mediaRecorder: MediaRecorder | null = null
+let mediaStream: MediaStream | null = null
+let chunkSeq = 0
 
 const statusLabel = computed(() => {
   const s = session.value?.status
@@ -147,8 +186,321 @@ function goBack() {
   router.push({ name: 'AppSessions' })
 }
 
+function buildWsUrl(id: string): string {
+  const base = (import.meta.env.VITE_API_BASE_URL as string | undefined) || window.location.origin
+  const wsBase = base.replace(/^http/i, 'ws').replace(/\/$/, '')
+  return `${wsBase}/ws/sessions/${id}`
+}
+
+function clearPingTimer() {
+  if (pingTimer) {
+    clearInterval(pingTimer)
+    pingTimer = null
+  }
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = reader.result
+      if (typeof result !== 'string') {
+        reject(new Error('读取音频失败'))
+        return
+      }
+      const base64 = result.split(',')[1]
+      if (!base64) {
+        reject(new Error('音频编码失败'))
+        return
+      }
+      resolve(base64)
+    }
+    reader.onerror = () => reject(new Error('读取音频失败'))
+    reader.readAsDataURL(blob)
+  })
+}
+
+async function sendAudioChunk(blob: Blob) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return
+  chunkSeq += 1
+  const audioB64 = await blobToBase64(blob)
+  ws.send(
+    JSON.stringify({
+      type: 'audio_chunk',
+      data: {
+        seq: chunkSeq,
+        mime_type: blob.type || 'audio/webm',
+        audio_b64: audioB64,
+        duration_ms: 1000,
+        sent_at: Date.now(),
+      },
+    }),
+  )
+}
+
+async function startRecording() {
+  if (isRecording.value) return
+  if (!navigator.mediaDevices?.getUserMedia) {
+    ElMessage.error('当前浏览器不支持录音')
+    return
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
+    mediaStream = stream
+    mediaRecorder = recorder
+    chunkSeq = 0
+    lastChunkAckSeq.value = null
+
+    recorder.ondataavailable = (event) => {
+      if (!event.data || event.data.size === 0) return
+      void sendAudioChunk(event.data).catch((err) => {
+        wsErrorMessage.value = extractErrorMessage(err)
+      })
+    }
+    recorder.start(1000)
+    isRecording.value = true
+  } catch (err) {
+    ElMessage.error(extractErrorMessage(err))
+  }
+}
+
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop()
+  }
+  mediaRecorder = null
+  if (mediaStream) {
+    mediaStream.getTracks().forEach((track) => track.stop())
+    mediaStream = null
+  }
+  isRecording.value = false
+}
+
+function startPingTimer() {
+  clearPingTimer()
+  pingTimer = setInterval(() => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    try {
+      ws.send(JSON.stringify({ type: 'ping', data: {} }))
+    } catch {
+      // Ignore send errors; close handler will refresh status.
+    }
+  }, 10000)
+}
+
+function handleWsMessage(event: MessageEvent<string>) {
+  let payload: unknown
+  try {
+    payload = JSON.parse(event.data)
+  } catch {
+    wsErrorMessage.value = '收到非法消息格式'
+    return
+  }
+  if (typeof payload !== 'object' || payload === null) {
+    wsErrorMessage.value = '消息格式无效'
+    return
+  }
+  const p = payload as { type?: unknown; data?: unknown }
+  const msgType = p.type
+  const data = p.data
+  if (typeof msgType !== 'string' || typeof data !== 'object' || data === null) {
+    wsErrorMessage.value = '消息缺少 type 或 data'
+    return
+  }
+  if (msgType === 'connected') {
+    reconnectAttempt.value = 0
+    clearReconnectTimer()
+    wsStatus.value = 'connected'
+    wsErrorMessage.value = ''
+    void refetchTranscriptsAndMerge()
+    return
+  }
+  if (msgType === 'pong') {
+    lastPongAt.value = Date.now()
+    return
+  }
+  if (msgType === 'error') {
+    const d = data as { message?: string }
+    wsErrorMessage.value = d?.message || 'WebSocket 错误'
+    return
+  }
+  if (msgType === 'audio_chunk_ack') {
+    const d = data as { seq?: number }
+    if (typeof d.seq === 'number') {
+      lastChunkAckSeq.value = d.seq
+    }
+    return
+  }
+  if (msgType === 'transcript') {
+    const d = data as Partial<AppTranscript> & { transcript_id?: string; text?: string }
+    if (!d.transcript_id || typeof d.text !== 'string') return
+    if (transcripts.value.some((t) => t.transcript_id === d.transcript_id)) return
+    const item: AppTranscript = {
+      transcript_id: d.transcript_id,
+      group_id: d.group_id ?? '',
+      session_id: d.session_id ?? sessionId,
+      user_id: d.user_id,
+      speaker: d.speaker,
+      text: d.text,
+      start: d.start ?? '',
+      end: d.end ?? '',
+      duration: d.duration,
+      confidence: d.confidence,
+      created_at:
+        typeof d.created_at === 'string'
+          ? d.created_at
+          : d.created_at != null
+            ? String(d.created_at)
+            : '',
+    }
+    transcripts.value = [...transcripts.value, item]
+    return
+  }
+  // engagement_alert / session_ended 等后续里程碑再处理
+}
+
+function speakerInitial(speaker: string | null | undefined): string {
+  const s = (speaker || '未').trim()
+  return s.slice(0, 1)
+}
+
+function scrollTranscriptsToBottom() {
+  nextTick(() => {
+    const el = transcriptsListEl.value
+    if (el) el.scrollTop = el.scrollHeight
+  })
+}
+
+watch(
+  () => transcripts.value.length,
+  () => {
+    scrollTranscriptsToBottom()
+  },
+)
+
+function mergeTranscriptsById(local: AppTranscript[], remote: AppTranscript[]): AppTranscript[] {
+  const map = new Map<string, AppTranscript>()
+  for (const t of local) {
+    if (t.transcript_id) map.set(t.transcript_id, t)
+  }
+  for (const t of remote) {
+    if (t.transcript_id) map.set(t.transcript_id, t)
+  }
+  return Array.from(map.values()).sort((a, b) => {
+    const sa = String(a.start ?? '')
+    const sb = String(b.start ?? '')
+    return sa.localeCompare(sb)
+  })
+}
+
+async function refetchTranscriptsAndMerge() {
+  try {
+    const remote = await listSessionTranscripts(sessionId, { noRedirectOn401: true })
+    transcripts.value = mergeTranscriptsById(transcripts.value, remote)
+    scrollTranscriptsToBottom()
+  } catch (err) {
+    wsErrorMessage.value = extractErrorMessage(err)
+  }
+}
+
+function clearReconnectTimer() {
+  if (reconnectTimer != null) {
+    clearTimeout(reconnectTimer)
+    reconnectTimer = null
+  }
+}
+
+function scheduleReconnect() {
+  clearReconnectTimer()
+  if (unmounted || wsIntentionalClose) return
+
+  reconnectAttempt.value += 1
+  if (reconnectAttempt.value > MAX_RECONNECT_TRIES) {
+    wsStatus.value = 'disconnected'
+    wsErrorMessage.value = '重连失败次数过多，请刷新页面'
+    return
+  }
+
+  const delay = Math.min(
+    MAX_RECONNECT_DELAY_MS,
+    BASE_RECONNECT_DELAY_MS * 2 ** (reconnectAttempt.value - 1),
+  )
+  wsStatus.value = 'reconnecting'
+
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null
+    if (unmounted || wsIntentionalClose) return
+    openWebSocket()
+  }, delay)
+}
+
+function closeWsForUnmount() {
+  wsIntentionalClose = true
+  clearReconnectTimer()
+  clearPingTimer()
+  const current = ws
+  ws = null
+  if (!current) return
+  try {
+    current.close(1000, 'client_closed')
+  } catch {
+    // Ignore close errors.
+  }
+}
+
+function openWebSocket() {
+  if (unmounted || wsIntentionalClose) return
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+    return
+  }
+
+  wsStatus.value = 'connecting'
+  if (reconnectAttempt.value === 0) {
+    wsErrorMessage.value = ''
+  }
+
+  const socket = new WebSocket(buildWsUrl(sessionId))
+  ws = socket
+
+  socket.onopen = () => {
+    if (unmounted || wsIntentionalClose) return
+    startPingTimer()
+  }
+  socket.onmessage = (event) => {
+    if (unmounted) return
+    handleWsMessage(event)
+  }
+  socket.onerror = () => {
+    if (unmounted || wsIntentionalClose) return
+    wsErrorMessage.value = '连接发生错误'
+  }
+  socket.onclose = () => {
+    clearPingTimer()
+    if (socket === ws) {
+      ws = null
+    }
+    if (unmounted || wsIntentionalClose) {
+      wsStatus.value = 'disconnected'
+      return
+    }
+    scheduleReconnect()
+  }
+}
+
 onMounted(() => {
+  unmounted = false
+  wsIntentionalClose = false
+  reconnectAttempt.value = 0
   void loadData()
+  openWebSocket()
+})
+
+onUnmounted(() => {
+  unmounted = true
+  stopRecording()
+  closeWsForUnmount()
+  wsStatus.value = 'disconnected'
 })
 </script>
 
@@ -210,27 +562,71 @@ onMounted(() => {
 
       <div class="app-session-detail-transcripts">
         <h3 class="app-session-detail-transcripts-title">转写记录</h3>
+        <div class="app-session-detail-ws-status">
+          连接状态：{{ wsStatusLabel }}（{{ wsStatus }}）
+          <span v-if="lastPongAt">
+            （最近心跳：{{ new Date(lastPongAt).toLocaleTimeString() }}）
+          </span>
+        </div>
+        <div v-if="wsErrorMessage" class="app-session-detail-ws-error">
+          {{ wsErrorMessage }}
+        </div>
+        <div class="app-session-detail-recorder-bar">
+          <button
+            v-if="!isRecording"
+            type="button"
+            class="app-session-detail-primary-btn"
+            :disabled="wsStatus !== 'connected'"
+            @click="startRecording"
+          >
+            开始录音
+          </button>
+          <button
+            v-else
+            type="button"
+            class="app-session-detail-danger-btn"
+            @click="stopRecording"
+          >
+            停止录音
+          </button>
+          <span class="app-session-detail-recorder-meta">
+            录音状态：{{ isRecording ? '录制中' : '未录制' }}
+          </span>
+          <span v-if="lastChunkAckSeq !== null" class="app-session-detail-recorder-meta">
+            最近 ACK 分片：#{{ lastChunkAckSeq }}
+          </span>
+        </div>
         <div v-if="transcriptsLoading" class="app-session-detail-loading">正在加载转写...</div>
         <div v-else-if="!transcripts.length" class="app-session-detail-transcripts-empty">
           暂无转写记录
         </div>
-        <ul v-else class="app-session-detail-transcripts-list">
-          <li
-            v-for="item in transcripts"
-            :key="item.transcript_id"
-            class="app-session-detail-transcript-item"
-          >
-            <div class="app-session-detail-transcript-meta">
-              <span class="app-session-detail-transcript-speaker">
-                {{ item.speaker || '未知说话人' }}
-              </span>
-              <span class="app-session-detail-transcript-time">
-                {{ item.start }} - {{ item.end }}
-              </span>
-            </div>
-            <p class="app-session-detail-transcript-text">{{ item.text }}</p>
-          </li>
-        </ul>
+        <div v-else ref="transcriptsListEl" class="app-session-detail-transcripts-scroll">
+          <ul class="app-session-detail-transcripts-list">
+            <li
+              v-for="item in transcripts"
+              :key="item.transcript_id"
+              class="app-session-detail-transcript-item"
+            >
+              <div class="app-session-detail-transcript-row">
+                <div class="app-session-detail-transcript-avatar" aria-hidden="true">
+                  {{ speakerInitial(item.speaker) }}
+                </div>
+                <div class="app-session-detail-transcript-body">
+                  <div class="app-session-detail-transcript-meta">
+                    <span class="app-session-detail-transcript-speaker">
+                      {{ item.speaker || '未知说话人' }}
+                    </span>
+                    <span class="app-session-detail-transcript-time">
+                      {{ item.start }} - {{ item.end }}
+                      <template v-if="item.created_at"> · {{ item.created_at }}</template>
+                    </span>
+                  </div>
+                  <p class="app-session-detail-transcript-text">{{ item.text }}</p>
+                </div>
+              </div>
+            </li>
+          </ul>
+        </div>
       </div>
     </template>
   </div>
@@ -380,10 +776,41 @@ onMounted(() => {
   color: #111827;
 }
 
+.app-session-detail-ws-status {
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: #4b5563;
+}
+
+.app-session-detail-ws-error {
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: #b91c1c;
+}
+
+.app-session-detail-recorder-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.app-session-detail-recorder-meta {
+  font-size: 12px;
+  color: #4b5563;
+}
+
 .app-session-detail-transcripts-empty {
   font-size: 13px;
   color: #9ca3af;
   padding: 8px 0;
+}
+
+.app-session-detail-transcripts-scroll {
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .app-session-detail-transcripts-list {
@@ -400,6 +827,31 @@ onMounted(() => {
   border-radius: 8px;
   background: #f9fafb;
   border: 1px solid #e5e7eb;
+}
+
+.app-session-detail-transcript-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.app-session-detail-transcript-avatar {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: #e0e7ff;
+  color: #3730a3;
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.app-session-detail-transcript-body {
+  min-width: 0;
+  flex: 1;
 }
 
 .app-session-detail-transcript-meta {

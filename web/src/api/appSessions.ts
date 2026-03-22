@@ -22,6 +22,7 @@ export interface AppTranscript {
   start: any
   end: any
   duration?: number | null
+  confidence?: number | null
   created_at: string
 }
 
@@ -91,7 +92,10 @@ export async function startSession(sessionId: string): Promise<AppChatSession> {
   return appHttp.post<AppChatSession>(`/api/sessions/${sessionId}/start`)
 }
 
-export async function listSessionTranscripts(sessionId: string): Promise<AppTranscript[]> {
-  return appHttp.get<AppTranscript[]>(`/api/sessions/${sessionId}/transcripts`)
+export async function listSessionTranscripts(
+  sessionId: string,
+  config?: AppHttpConfig,
+): Promise<AppTranscript[]> {
+  return appHttp.get<AppTranscript[]>(`/api/sessions/${sessionId}/transcripts`, config)
 }
 
