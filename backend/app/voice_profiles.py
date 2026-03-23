@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import shutil
 import uuid
 from datetime import datetime, timezone
@@ -9,12 +11,15 @@ from typing import Any, Mapping
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field, field_validator
+from resemblyzer import VoiceEncoder, preprocess_wav
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import get_current_user
 from .config_voice import VOICE_AUDIO_BASE_DIR, VOICE_AUDIO_PUBLIC_BASE_URL
 from .db import get_db
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/api/voice-profile", tags=["voice-profile"])
@@ -56,6 +61,37 @@ ALLOWED_AUDIO_CONTENT_TYPES: set[str] = {
 
 def _utc_now_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _url_to_local_path(url: str) -> Path:
+    """把样本公开 URL 转换为本地文件系统路径"""
+    relative = url.removeprefix(VOICE_AUDIO_PUBLIC_BASE_URL)
+    return VOICE_AUDIO_BASE_DIR / relative.lstrip("/")
+
+
+def _generate_embedding(audio_paths: list[Path]) -> list[float]:
+    """
+    用 Resemblyzer embed_speaker 对多段音频生成聚合声纹向量。
+    返回 256 维 list[float]，存入 jsonb。
+    CPU 阻塞操作，调用方应放入线程池。
+    """
+    encoder = VoiceEncoder()
+    wavs = []
+    for path in audio_paths:
+        if not path.exists():
+            logger.warning("[VoiceProfile] 音频文件不存在，跳过: %s", path)
+            continue
+        try:
+            wav = preprocess_wav(path)
+            wavs.append(wav)
+        except Exception as e:
+            logger.warning("[VoiceProfile] 音频预处理失败，跳过 %s: %s", path, e)
+
+    if not wavs:
+        raise ValueError("没有可用的音频文件，请重新上传样本")
+
+    embedding = encoder.embed_speaker(wavs)
+    return embedding.tolist()
 
 
 def _row_to_profile(row: Mapping[str, Any]) -> VoiceProfileOut:
@@ -205,35 +241,42 @@ async def generate_my_voice_embedding(
             detail="请先上传至少一条语音样本后再生成声纹",
         )
 
-    placeholder_embedding = {
-        "generated_at": _utc_now_naive().isoformat(),
-        # 这里故意使用纯 ASCII 文本，避免在 SQL_ASCII 编码的数据库中触发 UTF8/SQL_ASCII 转换错误。
-        "note": "placeholder_embedding, replace with real voice embedding later",
-    }
+    # 1. URL → 本地路径
+    audio_paths = [_url_to_local_path(url) for url in profile.sample_audio_urls]
 
+    # 2. Resemblyzer 生成 embedding（CPU 阻塞，放线程池）
+    loop = asyncio.get_event_loop()
+    try:
+        embedding: list[float] = await loop.run_in_executor(
+            None, _generate_embedding, audio_paths
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error("[VoiceProfile] embedding 生成失败 user_id=%s: %s", profile.user_id, e)
+        await db.execute(
+            text("UPDATE user_voice_profiles SET embedding_status='failed' WHERE id=:id"),
+            {"id": profile.id},
+        )
+        await db.commit()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="声纹生成失败，请重试")
+
+    # 3. 存库
     result = await db.execute(
-        text(
-            """
+        text("""
             UPDATE user_voice_profiles
-            SET voice_embedding = CAST(:voice_embedding AS jsonb),
-                embedding_status = 'ready',
+            SET voice_embedding      = CAST(:voice_embedding AS jsonb),
+                embedding_status     = 'ready',
                 embedding_updated_at = NOW()
             WHERE id = :id
-            RETURNING id, user_id, voice_embedding, sample_audio_urls, created_at,
-                      embedding_status, embedding_updated_at
-            """
-        ),
-        {
-            "id": profile.id,
-            "voice_embedding": json.dumps(placeholder_embedding),
-        },
+            RETURNING id, user_id, voice_embedding, sample_audio_urls,
+                      created_at, embedding_status, embedding_updated_at
+        """),
+        {"id": profile.id, "voice_embedding": json.dumps(embedding)},
     )
     row = result.mappings().first()
     if not row:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="声纹配置不存在",
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="声纹配置不存在")
 
     await db.commit()
     return _row_to_profile(row)

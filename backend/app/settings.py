@@ -48,3 +48,23 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+class TencentASRSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="TENCENT_",
+        env_file=(
+            str(BACKEND_DIR / ".env.local"),
+            str(BACKEND_DIR / ".env.production"),
+            "/etc/collab-ai-realtime.env",
+        ),
+        extra="ignore",
+    )
+
+    appid: str = ""
+    secret_id: str = ""
+    secret_key: str = ""
+    asr_engine: str = "16k_zh"
+
+
+tencent_asr_settings = TencentASRSettings()
