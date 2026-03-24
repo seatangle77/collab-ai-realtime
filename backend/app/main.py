@@ -30,13 +30,15 @@ app = FastAPI()
 
 # CORS 配置：开发环境显式允许本地前端，避免通配符与凭证冲突
 frontend_origin = os.getenv("FRONTEND_ORIGIN")
+# Capacitor Android App 的 WebView origin 固定为 https://localhost / capacitor://localhost
+_capacitor_origins = ["https://localhost", "capacitor://localhost"]
 allow_origins = (
-    [frontend_origin]
+    [frontend_origin] + _capacitor_origins
     if frontend_origin
     else [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
-    ]
+    ] + _capacitor_origins
 )
 
 app.add_middleware(
