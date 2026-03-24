@@ -55,9 +55,6 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
-            # 确保 Python C 扩展编译所需的头文件已安装（webrtcvad 等）
-            apt-get install -y python3.11-dev 2>/dev/null || apt-get install -y python3-dev 2>/dev/null || true
-
             # 更新 Python 依赖
             cd backend
             source venv/bin/activate
