@@ -459,7 +459,7 @@ onMounted(() => {
       </div>
     </template>
 
-    <el-dialog v-model="createDialogVisible" title="新建会话" width="420px">
+    <el-dialog v-model="createDialogVisible" title="新建会话" :width="'min(480px, 92vw)'">
       <el-form ref="createFormRef" :model="createForm" :rules="createRules" label-width="80px">
         <el-form-item label="所属群组" prop="groupId">
           <el-select
@@ -496,7 +496,7 @@ onMounted(() => {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="editDialogVisible" title="编辑会话" width="420px">
+    <el-dialog v-model="editDialogVisible" title="编辑会话" :width="'min(480px, 92vw)'">
       <el-form ref="editFormRef" :model="editForm" :rules="editRules" label-width="80px">
         <el-form-item label="会话标题" prop="sessionTitle">
           <el-input v-model="editForm.sessionTitle" placeholder="请输入新的会话标题" />
@@ -521,7 +521,7 @@ onMounted(() => {
     <el-dialog
       v-model="transcriptsDialogVisible"
       :title="currentSessionForTranscripts ? `会话转写 - ${currentSessionForTranscripts.session_title}` : '会话转写'"
-      width="680px"
+      :width="'min(680px, 92vw)'"
     >
       <div class="app-sessions-transcripts">
         <div v-if="transcriptsLoading" class="app-sessions-loading">
@@ -569,10 +569,11 @@ onMounted(() => {
 
 .app-sessions-header {
   display: flex;
-  align-items: flex-end;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   margin-bottom: 12px;
+  flex-wrap: wrap;
 }
 
 .app-sessions-title {
@@ -619,9 +620,8 @@ onMounted(() => {
   background: #f9fafb;
   border: 1px dashed #e5e7eb;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .app-sessions-desc,
@@ -767,9 +767,8 @@ onMounted(() => {
 
 .app-sessions-item {
   display: flex;
-  justify-content: space-between;
-  align-items: stretch;
-  gap: 12px;
+  flex-direction: column;
+  gap: 10px;
   padding: 12px 14px;
   border-radius: 12px;
   background: #ffffff;
@@ -819,8 +818,7 @@ onMounted(() => {
 
 .app-sessions-item-actions {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
+  flex-wrap: wrap;
   gap: 6px;
 }
 

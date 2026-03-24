@@ -544,7 +544,7 @@ onMounted(() => {
       </template>
     </el-card>
 
-    <el-dialog v-model="createDialogVisible" title="新建群组" width="420px">
+    <el-dialog v-model="createDialogVisible" title="新建群组" :width="'min(480px, 92vw)'">
       <el-form ref="createFormRef" :model="createForm" :rules="createRules" label-width="80px">
         <el-form-item label="名称" prop="name">
           <el-input v-model="createForm.name" placeholder="请输入群组名称" />
@@ -869,9 +869,10 @@ onMounted(() => {
 
 .app-groups-member-item {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   padding: 8px 10px;
   border-radius: 10px;
   border: 1px solid #e5e7eb;
@@ -924,8 +925,9 @@ onMounted(() => {
 
 .app-groups-member-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .app-groups-detail-empty {

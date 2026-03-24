@@ -317,7 +317,7 @@ onMounted(() => {
     </template>
 
     <!-- 发起讨论 dialog -->
-    <el-dialog v-model="createSessionVisible" title="发起讨论" width="420px">
+    <el-dialog v-model="createSessionVisible" title="发起讨论" :width="'min(480px, 92vw)'">
       <el-form
         ref="createSessionFormRef"
         :model="createSessionForm"

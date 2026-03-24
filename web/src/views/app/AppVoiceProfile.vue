@@ -439,8 +439,9 @@ onMounted(() => {
 
 .sample-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 16px;
+  gap: 8px;
   margin-bottom: 12px;
 }
 
@@ -458,7 +459,8 @@ onMounted(() => {
 
 .sample-audio {
   flex-shrink: 0;
-  max-width: 160px;
+  max-width: 100%;
+  width: 100%;
 }
 
 .samples-empty {
@@ -480,7 +482,7 @@ onMounted(() => {
 }
 
 .add-input {
-  width: 360px;
+  width: 100%;
   min-width: 200px;
 }
 

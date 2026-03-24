@@ -621,7 +621,7 @@ onUnmounted(() => {
 .app-session-detail-page {
   max-width: 860px;
   margin: 0 auto;
-  padding: 8px 0 32px;
+  padding: 8px 0 16px;
 }
 
 .app-session-detail-back {
@@ -793,7 +793,8 @@ onUnmounted(() => {
 }
 
 .app-session-detail-transcripts-scroll {
-  max-height: 420px;
+  max-height: calc(100vh - 360px);
+  min-height: 200px;
   overflow-y: auto;
   padding-right: 4px;
 }
