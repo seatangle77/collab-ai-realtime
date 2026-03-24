@@ -58,7 +58,11 @@ jobs:
             # 更新 Python 依赖
             cd backend
             source venv/bin/activate
-            pip install webrtcvad-wheels -q  # 预装预编译版，避免 webrtcvad 编译失败
+            # 先装预编译的 webrtcvad-wheels（提供 webrtcvad 模块，但包名不同）
+            pip install webrtcvad-wheels -q
+            # resemblyzer 依赖 webrtcvad，用 --no-deps 跳过，避免触发 gcc 编译
+            pip install resemblyzer --no-deps -q
+            # 安装其余依赖
             pip install -r requirements.txt -q
 
             # 重启后端（用端口 kill，避免误杀 SSH 进程）
