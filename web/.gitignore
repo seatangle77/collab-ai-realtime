@@ -26,3 +26,10 @@ dist-ssr
 # Playwright
 playwright-report/
 test-results/
+
+# Capacitor App 敏感文件
+.env.app
+android/.gradle/
+android/build/
+android/app/build/
+android/app/src/main/res/raw/server.crt

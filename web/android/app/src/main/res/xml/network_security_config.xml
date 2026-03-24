@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- 信任系统证书 + 自签名证书（域名正式证书后删除 user 和 domain-config） -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- 信任自签名证书 -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">43.163.85.196</domain>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="@raw/server" />
+        </trust-anchors>
+    </domain-config>
+
+    <!-- 允许本地开发 HTTP -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>

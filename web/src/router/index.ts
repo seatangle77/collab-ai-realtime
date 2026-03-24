@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
+import { Capacitor } from '@capacitor/core'
 import AdminLogin from '../views/admin/AdminLogin.vue'
 import AdminLayout from '../layouts/AdminLayout.vue'
 import AppLayout from '../layouts/AppLayout.vue'
@@ -130,6 +131,12 @@ router.beforeEach((to, _from, next) => {
   const publicAppPaths = ['/app/login', '/app/register']
   if (typeof window === 'undefined') {
     next()
+    return
+  }
+
+  // App 环境屏蔽管理后台
+  if (Capacitor.isNativePlatform() && to.path.startsWith('/admin')) {
+    next('/app')
     return
   }
 

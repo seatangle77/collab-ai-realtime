@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useAudioRecorder } from '../../composables/useAudioRecorder'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -29,8 +30,8 @@ const wsStatus = ref<'connecting' | 'connected' | 'reconnecting' | 'disconnected
 const wsErrorMessage = ref('')
 const lastPongAt = ref<number | null>(null)
 const reconnectAttempt = ref(0)
-const isRecording = ref(false)
 const lastChunkAckSeq = ref<number | null>(null)
+const { isRecording, onChunk, startRecording, stopRecording } = useAudioRecorder()
 const transcriptsListEl = ref<HTMLElement | null>(null)
 
 const wsStatusLabel = computed(() => {
@@ -60,8 +61,6 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let unmounted = false
 /** 为 true 时不自动重连（页面卸载、主动关闭） */
 let wsIntentionalClose = false
-let mediaRecorder: MediaRecorder | null = null
-let mediaStream: MediaStream | null = null
 let chunkSeq = 0
 
 const statusLabel = computed(() => {
@@ -238,43 +237,29 @@ async function sendAudioChunk(blob: Blob) {
   )
 }
 
-async function startRecording() {
-  if (isRecording.value) return
-  if (!navigator.mediaDevices?.getUserMedia) {
-    ElMessage.error('当前浏览器不支持录音')
-    return
-  }
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
-    mediaStream = stream
-    mediaRecorder = recorder
-    chunkSeq = 0
-    lastChunkAckSeq.value = null
+// 注册音频分块回调，每块数据直接发送 WS
+onChunk((blob) => {
+  void sendAudioChunk(blob).catch((err) => {
+    wsErrorMessage.value = extractErrorMessage(err)
+  })
+})
 
-    recorder.ondataavailable = (event) => {
-      if (!event.data || event.data.size === 0) return
-      void sendAudioChunk(event.data).catch((err) => {
-        wsErrorMessage.value = extractErrorMessage(err)
-      })
-    }
-    recorder.start(1000)
-    isRecording.value = true
+async function handleStartRecording() {
+  chunkSeq = 0
+  lastChunkAckSeq.value = null
+  try {
+    await startRecording()
   } catch (err) {
     ElMessage.error(extractErrorMessage(err))
   }
 }
 
-function stopRecording() {
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    mediaRecorder.stop()
+async function handleStopRecording() {
+  try {
+    await stopRecording()
+  } catch (err) {
+    ElMessage.error(extractErrorMessage(err))
   }
-  mediaRecorder = null
-  if (mediaStream) {
-    mediaStream.getTracks().forEach((track) => track.stop())
-    mediaStream = null
-  }
-  isRecording.value = false
 }
 
 function startPingTimer() {
@@ -577,7 +562,7 @@ onUnmounted(() => {
             type="button"
             class="app-session-detail-primary-btn"
             :disabled="wsStatus !== 'connected'"
-            @click="startRecording"
+            @click="handleStartRecording"
           >
             开始录音
           </button>
@@ -585,7 +570,7 @@ onUnmounted(() => {
             v-else
             type="button"
             class="app-session-detail-danger-btn"
-            @click="stopRecording"
+            @click="handleStopRecording"
           >
             停止录音
           </button>
