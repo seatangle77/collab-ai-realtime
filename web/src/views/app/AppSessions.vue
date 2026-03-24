@@ -7,12 +7,10 @@ import { formatDateTimeToCST } from '../../utils/datetime'
 import { listMyGroups } from '../../api/appGroups'
 import {
   type AppChatSession,
-  type AppTranscript,
   listGroupSessions,
   createSession,
   updateSession,
   endSession,
-  listSessionTranscripts,
 } from '../../api/appSessions'
 
 interface AppUser {
@@ -105,11 +103,6 @@ const editRules: FormRules<typeof editForm> = {
   sessionTitle: [{ required: true, message: '请输入会话标题', trigger: 'blur' }],
 }
 
-const transcriptsDialogVisible = ref(false)
-const transcriptsLoading = ref(false)
-const transcripts = ref<AppTranscript[]>([])
-const currentSessionForTranscripts = ref<AppChatSession | null>(null)
-
 const hasCurrentGroup = computed(() => !!currentGroup.value)
 
 function isNotStartedSession(session: AppChatSession): boolean {
@@ -123,17 +116,18 @@ const filteredSessions = computed(() => {
   if (activeFilter.value === 'all') {
     return sessions.value
   }
-  // 已结束
   return sessions.value.filter((s) => s.status === 'ended')
 })
 
+function statusTagType(session: AppChatSession): 'warning' | 'primary' | 'info' {
+  if (session.status === 'not_started') return 'warning'
+  if (session.status === 'ongoing') return 'primary'
+  return 'info'
+}
+
 function formatStatus(session: AppChatSession): string {
-  if (session.status === 'ended') {
-    return '已结束'
-  }
-  if (session.status === 'not_started') {
-    return '未开始'
-  }
+  if (session.status === 'ended') return '已结束'
+  if (session.status === 'not_started') return '未开始'
   return '进行中'
 }
 
@@ -152,7 +146,6 @@ async function fetchSessions(filter: SessionFilter = activeFilter.value) {
       const data = await listGroupSessions(currentGroup.value.id, { includeEnded: false })
       sessions.value = data
     } else {
-      // all / ended：用 include_ended=true 拉全量，再在前端过滤
       const data = await listGroupSessions(currentGroup.value.id, { includeEnded: true })
       sessions.value = data
       allSessionsCache.value = data
@@ -171,10 +164,7 @@ async function fetchMyGroupsForSessions() {
   groupsLoading.value = true
   try {
     const data = await listMyGroups()
-    // 只保留 id/name 字段
     myGroups.value = data.map((g) => ({ id: g.id, name: g.name }))
-
-    // 如果当前没有已选群组，但用户有群组，默认选第一个群组
     if (!currentGroup.value && myGroups.value.length) {
       const first = myGroups.value[0]!
       currentGroup.value = { id: first.id, name: first.name }
@@ -203,7 +193,6 @@ function handleFilterChange(filter: SessionFilter) {
 }
 
 async function openCreateDialog() {
-  // 确保群组列表已加载（无论当前是否在 loading 中，都先等一次拉取结束）
   if (!myGroups.value.length) {
     await fetchMyGroupsForSessions()
   }
@@ -211,8 +200,6 @@ async function openCreateDialog() {
     ElMessage.info('你还没有加入任何群组，请先在「我的群组」中创建或加入群组')
     return
   }
-
-  // 默认选当前群组；若当前群组不在列表中，则选第一个
   const currentId = currentGroup.value?.id
   const defaultId =
     currentId && myGroups.value.some((g) => g.id === currentId) ? currentId : myGroups.value[0]!.id
@@ -239,12 +226,9 @@ async function submitCreate() {
       createDialogVisible.value = false
 
       const currentId = currentGroup.value?.id
-
-      // 若新建会话在当前群组下，直接插入列表顶部保证立即可见
       if (currentId && currentId === targetGroupId) {
         sessions.value = [created, ...sessions.value]
       } else {
-        // 否则自动切换当前群组到目标群组
         const g = myGroups.value.find((x) => x.id === targetGroupId)
         if (g) {
           const cg = { id: g.id, name: g.name }
@@ -254,8 +238,6 @@ async function submitCreate() {
           }
         }
       }
-
-      // 再次拉取以与服务端状态对齐（例如排序规则/最新状态）
       void fetchSessions(activeFilter.value)
     } catch (err) {
       console.error(err)
@@ -315,29 +297,11 @@ async function handleEndSession(session: AppChatSession) {
   }
 }
 
-async function openTranscripts(session: AppChatSession) {
-  currentSessionForTranscripts.value = session
-  transcriptsDialogVisible.value = true
-  transcriptsLoading.value = true
-  transcripts.value = []
-  try {
-    const data = await listSessionTranscripts(session.id)
-    transcripts.value = data
-  } catch (err) {
-    console.error(err)
-    ElMessage.error(extractErrorMessage(err))
-  } finally {
-    transcriptsLoading.value = false
-  }
-}
-
 function goToGroups() {
   router.push('/app/groups')
 }
 
 function goToDetail(session: AppChatSession) {
-  // 通过 history state 传递当前会话详情到会话详情页，避免重复请求。
-  // Vue Router 对 state 使用较窄的类型定义，这里显式断言为 any 以兼容 AppChatSession 结构。
   router.push({
     name: 'AppSessionDetail',
     params: { id: session.id },
@@ -359,20 +323,18 @@ onMounted(() => {
       <h2 class="app-sessions-title">我的会话</h2>
       <div class="app-sessions-meta">
         <span class="app-sessions-user" v-if="currentUser">
-          {{ currentUser.name || currentUser.email }}（{{ currentUser.email }}）
+          {{ currentUser.name || currentUser.email }}
         </span>
         <span class="app-sessions-group">
           <span class="app-sessions-group-label">当前群组：</span>
-          <span class="app-sessions-group-value">
-            {{ currentGroup?.name || '未选择' }}
-          </span>
+          <span class="app-sessions-group-value">{{ currentGroup?.name || '未选择' }}</span>
         </span>
       </div>
     </div>
 
     <div v-if="!hasCurrentGroup" class="app-sessions-empty-group">
       <p class="app-sessions-empty-text">
-        当前未选择群组，请先前往「我的群组」选择或加入一个群组。选择的当前群组会影响这里展示的会话列表。
+        当前未选择群组，请先前往「我的群组」选择或加入一个群组。
       </p>
       <button type="button" class="app-sessions-primary-btn" @click="goToGroups">
         前往我的群组
@@ -380,6 +342,7 @@ onMounted(() => {
     </div>
 
     <template v-else>
+      <!-- Tab 栏 + 新建按钮同行 -->
       <div class="app-sessions-toolbar">
         <div class="app-sessions-tabs">
           <button
@@ -407,58 +370,93 @@ onMounted(() => {
             全部
           </button>
         </div>
-        <button type="button" class="app-sessions-primary-btn" @click="openCreateDialog">
-          新建会话
+        <!-- 桌面端：Tab 同行显示 -->
+        <button type="button" class="app-sessions-primary-btn app-sessions-new-btn-inline" @click="openCreateDialog">
+          + 新建会话
         </button>
       </div>
 
       <div class="app-sessions-list-wrapper">
-        <div v-if="loading" class="app-sessions-loading">
-          正在加载会话列表...
-        </div>
-        <div v-else-if="filteredSessions.length === 0" class="app-sessions-empty">
-          <p class="app-sessions-empty-text">
-            当前筛选条件下暂无会话。你可以点击右上角「新建会话」按钮创建一次会话，或稍后再来查看历史记录。
-          </p>
-        </div>
+        <div v-if="loading" class="app-sessions-loading">正在加载会话列表...</div>
+
+        <!-- 空状态：用 el-empty + 内联新建按钮 -->
+        <el-empty
+          v-else-if="filteredSessions.length === 0"
+          :image-size="80"
+          description="暂无会话，点击下方按钮创建第一个"
+        >
+          <el-button type="primary" @click="openCreateDialog">新建会话</el-button>
+        </el-empty>
+
         <ul v-else class="app-sessions-list">
-          <li v-for="session in filteredSessions" :key="session.id" class="app-sessions-item">
+          <li
+            v-for="session in filteredSessions"
+            :key="session.id"
+            class="app-sessions-item"
+            @click="goToDetail(session)"
+          >
             <div class="app-sessions-item-main">
               <div class="app-sessions-item-title-row">
                 <span class="app-sessions-item-title">{{ session.session_title }}</span>
-                <span class="app-sessions-item-status" :data-status="formatStatus(session)">
+                <el-tag
+                  :type="statusTagType(session)"
+                  size="small"
+                  class="app-sessions-item-tag"
+                >
                   {{ formatStatus(session) }}
-                </span>
+                </el-tag>
               </div>
               <div class="app-sessions-item-meta">
-                <span>创建时间：{{ formatDateTimeToCST(session.created_at) }}</span>
-                <span>最后更新：{{ formatDateTimeToCST(session.last_updated) }}</span>
+                <span>创建：{{ formatDateTimeToCST(session.created_at) }}</span>
+                <span>更新：{{ formatDateTimeToCST(session.last_updated) }}</span>
               </div>
             </div>
-            <div class="app-sessions-item-actions">
-              <button type="button" class="app-sessions-secondary-btn" @click="goToDetail(session)">
-                查看详情
-              </button>
-              <button type="button" class="app-sessions-secondary-btn" @click="openTranscripts(session)">
-                查看转写
-              </button>
-              <button type="button" class="app-sessions-secondary-btn" @click="openEditDialog(session)">
-                编辑
-              </button>
+
+            <!-- 右侧 ⋯ 下拉菜单，阻止点击冒泡到行 -->
+            <el-dropdown
+              trigger="click"
+              @click.stop
+              @command="(cmd: string) => {
+                if (cmd === 'edit') openEditDialog(session)
+                if (cmd === 'end') handleEndSession(session)
+              }"
+            >
               <button
                 type="button"
-                class="app-sessions-danger-btn"
-                :disabled="!canEndSession(session)"
-                @click="handleEndSession(session)"
+                class="app-sessions-more-btn"
+                @click.stop
               >
-                结束会话
+                ⋯
               </button>
-            </div>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="edit">编辑标题</el-dropdown-item>
+                  <el-dropdown-item
+                    command="end"
+                    :disabled="!canEndSession(session)"
+                    class="app-sessions-dropdown-danger"
+                  >
+                    结束会话
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </li>
         </ul>
       </div>
     </template>
 
+    <!-- 移动端 FAB 新建按钮 -->
+    <button
+      v-if="hasCurrentGroup"
+      type="button"
+      class="app-sessions-fab"
+      @click="openCreateDialog"
+    >
+      +
+    </button>
+
+    <!-- 新建会话弹窗 -->
     <el-dialog v-model="createDialogVisible" title="新建会话" :width="'min(480px, 92vw)'">
       <el-form ref="createFormRef" :model="createForm" :rules="createRules" label-width="80px">
         <el-form-item label="所属群组" prop="groupId">
@@ -496,6 +494,7 @@ onMounted(() => {
       </template>
     </el-dialog>
 
+    <!-- 编辑会话弹窗 -->
     <el-dialog v-model="editDialogVisible" title="编辑会话" :width="'min(480px, 92vw)'">
       <el-form ref="editFormRef" :model="editForm" :rules="editRules" label-width="80px">
         <el-form-item label="会话标题" prop="sessionTitle">
@@ -517,47 +516,6 @@ onMounted(() => {
         </div>
       </template>
     </el-dialog>
-
-    <el-dialog
-      v-model="transcriptsDialogVisible"
-      :title="currentSessionForTranscripts ? `会话转写 - ${currentSessionForTranscripts.session_title}` : '会话转写'"
-      :width="'min(680px, 92vw)'"
-    >
-      <div class="app-sessions-transcripts">
-        <div v-if="transcriptsLoading" class="app-sessions-loading">
-          正在加载转写记录...
-        </div>
-        <div v-else-if="!transcripts.length" class="app-sessions-empty">
-          <p class="app-sessions-empty-text">
-            当前会话暂无转写记录。你可以稍后再来查看，或在其它页面触发转写生成。
-          </p>
-        </div>
-        <ul v-else class="app-sessions-transcripts-list">
-          <li
-            v-for="item in transcripts"
-            :key="item.transcript_id"
-            class="app-sessions-transcripts-item"
-          >
-            <div class="app-sessions-transcripts-meta">
-              <span class="app-sessions-transcripts-speaker">
-                {{ item.speaker || '未知说话人' }}
-              </span>
-              <span class="app-sessions-transcripts-time">
-                {{ item.start }} - {{ item.end }}
-              </span>
-            </div>
-            <p class="app-sessions-transcripts-text">
-              {{ item.text }}
-            </p>
-          </li>
-        </ul>
-      </div>
-      <template #footer>
-        <div class="dialog-footer">
-          <el-button @click="transcriptsDialogVisible = false">关 闭</el-button>
-        </div>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
@@ -565,6 +523,7 @@ onMounted(() => {
 .app-sessions {
   max-width: 880px;
   margin: 0 auto;
+  padding-bottom: 80px; /* 给 FAB 留空间 */
 }
 
 .app-sessions-header {
@@ -624,7 +583,6 @@ onMounted(() => {
   gap: 12px;
 }
 
-.app-sessions-desc,
 .app-sessions-empty-text {
   margin: 0;
   font-size: 13px;
@@ -632,6 +590,7 @@ onMounted(() => {
   color: #4b5563;
 }
 
+/* Tab 栏 + 新建按钮同行 */
 .app-sessions-toolbar {
   margin-top: 16px;
   margin-bottom: 12px;
@@ -657,9 +616,7 @@ onMounted(() => {
   background: transparent;
   color: #6b7280;
   cursor: pointer;
-  transition:
-    background-color 0.18s ease,
-    color 0.18s ease;
+  transition: background-color 0.18s ease, color 0.18s ease;
 }
 
 .app-sessions-tab[data-active='true'] {
@@ -681,10 +638,7 @@ onMounted(() => {
   color: #ffffff;
   cursor: pointer;
   box-shadow: 0 8px 18px rgba(37, 99, 235, 0.22);
-  transition:
-    background-color 0.18s ease,
-    box-shadow 0.18s ease,
-    transform 0.1s ease;
+  transition: background-color 0.18s ease, box-shadow 0.18s ease, transform 0.1s ease;
 }
 
 .app-sessions-primary-btn:hover {
@@ -693,46 +647,12 @@ onMounted(() => {
   transform: translateY(-1px);
 }
 
-.app-sessions-primary-btn:active {
-  transform: translateY(0);
-  box-shadow: 0 6px 14px rgba(37, 99, 235, 0.2);
+/* 移动端：隐藏 inline 新建按钮，改用 FAB */
+.app-sessions-new-btn-inline {
+  display: inline-block;
 }
 
-.app-sessions-secondary-btn,
-.app-sessions-danger-btn {
-  border-radius: 999px;
-  border: 1px solid #e5e7eb;
-  padding: 4px 12px;
-  font-size: 12px;
-  background: #ffffff;
-  color: #374151;
-  cursor: pointer;
-  transition:
-    background-color 0.18s ease,
-    border-color 0.18s ease,
-    color 0.18s ease;
-}
-
-.app-sessions-secondary-btn:hover {
-  background: #f3f4f6;
-}
-
-.app-sessions-danger-btn {
-  border-color: rgba(248, 113, 113, 0.5);
-  color: #b91c1c;
-}
-
-.app-sessions-danger-btn:hover:enabled {
-  background: #fef2f2;
-  border-color: #ef4444;
-  color: #991b1b;
-}
-
-.app-sessions-danger-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
+/* 会话列表 */
 .app-sessions-list-wrapper {
   margin-top: 4px;
 }
@@ -743,37 +663,37 @@ onMounted(() => {
   color: #6b7280;
 }
 
-.app-sessions-empty {
-  margin-top: 8px;
-  padding: 16px 18px;
-  border-radius: 12px;
-  background: #f9fafb;
-  border: 1px dashed #e5e7eb;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
 .app-sessions-list {
   list-style: none;
   margin: 0;
-  margin-top: 4px;
   padding: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
+/* 整行可点击 */
 .app-sessions-item {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 10px;
   padding: 12px 14px;
   border-radius: 12px;
   background: #ffffff;
   border: 1px solid #e5e7eb;
   box-shadow: 0 6px 16px rgba(15, 23, 42, 0.04);
+  cursor: pointer;
+  transition: background-color 0.16s ease, box-shadow 0.16s ease, transform 0.08s ease;
+}
+
+.app-sessions-item:hover {
+  background: #f8faff;
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.1);
+  transform: translateY(-1px);
+}
+
+.app-sessions-item:active {
+  transform: translateY(0);
 }
 
 .app-sessions-item-main {
@@ -784,84 +704,109 @@ onMounted(() => {
 .app-sessions-item-title-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
+  margin-bottom: 6px;
 }
 
 .app-sessions-item-title {
   font-size: 14px;
   font-weight: 600;
   color: #111827;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.app-sessions-item-status {
-  font-size: 12px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: #ecfdf3;
-  color: #166534;
-}
-
-.app-sessions-item-status[data-status='已结束'] {
-  background: #fef2f2;
-  color: #b91c1c;
+.app-sessions-item-tag {
+  flex-shrink: 0;
 }
 
 .app-sessions-item-meta {
-  margin-top: 6px;
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  font-size: 12px;
-  color: #6b7280;
-}
-
-.app-sessions-item-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.app-sessions-transcripts {
-  max-height: 420px;
-  overflow: auto;
-}
-
-.app-sessions-transcripts-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
   gap: 10px;
-}
-
-.app-sessions-transcripts-item {
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
-}
-
-.app-sessions-transcripts-meta {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
   font-size: 12px;
   color: #6b7280;
-  margin-bottom: 4px;
 }
 
-.app-sessions-transcripts-speaker {
-  font-weight: 500;
+/* ⋯ 更多按钮 */
+.app-sessions-more-btn {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: #9ca3af;
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.16s ease, color 0.16s ease;
+  line-height: 1;
+  padding-bottom: 4px;
 }
 
-.app-sessions-transcripts-text {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.5;
-  color: #111827;
+.app-sessions-more-btn:hover {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+/* 结束会话选项红色 */
+:global(.app-sessions-dropdown-danger) {
+  color: #b91c1c !important;
+}
+
+:global(.app-sessions-dropdown-danger:not(.is-disabled):hover) {
+  background: #fef2f2 !important;
+  color: #991b1b !important;
+}
+
+/* 移动端 FAB */
+.app-sessions-fab {
+  display: none;
+  position: fixed;
+  right: 20px;
+  bottom: 80px; /* 底部 tab bar 高度之上 */
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: none;
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.4);
+  z-index: 100;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.app-sessions-fab:active {
+  transform: scale(0.95);
+}
+
+/* 移动端响应式 */
+@media (max-width: 480px) {
+  .app-sessions-new-btn-inline {
+    display: none;
+  }
+
+  .app-sessions-fab {
+    display: flex;
+  }
+
+  .app-sessions-tab {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+
+  .app-sessions-item-meta {
+    gap: 6px;
+  }
 }
 
 .dialog-footer {
