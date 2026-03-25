@@ -30,8 +30,8 @@ const wsStatus = ref<'connecting' | 'connected' | 'reconnecting' | 'disconnected
 const wsErrorMessage = ref('')
 const lastPongAt = ref<number | null>(null)
 const reconnectAttempt = ref(0)
-const lastChunkAckSeq = ref<number | null>(null)
-const { isRecording, onChunk, startRecording, stopRecording } = useAudioRecorder()
+const pendingRecordingStart = ref(false)
+const { onChunk, startRecording, stopRecording } = useAudioRecorder()
 const transcriptsListEl = ref<HTMLElement | null>(null)
 
 const wsStatusLabel = computed(() => {
@@ -126,15 +126,31 @@ async function loadData() {
   }
 }
 
-async function handleStart() {
+async function handleLaunchSession() {
   if (!canStart.value) return
+
+  // 1. 先检查麦克风权限（失败直接终止，无需回滚后端状态）
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    stream.getTracks().forEach((t) => t.stop())
+  } catch {
+    ElMessage.error('需要麦克风权限才能发起会话')
+    return
+  }
+
+  // 2. 改会话状态为进行中
   try {
     const updated = await startSession(sessionId)
     session.value = updated
-    ElMessage.success('会话已开始')
   } catch (err) {
     ElMessage.error(extractErrorMessage(err))
+    return
   }
+
+  // 3. 标记待录音，建立 WS（connected 后自动开始录音）
+  pendingRecordingStart.value = true
+  wsIntentionalClose = false
+  openWebSocket()
 }
 
 async function handleEnd() {
@@ -188,7 +204,8 @@ function goBack() {
 function buildWsUrl(id: string): string {
   const base = (import.meta.env.VITE_API_BASE_URL as string | undefined) || window.location.origin
   const wsBase = base.replace(/^http/i, 'ws').replace(/\/$/, '')
-  return `${wsBase}/ws/sessions/${id}`
+  const token = localStorage.getItem('app_token') ?? ''
+  return `${wsBase}/ws/sessions/${id}?token=${encodeURIComponent(token)}`
 }
 
 function clearPingTimer() {
@@ -244,23 +261,6 @@ onChunk((blob) => {
   })
 })
 
-async function handleStartRecording() {
-  chunkSeq = 0
-  lastChunkAckSeq.value = null
-  try {
-    await startRecording()
-  } catch (err) {
-    ElMessage.error(extractErrorMessage(err))
-  }
-}
-
-async function handleStopRecording() {
-  try {
-    await stopRecording()
-  } catch (err) {
-    ElMessage.error(extractErrorMessage(err))
-  }
-}
 
 function startPingTimer() {
   clearPingTimer()
@@ -299,6 +299,13 @@ function handleWsMessage(event: MessageEvent<string>) {
     wsStatus.value = 'connected'
     wsErrorMessage.value = ''
     void refetchTranscriptsAndMerge()
+    if (pendingRecordingStart.value) {
+      pendingRecordingStart.value = false
+      chunkSeq = 0
+      startRecording().catch((err) => {
+        ElMessage.error(extractErrorMessage(err))
+      })
+    }
     return
   }
   if (msgType === 'pong') {
@@ -313,7 +320,7 @@ function handleWsMessage(event: MessageEvent<string>) {
   if (msgType === 'audio_chunk_ack') {
     const d = data as { seq?: number }
     if (typeof d.seq === 'number') {
-      lastChunkAckSeq.value = d.seq
+      console.debug('ack chunk:', d.seq)
     }
     return
   }
@@ -473,12 +480,15 @@ function openWebSocket() {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   unmounted = false
   wsIntentionalClose = false
   reconnectAttempt.value = 0
-  void loadData()
-  openWebSocket()
+  await loadData()
+  // 仅会话已「进行中」时才自动连接 WS（如刷新页面场景）
+  if (session.value?.status === 'ongoing') {
+    openWebSocket()
+  }
 })
 
 onUnmounted(() => {
@@ -523,9 +533,9 @@ onUnmounted(() => {
             v-if="canStart"
             type="button"
             class="app-session-detail-primary-btn"
-            @click="handleStart"
+            @click="handleLaunchSession"
           >
-            开始会话
+            发起会话
           </button>
           <button
             type="button"
@@ -548,38 +558,10 @@ onUnmounted(() => {
       <div class="app-session-detail-transcripts">
         <h3 class="app-session-detail-transcripts-title">转写记录</h3>
         <div class="app-session-detail-ws-status">
-          连接状态：{{ wsStatusLabel }}（{{ wsStatus }}）
-          <span v-if="lastPongAt">
-            （最近心跳：{{ new Date(lastPongAt).toLocaleTimeString() }}）
-          </span>
+          连接状态：{{ wsStatusLabel }}
         </div>
         <div v-if="wsErrorMessage" class="app-session-detail-ws-error">
           {{ wsErrorMessage }}
-        </div>
-        <div class="app-session-detail-recorder-bar">
-          <button
-            v-if="!isRecording"
-            type="button"
-            class="app-session-detail-primary-btn"
-            :disabled="wsStatus !== 'connected'"
-            @click="handleStartRecording"
-          >
-            开始录音
-          </button>
-          <button
-            v-else
-            type="button"
-            class="app-session-detail-danger-btn"
-            @click="handleStopRecording"
-          >
-            停止录音
-          </button>
-          <span class="app-session-detail-recorder-meta">
-            录音状态：{{ isRecording ? '录制中' : '未录制' }}
-          </span>
-          <span v-if="lastChunkAckSeq !== null" class="app-session-detail-recorder-meta">
-            最近 ACK 分片：#{{ lastChunkAckSeq }}
-          </span>
         </div>
         <div v-if="transcriptsLoading" class="app-session-detail-loading">正在加载转写...</div>
         <div v-else-if="!transcripts.length" class="app-session-detail-transcripts-empty">
