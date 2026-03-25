@@ -16,10 +16,23 @@ import { listMyGroups } from '../../api/appGroups'
 import { formatDateTimeToCST } from '../../utils/datetime'
 import { extractErrorMessage } from '../../utils/error'
 
+interface AppUser {
+  id: string
+  name: string
+  email: string
+}
+
+function loadCurrentUser(): AppUser | null {
+  const raw = localStorage.getItem('app_user')
+  if (!raw) return null
+  try { return JSON.parse(raw) as AppUser } catch { return null }
+}
+
 const route = useRoute()
 const router = useRouter()
 const sessionId = route.params.id as string
 
+const currentUser = ref<AppUser | null>(null)
 const session = ref<AppChatSession | null>(null)
 const transcripts = ref<AppTranscript[]>([])
 const pageLoading = ref(true)
@@ -73,6 +86,11 @@ const statusLabel = computed(() => {
 
 const canStart = computed(() => session.value?.status === 'not_started')
 const canEnd = computed(() => session.value?.status !== 'ended')
+
+const isHost = computed(() => {
+  if (!session.value?.created_by) return true // 老数据兼容
+  return currentUser.value?.id === session.value.created_by
+})
 
 async function loadSession(): Promise<AppChatSession | null> {
   // 优先从 history.state 拿
@@ -198,6 +216,10 @@ async function handleEditTitle() {
 }
 
 function goBack() {
+  router.push({ name: 'AppSessions' })
+}
+
+function handleLeave() {
   router.push({ name: 'AppSessions' })
 }
 
@@ -484,6 +506,7 @@ onMounted(async () => {
   unmounted = false
   wsIntentionalClose = false
   reconnectAttempt.value = 0
+  currentUser.value = loadCurrentUser()
   await loadData()
   // 仅会话已「进行中」时才自动连接 WS（如刷新页面场景）
   if (session.value?.status === 'ongoing') {
@@ -529,34 +552,47 @@ onUnmounted(() => {
           <span v-if="session.ended_at">结束时间：{{ formatDateTimeToCST(session.ended_at) }}</span>
         </div>
         <div class="app-session-detail-actions">
+          <template v-if="isHost">
+            <button
+              v-if="canStart"
+              type="button"
+              class="app-session-detail-primary-btn"
+              @click="handleLaunchSession"
+            >
+              发起会话
+            </button>
+            <button
+              type="button"
+              class="app-session-detail-secondary-btn"
+              @click="handleEditTitle"
+            >
+              修改标题
+            </button>
+            <button
+              type="button"
+              class="app-session-detail-danger-btn"
+              :disabled="!canEnd"
+              @click="handleEnd"
+            >
+              结束会话
+            </button>
+          </template>
           <button
-            v-if="canStart"
-            type="button"
-            class="app-session-detail-primary-btn"
-            @click="handleLaunchSession"
-          >
-            发起会话
-          </button>
-          <button
+            v-else
             type="button"
             class="app-session-detail-secondary-btn"
-            @click="handleEditTitle"
+            @click="handleLeave"
           >
-            修改标题
-          </button>
-          <button
-            type="button"
-            class="app-session-detail-danger-btn"
-            :disabled="!canEnd"
-            @click="handleEnd"
-          >
-            结束会话
+            离开会话
           </button>
         </div>
       </div>
 
       <div class="app-session-detail-transcripts">
-        <h3 class="app-session-detail-transcripts-title">转写记录</h3>
+        <h3 class="app-session-detail-transcripts-title">
+          转写记录
+          <span v-if="!isHost" class="app-session-detail-readonly-badge">只读</span>
+        </h3>
         <div class="app-session-detail-ws-status">
           连接状态：{{ wsStatusLabel }}
         </div>
@@ -741,6 +777,18 @@ onUnmounted(() => {
   font-size: 15px;
   font-weight: 600;
   color: #111827;
+  display: flex;
+  align-items: center;
+}
+
+.app-session-detail-readonly-badge {
+  font-size: 11px;
+  font-weight: 400;
+  color: #9ca3af;
+  background: #f3f4f6;
+  border-radius: 999px;
+  padding: 2px 8px;
+  margin-left: 8px;
 }
 
 .app-session-detail-ws-status {
