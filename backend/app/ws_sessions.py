@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
 from typing import Any
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from jose import JWTError, jwt
 from sqlalchemy import text
 
 from .audio.audio_service import (
@@ -13,6 +15,7 @@ from .audio.audio_service import (
     destroy_audio_service,
     get_audio_service,
 )
+from .auth import JWT_ALGORITHM, JWT_SECRET_KEY
 from .db import get_sessionmaker
 from .ws_manager import ws_manager
 from .ws_protocol import (
@@ -27,6 +30,7 @@ from .ws_protocol import (
 
 router = APIRouter(tags=["ws-sessions"])
 MAX_AUDIO_B64_LENGTH = 1_500_000
+HEARTBEAT_TIMEOUT = 30  # 秒：发起者超过此时间无 ping 则自动结束会话
 _logger = logging.getLogger(__name__)
 
 
@@ -63,6 +67,38 @@ async def broadcast_engagement_alert(session_id: str, data: dict[str, Any]) -> N
 
 async def broadcast_session_ended(session_id: str, data: dict[str, Any]) -> None:
     await ws_manager.broadcast_to_session(session_id, build_session_ended(data))
+
+
+async def _get_session_created_by(session_id: str) -> str | None:
+    """查询会话的发起者 user_id（created_by 字段）"""
+    session_factory = get_sessionmaker()
+    async with session_factory() as db:
+        result = await db.execute(
+            text("SELECT created_by FROM chat_sessions WHERE id = :id"),
+            {"id": session_id},
+        )
+        row = result.mappings().first()
+        if not row:
+            return None
+        return row["created_by"]
+
+
+async def _auto_end_session(session_id: str) -> None:
+    """心跳超时时自动将会话标记为已结束（幂等）"""
+    session_factory = get_sessionmaker()
+    async with session_factory() as db:
+        await db.execute(
+            text(
+                """
+                UPDATE chat_sessions
+                SET status = 'ended', ended_at = NOW(), last_updated = NOW()
+                WHERE id = :id AND status != 'ended'
+                """
+            ),
+            {"id": session_id},
+        )
+        await db.commit()
+    _logger.info("会话心跳超时，已自动结束 session_id=%s", session_id)
 
 
 async def _get_session_member_ids(session_id: str) -> list[str]:
@@ -116,13 +152,46 @@ def _validate_audio_chunk(data: dict[str, Any]) -> tuple[bool, str | None]:
 
 
 @router.websocket("/ws/sessions/{session_id}")
-async def ws_session_endpoint(websocket: WebSocket, session_id: str) -> None:
+async def ws_session_endpoint(
+    websocket: WebSocket,
+    session_id: str,
+    token: str | None = Query(default=None),
+) -> None:
+    # 解析 token，判断是否为发起者
+    is_host = False
+    if token:
+        try:
+            payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+            user_id: str = payload.get("sub", "")
+            if user_id:
+                created_by = await _get_session_created_by(session_id)
+                is_host = (created_by is not None and user_id == created_by)
+        except JWTError:
+            pass  # token 无效，降级为非发起者
+
     await ws_manager.connect_session(session_id, websocket)
     try:
         await websocket.send_json(build_connected(session_id))
 
         while True:
-            raw = await websocket.receive_text()
+            # 发起者：有超时检测；非发起者：正常等待
+            if is_host:
+                try:
+                    raw = await asyncio.wait_for(
+                        websocket.receive_text(),
+                        timeout=HEARTBEAT_TIMEOUT,
+                    )
+                except asyncio.TimeoutError:
+                    _logger.warning("发起者心跳超时，自动结束会话 session_id=%s", session_id)
+                    await _auto_end_session(session_id)
+                    await ws_manager.broadcast_to_session(
+                        session_id,
+                        build_session_ended({"session_id": session_id, "reason": "host_timeout"}),
+                    )
+                    break
+            else:
+                raw = await websocket.receive_text()
+
             msg_type, _data, parse_error = _parse_envelope(raw)
             if parse_error is not None:
                 await websocket.send_json(parse_error)
