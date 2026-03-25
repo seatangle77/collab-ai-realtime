@@ -4,7 +4,9 @@ from typing import Any, Mapping
 from datetime import datetime
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from jose import JWTError, jwt
+from .auth import JWT_SECRET_KEY, JWT_ALGORITHM
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -511,7 +513,7 @@ async def end_session(
                 ended_at = NOW(),
                 last_updated = NOW()
             WHERE id = :session_id
-            RETURNING id, group_id, created_at, last_updated, session_title, status, started_at, ended_at
+            RETURNING id, group_id, created_at, last_updated, session_title, status, started_at, ended_at, created_by
             """
         ),
         {"session_id": session_id},
@@ -519,3 +521,53 @@ async def end_session(
     await db.commit()
     row = result.mappings().one()
     return ChatSessionOut.model_validate(dict(row))
+
+
+@router.post(
+    "/sessions/{session_id}/end-beacon",
+    status_code=status.HTTP_200_OK,
+)
+async def end_session_beacon(
+    session_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    供前端 navigator.sendBeacon 调用的会话结束接口。
+    token 放在 text/plain body 中，而非 Authorization Header。
+    幂等：已结束的会话直接返回成功。
+    """
+    raw_body = await request.body()
+    token = raw_body.decode("utf-8").strip()
+
+    try:
+        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        user_id: str = payload.get("sub", "")
+        if not user_id:
+            raise JWTError("Missing subject")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的 token")
+
+    result = await db.execute(
+        text("SELECT id, status FROM chat_sessions WHERE id = :session_id"),
+        {"session_id": session_id},
+    )
+    row = result.mappings().first()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在")
+
+    if row["status"] == "ended":
+        return {"ok": True}
+
+    await db.execute(
+        text(
+            """
+            UPDATE chat_sessions
+            SET status = 'ended', ended_at = NOW(), last_updated = NOW()
+            WHERE id = :session_id
+            """
+        ),
+        {"session_id": session_id},
+    )
+    await db.commit()
+    return {"ok": True}
