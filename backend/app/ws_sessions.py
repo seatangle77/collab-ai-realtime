@@ -130,7 +130,7 @@ def _validate_audio_chunk(data: dict[str, Any]) -> tuple[bool, str | None]:
         return False, "seq 必须是非负整数"
 
     mime_type = data.get("mime_type")
-    if not isinstance(mime_type, str) or mime_type != "audio/webm":
+    if not isinstance(mime_type, str) or not mime_type.startswith("audio/webm"):
         return False, "mime_type 必须为 audio/webm"
 
     audio_b64 = data.get("audio_b64")
