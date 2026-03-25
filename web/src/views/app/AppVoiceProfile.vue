@@ -15,6 +15,7 @@ const savingSamples = ref(false)
 const generating = ref(false)
 const isRecording = ref(false)
 const isUploading = ref(false)
+const activeRecordTab = ref<'record' | 'url'>('record')
 
 const profile = ref<VoiceProfileOut | null>(null)
 const editableUrls = ref<string[]>([])
@@ -62,18 +63,24 @@ async function fetchProfile() {
   }
 }
 
-function handleRemoveUrl(idx: number) {
+async function handleRemoveUrl(idx: number) {
   editableUrls.value.splice(idx, 1)
+  await handleSaveSamples()
 }
 
-function handleAddUrl() {
+async function handleAddUrl() {
   const v = newUrlInput.value.trim()
   if (!v) {
     ElMessage.warning('请输入非空的样本 URL')
     return
   }
+  if (editableUrls.value.length >= 5) {
+    ElMessage.warning('已达到最多 5 条样本')
+    return
+  }
   editableUrls.value.push(v)
   newUrlInput.value = ''
+  await handleSaveSamples()
 }
 
 async function handleSaveSamples() {
@@ -83,7 +90,7 @@ async function handleSaveSamples() {
     const updated = await updateMySamples(editableUrls.value)
     profile.value = updated
     editableUrls.value = [...(updated.sample_audio_urls || [])]
-    ElMessage.success('样本列表已保存')
+    ElMessage.success('已保存')
   } catch (err: unknown) {
     console.error(err)
     ElMessage.error((err as Error)?.message || '保存样本列表失败')
@@ -155,6 +162,13 @@ function resetRecording() {
   }
 }
 
+function handleTabChange(tab: 'record' | 'url') {
+  if (tab !== activeRecordTab.value) {
+    resetRecording()
+    activeRecordTab.value = tab
+  }
+}
+
 async function handleUploadRecordedSample() {
   if (!recordedChunks.value.length) {
     ElMessage.warning('请先录制一段音频')
@@ -223,112 +237,134 @@ onMounted(() => {
   <div class="app-voice-profile">
     <div class="app-voice-profile-card" v-loading="loading">
       <h2 class="app-voice-profile-title">我的声纹</h2>
-      <p class="app-voice-profile-desc">
-        在此管理你的声纹样本并生成声纹。你可以直接在页面录音上传，或手动添加样本 URL，保存后点击「生成声纹」或「重新生成声纹」。
-      </p>
+      <p class="app-voice-profile-desc">录制或上传音频样本，生成专属声纹用于说话人识别。</p>
 
       <template v-if="profile">
-        <div class="section-divider">录音采集</div>
+        <div class="section-divider">第一步：添加音频样本</div>
         <el-card class="record-card" shadow="never">
-          <div class="record-controls">
-            <el-button
-              type="primary"
-              size="default"
-              :disabled="isRecording || editableUrls.length >= 5"
-              @click="startRecording"
-            >
-              开始录音
-            </el-button>
-            <el-button type="warning" size="default" :disabled="!isRecording" @click="stopRecording">
-              停止
-            </el-button>
-            <el-button
-              size="default"
-              :disabled="isRecording || !recordedChunks.length"
-              @click="resetRecording"
-            >
-              重录
-            </el-button>
-            <span v-if="isRecording" class="recording-indicator">录音中... {{ recordingDuration }}s</span>
-            <span v-else class="recording-hint">每段建议控制在 10–15 秒内</span>
+          <div class="record-tabs">
+            <button
+              class="record-tab"
+              :class="{ active: activeRecordTab === 'record' }"
+              @click="handleTabChange('record')"
+            >现场录音</button>
+            <button
+              class="record-tab"
+              :class="{ active: activeRecordTab === 'url' }"
+              @click="handleTabChange('url')"
+            >粘贴 URL</button>
           </div>
-          <div v-if="previewUrl" class="record-preview">
-            <p class="preview-title">录音预览</p>
-            <audio :src="previewUrl" controls class="preview-audio" />
-            <el-button
-              type="success"
-              size="default"
-              :loading="isUploading"
-              :disabled="editableUrls.length >= 5"
-              @click="handleUploadRecordedSample"
-            >
-              上传并添加为样本
-            </el-button>
+
+          <!-- Tab: 现场录音 -->
+          <div v-if="activeRecordTab === 'record'" class="tab-panel">
+            <!-- 未录音 -->
+            <template v-if="!isRecording && !previewUrl">
+              <el-button
+                type="primary"
+                size="default"
+                :disabled="editableUrls.length >= 5"
+                @click="startRecording"
+              >开始录音</el-button>
+              <span class="recording-hint">每段建议 10–15 秒</span>
+            </template>
+
+            <!-- 录音中 -->
+            <template v-else-if="isRecording">
+              <el-button type="danger" size="default" @click="stopRecording">停止录音</el-button>
+              <span class="recording-indicator">录音中… {{ recordingDuration }}s</span>
+            </template>
+
+            <!-- 录完，预览 -->
+            <template v-else-if="previewUrl">
+              <audio :src="previewUrl" controls class="preview-audio" />
+              <div class="preview-actions">
+                <el-button size="default" @click="resetRecording">重新录制</el-button>
+                <el-button
+                  type="primary"
+                  size="default"
+                  :loading="isUploading"
+                  :disabled="editableUrls.length >= 5"
+                  @click="handleUploadRecordedSample"
+                >添加此段</el-button>
+              </div>
+            </template>
+          </div>
+
+          <!-- Tab: 粘贴 URL -->
+          <div v-if="activeRecordTab === 'url'" class="tab-panel">
+            <div class="url-add-row">
+              <el-input
+                v-model="newUrlInput"
+                size="default"
+                placeholder="粘贴音频 URL"
+                class="url-input"
+                @keyup.enter.prevent="handleAddUrl"
+              />
+              <el-button type="primary" size="default" @click="handleAddUrl">添加</el-button>
+            </div>
           </div>
         </el-card>
 
-        <div class="section-divider">样本列表</div>
+        <div class="section-divider">
+          已添加 {{ editableUrls.length }} / 5 条样本
+        </div>
         <div class="samples-editor">
-          <p class="samples-count-tip">样本数量：{{ editableUrls.length }}/5（最多 5 条）</p>
           <div class="samples-list">
+            <div v-if="editableUrls.length === 0" class="samples-empty">
+              暂无样本，请在上方添加。
+            </div>
             <div
               v-for="(url, idx) in editableUrls"
               :key="idx"
               class="sample-row"
             >
-              <span class="sample-index">样本 {{ idx + 1 }}</span>
-              <el-input v-model="editableUrls[idx]" size="default" class="sample-input" />
-              <audio
-                v-if="url"
-                :src="url"
-                controls
-                class="sample-audio"
-              />
-              <el-button type="danger" plain size="default" @click="handleRemoveUrl(idx)">删除</el-button>
+              <span class="sample-index">{{ idx + 1 }}</span>
+              <audio :src="url" controls class="sample-audio" />
+              <el-button type="danger" plain size="small" @click="handleRemoveUrl(idx)">删除</el-button>
             </div>
-            <div v-if="editableUrls.length === 0" class="samples-empty">暂无样本，请在下行添加 URL。</div>
-          </div>
-          <div class="samples-add-row">
-            <el-input
-              v-model="newUrlInput"
-              size="default"
-              placeholder="输入样本 URL"
-              class="add-input"
-              @keyup.enter.prevent="handleAddUrl"
-            />
-            <el-button type="primary" size="default" @click="handleAddUrl">添加样本</el-button>
-          </div>
-          <div class="samples-save-row">
-            <el-button type="primary" size="default" :loading="savingSamples" @click="handleSaveSamples">
-              保存样本列表
-            </el-button>
           </div>
         </div>
 
-        <div class="section-divider">声纹状态</div>
-        <div class="embedding-block">
-          <div class="embedding-meta">
-            <span class="meta-item">
-              状态：
-              <el-tag v-if="hasEmbedding" type="success" size="small" effect="light">已生成</el-tag>
-              <el-tag v-else type="info" size="small" effect="light">未生成</el-tag>
-            </span>
-            <span class="meta-item">嵌入状态：{{ parseEmbeddingStatusLabel() }}</span>
-            <span class="meta-item">创建：{{ formatDateTimeToCST(profile.created_at) }}</span>
-            <span class="meta-item">最近更新：{{ parseEmbeddingUpdatedAt() }}</span>
-            <span v-if="parseGeneratedAt()" class="meta-item">最近生成：{{ parseGeneratedAt() }}</span>
-          </div>
-          <el-button type="primary" size="default" :loading="generating" @click="handleGenerateEmbedding">
-            {{ hasEmbedding ? '重新生成声纹' : '生成声纹' }}
-          </el-button>
+        <div class="section-divider">第二步：生成声纹</div>
+
+        <!-- 未生成 / 可生成 -->
+        <div v-if="!hasEmbedding" class="embedding-block">
+          <el-button
+            type="primary"
+            size="default"
+            :loading="generating"
+            :disabled="editableUrls.length === 0"
+            @click="handleGenerateEmbedding"
+          >生成声纹</el-button>
+          <span v-if="editableUrls.length === 0" class="generate-hint">至少需要 1 条样本</span>
         </div>
 
-        <el-collapse v-if="profile.voice_embedding" class="embedding-collapse">
-          <el-collapse-item name="meta">
+        <!-- 已生成 -->
+        <div v-else class="embedding-done">
+          <div class="embedding-done-info">
+            <el-tag type="success" size="small" effect="light">声纹已生成</el-tag>
+            <span v-if="parseGeneratedAt()" class="embedding-done-time">生成于 {{ parseGeneratedAt() }}</span>
+          </div>
+          <el-button
+            link
+            type="primary"
+            size="small"
+            :loading="generating"
+            @click="handleGenerateEmbedding"
+          >重新生成</el-button>
+        </div>
+
+        <el-collapse class="detail-collapse">
+          <el-collapse-item name="detail">
             <template #title>
-              <span class="collapse-title">声纹元数据（占位）</span>
+              <span class="collapse-title">详细信息</span>
             </template>
-            <pre class="embedding-json">{{ JSON.stringify(profile.voice_embedding, null, 2) }}</pre>
+            <div class="detail-fields">
+              <span class="detail-item">嵌入状态：{{ parseEmbeddingStatusLabel() }}</span>
+              <span class="detail-item">创建时间：{{ formatDateTimeToCST(profile.created_at) }}</span>
+              <span class="detail-item">最近更新：{{ parseEmbeddingUpdatedAt() }}</span>
+            </div>
+            <pre v-if="profile.voice_embedding" class="embedding-json">{{ JSON.stringify(profile.voice_embedding, null, 2) }}</pre>
           </el-collapse-item>
         </el-collapse>
       </template>
@@ -384,13 +420,6 @@ onMounted(() => {
   background: #f9fafb;
 }
 
-.record-controls {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px 16px;
-}
-
 .recording-indicator {
   font-size: 13px;
   color: #dc2626;
@@ -401,22 +430,14 @@ onMounted(() => {
   color: #9ca3af;
 }
 
-.record-preview {
-  margin-top: 12px;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px 16px;
-}
-
-.preview-title {
-  margin: 0;
-  font-size: 12px;
-  color: #6b7280;
-}
-
 .preview-audio {
-  flex-shrink: 0;
+  width: 100%;
+  max-width: 100%;
+}
+
+.preview-actions {
+  display: flex;
+  gap: 10px;
 }
 
 .samples-editor {
@@ -431,36 +452,24 @@ onMounted(() => {
   gap: 0;
 }
 
-.samples-count-tip {
-  margin: 0 0 2px;
-  font-size: 12px;
-  color: #6b7280;
-}
-
 .sample-row {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
+  gap: 10px;
+  margin-bottom: 10px;
 }
 
 .sample-index {
   flex-shrink: 0;
-  width: 52px;
-  font-size: 12px;
-  color: #6b7280;
-}
-
-.sample-input {
-  flex: 1;
-  min-width: 0;
+  width: 20px;
+  font-size: 13px;
+  color: #9ca3af;
+  text-align: right;
 }
 
 .sample-audio {
-  flex-shrink: 0;
-  max-width: 100%;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
 }
 
 .samples-empty {
@@ -469,56 +478,109 @@ onMounted(() => {
   padding: 8px 0;
 }
 
-.samples-add-row {
+.embedding-block {
   display: flex;
   align-items: center;
   gap: 16px;
+  padding: 12px 0;
+}
+
+/* Tab 切换 */
+.record-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 16px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.record-tab {
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #6b7280;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+  margin-bottom: -1px;
+}
+
+.record-tab.active {
+  color: #2563eb;
+  border-bottom-color: #2563eb;
+}
+
+.tab-panel {
+  display: flex;
+  align-items: center;
   flex-wrap: wrap;
-  margin-top: 4px;
+  gap: 12px;
+  min-height: 40px;
 }
 
-.samples-save-row {
-  margin-top: 16px;
-}
-
-.add-input {
+.url-add-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   width: 100%;
-  min-width: 200px;
 }
 
-.embedding-block {
+.url-input {
+  flex: 1;
+}
+
+/* 生成声纹区 */
+.generate-hint {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.embedding-done {
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 20px;
-  padding: 16px 0;
+  gap: 8px;
+  padding: 12px 0;
 }
 
-.embedding-meta {
+.embedding-done-info {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 16px 24px;
-  font-size: 13px;
-  color: #4b5563;
+  gap: 10px;
 }
 
-.meta-item {
-  white-space: nowrap;
+.embedding-done-time {
+  font-size: 12px;
+  color: #6b7280;
 }
 
-.embedding-collapse {
-  margin-top: 8px;
+/* 详细信息折叠 */
+.detail-collapse {
+  margin-top: 16px;
 }
 
-.embedding-collapse :deep(.el-collapse-item__header) {
+.detail-collapse :deep(.el-collapse-item__header) {
   font-size: 13px;
   color: #6b7280;
 }
 
 .collapse-title {
   font-weight: 500;
+}
+
+.detail-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.detail-item {
+  white-space: nowrap;
 }
 
 .embedding-json {
