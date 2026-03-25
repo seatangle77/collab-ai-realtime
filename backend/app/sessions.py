@@ -33,6 +33,7 @@ class ChatSessionOut(BaseModel):
     status: str | None = None
     started_at: datetime | None = None
     ended_at: datetime | None = None
+    created_by: str | None = None
 
 
 @router.post(
@@ -78,12 +79,12 @@ async def create_session(
         result = await db.execute(
             text(
                 """
-                INSERT INTO chat_sessions (id, group_id, created_at, last_updated, session_title, status)
-                VALUES (:id, :group_id, NOW(), NOW(), :title, 'not_started')
-                RETURNING id, group_id, created_at, last_updated, session_title, status, started_at, ended_at
+                INSERT INTO chat_sessions (id, group_id, created_at, last_updated, session_title, status, created_by)
+                VALUES (:id, :group_id, NOW(), NOW(), :title, 'not_started', :created_by)
+                RETURNING id, group_id, created_at, last_updated, session_title, status, started_at, ended_at, created_by
                 """
             ),
-            {"id": session_id, "group_id": group_id, "title": payload.session_title},
+            {"id": session_id, "group_id": group_id, "title": payload.session_title, "created_by": current_user["id"]},
         )
     else:
         created_at = payload.created_at
@@ -106,7 +107,8 @@ async def create_session(
                     last_updated,
                     session_title,
                     status,
-                    ended_at
+                    ended_at,
+                    created_by
                 )
                 VALUES (
                     :id,
@@ -115,9 +117,10 @@ async def create_session(
                     COALESCE(:last_updated, COALESCE(:created_at, NOW())),
                     :title,
                     :status,
-                    :ended_at
+                    :ended_at,
+                    :created_by
                 )
-                RETURNING id, group_id, created_at, last_updated, session_title, status, started_at, ended_at
+                RETURNING id, group_id, created_at, last_updated, session_title, status, started_at, ended_at, created_by
                 """
             ),
             {
@@ -128,6 +131,7 @@ async def create_session(
                 "last_updated": last_updated,
                 "status": session_status,
                 "ended_at": payload.ended_at,
+                "created_by": current_user["id"],
             },
         )
     await db.commit()
@@ -169,7 +173,7 @@ async def list_group_sessions(
     if include_ended:
         query = text(
             """
-            SELECT id, group_id, created_at, last_updated, session_title, status, started_at, ended_at
+            SELECT id, group_id, created_at, last_updated, session_title, status, started_at, ended_at, created_by
             FROM chat_sessions
             WHERE group_id = :group_id
             ORDER BY last_updated DESC, created_at DESC
@@ -178,7 +182,7 @@ async def list_group_sessions(
     else:
         query = text(
             """
-            SELECT id, group_id, created_at, last_updated, session_title, status, started_at, ended_at
+            SELECT id, group_id, created_at, last_updated, session_title, status, started_at, ended_at, created_by
             FROM chat_sessions
             WHERE group_id = :group_id
               AND status != 'ended'
@@ -220,7 +224,7 @@ async def _get_session_and_group(
     result = await db.execute(
         text(
             """
-            SELECT id, group_id, created_at, last_updated, session_title, status, started_at, ended_at
+            SELECT id, group_id, created_at, last_updated, session_title, status, started_at, ended_at, created_by
             FROM chat_sessions
             WHERE id = :session_id
             """
@@ -384,8 +388,8 @@ async def update_session(
                     last_updated = COALESCE(:last_updated, last_updated),
                     ended_at = COALESCE(:ended_at, ended_at)
                 WHERE id = :session_id
-                RETURNING id, group_id, created_at, last_updated, session_title, status, started_at, ended_at
-                """
+                RETURNING id, group_id, created_at, last_updated, session_title, status, started_at, ended_at, created_by
+"""
             ),
             {
                 "session_id": session_id,
@@ -404,8 +408,8 @@ async def update_session(
                 SET session_title = :title,
                     last_updated = NOW()
                 WHERE id = :session_id
-                RETURNING id, group_id, created_at, last_updated, session_title, status, started_at, ended_at
-                """
+                RETURNING id, group_id, created_at, last_updated, session_title, status, started_at, ended_at, created_by
+"""
             ),
             {"session_id": session_id, "title": new_title},
         )
