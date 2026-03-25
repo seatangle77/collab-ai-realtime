@@ -10,6 +10,7 @@ export interface AppChatSession {
   status?: 'not_started' | 'ongoing' | 'ended' | null
   started_at?: string | null
   ended_at?: string | null
+  created_by?: string | null
 }
 
 export interface AppTranscript {
@@ -90,6 +91,13 @@ export async function endSession(sessionId: string): Promise<AppChatSession> {
 
 export async function startSession(sessionId: string): Promise<AppChatSession> {
   return appHttp.post<AppChatSession>(`/api/sessions/${sessionId}/start`)
+}
+
+export function endSessionBeacon(sessionId: string): void {
+  const token = localStorage.getItem('app_token') ?? ''
+  const base = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? ''
+  const url = `${base}/api/sessions/${sessionId}/end-beacon`
+  navigator.sendBeacon(url, token)
 }
 
 export async function listSessionTranscripts(
