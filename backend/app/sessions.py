@@ -473,7 +473,7 @@ async def start_session(
                 started_at = NOW(),
                 last_updated = NOW()
             WHERE id = :session_id
-            RETURNING id, group_id, created_at, last_updated, session_title, status, started_at, ended_at
+            RETURNING id, group_id, created_at, last_updated, session_title, status, started_at, ended_at, created_by
             """
         ),
         {"session_id": session_id},
