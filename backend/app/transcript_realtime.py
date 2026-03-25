@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 
-from sqlalchemy import text
+from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .db import DBNotConfiguredError, get_sessionmaker
@@ -74,7 +74,7 @@ async def insert_speech_transcript_and_broadcast(
 
     async with session_factory() as db:  # type: AsyncSession
         sess_row = await db.execute(
-            text("SELECT group_id FROM chat_sessions WHERE id = :id"),
+            sa_text("SELECT group_id FROM chat_sessions WHERE id = :id"),
             {"id": session_id},
         )
         first = sess_row.mappings().first()
@@ -89,7 +89,7 @@ async def insert_speech_transcript_and_broadcast(
         tid = f"tr{uuid.uuid4().hex[:8]}"
 
         result = await db.execute(
-            text(
+            sa_text(
                 """
                 INSERT INTO speech_transcripts
                     (transcript_id, session_id, group_id, user_id, speaker, text,
