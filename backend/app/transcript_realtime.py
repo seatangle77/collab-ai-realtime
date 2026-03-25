@@ -63,7 +63,8 @@ async def insert_speech_transcript_and_broadcast(
     """
     插入一条转写并广播 transcript。失败时返回 None（不写库、不广播）。
     """
-    if not text or not text.strip():
+    transcript_text = text
+    if not transcript_text or not transcript_text.strip():
         return None
 
     try:
@@ -107,7 +108,7 @@ async def insert_speech_transcript_and_broadcast(
                 "group_id": group_id,
                 "user_id": user_id,
                 "speaker": speaker,
-                "text": text.strip(),
+                "text": transcript_text.strip(),
                 "start": start_naive,
                 "end": end_naive,
                 "duration": duration,
