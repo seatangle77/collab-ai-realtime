@@ -94,7 +94,7 @@ export async function startSession(sessionId: string): Promise<AppChatSession> {
 }
 
 export function endSessionBeacon(sessionId: string): void {
-  const token = localStorage.getItem('app_token') ?? ''
+  const token = localStorage.getItem('app_access_token') ?? ''
   const base = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? ''
   const url = `${base}/api/sessions/${sessionId}/end-beacon`
   navigator.sendBeacon(url, token)

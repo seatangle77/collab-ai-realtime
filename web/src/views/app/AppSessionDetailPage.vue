@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { Capacitor } from '@capacitor/core'
+import type { PluginListenerHandle } from '@capacitor/core'
+import { App as CapApp } from '@capacitor/app'
 import { useAudioRecorder } from '../../composables/useAudioRecorder'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -11,6 +14,7 @@ import {
   updateSession,
   listGroupSessions,
   listSessionTranscripts,
+  endSessionBeacon,
 } from '../../api/appSessions'
 import { listMyGroups } from '../../api/appGroups'
 import { formatDateTimeToCST } from '../../utils/datetime'
@@ -44,6 +48,7 @@ const wsErrorMessage = ref('')
 const lastPongAt = ref<number | null>(null)
 const reconnectAttempt = ref(0)
 const pendingRecordingStart = ref(false)
+const metaExpanded = ref(false)
 const { onChunk, startRecording, stopRecording } = useAudioRecorder()
 const transcriptsListEl = ref<HTMLElement | null>(null)
 
@@ -68,6 +73,7 @@ const BASE_RECONNECT_DELAY_MS = 1000
 const MAX_RECONNECT_DELAY_MS = 30_000
 const MAX_RECONNECT_TRIES = 5
 
+let appStateListener: PluginListenerHandle | null = null
 let ws: WebSocket | null = null
 let pingTimer: ReturnType<typeof setInterval> | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -84,7 +90,8 @@ const statusLabel = computed(() => {
   return '未知'
 })
 
-const canStart = computed(() => session.value?.status === 'not_started')
+const launching = ref(false)
+const canStart = computed(() => session.value?.status === 'not_started' && !launching.value)
 const canEnd = computed(() => session.value?.status !== 'ended')
 
 const isHost = computed(() => {
@@ -146,29 +153,34 @@ async function loadData() {
 
 async function handleLaunchSession() {
   if (!canStart.value) return
+  launching.value = true
 
-  // 1. 先检查麦克风权限（失败直接终止，无需回滚后端状态）
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    stream.getTracks().forEach((t) => t.stop())
-  } catch {
-    ElMessage.error('需要麦克风权限才能发起会话')
-    return
-  }
+    // 1. 先检查麦克风权限（失败直接终止，无需回滚后端状态）
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      stream.getTracks().forEach((t) => t.stop())
+    } catch {
+      ElMessage.error('需要麦克风权限才能发起会话')
+      return
+    }
 
-  // 2. 改会话状态为进行中
-  try {
-    const updated = await startSession(sessionId)
-    session.value = updated
-  } catch (err) {
-    ElMessage.error(extractErrorMessage(err))
-    return
-  }
+    // 2. 改会话状态为进行中
+    try {
+      const updated = await startSession(sessionId)
+      session.value = updated
+    } catch (err) {
+      ElMessage.error(extractErrorMessage(err))
+      return
+    }
 
-  // 3. 标记待录音，建立 WS（connected 后自动开始录音）
-  pendingRecordingStart.value = true
-  wsIntentionalClose = false
-  openWebSocket()
+    // 3. 标记待录音，建立 WS（connected 后自动开始录音）
+    pendingRecordingStart.value = true
+    wsIntentionalClose = false
+    openWebSocket()
+  } finally {
+    launching.value = false
+  }
 }
 
 async function handleEnd() {
@@ -223,10 +235,23 @@ function handleLeave() {
   router.push({ name: 'AppSessions' })
 }
 
+function handleBeforeUnload() {
+  if (isHost.value && session.value?.status === 'ongoing') {
+    endSessionBeacon(sessionId)
+  }
+}
+
+function handleManualReconnect() {
+  reconnectAttempt.value = 0
+  wsErrorMessage.value = ''
+  wsIntentionalClose = false
+  openWebSocket()
+}
+
 function buildWsUrl(id: string): string {
   const base = (import.meta.env.VITE_API_BASE_URL as string | undefined) || window.location.origin
   const wsBase = base.replace(/^http/i, 'ws').replace(/\/$/, '')
-  const token = localStorage.getItem('app_token') ?? ''
+  const token = localStorage.getItem('app_access_token') ?? ''
   return `${wsBase}/ws/sessions/${id}?token=${encodeURIComponent(token)}`
 }
 
@@ -371,7 +396,22 @@ function handleWsMessage(event: MessageEvent<string>) {
     transcripts.value = [...transcripts.value, item]
     return
   }
-  // engagement_alert / session_ended 等后续里程碑再处理
+  if (msgType === 'session_ended') {
+    const d = data as { session_id?: string; reason?: string }
+    if (session.value) {
+      session.value = { ...session.value, status: 'ended' }
+    }
+    stopRecording()
+    wsIntentionalClose = true
+    ws?.close(1000, 'session_ended')
+    void loadTranscripts()
+    if (d.reason === 'host_timeout') {
+      ElMessage.warning('发起人长时间未响应，会话已自动结束')
+    } else {
+      ElMessage.info('会话已结束')
+    }
+    return
+  }
 }
 
 function speakerInitial(speaker: string | null | undefined): string {
@@ -512,9 +552,20 @@ onMounted(async () => {
   if (session.value?.status === 'ongoing') {
     openWebSocket()
   }
+  window.addEventListener('beforeunload', handleBeforeUnload)
+  if (Capacitor.isNativePlatform()) {
+    appStateListener = await CapApp.addListener('appStateChange', ({ isActive }) => {
+      if (!isActive && isHost.value && session.value?.status === 'ongoing') {
+        endSessionBeacon(sessionId)
+      }
+    })
+  }
 })
 
 onUnmounted(() => {
+  window.removeEventListener('beforeunload', handleBeforeUnload)
+  appStateListener?.remove()
+  appStateListener = null
   unmounted = true
   stopRecording()
   closeWsForUnmount()
@@ -544,7 +595,14 @@ onUnmounted(() => {
             {{ statusLabel }}
           </el-tag>
         </div>
-        <div class="app-session-detail-meta">
+        <button
+          type="button"
+          class="app-session-detail-meta-toggle"
+          @click="metaExpanded = !metaExpanded"
+        >
+          详细信息 {{ metaExpanded ? '▴' : '▾' }}
+        </button>
+        <div v-show="metaExpanded" class="app-session-detail-meta">
           <span>会话 ID：{{ session.id }}</span>
           <span>创建时间：{{ formatDateTimeToCST(session.created_at) }}</span>
           <span>最后更新：{{ formatDateTimeToCST(session.last_updated) }}</span>
@@ -593,12 +651,29 @@ onUnmounted(() => {
           转写记录
           <span v-if="!isHost" class="app-session-detail-readonly-badge">只读</span>
         </h3>
-        <div class="app-session-detail-ws-status">
-          连接状态：{{ wsStatusLabel }}
+        <div
+          v-if="wsStatus !== 'connected' && session?.status === 'ongoing'"
+          class="app-session-detail-ws-banner"
+          :class="{
+            'is-reconnecting': wsStatus === 'reconnecting',
+            'is-disconnected': wsStatus === 'disconnected',
+            'is-connecting': wsStatus === 'connecting',
+          }"
+        >
+          <span class="app-session-detail-ws-banner-icon" aria-hidden="true">
+            {{ wsStatus === 'disconnected' ? '✕' : '↻' }}
+          </span>
+          <span class="app-session-detail-ws-banner-text">{{ wsStatusLabel }}</span>
+          <button
+            v-if="wsStatus === 'disconnected'"
+            type="button"
+            class="app-session-detail-ws-banner-retry"
+            @click="handleManualReconnect"
+          >
+            重新连接
+          </button>
         </div>
-        <div v-if="wsErrorMessage" class="app-session-detail-ws-error">
-          {{ wsErrorMessage }}
-        </div>
+
         <div v-if="transcriptsLoading" class="app-session-detail-loading">正在加载转写...</div>
         <div v-else-if="!transcripts.length" class="app-session-detail-transcripts-empty">
           暂无转写记录
@@ -701,6 +776,21 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
+.app-session-detail-meta-toggle {
+  background: none;
+  border: none;
+  padding: 0 0 10px;
+  font-size: 12px;
+  color: #6b7280;
+  cursor: pointer;
+  display: block;
+  text-align: left;
+}
+
+.app-session-detail-meta-toggle:hover {
+  color: #374151;
+}
+
 .app-session-detail-meta {
   display: flex;
   flex-wrap: wrap;
@@ -791,16 +881,56 @@ onUnmounted(() => {
   margin-left: 8px;
 }
 
-.app-session-detail-ws-status {
-  margin-bottom: 10px;
-  font-size: 12px;
-  color: #4b5563;
+.app-session-detail-ws-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  margin-bottom: 12px;
 }
 
-.app-session-detail-ws-error {
-  margin-bottom: 10px;
+.app-session-detail-ws-banner.is-connecting {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+
+.app-session-detail-ws-banner.is-reconnecting {
+  background: #fffbeb;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+.app-session-detail-ws-banner.is-disconnected {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+.app-session-detail-ws-banner-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.app-session-detail-ws-banner-text {
+  flex: 1;
+}
+
+.app-session-detail-ws-banner-retry {
+  background: none;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 2px 10px;
   font-size: 12px;
-  color: #b91c1c;
+  color: inherit;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.app-session-detail-ws-banner-retry:hover {
+  opacity: 0.75;
 }
 
 .app-session-detail-recorder-bar {
