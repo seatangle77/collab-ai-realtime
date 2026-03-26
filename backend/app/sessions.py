@@ -324,7 +324,7 @@ async def list_session_transcripts(
                 t.confidence,
                 t.created_at
             FROM speech_transcripts t
-            LEFT JOIN users u ON u.id::text = t.speaker
+            LEFT JOIN users_info u ON u.id = t.speaker
             WHERE t.session_id = :session_id
             ORDER BY t.start ASC
             """

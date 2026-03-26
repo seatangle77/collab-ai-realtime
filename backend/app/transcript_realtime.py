@@ -125,7 +125,7 @@ async def insert_speech_transcript_and_broadcast(
         raw_speaker = payload.get("speaker")
         if raw_speaker and raw_speaker not in ("unknown", "系统"):
             name_row = await db.execute(
-                sa_text("SELECT name FROM users WHERE id = :uid"),
+                sa_text("SELECT name FROM users_info WHERE id = :uid"),
                 {"uid": raw_speaker},
             )
             name_result = name_row.mappings().first()
