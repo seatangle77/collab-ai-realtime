@@ -4,6 +4,8 @@ import asyncio
 import json
 import logging
 import shutil
+import subprocess
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,7 +32,7 @@ class VoiceProfileOut(BaseModel):
     user_id: str
     sample_audio_urls: list[str] = Field(default_factory=list)
     created_at: datetime
-    voice_embedding: dict[str, Any] | None = None
+    voice_embedding: list[float] | None = None
     embedding_status: str = "not_generated"
     embedding_updated_at: datetime | None = None
 
@@ -51,12 +53,12 @@ class UploadAudioResponse(BaseModel):
     url: str
 
 
-ALLOWED_AUDIO_CONTENT_TYPES: set[str] = {
-    "audio/webm",
+ALLOWED_AUDIO_CONTENT_TYPE_PREFIXES: tuple[str, ...] = (
+    "audio/webm",   # 包含 audio/webm;codecs=opus 等变体
     "audio/ogg",
     "audio/mpeg",
     "audio/wav",
-}
+)
 
 
 def _utc_now_naive() -> datetime:
@@ -69,23 +71,76 @@ def _url_to_local_path(url: str) -> Path:
     return VOICE_AUDIO_BASE_DIR / relative.lstrip("/")
 
 
+def _convert_to_wav(src: Path) -> Path | None:
+    """
+    用 ffmpeg 将任意格式音频（webm / ogg / mp3 等）转换为 16kHz 单声道 WAV。
+    转换成功返回临时文件路径，失败返回 None（临时文件会被清理）。
+    """
+    if src.suffix.lower() == ".wav":
+        return src  # 已经是 wav，无需转换
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    tmp.close()
+    tmp_path = Path(tmp.name)
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-i", str(src),
+                "-ar", "16000",
+                "-ac", "1",
+                "-f", "wav",
+                str(tmp_path),
+            ],
+            capture_output=True,
+            timeout=60,
+        )
+        if result.returncode != 0:
+            logger.warning(
+                "[VoiceProfile] ffmpeg 转换失败 %s: %s",
+                src, result.stderr.decode(errors="replace"),
+            )
+            tmp_path.unlink(missing_ok=True)
+            return None
+        return tmp_path
+    except Exception as e:
+        logger.warning("[VoiceProfile] ffmpeg 转换异常 %s: %s", src, e)
+        tmp_path.unlink(missing_ok=True)
+        return None
+
+
 def _generate_embedding(audio_paths: list[Path]) -> list[float]:
     """
     用 Resemblyzer embed_speaker 对多段音频生成聚合声纹向量。
     返回 256 维 list[float]，存入 jsonb。
     CPU 阻塞操作，调用方应放入线程池。
+    非 WAV 格式会先通过 ffmpeg 转换，避免 librosa 解码 WebM/OGG 失败。
     """
     encoder = VoiceEncoder()
     wavs = []
+    tmp_files: list[Path] = []   # 记录需要清理的临时文件
+
     for path in audio_paths:
         if not path.exists():
             logger.warning("[VoiceProfile] 音频文件不存在，跳过: %s", path)
             continue
         try:
-            wav = preprocess_wav(path)
+            # 非 wav 先转换，保证 librosa 能可靠读取
+            wav_path = _convert_to_wav(path)
+            if wav_path is None:
+                continue
+            if wav_path != path:
+                tmp_files.append(wav_path)
+
+            wav = preprocess_wav(wav_path)
             wavs.append(wav)
         except Exception as e:
             logger.warning("[VoiceProfile] 音频预处理失败，跳过 %s: %s", path, e)
+        finally:
+            # 清理本次循环产生的临时文件
+            for tmp in tmp_files:
+                tmp.unlink(missing_ok=True)
+            tmp_files.clear()
 
     if not wavs:
         raise ValueError("没有可用的音频文件，请重新上传样本")
@@ -305,10 +360,11 @@ async def upload_my_voice_sample(
             detail="最多支持 5 条语音样本",
         )
 
-    if file.content_type not in ALLOWED_AUDIO_CONTENT_TYPES:
+    content_type = file.content_type or ""
+    if not any(content_type.startswith(p) for p in ALLOWED_AUDIO_CONTENT_TYPE_PREFIXES):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="不支持的音频格式",
+            detail=f"不支持的音频格式: {content_type}",
         )
 
     ext = ".webm"

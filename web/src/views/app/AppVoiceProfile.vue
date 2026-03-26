@@ -36,10 +36,10 @@ function parseEmbeddingStatusLabel(): string {
 }
 
 function parseGeneratedAt(): string | null {
-  const emb = profile.value?.voice_embedding
-  if (!emb) return null
-  const raw = (emb as Record<string, unknown>).generated_at
-  if (typeof raw !== 'string') return null
+  // voice_embedding 是 number[]，没有 generated_at 字段；
+  // 改用 embedding_updated_at 作为"生成时间"展示
+  const raw = profile.value?.embedding_updated_at
+  if (!raw) return null
   return formatDateTimeToCST(raw)
 }
 

@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config_voice import VOICE_AUDIO_BASE_DIR, VOICE_AUDIO_PUBLIC_BASE_URL
 from ..db import get_db
-from ..voice_profiles import ALLOWED_AUDIO_CONTENT_TYPES, VoiceProfileOut, _row_to_profile
+from ..voice_profiles import ALLOWED_AUDIO_CONTENT_TYPE_PREFIXES, VoiceProfileOut, _row_to_profile
 from .deps import require_admin
 from .schemas import BatchDeleteRequest, BatchDeleteResponse, Page, PageMeta
 
@@ -373,10 +373,11 @@ async def admin_upload_audio_sample(
             detail="最多支持 5 条语音样本",
         )
 
-    if file.content_type not in ALLOWED_AUDIO_CONTENT_TYPES:
+    content_type = file.content_type or ""
+    if not any(content_type.startswith(p) for p in ALLOWED_AUDIO_CONTENT_TYPE_PREFIXES):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="不支持的音频格式",
+            detail=f"不支持的音频格式: {content_type}",
         )
 
     ext = ".webm"

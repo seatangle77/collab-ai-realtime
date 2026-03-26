@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import io
+import math
+import struct
 import uuid
 from typing import Any, Dict, Tuple
 
@@ -40,6 +42,42 @@ def _register_and_login(label: str) -> Tuple[Dict[str, Any], str]:
 
 def _auth(token: str) -> Dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+def _make_minimal_wav(duration_secs: float = 1.5, sample_rate: int = 16000) -> bytes:
+    """生成最小有效 WAV（单声道 440Hz 正弦波），供 Resemblyzer 可以真实处理。"""
+    n_samples = int(duration_secs * sample_rate)
+    samples = bytearray()
+    for i in range(n_samples):
+        val = int(16000 * math.sin(2 * math.pi * 440 * i / sample_rate))
+        samples += struct.pack("<h", val)
+    data = bytes(samples)
+    header = struct.pack(
+        "<4sI4s4sIHHIIHH4sI",
+        b"RIFF", 36 + len(data), b"WAVE",
+        b"fmt ", 16, 1, 1, sample_rate, sample_rate * 2, 2, 16,
+        b"data", len(data),
+    )
+    return header + data
+
+
+def _upload_real_wav_and_save(token: str) -> bool:
+    """上传真实 WAV 并保存到样本列表，返回是否成功。"""
+    wav_bytes = _make_minimal_wav()
+    r_upload = requests.post(
+        f"{BASE_URL}/api/voice-profile/me/upload-audio",
+        headers=_auth(token),
+        files={"file": ("sample.wav", io.BytesIO(wav_bytes), "audio/wav")},
+    )
+    if r_upload.status_code != 200:
+        return False
+    url = r_upload.json()["url"]
+    r_put = requests.put(
+        f"{BASE_URL}/api/voice-profile/me/samples",
+        headers=_auth(token),
+        json={"sample_audio_urls": [url]},
+    )
+    return r_put.status_code == 200
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -187,12 +225,9 @@ def scenario_generate_embedding_no_samples() -> bool:
 
 def scenario_generate_embedding_success() -> bool:
     _, token = _register_and_login("GenEmbOk")
-    # 先写入样本
-    requests.put(
-        f"{BASE_URL}/api/voice-profile/me/samples",
-        headers=_auth(token),
-        json={"sample_audio_urls": ["https://example.com/gen.wav"]},
-    ).raise_for_status()
+    # 上传真实 WAV（Resemblyzer 需要可读取的本地文件，假 URL 会导致 400）
+    if not _upload_real_wav_and_save(token):
+        return _log(False, "准备真实音频样本失败", None)
 
     r = requests.post(f"{BASE_URL}/api/voice-profile/me/generate-embedding", headers=_auth(token))
     if r.status_code != 200:
@@ -201,20 +236,23 @@ def scenario_generate_embedding_success() -> bool:
     ok = True
     ok &= data.get("embedding_status") == "ready"
     ok &= data.get("embedding_updated_at") is not None
-    emb = data.get("voice_embedding") or {}
-    ok &= isinstance(emb, dict) and "generated_at" in emb
-    return _log(ok, "POST /me/generate-embedding 成功场景，字段验证", data)
+    emb = data.get("voice_embedding")
+    # voice_embedding 现在是 list[float]（256 维），不再是占位 dict
+    ok &= isinstance(emb, list) and len(emb) == 256
+    return _log(ok, "POST /me/generate-embedding 成功场景，字段验证", {
+        "embedding_status": data.get("embedding_status"),
+        "embedding_updated_at": data.get("embedding_updated_at"),
+        "emb_len": len(emb) if isinstance(emb, list) else None,
+    })
 
 
 def scenario_generate_embedding_twice_updates_timestamp() -> bool:
     """连续调用两次，embedding_updated_at 应刷新（不同值）。"""
     import time
     _, token = _register_and_login("GenEmbTwice")
-    requests.put(
-        f"{BASE_URL}/api/voice-profile/me/samples",
-        headers=_auth(token),
-        json={"sample_audio_urls": ["https://example.com/twice.wav"]},
-    ).raise_for_status()
+    # 上传真实 WAV（假 URL 会导致 400）
+    if not _upload_real_wav_and_save(token):
+        return _log(False, "准备真实音频样本失败", None)
 
     r1 = requests.post(f"{BASE_URL}/api/voice-profile/me/generate-embedding", headers=_auth(token))
     r1.raise_for_status()

@@ -5,7 +5,7 @@ export interface VoiceProfileOut {
   user_id: string
   sample_audio_urls: string[]
   created_at: string
-  voice_embedding: Record<string, unknown> | null
+  voice_embedding: number[] | null
   embedding_status: string
   embedding_updated_at: string | null
 }

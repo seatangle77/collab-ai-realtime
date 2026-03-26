@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import io
+import math
+import struct
 import uuid
 from typing import Any, Dict, Tuple
 
@@ -47,6 +50,42 @@ def register_dummy_user_with_token(label: str) -> Tuple[Dict[str, Any], str]:
 
 def _auth_headers(token: str) -> Dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+def _make_minimal_wav(duration_secs: float = 1.5, sample_rate: int = 16000) -> bytes:
+    """生成最小有效 WAV（单声道 440Hz 正弦波），供 Resemblyzer 可以真实处理。"""
+    n_samples = int(duration_secs * sample_rate)
+    samples = bytearray()
+    for i in range(n_samples):
+        val = int(16000 * math.sin(2 * math.pi * 440 * i / sample_rate))
+        samples += struct.pack("<h", val)
+    data = bytes(samples)
+    header = struct.pack(
+        "<4sI4s4sIHHIIHH4sI",
+        b"RIFF", 36 + len(data), b"WAVE",
+        b"fmt ", 16, 1, 1, sample_rate, sample_rate * 2, 2, 16,
+        b"data", len(data),
+    )
+    return header + data
+
+
+def _upload_real_wav_and_save(token: str) -> bool:
+    """上传真实 WAV 并保存到样本列表，返回是否成功。"""
+    wav_bytes = _make_minimal_wav()
+    r_upload = requests.post(
+        f"{BASE_URL}/api/voice-profile/me/upload-audio",
+        headers=_auth_headers(token),
+        files={"file": ("sample.wav", io.BytesIO(wav_bytes), "audio/wav")},
+    )
+    if r_upload.status_code != 200:
+        return False
+    url = r_upload.json()["url"]
+    r_put = requests.put(
+        f"{BASE_URL}/api/voice-profile/me/samples",
+        headers=_auth_headers(token),
+        json={"sample_audio_urls": [url]},
+    )
+    return r_put.status_code == 200
 
 
 # ---------- 场景：GET /api/voice-profile/me ----------
@@ -177,14 +216,9 @@ def scenario_generate_embedding_requires_samples() -> bool:
 def scenario_generate_embedding_success_and_overwrite() -> bool:
     _, token = register_dummy_user_with_token("GenOk")
 
-    urls = [f"https://example.com/{uuid.uuid4().hex[:6]}.wav"]
-    r_samples = requests.put(
-        f"{BASE_URL}/api/voice-profile/me/samples",
-        headers=_auth_headers(token),
-        json={"sample_audio_urls": urls},
-    )
-    if r_samples.status_code != 200:
-        return _log(False, "准备样本失败（期望 200）", {"status_code": r_samples.status_code, "body": r_samples.text})
+    # 上传真实 WAV（Resemblyzer 需要可读取的本地文件）
+    if not _upload_real_wav_and_save(token):
+        return _log(False, "准备真实音频样本失败", None)
 
     r1 = requests.post(
         f"{BASE_URL}/api/voice-profile/me/generate-embedding",
@@ -193,9 +227,7 @@ def scenario_generate_embedding_success_and_overwrite() -> bool:
     if r1.status_code != 200:
         return _log(False, "第一次生成声纹失败（期望 200）", {"status_code": r1.status_code, "body": r1.text})
     data1 = r1.json()
-
-    emb1 = data1.get("voice_embedding") or {}
-    ts1 = emb1.get("generated_at")
+    emb1 = data1.get("voice_embedding")
 
     r2 = requests.post(
         f"{BASE_URL}/api/voice-profile/me/generate-embedding",
@@ -204,17 +236,22 @@ def scenario_generate_embedding_success_and_overwrite() -> bool:
     if r2.status_code != 200:
         return _log(False, "第二次生成声纹失败（期望 200）", {"status_code": r2.status_code, "body": r2.text})
     data2 = r2.json()
-
-    emb2 = data2.get("voice_embedding") or {}
-    ts2 = emb2.get("generated_at")
+    emb2 = data2.get("voice_embedding")
 
     ok = True
-    ok &= isinstance(emb1, dict) and isinstance(emb2, dict)
-    ok &= emb1.get("note") is not None and emb2.get("note") is not None
-    ok &= ts1 is not None and ts2 is not None
-    ok &= ts1 != ts2
+    ok &= isinstance(emb1, list) and len(emb1) == 256
+    ok &= isinstance(emb2, list) and len(emb2) == 256
+    ok &= data1.get("embedding_status") == "ready"
+    ok &= data2.get("embedding_status") == "ready"
+    ok &= data1.get("embedding_updated_at") is not None
+    ok &= data2.get("embedding_updated_at") is not None
 
-    return _log(ok, "有样本成功生成并可覆盖更新声纹场景", {"first": data1, "second": data2})
+    return _log(
+        ok,
+        "有样本成功生成并可覆盖更新声纹场景",
+        {"emb1_len": len(emb1) if isinstance(emb1, list) else None,
+         "emb2_len": len(emb2) if isinstance(emb2, list) else None},
+    )
 
 
 def scenario_generate_embedding_requires_auth() -> bool:
