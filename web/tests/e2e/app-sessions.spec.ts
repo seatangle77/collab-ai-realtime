@@ -103,6 +103,30 @@ async function createSessionViaApi(user: AppTestUser, groupId: string, title: st
   return { id: data.id, title: data.session_title }
 }
 
+async function startSessionViaApi(user: AppTestUser, sessionId: string): Promise<void> {
+  const { token } = await loginAndGetToken(user)
+  const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/start`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`start session failed: ${res.status} - ${text}`)
+  }
+}
+
+async function endSessionViaApi(user: AppTestUser, sessionId: string): Promise<void> {
+  const { token } = await loginAndGetToken(user)
+  const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/end`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`end session failed: ${res.status} - ${text}`)
+  }
+}
+
 async function loginViaUI(page: import('@playwright/test').Page, user: AppTestUser): Promise<void> {
   await page.goto('/app/login')
   await page.getByLabel('邮箱').fill(user.email)
@@ -170,11 +194,11 @@ test.describe.serial('App 我的会话页面 - 单用户完整流程', () => {
   })
 
   test('2. 初始无会话时展示空状态并可新建', async ({ page }) => {
-    const emptyText = page.getByText('当前筛选条件下暂无会话', { exact: false })
+    const emptyText = page.getByText('暂无会话', { exact: false })
     await expect(emptyText).toBeVisible()
 
     const title = `App E2E Session ${RUN_ID}`
-    await page.getByRole('button', { name: '新建会话' }).click()
+    await page.locator('.app-sessions-new-btn-inline').click()
 
     const dialog = page.getByRole('dialog', { name: '新建会话' })
     await expect(dialog).toBeVisible()
@@ -187,43 +211,36 @@ test.describe.serial('App 我的会话页面 - 单用户完整流程', () => {
   })
 
   test('3. 筛选 Tab：进行中 / 已结束 / 全部', async ({ page }) => {
+    test.setTimeout(90000)
     const titleActive = `App Filter Active ${RUN_ID}`
     const titleToEnd = `App Filter Ended ${RUN_ID}`
 
-    // 新建两个进行中会话
-    for (const t of [titleActive, titleToEnd]) {
-      await page.getByRole('button', { name: '新建会话' }).click()
-      const dialog = page.getByRole('dialog', { name: '新建会话' })
-      await dialog.getByLabel('会话标题').fill(t)
-      await dialog.getByRole('button', { name: '确 定' }).click()
-      // 以列表中能看到标题为准，避免依赖全局提示的时序
-      await expect(page.getByText(t, { exact: false })).toBeVisible()
-    }
+    // 新建 active 会话（UI）
+    await page.getByRole('button', { name: '新建会话' }).click()
+    const dialog = page.getByRole('dialog', { name: '新建会话' })
+    await dialog.getByLabel('会话标题').fill(titleActive)
+    await dialog.getByRole('button', { name: '确 定' }).click()
+    await expect(page.getByText(titleActive, { exact: false })).toBeVisible()
 
-    // 结束其中一个
-    const itemToEnd = page
-      .locator('.app-sessions-item')
-      .filter({ hasText: titleToEnd })
-      .first()
-    await expect(itemToEnd).toBeVisible()
-    await itemToEnd.getByRole('button', { name: '结束会话' }).click()
-    // 在 Element Plus 的确认弹窗中点击"结束"按钮，避免匹配到顶部 Tab「已结束」或其它按钮
-    const confirmDialog = page.getByRole('dialog', { name: '结束会话' })
-    await expect(confirmDialog).toBeVisible()
-    await confirmDialog.getByRole('button', { name: '结束' }).click()
-    await expect(page.getByText('会话已结束')).toBeVisible()
+    // 通过 API 创建并结束另一个会话（start → end），避免 UI 端触发麦克风权限
+    const toEnd = await createSessionViaApi(user, group.id, titleToEnd)
+    await startSessionViaApi(user, toEnd.id)
+    await endSessionViaApi(user, toEnd.id)
 
-    // 进行中：应只包含 active 会话
+    // 重新加载，使列表反映最新状态
+    await page.reload()
+    await expect(page.getByRole('heading', { name: '我的会话' })).toBeVisible()
+
+    // 进行中 Tab：只有 active 会话可见
     await page.getByRole('button', { name: '进行中' }).click()
     await expect(page.getByText(titleActive, { exact: false })).toBeVisible()
     await expect(page.getByText(titleToEnd, { exact: false })).toHaveCount(0)
 
-    // 已结束：应至少能看到一条已结束会话
+    // 已结束 Tab：至少有一条已结束会话
     await page.getByRole('button', { name: '已结束' }).click()
-    const endedItem = page.locator('.app-sessions-item').first()
-    await expect(endedItem).toBeVisible()
+    await expect(page.locator('.app-sessions-item').first()).toBeVisible()
 
-    // 全部：两个都能看到
+    // 全部 Tab：两个都能看到
     await page.getByRole('button', { name: '全部' }).click()
     await expect(page.getByText(titleActive, { exact: false })).toBeVisible()
     await expect(page.getByText(titleToEnd, { exact: false })).toBeVisible()
@@ -241,9 +258,10 @@ test.describe.serial('App 我的会话页面 - 单用户完整流程', () => {
     const item = page.locator('.app-sessions-item').filter({ hasText: originalTitle }).first()
     await expect(item).toBeVisible()
 
-    // 第一次编辑：会话处于「未开始」状态，应看到预设开始时间控件；这里只改时间，不改标题
-    await item.getByRole('button', { name: '编辑' }).click()
+    // 通过 ⋯ 下拉菜单点击「编辑标题」
+    await item.locator('.app-sessions-more-btn').click()
     let editDialog = page.getByRole('dialog', { name: '编辑会话' })
+    await page.getByRole('menuitem', { name: '编辑标题' }).click()
     await expect(editDialog).toBeVisible()
     await expect(editDialog.getByText('预设开始')).toBeVisible()
 
@@ -257,7 +275,7 @@ test.describe.serial('App 我的会话页面 - 单用户完整流程', () => {
     await expect(page.getByText(originalTitle, { exact: false })).toBeVisible()
   })
 
-  test('5. 查看转写：无记录时展示空状态', async ({ page }) => {
+  test('5. 点击会话进入详情页，无转写时展示空状态', async ({ page }) => {
     const title = `App Transcripts Empty ${RUN_ID}`
     await page.getByRole('button', { name: '新建会话' }).click()
     const dialog = page.getByRole('dialog', { name: '新建会话' })
@@ -265,19 +283,13 @@ test.describe.serial('App 我的会话页面 - 单用户完整流程', () => {
     await dialog.getByRole('button', { name: '确 定' }).click()
     await expect(page.getByText('创建会话成功')).toBeVisible()
 
-    // 列表中至少应出现一条会话记录；这里选择第一条即可，不强依赖标题匹配，降低对顺序/刷新时序的敏感度
-    const item = page.locator('.app-sessions-item').first()
+    // 点击会话行（非 ⋯ 按钮区域）进入详情页
+    const item = page.locator('.app-sessions-item').filter({ hasText: title }).first()
     await expect(item).toBeVisible()
+    await item.locator('.app-sessions-item-main').click()
 
-    await item.getByRole('button', { name: '查看转写' }).click()
-    const transcriptsDialog = page.getByRole('dialog', { name: new RegExp(`会话转写 - ${title}`) })
-    await expect(transcriptsDialog).toBeVisible()
-
-    const emptyText = transcriptsDialog.getByText('当前会话暂无转写记录', { exact: false })
-    await expect(emptyText).toBeVisible()
-
-    await transcriptsDialog.getByRole('button', { name: '关 闭' }).click()
-    await expect(transcriptsDialog).toBeHidden()
+    await expect(page).toHaveURL(/\/app\/sessions\/.+/)
+    await expect(page.locator('.app-session-detail-transcripts-empty')).toContainText('暂无转写记录')
   })
 })
 
@@ -355,8 +367,8 @@ test.describe.serial('App 我的会话页面 - 表单校验与边界', () => {
     await page.keyboard.press('Escape')
     await dialog.getByRole('button', { name: '取 消' }).click()
 
-    // 再次打开，应为初始空状态
-    await page.getByRole('button', { name: '新建会话' }).click()
+    // 再次打开，应为初始空状态（用行内 + 新建按钮，避免匹配到弹窗内确认按钮）
+    await page.locator('.app-sessions-new-btn-inline').click()
     dialog = page.getByRole('dialog', { name: '新建会话' })
     await expect(dialog).toBeVisible()
     await expect(dialog.getByLabel('会话标题')).toHaveValue('')
@@ -412,38 +424,63 @@ test.describe.serial('App 我的会话页面 - 表单校验与边界', () => {
     await expect(page.getByText(title, { exact: false })).toBeVisible()
   })
 
-  test('5.5 已结束会话的"结束会话"按钮禁用', async ({ page }) => {
-    const title = `App To End ${RUN_ID}`
+  test('5.5 ⋯ 菜单按状态显示正确的操作项（取消/结束/已结束无操作）', async ({ page }) => {
+    test.setTimeout(90000)
+    const title = `App Status Menu ${RUN_ID}`
 
-    // 创建一个会话
-    await page.getByRole('button', { name: '新建会话' }).click()
-    const dialog = page.getByRole('dialog', { name: '新建会话' })
-    await dialog.getByLabel('会话标题').fill(title)
-    await dialog.getByRole('button', { name: '确 定' }).click()
-    await expect(page.getByText('创建会话成功')).toBeVisible()
+    // 通过 API 创建会话，直接拿到 ID，避免页面 evaluate 跨端口问题
+    const created = await createSessionViaApi(user, group.id, title)
 
-    // 使用第一条会话记录，避免对标题精确匹配造成的脆弱性
-    const item = page.locator('.app-sessions-item').first()
+    // 加载页面，确保列表已显示
+    await page.goto('/app/sessions')
+    await expect(page.getByRole('heading', { name: '我的会话' })).toBeVisible()
+
+    const item = page.locator('.app-sessions-item').filter({ hasText: title }).first()
     await expect(item).toBeVisible()
 
-    // 第一次结束（在进行中 Tab 下）
-    await item.getByRole('button', { name: '结束会话' }).click()
+    // not_started：⋯ 菜单只有「取消会话」，没有「结束会话」
+    await item.locator('.app-sessions-more-btn').click()
+    await expect(page.getByRole('menuitem', { name: '取消会话' })).toBeVisible()
+    await expect(page.getByRole('menuitem', { name: '结束会话' })).not.toBeVisible()
+    await page.keyboard.press('Escape')
+
+    // 通过 API 发起会话（ongoing），避免 UI 端触发麦克风权限
+    await startSessionViaApi(user, created.id)
+
+    // 重新加载，使状态更新为 ongoing
+    await page.reload()
+    await expect(page.getByRole('heading', { name: '我的会话' })).toBeVisible()
+
+    const ongoingItem = page.locator('.app-sessions-item').filter({ hasText: title }).first()
+    await expect(ongoingItem).toBeVisible()
+
+    // ongoing：⋯ 菜单只有「结束会话」，没有「取消会话」
+    await ongoingItem.locator('.app-sessions-more-btn').click()
+    await expect(page.getByRole('menuitem', { name: '结束会话' })).toBeVisible()
+    await expect(page.getByRole('menuitem', { name: '取消会话' })).not.toBeVisible()
+
+    // 通过 ⋯ 菜单结束会话
+    await page.getByRole('menuitem', { name: '结束会话' }).click()
     const confirmDialog = page.getByRole('dialog', { name: '结束会话' })
     await expect(confirmDialog).toBeVisible()
     await confirmDialog.getByRole('button', { name: '结束' }).click()
     await expect(page.getByText('会话已结束')).toBeVisible()
 
-    // 切换到"已结束"Tab，再检查该会话的按钮状态
+    // 重新加载，确保已结束状态已写入后端，再切 Tab
+    await page.reload()
+    await expect(page.getByRole('heading', { name: '我的会话' })).toBeVisible()
     await page.getByRole('button', { name: '已结束' }).click()
     const endedItem = page.locator('.app-sessions-item').filter({ hasText: title }).first()
-    await expect(endedItem).toBeVisible()
+    await expect(endedItem).toBeVisible({ timeout: 15000 })
 
-    // 再次获取该条目的结束按钮，应处于禁用状态
-    const endBtn = endedItem.getByRole('button', { name: '结束会话' })
-    await expect(endBtn).toBeDisabled()
+    // ended：⋯ 菜单无「结束会话」也无「取消会话」，只有「编辑标题」
+    await endedItem.locator('.app-sessions-more-btn').click()
+    await expect(page.getByRole('menuitem', { name: '结束会话' })).not.toBeVisible()
+    await expect(page.getByRole('menuitem', { name: '取消会话' })).not.toBeVisible()
+    await expect(page.getByRole('menuitem', { name: '编辑标题' })).toBeVisible()
 
-    // 已结束会话仍然可以编辑标题，但不允许编辑时间
-    await endedItem.getByRole('button', { name: '编辑' }).click()
+    // 已结束会话仍可编辑标题，但无预设开始时间控件
+    await page.getByRole('menuitem', { name: '编辑标题' }).click()
     const editDialog = page.getByRole('dialog', { name: '编辑会话' })
     await expect(editDialog).toBeVisible()
     await expect(editDialog.getByPlaceholder('仅未开始会话可编辑')).toHaveCount(0)

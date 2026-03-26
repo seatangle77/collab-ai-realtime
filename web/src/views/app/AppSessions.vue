@@ -10,6 +10,7 @@ import {
   listGroupSessions,
   createSession,
   updateSession,
+  cancelSession,
   endSession,
 } from '../../api/appSessions'
 
@@ -131,8 +132,12 @@ function formatStatus(session: AppChatSession): string {
   return '进行中'
 }
 
+function canCancelSession(session: AppChatSession): boolean {
+  return session.status === 'not_started'
+}
+
 function canEndSession(session: AppChatSession): boolean {
-  return session.status !== 'ended'
+  return session.status === 'ongoing'
 }
 
 async function fetchSessions(filter: SessionFilter = activeFilter.value) {
@@ -274,6 +279,27 @@ async function submitEdit() {
       ElMessage.error(extractErrorMessage(err))
     }
   })
+}
+
+async function handleCancelSession(session: AppChatSession) {
+  if (!canCancelSession(session)) return
+  try {
+    await ElMessageBox.confirm('确认要取消这个会话吗？取消后将被删除，无法恢复。', '取消会话', {
+      type: 'warning',
+      confirmButtonText: '取消会话',
+      cancelButtonText: '返回',
+    })
+  } catch {
+    return
+  }
+  try {
+    await cancelSession(session.id)
+    ElMessage.success('会话已取消')
+    void fetchSessions(activeFilter.value)
+  } catch (err) {
+    console.error(err)
+    ElMessage.error(extractErrorMessage(err))
+  }
 }
 
 async function handleEndSession(session: AppChatSession) {
@@ -418,6 +444,7 @@ onMounted(() => {
               @click.stop
               @command="(cmd: string) => {
                 if (cmd === 'edit') openEditDialog(session)
+                if (cmd === 'cancel') handleCancelSession(session)
                 if (cmd === 'end') handleEndSession(session)
               }"
             >
@@ -432,8 +459,15 @@ onMounted(() => {
                 <el-dropdown-menu>
                   <el-dropdown-item command="edit">编辑标题</el-dropdown-item>
                   <el-dropdown-item
+                    v-if="canCancelSession(session)"
+                    command="cancel"
+                    class="app-sessions-dropdown-danger"
+                  >
+                    取消会话
+                  </el-dropdown-item>
+                  <el-dropdown-item
+                    v-if="canEndSession(session)"
                     command="end"
-                    :disabled="!canEndSession(session)"
                     class="app-sessions-dropdown-danger"
                   >
                     结束会话

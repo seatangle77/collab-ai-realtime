@@ -86,6 +86,10 @@ export async function updateSession(
   return appHttp.patch<AppChatSession>(`/api/sessions/${sessionId}`, payload)
 }
 
+export async function cancelSession(sessionId: string): Promise<void> {
+  return appHttp.delete<void>(`/api/sessions/${sessionId}`)
+}
+
 export async function endSession(sessionId: string): Promise<AppChatSession> {
   return appHttp.post<AppChatSession>(`/api/sessions/${sessionId}/end`)
 }

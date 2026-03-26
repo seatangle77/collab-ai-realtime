@@ -173,21 +173,22 @@ test.describe.serial('AppSessionDetail - 会话操作', () => {
     sessionId = await createSession(user.token, groupId, `Serial操作会话-${Date.now()}`)
   })
 
-  test('B-1: 未开始状态显示「开始会话」按钮', async ({ page }) => {
+  test('B-1: 未开始状态显示「发起」和「取消会话」按钮', async ({ page }) => {
     await loginViaUI(page, user)
     await page.goto(`/app/sessions/${sessionId}`)
 
     await expect(page.locator('.app-session-detail-status-tag')).toContainText('未开始')
-    await expect(page.getByRole('button', { name: '开始会话' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '发起' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '取消会话' })).toBeVisible()
   })
 
-  test('B-2: 点击「开始会话」后状态变为进行中', async ({ page }) => {
+  test('B-2: 点击「发起」后状态变为进行中', async ({ page }) => {
     await loginViaUI(page, user)
     await page.goto(`/app/sessions/${sessionId}`)
 
-    await page.getByRole('button', { name: '开始会话' }).click()
+    await page.getByRole('button', { name: '发起' }).click()
     await expect(page.locator('.app-session-detail-status-tag')).toContainText('进行中')
-    await expect(page.getByRole('button', { name: '开始会话' })).not.toBeVisible()
+    await expect(page.getByRole('button', { name: '发起' })).not.toBeVisible()
   })
 
   test('B-3: 点击「修改标题」弹出 prompt 并保存新标题', async ({ page }) => {
@@ -204,23 +205,26 @@ test.describe.serial('AppSessionDetail - 会话操作', () => {
     await expect(page.locator('.app-session-detail-title')).toContainText(newTitle)
   })
 
-  test('B-4: 点击「结束会话」弹出确认后状态变为已结束', async ({ page }) => {
+  test('B-4: 点击「结束」弹出确认后状态变为已结束', async ({ page }) => {
     await loginViaUI(page, user)
     await page.goto(`/app/sessions/${sessionId}`)
 
-    await page.getByRole('button', { name: '结束会话' }).click()
+    // 会话已 ongoing（B-2 发起后），显示 ⏹ 结束 按钮
+    await page.getByRole('button', { name: '结束' }).click()
     // ElMessageBox.confirm 是 Element Plus DOM 组件，scope 到 dialog 避免匹配到页面按钮
     await page.locator('.el-message-box').getByRole('button', { name: '结束' }).click()
 
     await expect(page.locator('.app-session-detail-status-tag')).toContainText('已结束')
   })
 
-  test('B-5: 已结束状态下「结束会话」按钮禁用', async ({ page }) => {
+  test('B-5: 已结束状态下发起和结束按钮均不可见', async ({ page }) => {
     await loginViaUI(page, user)
     await page.goto(`/app/sessions/${sessionId}`)
 
-    const endBtn = page.getByRole('button', { name: '结束会话' })
-    await expect(endBtn).toBeDisabled()
+    // 会话已结束，不再显示任何操作按钮
+    await expect(page.getByRole('button', { name: '结束' })).not.toBeVisible()
+    await expect(page.getByRole('button', { name: '发起' })).not.toBeVisible()
+    await expect(page.getByRole('button', { name: '取消会话' })).not.toBeVisible()
   })
 })
 
@@ -298,7 +302,7 @@ test.describe('AppSessionDetail - 边界异常', () => {
     await expect(page).toHaveURL(/\/app\/login/)
   })
 
-  test('D-3: 取消「结束会话」确认弹窗，状态不变', async ({ page }) => {
+  test('D-3: 取消「取消会话」确认弹窗，状态不变', async ({ page }) => {
     const user = await registerAndLogin('d3')
     const groupId = await createGroup(user.token, `D3取消结束群-${Date.now()}`)
     const sessionId = await createSession(user.token, groupId, `D3取消结束会话-${Date.now()}`)
@@ -306,8 +310,9 @@ test.describe('AppSessionDetail - 边界异常', () => {
     await loginViaUI(page, user)
     await page.goto(`/app/sessions/${sessionId}`)
 
-    await page.getByRole('button', { name: '结束会话' }).click()
-    await page.getByRole('button', { name: '取消' }).click()
+    // not_started 显示「取消会话」按钮；弹窗内的返回按钮文字为「返回」
+    await page.getByRole('button', { name: '取消会话' }).click()
+    await page.locator('.el-message-box').getByRole('button', { name: '返回' }).click()
 
     await expect(page.locator('.app-session-detail-status-tag')).toContainText('未开始')
   })

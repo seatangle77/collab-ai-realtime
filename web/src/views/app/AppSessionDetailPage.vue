@@ -10,6 +10,7 @@ import {
   type AppChatSession,
   type AppTranscript,
   startSession,
+  cancelSession,
   endSession,
   updateSession,
   listGroupSessions,
@@ -92,7 +93,8 @@ const statusLabel = computed(() => {
 
 const launching = ref(false)
 const canStart = computed(() => session.value?.status === 'not_started' && !launching.value)
-const canEnd = computed(() => session.value?.status !== 'ended')
+const canCancel = computed(() => session.value?.status === 'not_started')
+const canEnd = computed(() => session.value?.status === 'ongoing')
 
 const isHost = computed(() => {
   if (!session.value?.created_by) return true // 老数据兼容
@@ -183,10 +185,30 @@ async function handleLaunchSession() {
   }
 }
 
+async function handleCancel() {
+  if (!canCancel.value) return
+  try {
+    await ElMessageBox.confirm('确认要取消这个会话吗？取消后将被删除，无法恢复。', '取消会话', {
+      type: 'warning',
+      confirmButtonText: '取消会话',
+      cancelButtonText: '返回',
+    })
+  } catch {
+    return
+  }
+  try {
+    await cancelSession(sessionId)
+    ElMessage.success('会话已取消')
+    router.push({ name: 'AppSessions' })
+  } catch (err) {
+    ElMessage.error(extractErrorMessage(err))
+  }
+}
+
 async function handleEnd() {
   if (!canEnd.value) return
   try {
-    await ElMessageBox.confirm('确认要结束这个会话吗？结束后将标记为已结束。', '结束会话', {
+    await ElMessageBox.confirm('确认要结束这个会话吗？结束后将标记为已结束，录音同步停止。', '结束会话', {
       type: 'warning',
       confirmButtonText: '结束',
       cancelButtonText: '取消',
@@ -195,6 +217,11 @@ async function handleEnd() {
     return
   }
   try {
+    // 先停止录音、关闭 WS
+    stopRecording()
+    wsIntentionalClose = true
+    ws?.close(1000, 'host_ended')
+    // 再通知后端
     const updated = await endSession(sessionId)
     session.value = updated
     ElMessage.success('会话已结束')
@@ -612,28 +639,47 @@ onUnmounted(() => {
         </div>
         <div class="app-session-detail-actions">
           <template v-if="isHost">
+            <!-- not_started：发起 + 取消 -->
+            <template v-if="session.status === 'not_started'">
+              <button
+                type="button"
+                class="app-session-detail-primary-btn app-session-detail-icon-btn"
+                :disabled="!canStart"
+                @click="handleLaunchSession"
+                title="发起会话"
+              >
+                <span class="app-session-detail-btn-icon" aria-hidden="true">▶</span>
+                发起
+              </button>
+              <button
+                type="button"
+                class="app-session-detail-danger-btn"
+                @click="handleCancel"
+                title="取消会话"
+              >
+                取消会话
+              </button>
+            </template>
+            <!-- ongoing：结束 -->
+            <template v-else-if="session.status === 'ongoing'">
+              <button
+                type="button"
+                class="app-session-detail-danger-btn app-session-detail-icon-btn"
+                @click="handleEnd"
+                title="结束会话"
+              >
+                <span class="app-session-detail-btn-icon" aria-hidden="true">⏹</span>
+                结束
+              </button>
+            </template>
+            <!-- 修改标题（always visible for host when not ended） -->
             <button
-              v-if="canStart"
-              type="button"
-              class="app-session-detail-primary-btn"
-              @click="handleLaunchSession"
-            >
-              发起会话
-            </button>
-            <button
+              v-if="session.status !== 'ended'"
               type="button"
               class="app-session-detail-secondary-btn"
               @click="handleEditTitle"
             >
               修改标题
-            </button>
-            <button
-              type="button"
-              class="app-session-detail-danger-btn"
-              :disabled="!canEnd"
-              @click="handleEnd"
-            >
-              结束会话
             </button>
           </template>
           <button
@@ -817,8 +863,24 @@ onUnmounted(() => {
   cursor: pointer;
 }
 
-.app-session-detail-primary-btn:hover {
+.app-session-detail-primary-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.app-session-detail-primary-btn:not(:disabled):hover {
   background: #1d4ed8;
+}
+
+.app-session-detail-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.app-session-detail-btn-icon {
+  font-size: 12px;
+  line-height: 1;
 }
 
 .app-session-detail-secondary-btn {

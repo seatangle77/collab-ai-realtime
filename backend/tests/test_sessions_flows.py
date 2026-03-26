@@ -258,17 +258,24 @@ def scenario_start_session(ctx: Dict[str, Any]) -> bool:
 def scenario_end_session(ctx: Dict[str, Any]) -> bool:
     ok = True
 
-    # member 结束 session_1
+    # member 结束 session_1（ongoing）→ 200
     headers_member = {"Authorization": f"Bearer {ctx['member_token']}"}
     r = requests.post(
         f"{BASE_URL}/api/sessions/{ctx['session_id_1']}/end",
         headers=headers_member,
     )
     if r.status_code != 200:
-        return _log(False, "member 结束会话失败", {"status_code": r.status_code, "text": r.text})
-    ok &= _log(True, "member 结束会话场景", r.json())
+        return _log(False, "member 结束 ongoing 会话失败（期望 200）", {"status_code": r.status_code, "text": r.text})
+    ok &= _log(True, "member 结束 ongoing 会话场景", r.json())
 
-    # 默认列表不再包含 session_1，只包含 session_2
+    # session_id_2 是 not_started，member 结束应返回 400
+    r = requests.post(
+        f"{BASE_URL}/api/sessions/{ctx['session_id_2']}/end",
+        headers=headers_member,
+    )
+    ok &= _log(r.status_code == 400, "结束 not_started 会话返回 400 场景", {"status_code": r.status_code, "body": r.text})
+
+    # 默认列表不再包含 session_1，只包含 session_2 / session_3
     headers_leader = {"Authorization": f"Bearer {ctx['leader_token']}"}
     r = requests.get(f"{BASE_URL}/api/groups/{ctx['group_id']}/sessions", headers=headers_leader)
     if r.status_code != 200:
@@ -297,7 +304,7 @@ def scenario_end_session(ctx: Dict[str, Any]) -> bool:
         sessions,
     )
 
-    # outsider 结束会话应失败
+    # outsider 结束会话 → 403（权限检查先于状态检查）
     headers_outsider = {"Authorization": f"Bearer {ctx['outsider_token']}"}
     r = requests.post(
         f"{BASE_URL}/api/sessions/{ctx['session_id_2']}/end",
@@ -305,12 +312,66 @@ def scenario_end_session(ctx: Dict[str, Any]) -> bool:
     )
     ok &= _log(r.status_code == 403, "outsider 结束会话被禁止场景", {"status_code": r.status_code, "body": r.text})
 
-    # 结束不存在的会话
+    # 结束不存在的会话 → 404
     r = requests.post(
         f"{BASE_URL}/api/sessions/nonexistent-session/end",
         headers=headers_leader,
     )
     ok &= _log(r.status_code == 404, "结束不存在会话返回 404 场景", {"status_code": r.status_code, "body": r.text})
+
+    return ok
+
+
+def scenario_cancel_session(ctx: Dict[str, Any]) -> bool:
+    ok = True
+    headers_leader = {"Authorization": f"Bearer {ctx['leader_token']}"}
+    headers_member = {"Authorization": f"Bearer {ctx['member_token']}"}
+    headers_outsider = {"Authorization": f"Bearer {ctx['outsider_token']}"}
+
+    # 新建 not_started 会话用于取消
+    r = requests.post(
+        f"{BASE_URL}/api/groups/{ctx['group_id']}/sessions",
+        json={"session_title": "Session To Cancel"},
+        headers=headers_leader,
+    )
+    if r.status_code != 201:
+        return _log(False, "创建待取消会话失败（期望 201）", {"status_code": r.status_code, "text": r.text})
+    cancel_session_id = r.json()["id"]
+
+    # outsider 取消 → 403
+    r = requests.delete(f"{BASE_URL}/api/sessions/{cancel_session_id}", headers=headers_outsider)
+    ok &= _log(r.status_code == 403, "outsider 取消会话被禁止场景（403）", {"status_code": r.status_code, "body": r.text})
+
+    # 取消不存在的会话 → 404
+    r = requests.delete(f"{BASE_URL}/api/sessions/nonexistent-session", headers=headers_leader)
+    ok &= _log(r.status_code == 404, "取消不存在会话返回 404 场景", {"status_code": r.status_code, "body": r.text})
+
+    # 取消已结束的会话（session_id_1）→ 400
+    r = requests.delete(f"{BASE_URL}/api/sessions/{ctx['session_id_1']}", headers=headers_member)
+    ok &= _log(r.status_code == 400, "取消已结束的会话返回 400 场景", {"status_code": r.status_code, "body": r.text})
+
+    # 新建会话并发起，取消 ongoing → 400
+    r = requests.post(
+        f"{BASE_URL}/api/groups/{ctx['group_id']}/sessions",
+        json={"session_title": "Session Ongoing Cancel Test"},
+        headers=headers_leader,
+    )
+    if r.status_code != 201:
+        return _log(False, "创建 ongoing 测试会话失败", {"status_code": r.status_code, "text": r.text})
+    ongoing_sid = r.json()["id"]
+    requests.post(f"{BASE_URL}/api/sessions/{ongoing_sid}/start", headers=headers_leader)
+    r = requests.delete(f"{BASE_URL}/api/sessions/{ongoing_sid}", headers=headers_leader)
+    ok &= _log(r.status_code == 400, "取消 ongoing 会话返回 400 场景", {"status_code": r.status_code, "body": r.text})
+    # 清理：结束该会话
+    requests.post(f"{BASE_URL}/api/sessions/{ongoing_sid}/end", headers=headers_leader)
+
+    # 正常取消 not_started 会话 → 204
+    r = requests.delete(f"{BASE_URL}/api/sessions/{cancel_session_id}", headers=headers_leader)
+    ok &= _log(r.status_code == 204, "正常取消 not_started 会话成功（204）", {"status_code": r.status_code, "body": r.text})
+
+    # 取消后再次取消同一会话 → 404
+    r = requests.delete(f"{BASE_URL}/api/sessions/{cancel_session_id}", headers=headers_leader)
+    ok &= _log(r.status_code == 404, "已取消的会话再次取消返回 404 场景", {"status_code": r.status_code, "body": r.text})
 
     return ok
 
@@ -366,6 +427,7 @@ def run_all() -> bool:
     ok &= scenario_update_session_titles(ctx)
     ok &= scenario_start_session(ctx)
     ok &= scenario_end_session(ctx)
+    ok &= scenario_cancel_session(ctx)
     ok &= scenario_transcripts_permissions(ctx)
 
     print("\n=== Sessions 测试结果: {} ===".format("全部通过 ✅" if ok else "有失败 ❌"))

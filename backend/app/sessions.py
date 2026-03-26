@@ -486,6 +486,41 @@ async def start_session(
     return ChatSessionOut.model_validate(dict(row))
 
 
+@router.delete(
+    "/sessions/{session_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def cancel_session(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: Mapping[str, Any] = Depends(get_current_user),
+) -> None:
+    """
+    取消一个尚未开始的会话（物理删除）。
+    仅 not_started 状态的会话可以取消。
+    """
+    session_row, group_id = await _get_session_and_group(session_id, db)
+    await _get_group_or_404(group_id, db)
+    await _ensure_member_of_group(
+        group_id,
+        current_user["id"],
+        db,
+        forbidden_detail="仅群组成员可以取消会话",
+    )
+
+    if session_row["status"] != "not_started":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="仅未开始的会话可以取消",
+        )
+
+    await db.execute(
+        text("DELETE FROM chat_sessions WHERE id = :session_id"),
+        {"session_id": session_id},
+    )
+    await db.commit()
+
+
 @router.post(
     "/sessions/{session_id}/end",
     response_model=ChatSessionOut,
@@ -497,7 +532,7 @@ async def end_session(
 ) -> ChatSessionOut:
     """
     标记会话为已结束，设置 status = 'ended', ended_at = NOW()。
-    仅所属群组成员可操作。
+    仅进行中（ongoing）的会话可以结束。
     """
     session_row, group_id = await _get_session_and_group(session_id, db)
     await _get_group_or_404(group_id, db)
@@ -507,6 +542,12 @@ async def end_session(
         db,
         forbidden_detail="仅群组成员可以结束会话",
     )
+
+    if session_row["status"] != "ongoing":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="仅进行中的会话可以结束",
+        )
 
     result = await db.execute(
         text(

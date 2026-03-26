@@ -119,9 +119,9 @@ test.describe('E: isHost 权限控制', () => {
     await loginViaUI(page, host)
     await page.goto(`/app/sessions/${sessionId}`)
 
-    await expect(page.getByRole('button', { name: '发起会话' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '发起' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '取消会话' })).toBeVisible()
     await expect(page.getByRole('button', { name: '修改标题' })).toBeVisible()
-    await expect(page.getByRole('button', { name: '结束会话' })).toBeVisible()
     await expect(page.getByRole('button', { name: '离开会话' })).not.toBeVisible()
     await expect(page.locator('.app-session-detail-readonly-badge')).not.toBeVisible()
   })
@@ -134,9 +134,9 @@ test.describe('E: isHost 权限控制', () => {
     await expect(page.getByRole('button', { name: '离开会话' })).toBeVisible({ timeout: 15000 })
     await expect(page.locator('.app-session-detail-readonly-badge')).toBeVisible({ timeout: 15000 })
     await expect(page.locator('.app-session-detail-readonly-badge')).toContainText('只读')
-    await expect(page.getByRole('button', { name: '发起会话' })).not.toBeVisible()
+    await expect(page.getByRole('button', { name: '发起' })).not.toBeVisible()
     await expect(page.getByRole('button', { name: '修改标题' })).not.toBeVisible()
-    await expect(page.getByRole('button', { name: '结束会话' })).not.toBeVisible()
+    await expect(page.getByRole('button', { name: '取消会话' })).not.toBeVisible()
   })
 
   test('E-3: 成员点击「离开会话」跳转到 /app/sessions', async ({ page }) => {
@@ -157,7 +157,7 @@ test.describe('E: isHost 权限控制', () => {
 
     await expect(page.locator('.app-session-detail-loading')).not.toBeVisible({ timeout: 20000 })
     // 正常流程：host 看到主机按钮
-    await expect(page.getByRole('button', { name: '发起会话' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '发起' })).toBeVisible()
   })
 })
 
@@ -226,12 +226,12 @@ test.describe('G: handleLaunchSession 流程', () => {
     await loginViaUI(page, user)
     await page.goto(`/app/sessions/${sessionId}`)
 
-    await page.getByRole('button', { name: '发起会话' }).click()
+    await page.getByRole('button', { name: '发起' }).click()
 
     await expect(page.locator('.app-session-detail-status-tag')).toContainText('进行中', {
       timeout: 10000,
     })
-    await expect(page.getByRole('button', { name: '发起会话' })).not.toBeVisible()
+    await expect(page.getByRole('button', { name: '发起' })).not.toBeVisible()
   })
 
   test('G-2: 麦克风权限被拒绝 → 错误提示，状态保持「未开始」', async ({ page }) => {
@@ -253,7 +253,7 @@ test.describe('G: handleLaunchSession 流程', () => {
 
     await loginViaUI(page, user)
     await page.goto(`/app/sessions/${sessionId}`)
-    await page.getByRole('button', { name: '发起会话' }).click()
+    await page.getByRole('button', { name: '发起' }).click()
 
     await expect(page.locator('.el-message--error')).toContainText('麦克风', { timeout: 5000 })
     await expect(page.locator('.app-session-detail-status-tag')).toContainText('未开始')
@@ -269,7 +269,7 @@ test.describe('G: handleLaunchSession 流程', () => {
 
     await expect(page.locator('.app-session-detail-loading')).not.toBeVisible({ timeout: 20000 })
     await expect(page.locator('.app-session-detail-status-tag')).toContainText('进行中')
-    await expect(page.getByRole('button', { name: '发起会话' })).not.toBeVisible()
+    await expect(page.getByRole('button', { name: '发起' })).not.toBeVisible()
   })
 
   test('G-4: ended 会话进入 → 不显示「发起会话」，且不建立 WS', async ({ page }) => {
@@ -289,7 +289,7 @@ test.describe('G: handleLaunchSession 流程', () => {
 
     await expect(page.locator('.app-session-detail-loading')).not.toBeVisible({ timeout: 20000 })
     await expect(page.locator('.app-session-detail-status-tag')).toContainText('已结束')
-    await expect(page.getByRole('button', { name: '发起会话' })).not.toBeVisible()
+    await expect(page.getByRole('button', { name: '发起' })).not.toBeVisible()
     await page.waitForTimeout(1500)
     expect(wsAttempted).toBe(false)
   })
@@ -309,7 +309,7 @@ test.describe('G: handleLaunchSession 流程', () => {
 
     // 等 loading 结束，确保按钮可用再双击
     await expect(page.locator('.app-session-detail-loading')).not.toBeVisible({ timeout: 20000 })
-    const btn = page.getByRole('button', { name: '发起会话' })
+    const btn = page.getByRole('button', { name: '发起' })
     await expect(btn).toBeVisible()
     await btn.dblclick()
 
