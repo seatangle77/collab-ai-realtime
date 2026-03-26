@@ -31,6 +31,7 @@ def _row_to_ws_payload(row: Mapping[str, Any]) -> dict[str, Any]:
         "session_id",
         "user_id",
         "speaker",
+        "speaker_name",
         "text",
         "start",
         "end",
@@ -119,6 +120,19 @@ async def insert_speech_transcript_and_broadcast(
         await db.commit()
         row = result.mappings().one()
         payload = _row_to_ws_payload(row)
+
+        # 查说话人姓名：speaker 存的是 user_id，JOIN 得到 name
+        raw_speaker = payload.get("speaker")
+        if raw_speaker and raw_speaker not in ("unknown", "系统"):
+            name_row = await db.execute(
+                sa_text("SELECT name FROM users WHERE id = :uid"),
+                {"uid": raw_speaker},
+            )
+            name_result = name_row.mappings().first()
+            payload["speaker_name"] = name_result["name"] if name_result else None
+        else:
+            payload["speaker_name"] = None
+
         # 延迟导入，避免与 ws_sessions 循环依赖
         from .ws_sessions import broadcast_transcript
 

@@ -19,6 +19,7 @@ export interface AppTranscript {
   session_id: string
   user_id?: string | null
   speaker?: string | null
+  speaker_name?: string | null  // 展示用：后端 JOIN users.name，原始 uid 保留在 speaker
   text: string
   start: any
   end: any

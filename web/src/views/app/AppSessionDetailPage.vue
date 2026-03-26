@@ -381,6 +381,7 @@ function handleWsMessage(event: MessageEvent<string>) {
       session_id: d.session_id ?? sessionId,
       user_id: d.user_id,
       speaker: d.speaker,
+      speaker_name: d.speaker_name,
       text: d.text,
       start: d.start ?? '',
       end: d.end ?? '',
@@ -687,12 +688,12 @@ onUnmounted(() => {
             >
               <div class="app-session-detail-transcript-row">
                 <div class="app-session-detail-transcript-avatar" aria-hidden="true">
-                  {{ speakerInitial(item.speaker) }}
+                  {{ speakerInitial(item.speaker_name || item.speaker) }}
                 </div>
                 <div class="app-session-detail-transcript-body">
                   <div class="app-session-detail-transcript-meta">
                     <span class="app-session-detail-transcript-speaker">
-                      {{ item.speaker || '未知说话人' }}
+                      {{ item.speaker_name || item.speaker || '未知说话人' }}
                     </span>
                     <span class="app-session-detail-transcript-time">
                       {{ item.start }} - {{ item.end }}

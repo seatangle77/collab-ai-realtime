@@ -204,6 +204,7 @@ class TranscriptOut(BaseModel):
     session_id: str
     user_id: str | None = None
     speaker: str | None = None
+    speaker_name: str | None = None  # 展示用：JOIN users.name 得到，原始 uid 保留在 speaker
     text: str | None = None
     start: Any
     end: Any
@@ -310,20 +311,22 @@ async def list_session_transcripts(
         text(
             """
             SELECT
-                transcript_id,
-                group_id,
-                session_id,
-                user_id,
-                speaker,
-                text,
-                start,
-                "end",
-                duration,
-                confidence,
-                created_at
-            FROM speech_transcripts
-            WHERE session_id = :session_id
-            ORDER BY start ASC
+                t.transcript_id,
+                t.group_id,
+                t.session_id,
+                t.user_id,
+                t.speaker,
+                u.name AS speaker_name,
+                t.text,
+                t.start,
+                t."end",
+                t.duration,
+                t.confidence,
+                t.created_at
+            FROM speech_transcripts t
+            LEFT JOIN users u ON u.id = t.speaker
+            WHERE t.session_id = :session_id
+            ORDER BY t.start ASC
             """
         ),
         {"session_id": session_id},
