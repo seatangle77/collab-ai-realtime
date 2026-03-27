@@ -71,12 +71,22 @@ class AudioService:
         self.asr.start()
         logger.info("[AudioService] session=%s 启动完成", self.session_id)
 
-    async def handle_chunk(self, webm_bytes: bytes) -> None:
-        """收到前端 audio_chunk，写入 ffmpeg stdin"""
+    async def handle_chunk(self, audio_bytes: bytes, mime_type: str = "audio/webm") -> None:
+        """收到前端 audio_chunk，按格式路由处理"""
+        # Native(Android) AAC：每块单独转 PCM，直接写 ASR
+        if mime_type.startswith("audio/aac") or mime_type.startswith("audio/mp4"):
+            try:
+                pcm_bytes = await self._convert_aac_chunk_to_pcm(audio_bytes)
+                if pcm_bytes:
+                    self.asr.write(pcm_bytes)
+            except Exception as e:
+                logger.warning("[AudioService] session=%s AAC→PCM 转换失败: %s", self.session_id, e)
+            return
+
+        # Browser WebM：流式写入 ffmpeg 管道
         if self._ffmpeg_proc is None or self._ffmpeg_proc.stdin is None:
             return
 
-        # ffmpeg 进程存活检测（poll() 非 None 表示已退出）
         if self._ffmpeg_proc.poll() is not None:
             logger.error(
                 "[AudioService] session=%s ffmpeg 进程已退出(returncode=%s)，本 chunk 丢弃",
@@ -85,10 +95,27 @@ class AudioService:
             return
 
         try:
-            self._ffmpeg_proc.stdin.write(webm_bytes)
+            self._ffmpeg_proc.stdin.write(audio_bytes)
             self._ffmpeg_proc.stdin.flush()
         except (BrokenPipeError, OSError) as e:
             logger.warning("[AudioService] session=%s ffmpeg stdin 写入失败: %s", self.session_id, e)
+
+    async def _convert_aac_chunk_to_pcm(self, aac_bytes: bytes) -> bytes:
+        """将单个 ADTS AAC chunk 转换为 16kHz 单声道 s16le PCM"""
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-loglevel", "quiet",
+            "-f", "aac",       # ADTS AAC 流式输入
+            "-i", "pipe:0",
+            "-ar", "16000",
+            "-ac", "1",
+            "-f", "s16le",
+            "pipe:1",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await proc.communicate(aac_bytes)
+        return stdout
 
     async def _on_asr_result(self, text: str, audio_bytes: bytes) -> None:
         """

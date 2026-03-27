@@ -87,6 +87,13 @@ export function useAudioRecorder() {
     // 防息屏
     await KeepAwake.keepAwake()
 
+    // 防御：如果 native 插件上一次录音未正常释放（如直接返回列表），先强制停掉
+    try {
+      await VoiceRecorder.stopRecording()
+    } catch {
+      // 没有在录音时 stop 会抛错，忽略即可
+    }
+
     // 开始录音
     await VoiceRecorder.startRecording()
 

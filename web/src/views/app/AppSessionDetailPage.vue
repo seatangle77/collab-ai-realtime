@@ -159,12 +159,28 @@ async function handleLaunchSession() {
 
   try {
     // 1. 先检查麦克风权限（失败直接终止，无需回滚后端状态）
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      stream.getTracks().forEach((t) => t.stop())
-    } catch {
-      ElMessage.error('需要麦克风权限才能发起会话')
-      return
+    // Native(Android)：使用 VoiceRecorder 权限 API，避免 getUserMedia 占住麦克风导致 MICROPHONE_BEING_USED
+    // Browser：使用 getUserMedia 检查权限
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const { VoiceRecorder } = await import('capacitor-voice-recorder')
+        const perm = await VoiceRecorder.hasAudioRecordingPermission()
+        if (!perm.value) {
+          const req = await VoiceRecorder.requestAudioRecordingPermission()
+          if (!req.value) throw new Error('denied')
+        }
+      } catch {
+        ElMessage.error('需要麦克风权限才能发起会话')
+        return
+      }
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        stream.getTracks().forEach((t) => t.stop())
+      } catch {
+        ElMessage.error('需要麦克风权限才能发起会话')
+        return
+      }
     }
 
     // 2. 改会话状态为进行中

@@ -130,8 +130,9 @@ def _validate_audio_chunk(data: dict[str, Any]) -> tuple[bool, str | None]:
         return False, "seq 必须是非负整数"
 
     mime_type = data.get("mime_type")
-    if not isinstance(mime_type, str) or not mime_type.startswith("audio/webm"):
-        return False, "mime_type 必须为 audio/webm"
+    _ALLOWED_MIME_PREFIXES = ("audio/webm", "audio/aac", "audio/mp4")
+    if not isinstance(mime_type, str) or not any(mime_type.startswith(p) for p in _ALLOWED_MIME_PREFIXES):
+        return False, f"mime_type 不支持，仅接受 {', '.join(_ALLOWED_MIME_PREFIXES)}"
 
     audio_b64 = data.get("audio_b64")
     if not isinstance(audio_b64, str) or not audio_b64:
@@ -211,7 +212,8 @@ async def ws_session_endpoint(
 
                 seq = _data.get("seq")
                 audio_b64 = _data.get("audio_b64")
-                webm_bytes = base64.b64decode(audio_b64)
+                mime_type = _data.get("mime_type", "audio/webm")
+                audio_bytes = base64.b64decode(audio_b64)
 
                 # 先回 ACK
                 await websocket.send_json(build_audio_chunk_ack(seq))
@@ -227,10 +229,10 @@ async def ws_session_endpoint(
                     except Exception:
                         _logger.exception("AudioService 初始化失败 session_id=%s", session_id)
 
-                # 把 WebM bytes 交给 AudioService 处理
+                # 把音频 bytes 交给 AudioService 处理
                 if service is not None:
                     try:
-                        await service.handle_chunk(webm_bytes)
+                        await service.handle_chunk(audio_bytes, mime_type)
                     except Exception:
                         _logger.exception("handle_chunk 失败 session_id=%s seq=%s", session_id, seq)
                 continue
