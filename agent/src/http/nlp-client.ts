@@ -1,0 +1,116 @@
+import axios, { AxiosInstance } from 'axios';
+import { config } from '../config';
+import { createLogger } from '../logger';
+
+const logger = createLogger('nlp-client');
+
+// ── 响应类型 ──────────────────────────────────────────────────────────────────
+
+export interface SegmentResult {
+  tokens: string[];
+  token_count: number;
+  unique_count: number;
+  ttr: number;
+  arg_density: number;
+}
+
+export interface EmbedResult {
+  embeddings: number[][];
+}
+
+export interface SimilarityResult {
+  scores: number[];
+}
+
+export interface TfidfResult {
+  keywords: string[];
+  member_keyword_contexts: Record<string, Record<string, string>>;
+}
+
+export interface ReasoningResult {
+  has_reasoning: boolean;
+  has_evidence: boolean;
+  method: string;
+}
+
+// ── 客户端 ────────────────────────────────────────────────────────────────────
+
+function createNlpClient(): AxiosInstance {
+  return axios.create({
+    baseURL: config.nlp.baseUrl,
+    headers: {
+      'X-Admin-Token': config.nlp.adminToken,
+      'Content-Type': 'application/json',
+    },
+    timeout: 30_000,
+  });
+}
+
+const client = createNlpClient();
+
+// ── 接口封装 ──────────────────────────────────────────────────────────────────
+
+/** 中文分词 + TTR + arg_density */
+export async function segment(text: string): Promise<SegmentResult> {
+  try {
+    const res = await client.post<SegmentResult>('/api/nlp/segment', { text });
+    return res.data;
+  } catch (err) {
+    logger.error('segment failed', { message: (err as Error).message });
+    throw err;
+  }
+}
+
+/** 批量文本向量化 */
+export async function embed(texts: string[]): Promise<number[][]> {
+  if (texts.length === 0) return [];
+  try {
+    const res = await client.post<EmbedResult>('/api/nlp/embed', { texts });
+    return res.data.embeddings;
+  } catch (err) {
+    logger.error('embed failed', { message: (err as Error).message });
+    throw err;
+  }
+}
+
+/** 批量余弦相似度，pairs 数组长度和返回 scores 数组长度一致 */
+export async function similarity(
+  pairs: Array<{ vec_a: number[]; vec_b: number[] }>,
+): Promise<number[]> {
+  if (pairs.length === 0) return [];
+  try {
+    const res = await client.post<SimilarityResult>('/api/nlp/similarity', { pairs });
+    return res.data.scores;
+  } catch (err) {
+    logger.error('similarity failed', { message: (err as Error).message });
+    throw err;
+  }
+}
+
+/** TF-IDF 关键词提取，memberTexts = { user_id: 发言文本 } */
+export async function tfidf(
+  memberTexts: Record<string, string>,
+  topN = 5,
+): Promise<TfidfResult> {
+  try {
+    const res = await client.post<TfidfResult>('/api/nlp/tfidf', {
+      member_texts: memberTexts,
+      top_n: topN,
+    });
+    return res.data;
+  } catch (err) {
+    logger.error('tfidf failed', { message: (err as Error).message });
+    throw err;
+  }
+}
+
+/** 判断文本是否含论证结构 */
+export async function hasReasoning(text: string): Promise<ReasoningResult> {
+  try {
+    const res = await client.post<ReasoningResult>('/api/nlp/has_reasoning', { text });
+    return res.data;
+  } catch (err) {
+    logger.error('has_reasoning failed', { message: (err as Error).message });
+    throw err;
+  }
+}

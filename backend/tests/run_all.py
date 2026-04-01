@@ -34,6 +34,7 @@ TEST_SCRIPTS = [
     "test_admin_memberships.py",
     "test_admin_chat_sessions.py",
     "test_ws_sessions.py",
+    "test_nlp_api.py",
 ]
 
 

@@ -25,6 +25,12 @@ from .admin.discussion_rules import router as admin_discussion_rules_router
 from .push_logs import router as push_logs_router
 from .admin.push_logs import router as admin_push_logs_router
 from .ws_sessions import router as ws_sessions_router
+from .nlp.router import router as nlp_router
+from .nlp import embedder as nlp_embedder
+from .settings import nlp_settings
+from .info_gap import router as info_gap_router
+from .discussion_summary import router as discussion_summary_router
+from .window_metrics_api import router as window_metrics_router
 
 app = FastAPI()
 
@@ -67,6 +73,10 @@ app.include_router(admin_discussion_rules_router)
 app.include_router(push_logs_router)
 app.include_router(admin_push_logs_router)
 app.include_router(ws_sessions_router)
+app.include_router(nlp_router)
+app.include_router(info_gap_router)
+app.include_router(discussion_summary_router)
+app.include_router(window_metrics_router)
 
 # 本地开发环境下直接通过 FastAPI 提供音频静态访问能力，
 # 与生产环境中通过 Nginx 映射 /audio/voice-profiles 到挂载目录的行为保持一致。
@@ -92,3 +102,5 @@ async def _startup():
     # 避免未配置 DB_PASSWORD 时无法启动服务；需要验证连通性请访问 /db/ping
     if os.getenv("DB_PASSWORD"):
         await ping_db()
+    # 预加载 NLP sentence-transformers 模型，避免第一个请求冷启动延迟
+    nlp_embedder.load_model(nlp_settings.embed_model)

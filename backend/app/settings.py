@@ -68,3 +68,45 @@ class TencentASRSettings(BaseSettings):
 
 
 tencent_asr_settings = TencentASRSettings()
+
+
+class NLPSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="NLP_",
+        env_file=(
+            str(BACKEND_DIR / ".env.local"),
+            str(BACKEND_DIR / ".env.production"),
+            "/etc/collab-ai-realtime.env",
+        ),
+        extra="ignore",
+    )
+
+    # sentence-transformers 模型名，可通过环境变量 NLP_EMBED_MODEL 覆盖
+    embed_model: str = "paraphrase-multilingual-MiniLM-L12-v2"
+
+    # 论证判定 LLM：Qwen，模型名可通过环境变量 NLP_REASONING_MODEL 覆盖
+    # 香港区域使用国际端点，稳定性更好
+    reasoning_model: str = "qwen-plus"
+    qwen_api_key: str = Field(default="")
+    qwen_base_url: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+
+
+nlp_settings = NLPSettings()
+
+
+class JPushSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="JPUSH_",
+        env_file=(
+            str(BACKEND_DIR / ".env.local"),
+            str(BACKEND_DIR / ".env.production"),
+            "/etc/collab-ai-realtime.env",
+        ),
+        extra="ignore",
+    )
+
+    app_key: str = ""
+    master_secret: str = Field(default="")
+
+
+jpush_settings = JPushSettings()

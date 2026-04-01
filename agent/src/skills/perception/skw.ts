@@ -1,0 +1,122 @@
+import { getTranscriptsInWindow, writeKeywordSkw, KeywordSkwRow } from '../../db/queries';
+import { tfidf, embed, similarity } from '../../http/nlp-client';
+
+export interface SkwResult {
+  /**
+   * 全局关键词列表（来自 tfidf）
+   * keyword_skw 表已同步写入
+   */
+  keywords: string[];
+  /**
+   * keyword → { userA_id → { userB_id → skw_score } }
+   * 用于后续 info_gain 消费
+   */
+  scores: Record<string, Record<string, Record<string, number>>>;
+}
+
+/**
+ * Skw：关键词跨成员语义相似度
+ *
+ * 步骤：
+ * 1. 用 /tfidf 提取全局 top-N 关键词 + 每位成员的上下文句子
+ * 2. 对每个关键词，取每位成员的上下文句子做 embed
+ * 3. 对所有成员 pair (a, b) 计算余弦相似度 → skw_score
+ * 4. 写入 keyword_skw 表
+ */
+export async function computeSkw(
+  sessionId: string,
+  windowStart: Date,
+  windowEnd: Date,
+  memberIds: string[],
+): Promise<SkwResult> {
+  if (memberIds.length < 2) {
+    return { keywords: [], scores: {} };
+  }
+
+  const transcripts = await getTranscriptsInWindow(sessionId, windowStart, windowEnd);
+
+  // 聚合每位成员的发言文本
+  const textByUser: Record<string, string[]> = {};
+  for (const uid of memberIds) textByUser[uid] = [];
+  for (const t of transcripts) {
+    if (t.user_id && t.text) textByUser[t.user_id].push(t.text);
+  }
+
+  // 过滤掉无发言成员
+  const activeMemberTexts: Record<string, string> = {};
+  for (const uid of memberIds) {
+    const combined = textByUser[uid].join(' ').trim();
+    if (combined) activeMemberTexts[uid] = combined;
+  }
+
+  if (Object.keys(activeMemberTexts).length < 2) {
+    return { keywords: [], scores: {} };
+  }
+
+  const tfidfResult = await tfidf(activeMemberTexts, 5);
+  const { keywords, member_keyword_contexts } = tfidfResult;
+
+  if (keywords.length === 0) {
+    return { keywords: [], scores: {} };
+  }
+
+  const activeMembers = Object.keys(activeMemberTexts);
+  const skwRows: KeywordSkwRow[] = [];
+  const scores: SkwResult['scores'] = {};
+
+  for (const keyword of keywords) {
+    scores[keyword] = {};
+
+    // 收集各成员该关键词的上下文句子（无上下文则用全文）
+    const contextByUser: Record<string, string> = {};
+    for (const uid of activeMembers) {
+      contextByUser[uid] =
+        member_keyword_contexts[uid]?.[keyword] || activeMemberTexts[uid];
+    }
+
+    // 批量 embed
+    const texts = activeMembers.map((uid) => contextByUser[uid]);
+    const embeddings = await embed(texts);
+    const embeddingByUser: Record<string, number[]> = {};
+    activeMembers.forEach((uid, i) => {
+      embeddingByUser[uid] = embeddings[i];
+    });
+
+    // 所有 pair (a, b) 计算相似度
+    const pairs: Array<{ vec_a: number[]; vec_b: number[] }> = [];
+    const pairMeta: Array<{ userA: string; userB: string }> = [];
+
+    for (let i = 0; i < activeMembers.length; i++) {
+      for (let j = i + 1; j < activeMembers.length; j++) {
+        const userA = activeMembers[i];
+        const userB = activeMembers[j];
+        pairs.push({ vec_a: embeddingByUser[userA], vec_b: embeddingByUser[userB] });
+        pairMeta.push({ userA, userB });
+      }
+    }
+
+    const simScores = await similarity(pairs);
+
+    simScores.forEach((score, idx) => {
+      const { userA, userB } = pairMeta[idx];
+
+      if (!scores[keyword][userA]) scores[keyword][userA] = {};
+      if (!scores[keyword][userB]) scores[keyword][userB] = {};
+      scores[keyword][userA][userB] = score;
+      scores[keyword][userB][userA] = score;
+
+      skwRows.push({
+        session_id: sessionId,
+        window_start: windowStart,
+        keyword,
+        user_a_id: userA,
+        user_b_id: userB,
+        skw_score: score,
+      });
+    });
+  }
+
+  await writeKeywordSkw(skwRows);
+
+  return { keywords, scores };
+}

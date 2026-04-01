@@ -58,3 +58,26 @@ def build_session_ended(data: dict[str, Any]) -> dict[str, Any]:
         "type": "session_ended",
         "data": data,
     }
+
+
+def build_push_notification(content: str, target_user_id: str) -> dict[str, Any]:
+    return {
+        "type": "push_notification",
+        "data": {
+            "content": content,
+            "target_user_id": target_user_id,
+        },
+    }
+
+
+def build_info_gap_button(buttons: list[dict[str, Any]]) -> dict[str, Any]:
+    """
+    buttons 每项格式：
+    { "id": str, "keyword": str, "skw_score": float }
+    """
+    return {
+        "type": "info_gap_button",
+        "data": {
+            "buttons": buttons,
+        },
+    }

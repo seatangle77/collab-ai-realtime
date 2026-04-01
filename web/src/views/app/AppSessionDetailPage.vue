@@ -20,6 +20,9 @@ import {
 import { listMyGroups } from '../../api/appGroups'
 import { formatDateTimeToCST } from '../../utils/datetime'
 import { extractErrorMessage } from '../../utils/error'
+import PushNotification from '../../components/PushNotification.vue'
+import InfoGapButtons, { type InfoGapButton } from '../../components/InfoGapButtons.vue'
+import { appHttp } from '../../api/appHttp'
 
 interface AppUser {
   id: string
@@ -52,6 +55,35 @@ const pendingRecordingStart = ref(false)
 const metaExpanded = ref(false)
 const { onChunk, startRecording, stopRecording } = useAudioRecorder()
 const transcriptsListEl = ref<HTMLElement | null>(null)
+
+// ── 推送通知 ──────────────────────────────────────────────────────────────────
+const pushContent = ref('')
+const pushVisible = ref(false)
+
+function showPushNotification(content: string) {
+  pushContent.value = content
+  pushVisible.value = false
+  // 强制触发 watch（即使上一条还没消失也能重新触发）
+  requestAnimationFrame(() => { pushVisible.value = true })
+}
+
+// ── 信息缺口按钮 ──────────────────────────────────────────────────────────────
+const infoGapButtons = ref<InfoGapButton[]>([])
+
+async function fetchInfoGapButtons() {
+  try {
+    const data = await appHttp.get<InfoGapButton[]>(
+      `/api/sessions/${sessionId}/info-gap/buttons`,
+    )
+    infoGapButtons.value = data
+  } catch {
+    // 静默失败，不影响主流程
+  }
+}
+
+function handleInfoGapButtonClicked(buttonId: string) {
+  infoGapButtons.value = infoGapButtons.value.filter((b) => b.id !== buttonId)
+}
 
 const wsStatusLabel = computed(() => {
   switch (wsStatus.value) {
@@ -456,6 +488,21 @@ function handleWsMessage(event: MessageEvent<string>) {
     }
     return
   }
+  if (msgType === 'push_notification') {
+    const d = data as { content?: string; target_user_id?: string }
+    if (d.content) showPushNotification(d.content)
+    return
+  }
+  if (msgType === 'info_gap_button') {
+    const d = data as { buttons?: InfoGapButton[] }
+    if (Array.isArray(d.buttons)) {
+      // 合并去重（保留已点击的不再添加）
+      const existingIds = new Set(infoGapButtons.value.map((b) => b.id))
+      const newBtns = d.buttons.filter((b) => !existingIds.has(b.id))
+      infoGapButtons.value = [...infoGapButtons.value, ...newBtns]
+    }
+    return
+  }
 }
 
 function speakerInitial(speaker: string | null | undefined): string {
@@ -595,6 +642,7 @@ onMounted(async () => {
   // 仅会话已「进行中」时才自动连接 WS（如刷新页面场景）
   if (session.value?.status === 'ongoing') {
     openWebSocket()
+    void fetchInfoGapButtons()
   }
   window.addEventListener('beforeunload', handleBeforeUnload)
   if (Capacitor.isNativePlatform()) {
@@ -619,6 +667,13 @@ onUnmounted(() => {
 
 <template>
   <div class="app-session-detail-page">
+    <!-- 推送消息 Toast（fixed 定位，不占文档流） -->
+    <PushNotification
+      :content="pushContent"
+      :visible="pushVisible"
+      @dismissed="pushVisible = false"
+    />
+
     <div class="app-session-detail-back">
       <button type="button" class="app-session-detail-back-btn" @click="goBack">← 返回会话列表</button>
     </div>
@@ -708,6 +763,14 @@ onUnmounted(() => {
           </button>
         </div>
       </div>
+
+      <!-- 信息缺口关键词按钮（会话进行中时显示） -->
+      <InfoGapButtons
+        v-if="session.status === 'ongoing' && infoGapButtons.length > 0"
+        :session-id="sessionId"
+        :buttons="infoGapButtons"
+        @clicked="handleInfoGapButtonClicked"
+      />
 
       <div class="app-session-detail-transcripts">
         <h3 class="app-session-detail-transcripts-title">

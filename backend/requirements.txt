@@ -15,3 +15,10 @@ resemblyzer
 numpy
 librosa
 soundfile
+
+# NLP 微服务
+sentence-transformers
+jieba
+scikit-learn
+openai
+jpush
