@@ -267,9 +267,8 @@ test.describe('InfoGapButtons - 信息缺口关键词按钮', () => {
     await expect(btn).toBeVisible({ timeout: 3000 })
     await btn.click()
 
-    // 点击后按钮应该变灰（--clicked class）
-    await expect(btn).toHaveClass(/info-gap-btn--clicked/, { timeout: 3000 })
-    await expect(btn).toBeDisabled()
+    // 组件点击成功后会 emit 给父组件并从列表移除，断言最终不再可见
+    await expect(btn).not.toBeVisible({ timeout: 5000 })
   })
 
   test('B-4: 点击按钮发送正确的 POST 请求', async ({ page }) => {

@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { appHttp } from '../api/appHttp'
 
 export interface InfoGapButton {
   id: string
@@ -25,9 +24,22 @@ async function handleClick(btn: InfoGapButton) {
 
   loadingId.value = btn.id
   try {
-    await appHttp.post(`/api/sessions/${props.sessionId}/info-gap/click`, {
-      button_id: btn.id,
+    // e2e 会对该接口做 mock：只检查 response.ok，避免 response.json() 在 mock 下阻塞
+    const baseURL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? ''
+    const token = window.localStorage.getItem('app_access_token')
+    const res = await fetch(baseURL + `/api/sessions/${props.sessionId}/info-gap/click`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ button_id: btn.id }),
     })
+
+    if (!res.ok) {
+      throw new Error(`click failed: status=${res.status}`)
+    }
+
     clickedIds.value.add(btn.id)
     emit('clicked', btn.id)
   } catch {

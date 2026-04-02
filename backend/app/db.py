@@ -21,6 +21,7 @@ def get_engine() -> AsyncEngine:
 
     return create_async_engine(
         url,
+        connect_args={"ssl": False},
         pool_pre_ping=True,
     )
 

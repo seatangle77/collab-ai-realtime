@@ -141,16 +141,17 @@ async def click_info_gap_button(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="按钮已被点击或已过期")
 
     # 2. 更新按钮状态
-    now = datetime.now(timezone.utc)
+    # 这里避免把 Python datetime 传给 asyncpg，改用 DB NOW() 写入，
+    # 防止 timestamp/timestamptz 的 naive/aware 类型不一致导致 DataError。
     await db.execute(
         text(
             """
             UPDATE info_gap_buttons
-            SET status = 'clicked', clicked_at = :clicked_at
+            SET status = 'clicked', clicked_at = NOW()
             WHERE id = :button_id
             """
         ),
-        {"clicked_at": now, "button_id": body.button_id},
+        {"button_id": body.button_id},
     )
     await db.commit()
 
@@ -165,7 +166,7 @@ async def click_info_gap_button(
                push_channel, delivery_status, triggered_at)
             VALUES
               (:id, :session_id, :user_id, :content,
-               'app', 'pending', :triggered_at)
+               'app', 'pending', NOW())
             """
         ),
         {
@@ -173,7 +174,6 @@ async def click_info_gap_button(
             "session_id": session_id,
             "user_id": current_user["id"],
             "content": push_content,
-            "triggered_at": now,
         },
     )
     await db.commit()

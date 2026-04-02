@@ -21,9 +21,9 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="DB_",
         env_file=(
-            str(BACKEND_DIR / ".env.local"),  # 本地开发（不进git）
             str(BACKEND_DIR / ".env.production"),  # 服务器项目目录可选（不进git）
             "/etc/collab-ai-realtime.env",  # 线上更规范（不进git）
+            str(BACKEND_DIR / ".env.local"),  # 本地开发优先级最高（不进git）
         ),
         extra="ignore",
     )
@@ -54,9 +54,9 @@ class TencentASRSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="TENCENT_",
         env_file=(
-            str(BACKEND_DIR / ".env.local"),
             str(BACKEND_DIR / ".env.production"),
             "/etc/collab-ai-realtime.env",
+            str(BACKEND_DIR / ".env.local"),  # 本地开发优先级最高
         ),
         extra="ignore",
     )
@@ -74,9 +74,9 @@ class NLPSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="NLP_",
         env_file=(
-            str(BACKEND_DIR / ".env.local"),
             str(BACKEND_DIR / ".env.production"),
             "/etc/collab-ai-realtime.env",
+            str(BACKEND_DIR / ".env.local"),  # 本地开发优先级最高
         ),
         extra="ignore",
     )
@@ -98,9 +98,9 @@ class JPushSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="JPUSH_",
         env_file=(
-            str(BACKEND_DIR / ".env.local"),
             str(BACKEND_DIR / ".env.production"),
             "/etc/collab-ai-realtime.env",
+            str(BACKEND_DIR / ".env.local"),  # 本地开发优先级最高
         ),
         extra="ignore",
     )
