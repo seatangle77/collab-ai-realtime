@@ -51,6 +51,18 @@ export interface HistoricalKeyword {
   keyword: string;
 }
 
+// ── 工具函数 ──────────────────────────────────────────────────────────────────
+
+/**
+ * 将 JS Date 转为无时区的 UTC 字符串（如 "2026-04-03 07:55:13.000"）
+ * DB 里的 timestamp without time zone 存的是 UTC 裸值，
+ * 传参时必须也用裸 UTC 字符串，否则 pg 会先把 Date 转成本地时间再比较，
+ * 导致 UTC+8 环境下出现 8 小时偏移。
+ */
+function toUtcString(date: Date): string {
+  return date.toISOString().replace('T', ' ').replace('Z', '');
+}
+
 // ── 查询函数 ──────────────────────────────────────────────────────────────────
 
 /** 获取所有 ongoing 会话 */
@@ -83,7 +95,9 @@ export async function getTranscriptsInWindow(
   windowEnd: Date,
 ): Promise<Transcript[]> {
   const res = await pool.query<Transcript>(
-    `SELECT transcript_id, user_id, text, start, "end", duration
+    `SELECT transcript_id,
+            COALESCE(NULLIF(user_id, ''), NULLIF(speaker, ''), NULLIF(speaker, 'unknown')) AS user_id,
+            text, start, "end", duration
      FROM speech_transcripts
      WHERE session_id = $1
        AND start >= $2
@@ -91,7 +105,7 @@ export async function getTranscriptsInWindow(
        AND text IS NOT NULL
        AND text != ''
      ORDER BY start ASC`,
-    [sessionId, windowStart, windowEnd],
+    [sessionId, toUtcString(windowStart), toUtcString(windowEnd)],
   );
   return res.rows;
 }
@@ -102,13 +116,14 @@ export async function getLastSpeakEndPerUser(
   since: Date,
 ): Promise<Array<{ user_id: string; last_end: Date }>> {
   const res = await pool.query<{ user_id: string; last_end: Date }>(
-    `SELECT user_id, MAX("end") AS last_end
+    `SELECT COALESCE(NULLIF(user_id, ''), NULLIF(speaker, ''), NULLIF(speaker, 'unknown')) AS user_id,
+            MAX("end") AS last_end
      FROM speech_transcripts
      WHERE session_id = $1
        AND "end" >= $2
-       AND user_id IS NOT NULL
-     GROUP BY user_id`,
-    [sessionId, since],
+       AND COALESCE(NULLIF(user_id, ''), NULLIF(speaker, ''), NULLIF(speaker, 'unknown')) IS NOT NULL
+     GROUP BY COALESCE(NULLIF(user_id, ''), NULLIF(speaker, ''), NULLIF(speaker, 'unknown'))`,
+    [sessionId, toUtcString(since)],
   );
   return res.rows;
 }
@@ -136,7 +151,7 @@ export async function getHistoricalKeywords(
      FROM keyword_skw
      WHERE session_id = $1
        AND window_start < $2`,
-    [sessionId, before],
+    [sessionId, toUtcString(before)],
   );
   return res.rows;
 }
@@ -155,8 +170,8 @@ export async function writeWindowMetrics(row: WindowMetricsRow): Promise<void> {
       id,
       row.session_id,
       row.user_id,
-      row.window_start,
-      row.window_end,
+      toUtcString(row.window_start),
+      toUtcString(row.window_end),
       row.speaking_ratio,
       row.silence_s,
       row.ttr,
@@ -179,7 +194,7 @@ export async function writeKeywordSkw(rows: KeywordSkwRow[]): Promise<void> {
     values.push(
       'skw_' + nanoid(12),
       row.session_id,
-      row.window_start,
+      toUtcString(row.window_start),
       row.keyword,
       row.user_a_id,
       row.user_b_id,

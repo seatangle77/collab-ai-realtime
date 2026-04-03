@@ -34,15 +34,63 @@ class MyASRListener(SpeechRecognitionListener):
         self.sentence_frames = []
 
     def on_sentence_end(self, response):
-        text = response["result"]["voice_text_str"]
-        audio_bytes = b"".join(self.sentence_frames)
+        """
+        在腾讯返回的一句内部，再按 0.6 秒静音做二次分段。
+        逻辑：
+          - 从 result.word_list 中读取每个词的 start_time / end_time（毫秒）
+          - 相邻两个词之间的间隔 >= 600ms 视为一个“停顿点”，在此处分割
+          - 对每一小段，拼接文本并调用外部 on_result(text, audio_bytes)
+        """
+        result = response.get("result") or {}
+        word_list = result.get("word_list") or []
+
+        # 若没有词级时间戳，退回到原来的整句逻辑
+        if not word_list:
+            text = result.get("voice_text_str", "")
+            audio_bytes = b"".join(self.sentence_frames)
+            self.sentence_frames = []
+            if text:
+                asyncio.run_coroutine_threadsafe(
+                    self.on_result(text, audio_bytes),
+                    self.loop,
+                )
+            return
+
+        # 按 0.6 秒静音切分
+        SIL_GAP_MS = 600
+        segments: list[list[dict]] = []
+        current_segment: list[dict] = [word_list[0]]
+        last_end = word_list[0].get("end_time", 0)
+
+        for w in word_list[1:]:
+            start = w.get("start_time", last_end)
+            end = w.get("end_time", start)
+            gap = start - last_end
+
+            if gap >= SIL_GAP_MS and current_segment:
+                segments.append(current_segment)
+                current_segment = [w]
+            else:
+                current_segment.append(w)
+
+            last_end = end
+
+        if current_segment:
+            segments.append(current_segment)
+
+        # 目前先简单使用整句音频作为每一小段的 audio_bytes
+        # 这样可以复用现有的声纹识别与写库逻辑，代价是会多次重复利用同一段音频。
+        full_audio = b"".join(self.sentence_frames)
         self.sentence_frames = []
 
-        # ASR 回调在子线程，桥接回 asyncio event loop
-        asyncio.run_coroutine_threadsafe(
-            self.on_result(text, audio_bytes),
-            self.loop,
-        )
+        for seg_words in segments:
+            seg_text = "".join(w.get("word", "") for w in seg_words).strip()
+            if not seg_text:
+                continue
+            asyncio.run_coroutine_threadsafe(
+                self.on_result(seg_text, full_audio),
+                self.loop,
+            )
 
     def on_fail(self, response):
         logger.error(

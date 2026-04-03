@@ -67,6 +67,27 @@ function showPushNotification(content: string) {
   requestAnimationFrame(() => { pushVisible.value = true })
 }
 
+// ── AI 分析倒计时 ─────────────────────────────────────────────────────────────
+const AGENT_INTERVAL_S = 120
+const agentCountdown = ref(AGENT_INTERVAL_S)
+let agentCountdownTimer: ReturnType<typeof setInterval> | null = null
+
+function startAgentCountdown() {
+  stopAgentCountdown()
+  agentCountdown.value = AGENT_INTERVAL_S
+  agentCountdownTimer = setInterval(() => {
+    agentCountdown.value -= 1
+    if (agentCountdown.value <= 0) agentCountdown.value = AGENT_INTERVAL_S
+  }, 1000)
+}
+
+function stopAgentCountdown() {
+  if (agentCountdownTimer !== null) {
+    clearInterval(agentCountdownTimer)
+    agentCountdownTimer = null
+  }
+}
+
 // ── 信息缺口按钮 ──────────────────────────────────────────────────────────────
 const infoGapButtons = ref<InfoGapButton[]>([])
 
@@ -228,6 +249,7 @@ async function handleLaunchSession() {
     pendingRecordingStart.value = true
     wsIntentionalClose = false
     openWebSocket()
+    startAgentCountdown()
   } finally {
     launching.value = false
   }
@@ -267,6 +289,7 @@ async function handleEnd() {
   try {
     // 先停止录音、关闭 WS
     stopRecording()
+    stopAgentCountdown()
     wsIntentionalClose = true
     ws?.close(1000, 'host_ended')
     // 再通知后端
@@ -478,6 +501,7 @@ function handleWsMessage(event: MessageEvent<string>) {
       session.value = { ...session.value, status: 'ended' }
     }
     stopRecording()
+    stopAgentCountdown()
     wsIntentionalClose = true
     ws?.close(1000, 'session_ended')
     void loadTranscripts()
@@ -722,6 +746,7 @@ onMounted(async () => {
   if (session.value?.status === 'ongoing') {
     openWebSocket()
     void fetchInfoGapButtons()
+    startAgentCountdown()
   }
   window.addEventListener('beforeunload', handleBeforeUnload)
   if (Capacitor.isNativePlatform()) {
@@ -739,6 +764,7 @@ onUnmounted(() => {
   appStateListener = null
   unmounted = true
   stopRecording()
+  stopAgentCountdown()
   closeWsForUnmount()
   wsStatus.value = 'disconnected'
 })
@@ -848,6 +874,12 @@ onUnmounted(() => {
         @clicked="handleInfoGapButtonClicked"
       />
 
+      <!-- AI 分析倒计时（会话进行中时显示） -->
+      <div v-if="session.status === 'ongoing'" class="app-agent-status-bar">
+        <span class="app-agent-status-dot" aria-hidden="true"></span>
+        AI 分析中 &nbsp;·&nbsp; 下次更新 {{ agentCountdown }}s 后
+      </div>
+
       <div class="app-session-detail-transcripts">
         <h3 class="app-session-detail-transcripts-title">
           转写记录
@@ -923,6 +955,33 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.app-agent-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px;
+  margin-bottom: 12px;
+  border-radius: 8px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  font-size: 12px;
+  color: #15803d;
+}
+
+.app-agent-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #22c55e;
+  flex-shrink: 0;
+  animation: agent-dot-pulse 2s ease-in-out infinite;
+}
+
+@keyframes agent-dot-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
 .app-session-detail-page {
   max-width: 860px;
   margin: 0 auto;
