@@ -17,3 +17,5 @@ backend/local-voice-audio/
 # Claude / AI assistant metadata
 .claude/
 web/.claude/
+
+demo_app/*

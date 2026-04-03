@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from 'vue-router'
 import { computed } from 'vue'
+import type { Component } from 'vue'
+import { HomeFilled, User, ChatLineRound, Microphone } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -17,14 +19,35 @@ interface AppGroupSummary {
   name: string
 }
 
-const tabs = computed(() => [
-  { path: '/app', label: '首页', icon: '🏠' },
-  { path: '/app/groups', label: '群组', icon: '👥' },
-  { path: '/app/sessions', label: '会话', icon: '💬' },
-  { path: '/app/voice-profile', label: '声纹', icon: '🎙️' },
-])
+interface TabItem {
+  path: string
+  label: string
+  icon: Component
+}
 
-const active = computed(() => (route.path.startsWith('/app') ? route.path : '/app'))
+const tabs: TabItem[] = [
+  { path: '/app', label: '首页', icon: HomeFilled },
+  { path: '/app/groups', label: '群组', icon: User },
+  { path: '/app/sessions', label: '会话', icon: ChatLineRound },
+  { path: '/app/voice-profile', label: '声纹', icon: Microphone },
+]
+
+function isTabActive(tabPath: string): boolean {
+  const p = route.path
+  if (tabPath === '/app') {
+    return p === '/app' || p === '/app/'
+  }
+  if (tabPath === '/app/groups') {
+    return p.startsWith('/app/groups')
+  }
+  if (tabPath === '/app/sessions') {
+    return p.startsWith('/app/sessions')
+  }
+  if (tabPath === '/app/voice-profile') {
+    return p.startsWith('/app/voice-profile')
+  }
+  return false
+}
 
 const isLoggedIn = computed(() => {
   if (typeof window === 'undefined') return false
@@ -81,7 +104,7 @@ function logout() {
         </span>
         <button
           v-if="!isLoggedIn"
-          class="app-auth-btn"
+          class="app-auth-btn app-auth-btn--login"
           type="button"
           @click="goAuth"
         >
@@ -110,9 +133,9 @@ function logout() {
         :key="tab.path"
         :to="tab.path"
         class="app-tab-item"
-        :class="{ 'app-tab-item--active': active === tab.path }"
+        :class="{ 'app-tab-item--active': isTabActive(tab.path) }"
       >
-        <span class="app-tab-icon">{{ tab.icon }}</span>
+        <component :is="tab.icon" class="app-tab-icon-svg" aria-hidden="true" />
         <span class="app-tab-label">{{ tab.label }}</span>
       </RouterLink>
     </nav>
@@ -124,20 +147,21 @@ function logout() {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background: #f9fafb;
+  background: var(--app-bg-page);
 }
 
-/* ── Header ── */
+/* ── Header（约 56px，与 demo h-14 对齐）── */
 .app-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 16px;
-  background: rgba(255, 255, 255, 0.96);
-  border-bottom: 1px solid rgba(229, 231, 235, 0.7);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+  min-height: 56px;
+  padding: 0 16px;
+  background: rgba(255, 255, 255, 0.8);
+  border-bottom: 1px solid var(--app-border);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--app-shadow-card);
   position: sticky;
   top: 0;
   z-index: 100;
@@ -146,21 +170,22 @@ function logout() {
 .app-logo {
   font-size: 18px;
   font-weight: 700;
-  color: #111827;
+  color: var(--app-text-primary);
   letter-spacing: 0.02em;
 }
 
 .app-header-right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  min-width: 0;
 }
 
 .app-user-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: #111827;
-  max-width: 80px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--app-text-secondary);
+  max-width: 96px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -168,60 +193,76 @@ function logout() {
 
 .app-current-group {
   font-size: 12px;
-  color: #6b7280;
-  background: #f3f4f6;
-  padding: 2px 8px;
+  font-weight: 500;
+  color: var(--app-text-secondary);
+  background: var(--app-bg-page);
+  border: 1px solid var(--app-border);
+  padding: 2px 10px;
   border-radius: 999px;
-  max-width: 80px;
+  max-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .app-auth-btn {
-  border-radius: 999px;
-  border: 1px solid #2563eb;
-  padding: 6px 14px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  padding: 6px 12px;
   font-size: 13px;
-  background: #2563eb;
-  color: #ffffff;
+  font-weight: 500;
+  font-family: inherit;
   cursor: pointer;
-  transition: background-color 0.18s ease;
+  transition:
+    background-color 0.18s ease,
+    color 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.app-auth-btn--login {
+  border: 1px solid var(--app-primary);
+  background: var(--app-primary);
+  color: #fff;
+}
+
+.app-auth-btn--login:hover {
+  background: var(--app-primary-hover);
+  border-color: var(--app-primary-hover);
 }
 
 .app-auth-btn--logout {
+  border: 1px solid transparent;
   background: transparent;
-  color: #6b7280;
-  border-color: #d1d5db;
+  color: var(--app-text-secondary);
 }
 
 .app-auth-btn--logout:hover {
-  background: #f3f4f6;
+  background: var(--app-bg-page);
+  color: var(--app-text-primary);
 }
 
 /* ── 主内容区 ── */
 .app-main {
   flex: 1;
-  padding: 16px 16px 80px; /* 底部留出 tab bar 高度 */
+  padding: 16px 16px 88px; /* 底部留出 tab bar + 安全区 */
   overflow-y: auto;
 }
 
-/* ── 底部 Tab Bar ── */
+/* ── 底部 Tab Bar（约 64px + safe-area）── */
 .app-tabbar {
   position: fixed;
   bottom: 0;
   left: 0;
   right: 0;
-  height: 60px;
+  min-height: 64px;
   display: flex;
   align-items: stretch;
-  background: rgba(255, 255, 255, 0.97);
-  border-top: 1px solid rgba(229, 231, 235, 0.8);
+  background: rgba(255, 255, 255, 0.96);
+  border-top: 1px solid var(--app-border);
   box-shadow: 0 -2px 12px rgba(15, 23, 42, 0.06);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   z-index: 200;
-  /* 兼容 iPhone 底部安全区 */
   padding-bottom: env(safe-area-inset-bottom);
 }
 
@@ -231,23 +272,30 @@ function logout() {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 4px;
+  padding: 8px 4px;
   text-decoration: none;
-  color: #9ca3af;
+  color: var(--app-text-muted);
   transition: color 0.18s ease;
 }
 
 .app-tab-item--active {
-  color: #2563eb;
+  color: var(--app-primary);
 }
 
-.app-tab-icon {
-  font-size: 20px;
-  line-height: 1;
+.app-tab-icon-svg {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
 }
 
 .app-tab-label {
-  font-size: 11px;
-  font-weight: 500;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.app-tab-item--active .app-tab-label {
+  font-weight: 600;
 }
 </style>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { User, ChatLineRound, Microphone } from '@element-plus/icons-vue'
 
 interface AppUser {
   id: string
@@ -37,23 +38,57 @@ const currentGroup = computed<AppGroupSummary | null>(() => {
 
 <template>
   <div class="app-home">
-    <div class="app-home-card">
-      <h2 class="app-home-title">
-        欢迎回来，{{ currentUser?.name || currentUser?.email || 'Collab AI 用户' }}
-      </h2>
-      <p v-if="currentUser?.email" class="app-home-subtitle">
-        邮箱：{{ currentUser.email }}
-      </p>
-      <p class="app-home-group">
-        <span class="app-home-group-label">当前群组：</span>
-        <span class="app-home-group-value">
-          {{ currentGroup?.name || '未选择，请前往「我的群组」选择' }}
-        </span>
-      </p>
-      <p class="app-home-desc">
-        这里将是普通用户使用协作与会话功能的入口。你可以在「我的群组」中加入或管理协作群组，
-        在「我的会话」中查看与 Collab AI 的历史会话，在「我的声纹」中管理声纹样本并生成声纹。
-      </p>
+    <div class="app-home-stack">
+      <div class="app-home-card">
+        <h2 class="app-home-title">
+          欢迎回来，{{ currentUser?.name || currentUser?.email || 'Collab AI 用户' }}
+        </h2>
+        <p v-if="currentUser?.email" class="app-home-subtitle">
+          邮箱：{{ currentUser.email }}
+        </p>
+        <p class="app-home-group">
+          <span class="app-home-group-label">当前群组：</span>
+          <span class="app-home-group-value">
+            {{ currentGroup?.name || '未选择，请前往「我的群组」选择' }}
+          </span>
+        </p>
+        <p class="app-home-desc">
+          这里将是普通用户使用协作与会话功能的入口。你可以在「我的群组」中加入或管理协作群组，
+          在「我的会话」中查看与 Collab AI 的历史会话，在「我的声纹」中管理声纹样本并生成声纹。
+        </p>
+      </div>
+
+      <div class="app-home-quick-grid">
+        <RouterLink class="app-home-quick" to="/app/groups">
+          <div class="app-home-quick-icon app-home-quick-icon--groups">
+            <User class="app-home-quick-svg" aria-hidden="true" />
+          </div>
+          <div class="app-home-quick-text">
+            <p class="app-home-quick-name">我的群组</p>
+            <p class="app-home-quick-hint">管理协作群组</p>
+          </div>
+        </RouterLink>
+
+        <RouterLink class="app-home-quick" to="/app/sessions">
+          <div class="app-home-quick-icon app-home-quick-icon--sessions">
+            <ChatLineRound class="app-home-quick-svg" aria-hidden="true" />
+          </div>
+          <div class="app-home-quick-text">
+            <p class="app-home-quick-name">我的会话</p>
+            <p class="app-home-quick-hint">查看历史会话</p>
+          </div>
+        </RouterLink>
+
+        <RouterLink class="app-home-quick" to="/app/voice-profile">
+          <div class="app-home-quick-icon app-home-quick-icon--voice">
+            <Microphone class="app-home-quick-svg" aria-hidden="true" />
+          </div>
+          <div class="app-home-quick-text">
+            <p class="app-home-quick-name">我的声纹</p>
+            <p class="app-home-quick-hint">管理声纹样本</p>
+          </div>
+        </RouterLink>
+      </div>
     </div>
   </div>
 </template>
@@ -64,51 +99,135 @@ const currentGroup = computed<AppGroupSummary | null>(() => {
   justify-content: center;
 }
 
-.app-home-card {
+.app-home-stack {
   width: 100%;
   max-width: 720px;
-  padding: 20px 22px;
-  border-radius: 16px;
-  background: #ffffff;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
-  border: 1px solid #e5e7eb;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.app-home-card {
+  width: 100%;
+  padding: 22px 22px;
+  border-radius: var(--app-radius-lg);
+  background: var(--app-bg-elevated);
+  box-shadow: var(--app-shadow-soft);
+  border: 1px solid var(--app-border);
 }
 
 .app-home-title {
   margin: 0 0 8px;
-  font-size: 20px;
-  font-weight: 600;
-  color: #111827;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--app-text-primary);
+  letter-spacing: -0.02em;
 }
 
 .app-home-subtitle {
   margin: 0 0 12px;
-  font-size: 13px;
-  color: #6b7280;
+  font-size: 14px;
+  color: var(--app-text-secondary);
 }
 
 .app-home-group {
   margin: 0 0 12px;
-  font-size: 13px;
+  font-size: 14px;
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
+  align-items: baseline;
   gap: 4px;
 }
 
 .app-home-group-label {
-  color: #6b7280;
+  color: var(--app-text-secondary);
 }
 
 .app-home-group-value {
   font-weight: 500;
-  color: #111827;
+  color: var(--app-text-primary);
 }
 
 .app-home-desc {
   margin: 0;
-  font-size: 13px;
-  line-height: 1.6;
-  color: #4b5563;
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--app-text-secondary);
+}
+
+/* 快捷入口：2 列，第三块自动换行 */
+.app-home-quick-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.app-home-quick {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border-radius: var(--app-radius-md);
+  background: var(--app-bg-elevated);
+  border: 1px solid var(--app-border);
+  box-shadow: var(--app-shadow-card);
+  text-decoration: none;
+  color: inherit;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.app-home-quick:hover {
+  border-color: var(--app-primary);
+  box-shadow: var(--app-shadow-soft);
+}
+
+.app-home-quick-icon {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.app-home-quick-icon--groups {
+  background: #dbeafe;
+  color: #2563eb;
+}
+
+.app-home-quick-icon--sessions {
+  background: #d1fae5;
+  color: #059669;
+}
+
+.app-home-quick-icon--voice {
+  background: #ede9fe;
+  color: #7c3aed;
+}
+
+.app-home-quick-svg {
+  width: 20px;
+  height: 20px;
+}
+
+.app-home-quick-text {
+  min-width: 0;
+  text-align: left;
+}
+
+.app-home-quick-name {
+  margin: 0 0 2px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--app-text-primary);
+}
+
+.app-home-quick-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--app-text-secondary);
 }
 </style>
-
