@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Microphone } from '@element-plus/icons-vue'
 import {
   getMyVoiceProfile,
   updateMySamples,
@@ -240,19 +241,25 @@ onMounted(() => {
       <p class="app-voice-profile-desc">录制或上传音频样本，生成专属声纹用于说话人识别。</p>
 
       <template v-if="profile">
-        <div class="section-divider">第一步：添加音频样本</div>
-        <el-card class="record-card" shadow="never">
+        <h3 class="voice-step-heading">第一步：添加音频样本</h3>
+        <div class="record-card">
           <div class="record-tabs">
             <button
+              type="button"
               class="record-tab"
               :class="{ active: activeRecordTab === 'record' }"
               @click="handleTabChange('record')"
-            >现场录音</button>
+            >
+              现场录音
+            </button>
             <button
+              type="button"
               class="record-tab"
               :class="{ active: activeRecordTab === 'url' }"
               @click="handleTabChange('url')"
-            >粘贴 URL</button>
+            >
+              粘贴 URL
+            </button>
           </div>
 
           <!-- Tab: 现场录音 -->
@@ -262,9 +269,12 @@ onMounted(() => {
               <el-button
                 type="primary"
                 size="default"
+                :icon="Microphone"
                 :disabled="editableUrls.length >= 5"
                 @click="startRecording"
-              >开始录音</el-button>
+              >
+                开始录音
+              </el-button>
               <span class="recording-hint">每段建议 10–15 秒</span>
             </template>
 
@@ -285,7 +295,9 @@ onMounted(() => {
                   :loading="isUploading"
                   :disabled="editableUrls.length >= 5"
                   @click="handleUploadRecordedSample"
-                >添加此段</el-button>
+                >
+                  添加此段
+                </el-button>
               </div>
             </template>
           </div>
@@ -296,18 +308,16 @@ onMounted(() => {
               <el-input
                 v-model="newUrlInput"
                 size="default"
-                placeholder="粘贴音频 URL"
+                placeholder="请输入音频 URL"
                 class="url-input"
                 @keyup.enter.prevent="handleAddUrl"
               />
               <el-button type="primary" size="default" @click="handleAddUrl">添加</el-button>
             </div>
           </div>
-        </el-card>
-
-        <div class="section-divider">
-          已添加 {{ editableUrls.length }} / 5 条样本
         </div>
+
+        <p class="voice-samples-count">已添加 {{ editableUrls.length }} / 5 条样本</p>
         <div class="samples-editor">
           <div class="samples-list">
             <div v-if="editableUrls.length === 0" class="samples-empty">
@@ -319,13 +329,20 @@ onMounted(() => {
               class="sample-row"
             >
               <span class="sample-index">{{ idx + 1 }}</span>
-              <audio :src="url" controls class="sample-audio" />
+              <div class="sample-row-main">
+                <audio :src="url" controls class="sample-audio" />
+                <div class="sample-progress-track" aria-hidden="true">
+                  <div class="sample-progress-fill" />
+                </div>
+              </div>
               <el-button type="danger" plain size="small" @click="handleRemoveUrl(idx)">删除</el-button>
             </div>
           </div>
         </div>
 
-        <div class="section-divider">第二步：生成声纹</div>
+        <div class="voice-step-separator" role="presentation" />
+
+        <h3 class="voice-step-heading">第二步：生成声纹</h3>
 
         <!-- 未生成 / 可生成 -->
         <div v-if="!hasEmbedding" class="embedding-block">
@@ -381,53 +398,67 @@ onMounted(() => {
 .app-voice-profile-card {
   width: 100%;
   max-width: 720px;
-  padding: 20px 22px;
-  border-radius: 16px;
-  background: #ffffff;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
-  border: 1px solid #e5e7eb;
+  padding: 22px 22px;
+  border-radius: var(--app-radius-lg);
+  background: var(--app-bg-elevated);
+  box-shadow: var(--app-shadow-soft);
+  border: 1px solid var(--app-border);
 }
 
 .app-voice-profile-title {
   margin: 0 0 8px;
-  font-size: 20px;
-  font-weight: 600;
-  color: #111827;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--app-text-primary);
+  letter-spacing: -0.02em;
 }
 
 .app-voice-profile-desc {
-  margin: 0 0 20px;
-  font-size: 13px;
-  line-height: 1.6;
-  color: #4b5563;
-}
-
-.section-divider {
-  margin: 20px 0 12px;
-  padding-bottom: 8px;
+  margin: 0 0 24px;
   font-size: 14px;
+  line-height: 1.65;
+  color: var(--app-text-secondary);
+}
+
+.voice-step-heading {
+  margin: 0 0 12px;
+  font-size: 16px;
   font-weight: 600;
-  color: #374151;
-  border-bottom: 1px solid #e5e7eb;
+  color: var(--app-text-primary);
 }
 
-.section-divider:first-of-type {
-  margin-top: 0;
+.voice-samples-count {
+  margin: 16px 0 10px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--app-text-secondary);
 }
 
+.voice-step-separator {
+  height: 1px;
+  margin: 24px 0 20px;
+  background: var(--app-border);
+  border: none;
+}
+
+/* 录音 / URL 区（卡片，对齐 demo） */
 .record-card {
-  border-radius: 10px;
-  background: #f9fafb;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-md);
+  background: var(--app-bg-elevated);
+  box-shadow: var(--app-shadow-card);
+  padding: 16px 18px 18px;
 }
 
 .recording-indicator {
-  font-size: 13px;
-  color: #dc2626;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--app-danger);
 }
 
 .recording-hint {
-  font-size: 12px;
-  color: #9ca3af;
+  font-size: 13px;
+  color: var(--app-text-muted);
 }
 
 .preview-audio {
@@ -437,78 +468,113 @@ onMounted(() => {
 
 .preview-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
 .samples-editor {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .samples-list {
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: 10px;
 }
 
 .sample-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 10px;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--app-radius-md);
+  background: var(--app-bg-page);
 }
 
 .sample-index {
   flex-shrink: 0;
-  width: 20px;
+  width: 22px;
   font-size: 13px;
-  color: #9ca3af;
+  font-weight: 500;
+  color: var(--app-text-muted);
   text-align: right;
 }
 
-.sample-audio {
+.sample-row-main {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sample-audio {
+  width: 100%;
+  max-width: 100%;
+}
+
+/* 占位进度条（后续可接真实播放进度） */
+.sample-progress-track {
+  height: 4px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+
+.sample-progress-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: var(--app-primary);
 }
 
 .samples-empty {
-  font-size: 12px;
-  color: #9ca3af;
+  font-size: 14px;
+  color: var(--app-text-muted);
   padding: 8px 0;
 }
 
 .embedding-block {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 12px 0;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 4px 0 8px;
 }
 
-/* Tab 切换 */
+/* Tab：下划线激活（对齐 demo） */
 .record-tabs {
   display: flex;
-  gap: 0;
+  gap: 24px;
   margin-bottom: 16px;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--app-border);
 }
 
 .record-tab {
-  padding: 6px 16px;
-  font-size: 13px;
+  padding: 0 0 10px;
+  margin-bottom: -1px;
+  font-size: 14px;
   font-weight: 500;
-  color: #6b7280;
+  font-family: inherit;
+  color: var(--app-text-secondary);
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
   cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
-  margin-bottom: -1px;
+  transition:
+    color 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.record-tab:hover {
+  color: var(--app-text-primary);
 }
 
 .record-tab.active {
-  color: #2563eb;
-  border-bottom-color: #2563eb;
+  color: var(--app-primary);
+  border-bottom-color: var(--app-primary);
 }
 
 .tab-panel {
@@ -516,12 +582,12 @@ onMounted(() => {
   align-items: center;
   flex-wrap: wrap;
   gap: 12px;
-  min-height: 40px;
+  min-height: 44px;
 }
 
 .url-add-row {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 12px;
   width: 100%;
 }
@@ -530,10 +596,9 @@ onMounted(() => {
   flex: 1;
 }
 
-/* 生成声纹区 */
 .generate-hint {
-  font-size: 12px;
-  color: #9ca3af;
+  font-size: 13px;
+  color: var(--app-text-muted);
 }
 
 .embedding-done {
@@ -541,42 +606,47 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 8px;
-  padding: 12px 0;
+  gap: 12px;
+  padding: 4px 0 12px;
 }
 
 .embedding-done-info {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
 .embedding-done-time {
-  font-size: 12px;
-  color: #6b7280;
+  font-size: 13px;
+  color: var(--app-text-secondary);
 }
 
-/* 详细信息折叠 */
 .detail-collapse {
-  margin-top: 16px;
+  margin-top: 8px;
 }
 
 .detail-collapse :deep(.el-collapse-item__header) {
-  font-size: 13px;
-  color: #6b7280;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--app-text-secondary);
+}
+
+.detail-collapse :deep(.el-collapse-item__wrap) {
+  border-bottom: none;
 }
 
 .collapse-title {
-  font-weight: 500;
+  color: var(--app-text-primary);
 }
 
 .detail-fields {
   display: flex;
   flex-wrap: wrap;
   gap: 8px 24px;
-  margin-bottom: 10px;
-  font-size: 12px;
-  color: #6b7280;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--app-text-secondary);
 }
 
 .detail-item {
@@ -585,10 +655,10 @@ onMounted(() => {
 
 .embedding-json {
   margin: 0;
-  padding: 12px;
-  border-radius: 6px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  padding: 12px 14px;
+  border-radius: var(--app-radius-sm);
+  background: var(--app-bg-page);
+  border: 1px solid var(--app-border);
   font-size: 12px;
   line-height: 1.5;
   overflow-x: auto;

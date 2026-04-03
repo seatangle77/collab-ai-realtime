@@ -510,6 +510,83 @@ function speakerInitial(speaker: string | null | undefined): string {
   return s.slice(0, 1)
 }
 
+/** 用于分组合并连续同一说话人；优先用 speaker（uid），否则用展示名 */
+function speakerKey(t: AppTranscript): string {
+  const id = (t.speaker || '').trim()
+  if (id) return id
+  return (t.speaker_name || '').trim() || '__unknown__'
+}
+
+function speakerDisplayLabel(t: AppTranscript): string {
+  return (t.speaker_name || t.speaker || '未知说话人').trim() || '未知说话人'
+}
+
+const AVATAR_CLASS_BY_HASH = [
+  'app-session-detail-avatar--blue',
+  'app-session-detail-avatar--emerald',
+  'app-session-detail-avatar--violet',
+  'app-session-detail-avatar--amber',
+]
+
+function avatarClassForKey(key: string): string {
+  let h = 0
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) | 0
+  return AVATAR_CLASS_BY_HASH[Math.abs(h) % AVATAR_CLASS_BY_HASH.length]
+}
+
+function transcriptTimeLabel(item: AppTranscript): string {
+  if (item.created_at) {
+    const d = new Date(item.created_at)
+    if (!Number.isNaN(d.getTime())) {
+      return d.toLocaleTimeString('zh-CN', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      })
+    }
+  }
+  const s = item.start != null ? String(item.start) : ''
+  const e = item.end != null ? String(item.end) : ''
+  if (s && e) return `${s} - ${e}`
+  return s || e || ''
+}
+
+interface TranscriptMessageGroup {
+  groupKey: string
+  speakerLabel: string
+  initial: string
+  avatarClass: string
+  messages: AppTranscript[]
+}
+
+function buildTranscriptGroups(items: AppTranscript[]): TranscriptMessageGroup[] {
+  const sorted = [...items].sort((a, b) => {
+    const sa = String(a.start ?? '')
+    const sb = String(b.start ?? '')
+    return sa.localeCompare(sb)
+  })
+  const groups: TranscriptMessageGroup[] = []
+  for (const t of sorted) {
+    const key = speakerKey(t)
+    const prev = groups[groups.length - 1]
+    if (prev && prev.groupKey === key) {
+      prev.messages.push(t)
+    } else {
+      groups.push({
+        groupKey: key,
+        speakerLabel: speakerDisplayLabel(t),
+        initial: speakerInitial(t.speaker_name || t.speaker),
+        avatarClass: avatarClassForKey(key),
+        messages: [t],
+      })
+    }
+  }
+  return groups
+}
+
+const groupedTranscripts = computed(() => buildTranscriptGroups(transcripts.value))
+
 function scrollTranscriptsToBottom() {
   nextTick(() => {
     const el = transcriptsListEl.value
@@ -674,10 +751,6 @@ onUnmounted(() => {
       @dismissed="pushVisible = false"
     />
 
-    <div class="app-session-detail-back">
-      <button type="button" class="app-session-detail-back-btn" @click="goBack">← 返回会话列表</button>
-    </div>
-
     <div v-if="pageLoading" class="app-session-detail-loading">正在加载会话详情...</div>
 
     <div v-else-if="error" class="app-session-detail-error">{{ error }}</div>
@@ -685,6 +758,7 @@ onUnmounted(() => {
     <template v-else-if="session">
       <div class="app-session-detail-header">
         <div class="app-session-detail-title-row">
+          <button type="button" class="app-session-detail-back-btn" @click="goBack">‹</button>
           <h2 class="app-session-detail-title">{{ session.session_title }}</h2>
           <el-tag
             class="app-session-detail-status-tag"
@@ -807,25 +881,35 @@ onUnmounted(() => {
         <div v-else ref="transcriptsListEl" class="app-session-detail-transcripts-scroll">
           <ul class="app-session-detail-transcripts-list">
             <li
-              v-for="item in transcripts"
-              :key="item.transcript_id"
-              class="app-session-detail-transcript-item"
+              v-for="(group, gIdx) in groupedTranscripts"
+              :key="`${group.groupKey}-${gIdx}`"
+              class="app-session-detail-transcript-group"
             >
               <div class="app-session-detail-transcript-row">
-                <div class="app-session-detail-transcript-avatar" aria-hidden="true">
-                  {{ speakerInitial(item.speaker_name || item.speaker) }}
+                <div
+                  class="app-session-detail-transcript-avatar"
+                  :class="group.avatarClass"
+                  :title="group.speakerLabel"
+                  aria-hidden="true"
+                >
+                  {{ group.initial }}
                 </div>
-                <div class="app-session-detail-transcript-body">
-                  <div class="app-session-detail-transcript-meta">
-                    <span class="app-session-detail-transcript-speaker">
-                      {{ item.speaker_name || item.speaker || '未知说话人' }}
-                    </span>
-                    <span class="app-session-detail-transcript-time">
-                      {{ item.start }} - {{ item.end }}
-                      <template v-if="item.created_at"> · {{ item.created_at }}</template>
-                    </span>
+                <div class="app-session-detail-transcript-bubbles">
+                  <div
+                    v-for="(item, idx) in group.messages"
+                    :key="item.transcript_id"
+                    class="app-session-detail-bubble-stack"
+                  >
+                    <div class="app-session-detail-bubble">
+                      <p class="app-session-detail-transcript-text">{{ item.text }}</p>
+                    </div>
+                    <p
+                      v-if="idx === group.messages.length - 1"
+                      class="app-session-detail-bubble-time"
+                    >
+                      {{ transcriptTimeLabel(item) }}
+                    </p>
                   </div>
-                  <p class="app-session-detail-transcript-text">{{ item.text }}</p>
                 </div>
               </div>
             </li>
@@ -843,21 +927,20 @@ onUnmounted(() => {
   padding: 8px 0 16px;
 }
 
-.app-session-detail-back {
-  margin-bottom: 16px;
-}
-
 .app-session-detail-back-btn {
   background: none;
   border: none;
-  font-size: 13px;
-  color: #2563eb;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--app-text-secondary);
   cursor: pointer;
-  padding: 0;
+  padding: 0 4px 0 0;
+  flex-shrink: 0;
+  transition: color 0.15s ease;
 }
 
 .app-session-detail-back-btn:hover {
-  text-decoration: underline;
+  color: var(--app-text-primary);
 }
 
 .app-session-detail-loading {
@@ -1089,16 +1172,20 @@ onUnmounted(() => {
 }
 
 .app-session-detail-transcripts-empty {
-  font-size: 13px;
-  color: #9ca3af;
-  padding: 8px 0;
+  font-size: 14px;
+  color: var(--app-text-muted);
+  padding: 12px 0;
 }
 
+/* 聊天气泡区：浅灰底（与 demo bg-slate-50 一致） */
 .app-session-detail-transcripts-scroll {
   max-height: calc(100vh - 360px);
-  min-height: 200px;
+  min-height: 220px;
   overflow-y: auto;
-  padding-right: 4px;
+  margin: 0 -8px;
+  padding: 16px 12px 8px;
+  border-radius: var(--app-radius-md);
+  background: var(--app-bg-page);
 }
 
 .app-session-detail-transcripts-list {
@@ -1107,19 +1194,16 @@ onUnmounted(() => {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 16px;
 }
 
-.app-session-detail-transcript-item {
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
+.app-session-detail-transcript-group {
+  list-style: none;
 }
 
 .app-session-detail-transcript-row {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   align-items: flex-start;
 }
 
@@ -1128,43 +1212,66 @@ onUnmounted(() => {
   width: 32px;
   height: 32px;
   border-radius: 999px;
-  background: #e0e7ff;
-  color: #3730a3;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   display: flex;
   align-items: center;
   justify-content: center;
+  color: #fff;
 }
 
-.app-session-detail-transcript-body {
+.app-session-detail-avatar--blue {
+  background: #3b82f6;
+}
+
+.app-session-detail-avatar--emerald {
+  background: #10b981;
+}
+
+.app-session-detail-avatar--violet {
+  background: #8b5cf6;
+}
+
+.app-session-detail-avatar--amber {
+  background: #f59e0b;
+}
+
+.app-session-detail-transcript-bubbles {
   min-width: 0;
   flex: 1;
-}
-
-.app-session-detail-transcript-meta {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: #6b7280;
-  margin-bottom: 4px;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.app-session-detail-transcript-speaker {
-  font-weight: 500;
-  color: #374151;
+.app-session-detail-bubble-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
-.app-session-detail-transcript-time {
+.app-session-detail-bubble {
+  display: inline-block;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 10px 16px;
+  border-radius: 16px;
+  border-top-left-radius: 4px;
+  background: var(--app-bg-elevated);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.10), 0 1px 2px -1px rgba(15, 23, 42, 0.08);
+}
+
+.app-session-detail-bubble-time {
+  margin: 2px 0 0 4px;
   font-size: 11px;
+  line-height: 1.3;
+  color: var(--app-text-muted);
 }
 
 .app-session-detail-transcript-text {
   margin: 0;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.6;
-  color: #111827;
+  color: var(--app-text-primary);
 }
 </style>

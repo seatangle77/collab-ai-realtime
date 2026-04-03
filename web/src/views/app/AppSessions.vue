@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { MoreFilled, Plus } from '@element-plus/icons-vue'
 import { formatDateTimeToCST } from '../../utils/datetime'
 import { listMyGroups } from '../../api/appGroups'
 import {
@@ -347,15 +348,7 @@ onMounted(() => {
   <div class="app-sessions">
     <div class="app-sessions-header">
       <h2 class="app-sessions-title">我的会话</h2>
-      <div class="app-sessions-meta">
-        <span class="app-sessions-user" v-if="currentUser">
-          {{ currentUser.name || currentUser.email }}
-        </span>
-        <span class="app-sessions-group">
-          <span class="app-sessions-group-label">当前群组：</span>
-          <span class="app-sessions-group-value">{{ currentGroup?.name || '未选择' }}</span>
-        </span>
-      </div>
+      <span class="app-sessions-group-inline">当前群组：{{ currentGroup?.name || '未选择' }}</span>
     </div>
 
     <div v-if="!hasCurrentGroup" class="app-sessions-empty-group">
@@ -398,7 +391,10 @@ onMounted(() => {
         </div>
         <!-- 桌面端：Tab 同行显示 -->
         <button type="button" class="app-sessions-primary-btn app-sessions-new-btn-inline" @click="openCreateDialog">
-          + 新建会话
+          <el-icon class="app-sessions-new-icon" :size="16">
+            <Plus />
+          </el-icon>
+          新建会话
         </button>
       </div>
 
@@ -427,14 +423,16 @@ onMounted(() => {
                 <el-tag
                   :type="statusTagType(session)"
                   size="small"
+                  effect="light"
                   class="app-sessions-item-tag"
                 >
                   {{ formatStatus(session) }}
                 </el-tag>
               </div>
               <div class="app-sessions-item-meta">
-                <span>创建：{{ formatDateTimeToCST(session.created_at) }}</span>
-                <span>更新：{{ formatDateTimeToCST(session.last_updated) }}</span>
+                创建：{{ formatDateTimeToCST(session.created_at) }}
+                <span class="app-sessions-item-meta-sep">·</span>
+                更新：{{ formatDateTimeToCST(session.last_updated) }}
               </div>
             </div>
 
@@ -451,9 +449,12 @@ onMounted(() => {
               <button
                 type="button"
                 class="app-sessions-more-btn"
+                aria-label="更多操作"
                 @click.stop
               >
-                ⋯
+                <el-icon class="app-sessions-more-icon" :size="18">
+                  <MoreFilled />
+                </el-icon>
               </button>
               <template #dropdown>
                 <el-dropdown-menu>
@@ -557,133 +558,130 @@ onMounted(() => {
 .app-sessions {
   max-width: 880px;
   margin: 0 auto;
-  padding-bottom: 80px; /* 给 FAB 留空间 */
+  padding-bottom: 88px; /* FAB + 与 AppLayout 底栏留白 */
 }
 
 .app-sessions-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 12px;
+  margin-bottom: 4px;
   flex-wrap: wrap;
 }
 
 .app-sessions-title {
   margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-  color: #111827;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--app-text-primary);
+  letter-spacing: -0.02em;
 }
 
-.app-sessions-meta {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
-  font-size: 12px;
-}
-
-.app-sessions-user {
-  color: #4b5563;
-}
-
-.app-sessions-group {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: #f3f4f6;
-  color: #374151;
-}
-
-.app-sessions-group-label {
-  color: #6b7280;
-}
-
-.app-sessions-group-value {
-  font-weight: 500;
+.app-sessions-group-inline {
+  font-size: 13px;
+  color: var(--app-text-secondary);
 }
 
 .app-sessions-empty-group {
   margin-top: 16px;
-  padding: 16px 18px;
-  border-radius: 12px;
-  background: #f9fafb;
-  border: 1px dashed #e5e7eb;
+  padding: 18px 20px;
+  border-radius: var(--app-radius-md);
+  background: var(--app-bg-elevated);
+  border: 1px dashed var(--app-border);
   display: flex;
   flex-direction: column;
   gap: 12px;
+  box-shadow: var(--app-shadow-card);
 }
 
 .app-sessions-empty-text {
   margin: 0;
-  font-size: 13px;
-  line-height: 1.6;
-  color: #4b5563;
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--app-text-secondary);
 }
 
-/* Tab 栏 + 新建按钮同行 */
+/* 筛选胶囊 + 新建（与 demo：独立圆角按钮 + 主色实心） */
 .app-sessions-toolbar {
   margin-top: 16px;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
 }
 
 .app-sessions-tabs {
-  display: inline-flex;
-  gap: 6px;
-  padding: 2px;
-  border-radius: 999px;
-  background: #f3f4f6;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 
 .app-sessions-tab {
   border-radius: 999px;
   border: none;
-  padding: 6px 14px;
-  font-size: 13px;
-  background: transparent;
-  color: #6b7280;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: inherit;
   cursor: pointer;
-  transition: background-color 0.18s ease, color 0.18s ease;
+  transition:
+    background-color 0.18s ease,
+    color 0.18s ease,
+    border-color 0.18s ease;
 }
 
 .app-sessions-tab[data-active='true'] {
-  background: #ffffff;
-  color: #1d4ed8;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+  background: var(--app-primary);
+  color: #fff;
+}
+
+.app-sessions-tab:not([data-active='true']) {
+  background: #f1f5f9;
+  color: var(--app-text-secondary);
 }
 
 .app-sessions-tab:not([data-active='true']):hover {
-  color: #111827;
+  background: #e2e8f0;
+  color: var(--app-text-primary);
 }
 
 .app-sessions-primary-btn {
-  border-radius: 999px;
-  border: 1px solid #2563eb;
-  padding: 6px 16px;
-  font-size: 13px;
-  background: #2563eb;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 8px;
+  border: 1px solid var(--app-primary);
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: inherit;
+  background: var(--app-primary);
   color: #ffffff;
   cursor: pointer;
-  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.22);
-  transition: background-color 0.18s ease, box-shadow 0.18s ease, transform 0.1s ease;
+  box-shadow: var(--app-shadow-card);
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
 }
 
 .app-sessions-primary-btn:hover {
-  background: #1d4ed8;
-  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.3);
-  transform: translateY(-1px);
+  background: var(--app-primary-hover);
+  border-color: var(--app-primary-hover);
+}
+
+.app-sessions-new-icon {
+  flex-shrink: 0;
 }
 
 /* 移动端：隐藏 inline 新建按钮，改用 FAB */
 .app-sessions-new-btn-inline {
-  display: inline-block;
+  display: inline-flex;
 }
 
 /* 会话列表 */
@@ -692,9 +690,9 @@ onMounted(() => {
 }
 
 .app-sessions-loading {
-  padding: 16px 0;
-  font-size: 13px;
-  color: #6b7280;
+  padding: 20px 0;
+  font-size: 14px;
+  color: var(--app-text-secondary);
 }
 
 .app-sessions-list {
@@ -703,31 +701,33 @@ onMounted(() => {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
-/* 整行可点击 */
+/* 整行可点击（卡片：浅边框 + 轻阴影，hover 主色边） */
 .app-sessions-item {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 12px 14px;
-  border-radius: 12px;
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.04);
+  padding: 14px 16px;
+  border-radius: var(--app-radius-md);
+  background: var(--app-bg-elevated);
+  border: 1px solid var(--app-border);
+  box-shadow: var(--app-shadow-card);
   cursor: pointer;
-  transition: background-color 0.16s ease, box-shadow 0.16s ease, transform 0.08s ease;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background-color 0.18s ease;
 }
 
 .app-sessions-item:hover {
-  background: #f8faff;
-  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.1);
-  transform: translateY(-1px);
+  border-color: var(--app-primary);
+  box-shadow: var(--app-shadow-soft);
 }
 
 .app-sessions-item:active {
-  transform: translateY(0);
+  box-shadow: var(--app-shadow-card);
 }
 
 .app-sessions-item-main {
@@ -743,9 +743,9 @@ onMounted(() => {
 }
 
 .app-sessions-item-title {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
-  color: #111827;
+  color: var(--app-text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -756,35 +756,39 @@ onMounted(() => {
 }
 
 .app-sessions-item-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  font-size: 12px;
-  color: #6b7280;
+  font-size: 13px;
+  color: var(--app-text-secondary);
+  line-height: 1.45;
 }
 
-/* ⋯ 更多按钮 */
+.app-sessions-item-meta-sep {
+  margin: 0 6px;
+  color: var(--app-text-muted);
+}
+
+/* 更多 */
 .app-sessions-more-btn {
   flex-shrink: 0;
   width: 36px;
   height: 36px;
-  border-radius: 50%;
+  border-radius: 8px;
   border: none;
   background: transparent;
-  color: #9ca3af;
-  font-size: 18px;
+  color: var(--app-text-muted);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: background-color 0.16s ease, color 0.16s ease;
-  line-height: 1;
-  padding-bottom: 4px;
 }
 
 .app-sessions-more-btn:hover {
-  background: #f3f4f6;
-  color: #374151;
+  background: var(--app-bg-page);
+  color: var(--app-text-primary);
+}
+
+.app-sessions-more-icon {
+  transform: rotate(90deg);
 }
 
 /* 结束会话选项红色 */
@@ -802,17 +806,17 @@ onMounted(() => {
   display: none;
   position: fixed;
   right: 20px;
-  bottom: 80px; /* 底部 tab bar 高度之上 */
+  bottom: 88px; /* 底部 tab bar + 安全区之上 */
   width: 52px;
   height: 52px;
   border-radius: 50%;
   border: none;
-  background: #2563eb;
+  background: var(--app-primary);
   color: #ffffff;
   font-size: 28px;
   line-height: 1;
   cursor: pointer;
-  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.4);
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.35);
   z-index: 100;
   align-items: center;
   justify-content: center;
@@ -836,10 +840,6 @@ onMounted(() => {
   .app-sessions-tab {
     padding: 6px 10px;
     font-size: 12px;
-  }
-
-  .app-sessions-item-meta {
-    gap: 6px;
   }
 }
 

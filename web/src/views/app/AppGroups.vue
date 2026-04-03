@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, RefreshRight, SwitchButton } from '@element-plus/icons-vue'
 import { formatDateTimeToCST } from '../../utils/datetime'
 import {
   type AppGroupDetail,
@@ -380,7 +381,7 @@ onMounted(() => {
             你可以加入多个群组，切换当前群组会影响「我的会话」等页面中展示的内容。
           </p>
         </div>
-        <el-button type="primary" size="small" @click="openCreateDialog">新建群组</el-button>
+        <el-button type="primary" size="small" :icon="Plus" @click="openCreateDialog">新建群组</el-button>
       </div>
 
       <p v-if="!groups.length && !loading" class="app-groups-empty">
@@ -476,9 +477,9 @@ onMounted(() => {
             </div>
           </div>
           <div class="app-groups-detail-actions">
-            <el-button size="small" @click="handleRefresh">刷新</el-button>
+            <el-button size="small" :icon="RefreshRight" @click="handleRefresh">刷新</el-button>
             <el-button v-if="isLeader" size="small" @click="handleRenameGroup">修改名称</el-button>
-            <el-button size="small" type="danger" @click="handleLeaveCurrentGroup">退出群组</el-button>
+            <el-button size="small" type="danger" :icon="SwitchButton" @click="handleLeaveCurrentGroup">退出群组</el-button>
             <el-button size="small" type="primary" @click="router.push('/app/groups/' + activeGroupDetail.group.id)">进入群组</el-button>
           </div>
         </div>
@@ -564,84 +565,98 @@ onMounted(() => {
 .app-groups {
   max-width: 880px;
   margin: 0 auto;
+  padding-bottom: 8px;
 }
 
 .app-groups-header {
   display: flex;
-  align-items: flex-end;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
 }
 
 .app-groups-title {
   margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-  color: #111827;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--app-text-primary);
+  letter-spacing: -0.02em;
 }
 
 .app-groups-meta {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 4px;
-  font-size: 12px;
+  gap: 6px;
+  font-size: 13px;
 }
 
 .app-groups-user {
-  color: #4b5563;
+  color: var(--app-text-secondary);
 }
 
 .app-groups-group {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 8px;
+  padding: 2px 10px;
   border-radius: 999px;
-  background: #f3f4f6;
-  color: #374151;
+  background: var(--app-bg-page);
+  border: 1px solid var(--app-border);
+  color: var(--app-text-secondary);
 }
 
 .app-groups-group-label {
-  color: #6b7280;
+  color: var(--app-text-muted);
 }
 
 .app-groups-group-value {
   font-weight: 500;
+  color: var(--app-text-primary);
 }
 
+/* 统计胶囊（对齐 demo） */
 .app-groups-overview {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 12px;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
 }
 
 .app-groups-overview-pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px;
+  padding: 6px 14px;
   border-radius: 999px;
-  background: #f3f4f6;
-  border: 1px solid #e5e7eb;
+  background: #f1f5f9;
+  font-size: 13px;
+  color: var(--app-text-secondary);
 }
 
 .app-groups-overview-label {
-  font-size: 12px;
-  color: #6b7280;
+  font-weight: 500;
 }
 
 .app-groups-overview-value {
-  font-size: 13px;
-  font-weight: 600;
-  color: #111827;
+  font-weight: 700;
+  color: var(--app-text-primary);
 }
 
+/* 卡片分区 */
 .app-groups-card {
-  border-radius: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
+  border-radius: var(--app-radius-md);
+  border: 1px solid var(--app-border);
+  background: var(--app-bg-elevated);
+  box-shadow: var(--app-shadow-card);
+}
+
+.app-groups-card :deep(.el-card__body) {
+  padding: 16px 18px;
 }
 
 .app-groups-list-header {
@@ -649,62 +664,65 @@ onMounted(() => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
 }
 
 .app-groups-list-title {
   margin: 0;
   font-size: 16px;
   font-weight: 600;
-  color: #111827;
+  color: var(--app-text-primary);
 }
 
 .app-groups-list-subtitle {
-  margin: 4px 0 0;
-  font-size: 12px;
-  color: #6b7280;
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--app-text-secondary);
 }
 
 .app-groups-empty {
-  margin: 8px 0 12px;
-  font-size: 13px;
-  color: #6b7280;
+  margin: 8px 0 4px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--app-text-secondary);
 }
 
 .app-groups-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 12px;
 }
 
 .app-groups-list.is-loading {
-  opacity: 0.6;
+  opacity: 0.65;
+  pointer-events: none;
 }
 
 .app-groups-list-item {
   display: flex;
   align-items: stretch;
-  padding: 8px 10px;
-  border-radius: 10px;
-  border: 1px solid transparent;
-  background: #f9fafb;
+  padding: 14px 16px;
+  border-radius: var(--app-radius-md);
+  border: 1px solid var(--app-border);
+  background: var(--app-bg-elevated);
+  box-shadow: var(--app-shadow-card);
   cursor: pointer;
   transition:
-    background-color 0.16s ease,
-    border-color 0.16s ease,
-    box-shadow 0.16s ease,
-    transform 0.08s ease;
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background-color 0.18s ease;
 }
 
 .app-groups-list-item:hover {
-  background: #f3f4f6;
-  border-color: #e5e7eb;
+  border-color: var(--app-primary);
+  box-shadow: var(--app-shadow-soft);
 }
 
 .app-groups-list-item[data-active='true'] {
-  background: #eff6ff;
-  border-color: #2563eb;
-  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.16);
+  background: var(--app-primary-soft);
+  border-color: var(--app-primary);
+  box-shadow: var(--app-shadow-soft);
 }
 
 .app-groups-list-main {
@@ -715,70 +733,70 @@ onMounted(() => {
 .app-groups-list-name-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 2px;
+  margin-bottom: 4px;
 }
 
 .app-groups-list-name {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
-  color: #111827;
+  color: var(--app-text-primary);
 }
 
 .app-groups-list-role {
   font-size: 11px;
-  padding: 1px 6px;
+  font-weight: 600;
+  padding: 2px 8px;
   border-radius: 999px;
   background: #fef3c7;
-  color: #92400e;
+  color: #b45309;
 }
 
 .app-groups-list-current {
   font-size: 11px;
-  padding: 1px 6px;
+  font-weight: 600;
+  padding: 2px 8px;
   border-radius: 999px;
   background: #dbeafe;
-  color: #1d4ed8;
+  color: var(--app-primary);
 }
 
 .app-groups-list-meta {
-  font-size: 12px;
-  color: #6b7280;
-}
-
-.app-groups-join {
-  margin-top: 16px;
-  padding-top: 12px;
-  border-top: 1px dashed #e5e7eb;
+  font-size: 13px;
+  color: var(--app-text-secondary);
 }
 
 .app-groups-join-title {
-  margin: 0 0 4px;
-  font-size: 14px;
+  margin: 0 0 8px;
+  font-size: 16px;
   font-weight: 600;
-  color: #111827;
+  color: var(--app-text-primary);
 }
 
 .app-groups-join-desc {
-  margin: 0 0 8px;
-  font-size: 12px;
-  color: #6b7280;
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--app-text-secondary);
 }
 
 .app-groups-join-hint {
-  margin: 6px 0 0;
-  font-size: 12px;
-  color: #9ca3af;
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: var(--app-text-muted);
 }
 
 .app-groups-join-row {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 10px;
   align-items: center;
 }
 
 .app-groups-join-input {
   flex: 1;
+  min-width: 200px;
 }
 
 .app-groups-detail-header {
@@ -787,6 +805,7 @@ onMounted(() => {
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 12px;
+  flex-wrap: wrap;
 }
 
 .app-groups-detail-name-row {
@@ -799,8 +818,8 @@ onMounted(() => {
 .app-groups-detail-name {
   margin: 0;
   font-size: 18px;
-  font-weight: 600;
-  color: #111827;
+  font-weight: 700;
+  color: var(--app-text-primary);
 }
 
 .app-groups-detail-tag {
@@ -808,20 +827,22 @@ onMounted(() => {
 }
 
 .app-groups-detail-sub {
-  margin-top: 4px;
-  font-size: 12px;
-  color: #6b7280;
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--app-text-secondary);
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 6px;
+  align-items: center;
 }
 
 .app-groups-detail-id {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: 12px;
 }
 
 .app-groups-detail-dot {
-  color: #d1d5db;
+  color: var(--app-text-muted);
 }
 
 .app-groups-detail-actions {
@@ -831,40 +852,40 @@ onMounted(() => {
 }
 
 .app-groups-members {
-  margin-top: 12px;
+  margin-top: 16px;
+  padding-top: 4px;
 }
 
 .app-groups-members-title {
-  margin: 0 0 8px;
-  font-size: 14px;
+  margin: 0 0 10px;
+  font-size: 15px;
   font-weight: 600;
-  color: #111827;
+  color: var(--app-text-primary);
 }
 
 .app-groups-self-tag {
-  margin-left: 6px;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: #eff6ff;
-  color: #1d4ed8;
-  font-size: 11px;
+  margin-left: 4px;
+  color: var(--app-primary);
+  font-size: 13px;
+  font-weight: 500;
 }
 
 .app-groups-detail-desc {
-  margin: 4px 0 8px;
-  font-size: 12px;
-  color: #6b7280;
+  margin: 0 0 4px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--app-text-secondary);
 }
 
 .app-groups-members-loading {
-  font-size: 13px;
-  color: #6b7280;
+  font-size: 14px;
+  color: var(--app-text-secondary);
 }
 
 .app-groups-members-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
 }
 
 .app-groups-member-item {
@@ -872,31 +893,31 @@ onMounted(() => {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 10px;
-  border: 1px solid #e5e7eb;
-  background: #f9fafb;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--app-radius-md);
+  background: var(--app-bg-page);
 }
 
 .app-groups-member-main {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   min-width: 0;
 }
 
 .app-groups-member-avatar {
-  width: 28px;
-  height: 28px;
+  width: 36px;
+  height: 36px;
   border-radius: 999px;
-  background: #e5e7eb;
+  background: #cbd5e1;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
-  color: #4b5563;
+  color: var(--app-text-primary);
+  flex-shrink: 0;
 }
 
 .app-groups-member-text {
@@ -913,38 +934,39 @@ onMounted(() => {
 }
 
 .app-groups-member-name {
-  font-size: 13px;
-  font-weight: 500;
-  color: #111827;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--app-text-primary);
 }
 
 .app-groups-member-meta {
-  font-size: 12px;
-  color: #6b7280;
+  font-size: 13px;
+  color: var(--app-text-secondary);
 }
 
 .app-groups-member-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 .app-groups-detail-empty {
-  padding: 12px 4px;
+  padding: 8px 4px 4px;
 }
 
 .app-groups-detail-empty-title {
-  margin: 0 0 4px;
-  font-size: 14px;
+  margin: 0 0 8px;
+  font-size: 15px;
   font-weight: 600;
-  color: #111827;
+  color: var(--app-text-primary);
 }
 
 .app-groups-detail-empty-desc {
   margin: 0;
-  font-size: 13px;
-  color: #6b7280;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--app-text-secondary);
 }
 
 .dialog-footer {
