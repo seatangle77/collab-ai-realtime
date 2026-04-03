@@ -531,7 +531,7 @@ const AVATAR_CLASS_BY_HASH = [
 function avatarClassForKey(key: string): string {
   let h = 0
   for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) | 0
-  return AVATAR_CLASS_BY_HASH[Math.abs(h) % AVATAR_CLASS_BY_HASH.length]
+  return AVATAR_CLASS_BY_HASH[Math.abs(h) % AVATAR_CLASS_BY_HASH.length] ?? AVATAR_CLASS_BY_HASH[0]
 }
 
 function transcriptTimeLabel(item: AppTranscript): string {

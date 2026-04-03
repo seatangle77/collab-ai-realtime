@@ -15,29 +15,12 @@ import {
   endSession,
 } from '../../api/appSessions'
 
-interface AppUser {
-  id: string
-  name: string
-  email: string
-}
-
 interface AppGroupSummary {
   id: string
   name: string
 }
 
 type SessionFilter = 'active' | 'ended' | 'all'
-
-function loadCurrentUser(): AppUser | null {
-  if (typeof window === 'undefined') return null
-  const raw = window.localStorage.getItem('app_user')
-  if (!raw) return null
-  try {
-    return JSON.parse(raw) as AppUser
-  } catch {
-    return null
-  }
-}
 
 function loadCurrentGroup(): AppGroupSummary | null {
   if (typeof window === 'undefined') return null
@@ -67,7 +50,6 @@ function extractErrorMessage(err: unknown): string {
 
 const router = useRouter()
 
-const currentUser = ref<AppUser | null>(loadCurrentUser())
 const currentGroup = ref<AppGroupSummary | null>(loadCurrentGroup())
 
 const loading = ref(false)
