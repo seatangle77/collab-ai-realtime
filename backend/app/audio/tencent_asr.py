@@ -57,7 +57,7 @@ class MyASRListener(SpeechRecognitionListener):
             return
 
         # 按 0.6 秒静音切分
-        SIL_GAP_MS = 600
+        SIL_GAP_MS = 650
         segments: list[list[dict]] = []
         current_segment: list[dict] = [word_list[0]]
         last_end = word_list[0].get("end_time", 0)
@@ -137,8 +137,9 @@ class TencentASR:
             tencent_asr_settings.asr_engine,
             self.listener,
         )
-        self.recognizer.set_need_vad(1)      # 腾讯侧 VAD 自动断句
-        self.recognizer.set_voice_format(1)  # 1 = PCM
+        self.recognizer.set_need_vad(1)           # 腾讯侧 VAD 自动断句
+        self.recognizer.set_vad_silence_time(650) # 静音 650ms 即断句
+        self.recognizer.set_voice_format(1)       # 1 = PCM
 
     def _on_asr_error(self) -> None:
         """ASR 连接异常时触发，最多重连 MAX_RETRIES 次，间隔递增"""

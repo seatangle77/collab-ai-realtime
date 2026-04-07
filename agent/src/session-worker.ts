@@ -1,7 +1,15 @@
 import { createLogger } from './logger';
 import { config } from './config';
-import { getSessionMembers, getLastSpeakEndGlobal } from './db/queries';
+import {
+  getSessionMembers,
+  getLastSpeakEndGlobal,
+  getLastSummary,
+  getTranscriptsInWindow,
+} from './db/queries';
 import { runPerceptionPipeline } from './skills/run-perception-pipeline';
+import { runReasoningLayer } from './skills/run-reasoning-layer';
+import { runActionLayer } from './skills/run-action-layer';
+import { runSummary } from './skills/run-summary';
 
 const logger = createLogger('session-worker');
 
@@ -62,7 +70,6 @@ export class SessionWorker {
           sessionId: this.sessionId,
           silence_s: Math.round(silenceS),
         });
-        // Week 3 推理层在此消费此事件，目前只记录日志
       }
     } catch (err) {
       logger.error('checkGroupSilence failed', {
@@ -78,16 +85,39 @@ export class SessionWorker {
     try {
       const members = await getSessionMembers(this.sessionId);
       const memberIds = members.map((m) => m.user_id);
+      if (memberIds.length === 0) return;
 
       const windowEnd = new Date();
       const windowStart = new Date(windowEnd.getTime() - config.agent.longIntervalMs);
 
-      await runPerceptionPipeline({
+      // Step1：感知层
+      const result = await runPerceptionPipeline({
         sessionId: this.sessionId,
         memberIds,
         windowStart,
         windowEnd,
       });
+
+      // Step2：推理层
+      const triggers = runReasoningLayer(result, memberIds);
+
+      // Step3：读当前摘要与本轮发言（行动层 Prompt 需要）
+      const summaryRow = await getLastSummary(this.sessionId);
+      const summaryText = summaryRow?.summary_text ?? '';
+      const transcripts = await getTranscriptsInWindow(this.sessionId, windowStart, windowEnd);
+
+      // Step4：行动层
+      await runActionLayer({
+        sessionId: this.sessionId,
+        triggers,
+        windowStart,
+        memberIds,
+        summaryText,
+        transcripts,
+      });
+
+      // Step5：摘要层
+      await runSummary(this.sessionId, windowStart, windowEnd);
     } catch (err) {
       logger.error('runFullPipeline failed', {
         sessionId: this.sessionId,

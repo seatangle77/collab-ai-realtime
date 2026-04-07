@@ -1,5 +1,8 @@
 import { getHistoricalKeywords } from '../../db/queries';
 import { embed, similarity } from '../../http/nlp-client';
+import { createLogger } from '../../logger';
+
+const logger = createLogger('skill:info-gain');
 
 export interface InfoGainResult {
   /** user_id → info_gain (0~1)，无当前关键词则为 null */
@@ -46,6 +49,7 @@ export async function computeInfoGain(
 
   // embed 当前关键词 + 历史关键词
   const allTexts = [...currentKeywords, ...historicalKeywords];
+  logger.info(`[信息增益 InfoGain] 正在向量化本轮关键词（${currentKeywords.length} 个）+ 历史关键词（${historicalKeywords.length} 个）`, { sessionId });
   const allEmbeddings = await embed(allTexts);
 
   const curEmbeddings = allEmbeddings.slice(0, currentKeywords.length);
@@ -73,6 +77,10 @@ export async function computeInfoGain(
 
   const newWordCount = maxSimByCur.filter((s) => s < COVERAGE_THRESHOLD).length;
   const gain = newWordCount / currentKeywords.length;
+
+  const newKeywords = currentKeywords.filter((_, i) => maxSimByCur[i] < COVERAGE_THRESHOLD);
+  const level = gain >= 0.6 ? '高（大量新内容）' : gain >= 0.3 ? '中' : '低（内容重复）';
+  logger.info(`[信息增益 InfoGain] 结果：gain=${gain.toFixed(3)}（${level}），新词 ${newWordCount}/${currentKeywords.length} 个，新词：${newKeywords.join('、') || '（无）'}`, { sessionId });
 
   for (const uid of memberIds) {
     infoGains[uid] = gain;

@@ -33,6 +33,23 @@ export interface ReasoningResult {
   method: string;
 }
 
+export interface GeneratePushParams {
+  trigger_type: string;
+  summary?: string;
+  transcripts?: string;
+  username?: string;
+  silence_s?: number;
+  speaking_ratio?: number;
+  triggered_metrics?: string;
+  keyword?: string;
+  skw_score?: number;
+}
+
+export interface TranscriptItem {
+  user_id: string;
+  text: string;
+}
+
 // ── 客户端 ────────────────────────────────────────────────────────────────────
 
 function createNlpClient(): AxiosInstance {
@@ -112,5 +129,33 @@ export async function hasReasoning(text: string): Promise<ReasoningResult> {
   } catch (err) {
     logger.error('has_reasoning failed', { message: (err as Error).message });
     throw err;
+  }
+}
+
+/** 生成推送文案，失败时返回空字符串 */
+export async function generatePush(params: GeneratePushParams): Promise<string> {
+  try {
+    const res = await client.post<{ content: string }>('/api/nlp/generate_push', params);
+    return res.data.content ?? '';
+  } catch (err) {
+    logger.error('generate_push failed', { message: (err as Error).message });
+    return '';
+  }
+}
+
+/** 生成滚动摘要，失败时返回空字符串 */
+export async function generateSummary(
+  transcripts: TranscriptItem[],
+  prevSummary = '',
+): Promise<string> {
+  try {
+    const res = await client.post<{ summary: string }>('/api/nlp/generate_summary', {
+      transcripts,
+      prev_summary: prevSummary,
+    });
+    return res.data.summary ?? '';
+  } catch (err) {
+    logger.error('generate_summary failed', { message: (err as Error).message });
+    return '';
   }
 }

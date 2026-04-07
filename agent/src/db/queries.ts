@@ -184,6 +184,134 @@ export async function writeWindowMetrics(row: WindowMetricsRow): Promise<void> {
   );
 }
 
+// ── 推理层 / 行动层 / 摘要层 新增查询 ─────────────────────────────────────────
+
+/** 写入 discussion_states，返回生成的 id */
+export async function writeDiscussionState(row: {
+  session_id: string;
+  state_type: string;
+  target_user_id?: string;
+  trigger_metrics: Record<string, unknown>;
+  window_start: Date;
+  push_cooldown_until: Date;
+}): Promise<string> {
+  const id = 'ds_' + nanoid(12);
+  await pool.query(
+    `INSERT INTO discussion_states
+       (id, session_id, state_type, target_user_id, trigger_metrics,
+        window_start, push_cooldown_until, triggered_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
+    [
+      id,
+      row.session_id,
+      row.state_type,
+      row.target_user_id ?? null,
+      JSON.stringify(row.trigger_metrics),
+      toUtcString(row.window_start),
+      toUtcString(row.push_cooldown_until),
+    ],
+  );
+  return id;
+}
+
+/** 写入 push_logs */
+export async function writePushLog(row: {
+  session_id: string;
+  state_id: string;
+  target_user_id: string;
+  push_content: string;
+  push_channel: 'glasses' | 'app';
+}): Promise<void> {
+  const id = 'pl_' + nanoid(12);
+  await pool.query(
+    `INSERT INTO push_logs
+       (id, session_id, state_id, target_user_id,
+        push_content, push_channel, delivery_status, triggered_at)
+     VALUES ($1, $2, $3, $4, $5, $6, 'pending', NOW())`,
+    [id, row.session_id, row.state_id, row.target_user_id, row.push_content, row.push_channel],
+  );
+}
+
+/** 跨状态冷却：查询某用户最近一次收到推送的时间 */
+export async function getLastPushTimeForUser(
+  sessionId: string,
+  userId: string,
+): Promise<Date | null> {
+  const res = await pool.query<{ last_push: Date | null }>(
+    `SELECT MAX(triggered_at) AS last_push
+     FROM push_logs
+     WHERE session_id = $1 AND target_user_id = $2`,
+    [sessionId, userId],
+  );
+  return res.rows[0]?.last_push ?? null;
+}
+
+/** 单状态冷却：查询某 state_type 对某用户的冷却截止时间 */
+export async function getStateCooldownUntil(
+  sessionId: string,
+  stateType: string,
+  userId?: string,
+): Promise<Date | null> {
+  const res = await pool.query<{ cooldown_until: Date | null }>(
+    `SELECT MAX(push_cooldown_until) AS cooldown_until
+     FROM discussion_states
+     WHERE session_id = $1
+       AND state_type = $2
+       AND ($3::text IS NULL OR target_user_id = $3)`,
+    [sessionId, stateType, userId ?? null],
+  );
+  return res.rows[0]?.cooldown_until ?? null;
+}
+
+/** 写入 info_gap_buttons（静默按钮，等待用户点击） */
+export async function writeInfoGapButton(row: {
+  session_id: string;
+  user_id: string;
+  keyword: string;
+  skw_score: number;
+  window_start: Date;
+}): Promise<void> {
+  const id = 'igb_' + nanoid(12);
+  await pool.query(
+    `INSERT INTO info_gap_buttons
+       (id, session_id, user_id, keyword, skw_score, window_start, status, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, 'pending', NOW())
+     ON CONFLICT DO NOTHING`,
+    [id, row.session_id, row.user_id, row.keyword, row.skw_score, toUtcString(row.window_start)],
+  );
+}
+
+/** 读取最近一条摘要 */
+export async function getLastSummary(
+  sessionId: string,
+): Promise<{ summary_text: string; window_end: Date } | null> {
+  const res = await pool.query<{ summary_text: string; window_end: Date }>(
+    `SELECT summary_text, window_end
+     FROM discussion_summaries
+     WHERE session_id = $1
+     ORDER BY window_end DESC
+     LIMIT 1`,
+    [sessionId],
+  );
+  return res.rows[0] ?? null;
+}
+
+/** 写入讨论摘要 */
+export async function writeDiscussionSummary(row: {
+  session_id: string;
+  summary_text: string;
+  window_start: Date;
+  window_end: Date;
+}): Promise<void> {
+  const id = 'sum_' + nanoid(12);
+  await pool.query(
+    `INSERT INTO discussion_summaries
+       (id, session_id, summary_text, window_start, window_end, created_at)
+     VALUES ($1, $2, $3, $4, $5, NOW())`,
+    [id, row.session_id, row.summary_text, toUtcString(row.window_start), toUtcString(row.window_end)],
+  );
+}
+
 /** 批量写入 keyword_skw */
 export async function writeKeywordSkw(rows: KeywordSkwRow[]): Promise<void> {
   if (rows.length === 0) return;

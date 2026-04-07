@@ -1,5 +1,8 @@
 import { getTranscriptsInWindow, writeKeywordSkw, KeywordSkwRow } from '../../db/queries';
 import { tfidf, embed, similarity } from '../../http/nlp-client';
+import { createLogger } from '../../logger';
+
+const logger = createLogger('skill:skw');
 
 export interface SkwResult {
   /**
@@ -39,7 +42,7 @@ export async function computeSkw(
   const textByUser: Record<string, string[]> = {};
   for (const uid of memberIds) textByUser[uid] = [];
   for (const t of transcripts) {
-    if (t.user_id && t.text) textByUser[t.user_id].push(t.text);
+    if (t.user_id && t.text && t.user_id in textByUser) textByUser[t.user_id].push(t.text);
   }
 
   // 过滤掉无发言成员
@@ -53,8 +56,10 @@ export async function computeSkw(
     return { keywords: [], scores: {} };
   }
 
+  logger.info(`[关键词提取 TF-IDF] 正在提取 ${Object.keys(activeMemberTexts).length} 位活跃成员的关键词`, { sessionId });
   const tfidfResult = await tfidf(activeMemberTexts, 5);
   const { keywords, member_keyword_contexts } = tfidfResult;
+  logger.info(`[关键词提取 TF-IDF] 提取完成，关键词：${keywords.join('、') || '（无）'}`, { sessionId });
 
   if (keywords.length === 0) {
     return { keywords: [], scores: {} };
@@ -76,6 +81,7 @@ export async function computeSkw(
 
     // 批量 embed
     const texts = activeMembers.map((uid) => contextByUser[uid]);
+    logger.info(`[跨成员语义相似度 Skw] 关键词「${keyword}」：向量化 ${texts.length} 位成员的上下文`, { sessionId });
     const embeddings = await embed(texts);
     const embeddingByUser: Record<string, number[]> = {};
     activeMembers.forEach((uid, i) => {
@@ -99,6 +105,8 @@ export async function computeSkw(
 
     simScores.forEach((score, idx) => {
       const { userA, userB } = pairMeta[idx];
+      const level = score >= 0.85 ? '高度一致' : score >= 0.6 ? '部分重叠' : '差异显著';
+      logger.info(`[跨成员语义相似度 Skw] 关键词「${keyword}」${userA} vs ${userB}：相似度=${score.toFixed(3)}（${level}）`, { sessionId });
 
       if (!scores[keyword][userA]) scores[keyword][userA] = {};
       if (!scores[keyword][userB]) scores[keyword][userB] = {};

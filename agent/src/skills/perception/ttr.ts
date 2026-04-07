@@ -1,5 +1,8 @@
 import { getTranscriptsInWindow } from '../../db/queries';
 import { segment } from '../../http/nlp-client';
+import { createLogger } from '../../logger';
+
+const logger = createLogger('skill:ttr');
 
 export interface TtrResult {
   /** user_id → TTR (0~1)，无发言为 null */
@@ -22,7 +25,7 @@ export async function computeTtr(
   for (const uid of memberIds) textByUser[uid] = [];
 
   for (const t of transcripts) {
-    if (t.user_id && t.text) {
+    if (t.user_id && t.text && t.user_id in textByUser) {
       textByUser[t.user_id].push(t.text);
     }
   }
@@ -36,8 +39,11 @@ export async function computeTtr(
         ttrs[uid] = null;
         return;
       }
+      logger.info(`[词汇多样性 TTR] 正在分析用户 ${uid} 的发言（${combined.length} 字）`, { sessionId });
       const result = await segment(combined);
       ttrs[uid] = result.ttr;
+      const level = result.ttr >= 0.7 ? '高（词汇丰富）' : result.ttr >= 0.4 ? '中' : '低（重复较多）';
+      logger.info(`[词汇多样性 TTR] 用户 ${uid} 结果：TTR=${result.ttr.toFixed(3)}（${level}），共 ${result.token_count} 词，其中 ${result.unique_count} 个不同词`, { sessionId });
     }),
   );
 
