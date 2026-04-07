@@ -14,6 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .auth import get_current_user
 from .db import get_db
 from .groups import _get_group_or_404
+from .ws_manager import ws_manager
+from .ws_protocol import build_session_ended
 
 router = APIRouter(prefix="/api", tags=["sessions"])
 
@@ -444,6 +446,11 @@ async def start_session(
         db,
         forbidden_detail="仅群组成员可以发起会话",
     )
+    if session_row.get("created_by") and current_user["id"] != session_row["created_by"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="仅发起人可以发起会话",
+        )
 
     if session_row["status"] != "not_started":
         raise HTTPException(
@@ -542,6 +549,11 @@ async def end_session(
         db,
         forbidden_detail="仅群组成员可以结束会话",
     )
+    if session_row.get("created_by") and current_user["id"] != session_row["created_by"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="仅发起人可以结束会话",
+        )
 
     if session_row["status"] != "ongoing":
         raise HTTPException(
@@ -564,6 +576,17 @@ async def end_session(
     )
     await db.commit()
     row = result.mappings().one()
+    await ws_manager.broadcast_to_session(
+        session_id,
+        build_session_ended(
+            {
+                "session_id": session_id,
+                "reason": "host_ended",
+                "ended_by": current_user["id"],
+            }
+        ),
+    )
+    await ws_manager.close_session_connections(session_id, code=1000, reason="host_ended")
     return ChatSessionOut.model_validate(dict(row))
 
 
@@ -593,12 +616,14 @@ async def end_session_beacon(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的 token")
 
     result = await db.execute(
-        text("SELECT id, status FROM chat_sessions WHERE id = :session_id"),
+        text("SELECT id, status, created_by FROM chat_sessions WHERE id = :session_id"),
         {"session_id": session_id},
     )
     row = result.mappings().first()
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在")
+    if row.get("created_by") and user_id != row["created_by"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅发起人可以结束会话")
 
     if row["status"] == "ended":
         return {"ok": True}
@@ -614,4 +639,15 @@ async def end_session_beacon(
         {"session_id": session_id},
     )
     await db.commit()
+    await ws_manager.broadcast_to_session(
+        session_id,
+        build_session_ended(
+            {
+                "session_id": session_id,
+                "reason": "host_ended",
+                "ended_by": user_id,
+            }
+        ),
+    )
+    await ws_manager.close_session_connections(session_id, code=1000, reason="host_ended")
     return {"ok": True}

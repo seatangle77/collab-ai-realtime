@@ -46,6 +46,13 @@ def build_transcript(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_transcript_segment(data: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "type": "transcript_segment",
+        "data": data,
+    }
+
+
 def build_engagement_alert(data: dict[str, Any]) -> dict[str, Any]:
     return {
         "type": "engagement_alert",
@@ -66,6 +73,17 @@ def build_push_notification(content: str, target_user_id: str) -> dict[str, Any]
         "data": {
             "content": content,
             "target_user_id": target_user_id,
+        },
+    }
+
+
+def build_summary_update(content: str, version: int, session_id: str) -> dict[str, Any]:
+    return {
+        "type": "summary_update",
+        "data": {
+            "session_id": session_id,
+            "version": version,
+            "content": content,
         },
     }
 

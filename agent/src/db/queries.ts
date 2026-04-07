@@ -284,9 +284,9 @@ export async function writeInfoGapButton(row: {
 /** 读取最近一条摘要 */
 export async function getLastSummary(
   sessionId: string,
-): Promise<{ summary_text: string; window_end: Date } | null> {
-  const res = await pool.query<{ summary_text: string; window_end: Date }>(
-    `SELECT summary_text, window_end
+): Promise<{ content: string; window_end: Date } | null> {
+  const res = await pool.query<{ content: string; window_end: Date }>(
+    `SELECT content, window_end
      FROM discussion_summaries
      WHERE session_id = $1
      ORDER BY window_end DESC

@@ -99,11 +99,12 @@ export class SessionWorker {
       });
 
       // Step2：推理层
+      if (!result) return;
       const triggers = runReasoningLayer(result, memberIds);
 
       // Step3：读当前摘要与本轮发言（行动层 Prompt 需要）
       const summaryRow = await getLastSummary(this.sessionId);
-      const summaryText = summaryRow?.summary_text ?? '';
+      const summaryText = summaryRow?.content ?? '';
       const transcripts = await getTranscriptsInWindow(this.sessionId, windowStart, windowEnd);
 
       // Step4：行动层

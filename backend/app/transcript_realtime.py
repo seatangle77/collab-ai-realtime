@@ -53,6 +53,7 @@ async def insert_speech_transcript_and_broadcast(
     session_id: str,
     *,
     text: str,
+    segment_key: str | None = None,
     speaker: str | None = None,
     user_id: str | None = None,
     start: datetime | None = None,
@@ -120,6 +121,9 @@ async def insert_speech_transcript_and_broadcast(
         await db.commit()
         row = result.mappings().one()
         payload = _row_to_ws_payload(row)
+        if segment_key:
+            # 仅用于前端匹配并清理对应实时片段，不写入数据库
+            payload["segment_key"] = segment_key
 
         # 查说话人姓名：speaker 存的是 user_id，JOIN 得到 name
         raw_speaker = payload.get("speaker")

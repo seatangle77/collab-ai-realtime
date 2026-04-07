@@ -5,9 +5,12 @@
 """
 from __future__ import annotations
 
+import logging
 from openai import OpenAI
 
 from ..settings import nlp_settings
+
+logger = logging.getLogger(__name__)
 
 # ── Prompt ────────────────────────────────────────────────────────────────────
 
@@ -64,6 +67,12 @@ def generate_summary(
     if not nlp_settings.qwen_api_key:
         return ""
 
+    prev_preview = (prev_summary[:30] + "...") if len(prev_summary) > 30 else prev_summary
+    logger.info(
+        "[NLP/summary] input: transcripts=%d条 prev_summary=\"%s\"",
+        len(transcripts), prev_preview or "（无）",
+    )
+
     try:
         client = _get_client()
         response = client.chat.completions.create(
@@ -75,6 +84,9 @@ def generate_summary(
             ],
         )
         content = response.choices[0].message.content or ""
-        return content.strip()
-    except Exception:
+        result = content.strip()
+        logger.info("[NLP/summary] output: \"%s\" (%d字)", result[:40] + ("..." if len(result) > 40 else ""), len(result))
+        return result
+    except Exception as e:
+        logger.warning("[NLP/summary] 调用失败: %s", e)
         return ""

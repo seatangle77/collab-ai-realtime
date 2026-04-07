@@ -8,10 +8,13 @@
 from __future__ import annotations
 
 import json
+import logging
 
 from openai import OpenAI
 
 from ..settings import nlp_settings
+
+logger = logging.getLogger(__name__)
 
 # ── 规则词表 ──────────────────────────────────────────────────────────────────
 
@@ -59,6 +62,9 @@ def _call_llm(text: str) -> dict[str, bool]:
 
     client = _get_client()
 
+    text_preview = text[:50] + ("..." if len(text) > 50 else "")
+    logger.info("[NLP/reasoning] input: text=\"%s\" (%d字) method=llm", text_preview, len(text))
+
     try:
         response = client.chat.completions.create(
             model=nlp_settings.reasoning_model,
@@ -68,7 +74,8 @@ def _call_llm(text: str) -> dict[str, bool]:
                 {"role": "user",   "content": _USER_TEMPLATE.format(text=text)},
             ],
         )
-    except Exception:
+    except Exception as e:
+        logger.warning("[NLP/reasoning] 调用失败: %s", e)
         # 认证失败、网络波动、上游限流等情况均降级，不影响主接口可用性
         return {"has_reasoning": False, "has_evidence": False}
 
@@ -79,10 +86,12 @@ def _call_llm(text: str) -> dict[str, bool]:
     raw = content.strip()
     try:
         result = json.loads(raw)
-        return {
+        parsed = {
             "has_reasoning": bool(result.get("has_reasoning", False)),
             "has_evidence":  bool(result.get("has_evidence", False)),
         }
+        logger.info("[NLP/reasoning] output: %s", parsed)
+        return parsed
     except (json.JSONDecodeError, KeyError):
         # LLM 输出格式异常时，保守返回 False
         return {"has_reasoning": False, "has_evidence": False}

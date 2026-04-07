@@ -88,6 +88,24 @@ function stopAgentCountdown() {
   }
 }
 
+// ── 讨论摘要 ──────────────────────────────────────────────────────────────────
+const currentSummary = ref('')
+const summaryVersion = ref(0)
+
+async function fetchLatestSummary() {
+  try {
+    const data = await appHttp.get<{ content: string; version: number }>(
+      `/api/sessions/${sessionId}/summary`,
+    )
+    if (data.content) {
+      currentSummary.value = data.content
+      summaryVersion.value = data.version
+    }
+  } catch {
+    // 404 或暂无摘要时静默处理
+  }
+}
+
 // ── 信息缺口按钮 ──────────────────────────────────────────────────────────────
 const infoGapButtons = ref<InfoGapButton[]>([])
 
@@ -470,7 +488,11 @@ function handleWsMessage(event: MessageEvent<string>) {
     return
   }
   if (msgType === 'transcript') {
-    const d = data as Partial<AppTranscript> & { transcript_id?: string; text?: string }
+    const d = data as Partial<AppTranscript> & {
+      transcript_id?: string
+      text?: string
+      segment_key?: string
+    }
     if (!d.transcript_id || typeof d.text !== 'string') return
     if (transcripts.value.some((t) => t.transcript_id === d.transcript_id)) return
     const item: AppTranscript = {
@@ -493,6 +515,48 @@ function handleWsMessage(event: MessageEvent<string>) {
             : '',
     }
     transcripts.value = [...transcripts.value, item]
+    const next = { ...liveSegments.value }
+    if (typeof d.segment_key === 'string' && d.segment_key) {
+      delete next[d.segment_key]
+    } else {
+      // 兼容旧后端：缺少 segment_key 时仍按文本兜底清理
+      for (const [k, v] of Object.entries(next)) {
+        if (v.text.trim() === item.text.trim()) delete next[k]
+      }
+    }
+    liveSegments.value = next
+    scrollTranscriptsToBottom()
+    return
+  }
+  if (msgType === 'transcript_segment') {
+    const d = data as { segment_key?: string; text?: string; speaker?: string; is_final?: boolean }
+    if (!d.segment_key) return
+    if (d.is_final) {
+      const existing = liveSegments.value[d.segment_key]
+      const finalText = typeof d.text === 'string' && d.text.trim() ? d.text : existing?.text
+      if (!finalText || !finalText.trim()) return
+      liveSegments.value = {
+        ...liveSegments.value,
+        [d.segment_key]: {
+          segment_key: d.segment_key,
+          text: finalText,
+          speaker: d.speaker ?? existing?.speaker,
+          status: 'pending_final',
+        },
+      }
+      return
+    }
+    if (typeof d.text !== 'string' || !d.text.trim()) return
+    liveSegments.value = {
+      ...liveSegments.value,
+      [d.segment_key]: {
+        segment_key: d.segment_key,
+        text: d.text,
+        speaker: d.speaker,
+        status: 'live',
+      },
+    }
+    scrollTranscriptsToBottom()
     return
   }
   if (msgType === 'session_ended') {
@@ -507,8 +571,18 @@ function handleWsMessage(event: MessageEvent<string>) {
     void loadTranscripts()
     if (d.reason === 'host_timeout') {
       ElMessage.warning('发起人长时间未响应，会话已自动结束')
+    } else if (d.reason === 'host_ended') {
+      ElMessage.info('发起人已结束会话')
     } else {
       ElMessage.info('会话已结束')
+    }
+    return
+  }
+  if (msgType === 'summary_update') {
+    const d = data as { content?: string; version?: number }
+    if (typeof d.content === 'string' && d.content) {
+      currentSummary.value = d.content
+      summaryVersion.value = d.version ?? summaryVersion.value
     }
     return
   }
@@ -531,7 +605,10 @@ function handleWsMessage(event: MessageEvent<string>) {
 
 function speakerInitial(speaker: string | null | undefined): string {
   const s = (speaker || '未').trim()
-  return s.slice(0, 1)
+  if (!s) return '未'
+  const asciiOnly = /^[A-Za-z0-9]+$/.test(s)
+  if (asciiOnly) return s.slice(0, 2).toUpperCase()
+  return s.slice(0, 2)
 }
 
 /** 用于分组合并连续同一说话人；优先用 speaker（uid），否则用展示名 */
@@ -547,9 +624,17 @@ function speakerDisplayLabel(t: AppTranscript): string {
 
 const AVATAR_CLASS_BY_HASH = [
   'app-session-detail-avatar--blue',
+  'app-session-detail-avatar--sky',
+  'app-session-detail-avatar--cyan',
+  'app-session-detail-avatar--teal',
   'app-session-detail-avatar--emerald',
+  'app-session-detail-avatar--green',
+  'app-session-detail-avatar--lime',
   'app-session-detail-avatar--violet',
+  'app-session-detail-avatar--indigo',
   'app-session-detail-avatar--amber',
+  'app-session-detail-avatar--orange',
+  'app-session-detail-avatar--rose',
 ]
 
 function avatarClassForKey(key: string): string {
@@ -586,6 +671,13 @@ interface TranscriptMessageGroup {
   messages: AppTranscript[]
 }
 
+interface LiveTranscriptSegment {
+  segment_key: string
+  text: string
+  speaker?: string
+  status: 'live' | 'pending_final'
+}
+
 function buildTranscriptGroups(items: AppTranscript[]): TranscriptMessageGroup[] {
   const sorted = [...items].sort((a, b) => {
     const sa = String(a.start ?? '')
@@ -612,6 +704,8 @@ function buildTranscriptGroups(items: AppTranscript[]): TranscriptMessageGroup[]
 }
 
 const groupedTranscripts = computed(() => buildTranscriptGroups(transcripts.value))
+const liveSegments = ref<Record<string, LiveTranscriptSegment>>({})
+const liveSegmentList = computed(() => Object.values(liveSegments.value))
 
 function scrollTranscriptsToBottom() {
   nextTick(() => {
@@ -746,7 +840,10 @@ onMounted(async () => {
   if (session.value?.status === 'ongoing') {
     openWebSocket()
     void fetchInfoGapButtons()
+    void fetchLatestSummary()
     startAgentCountdown()
+  } else if (session.value?.status === 'ended') {
+    void fetchLatestSummary()
   }
   window.addEventListener('beforeunload', handleBeforeUnload)
   if (Capacitor.isNativePlatform()) {
@@ -880,9 +977,19 @@ onUnmounted(() => {
         AI 分析中 &nbsp;·&nbsp; 下次更新 {{ agentCountdown }}s 后
       </div>
 
+      <!-- 讨论摘要（有内容时显示） -->
+      <div v-if="currentSummary" class="app-session-summary-panel">
+        <div class="app-session-summary-header">
+          <span class="app-session-summary-icon" aria-hidden="true">◈</span>
+          <span class="app-session-summary-label">讨论摘要</span>
+          <span class="app-session-summary-version">v{{ summaryVersion }}</span>
+        </div>
+        <p class="app-session-summary-content">{{ currentSummary }}</p>
+      </div>
+
       <div class="app-session-detail-transcripts">
         <h3 class="app-session-detail-transcripts-title">
-          转写记录
+          讨论实录
           <span v-if="!isHost" class="app-session-detail-readonly-badge">只读</span>
         </h3>
         <div
@@ -908,9 +1015,12 @@ onUnmounted(() => {
           </button>
         </div>
 
-        <div v-if="transcriptsLoading" class="app-session-detail-loading">正在加载转写...</div>
-        <div v-else-if="!transcripts.length" class="app-session-detail-transcripts-empty">
-          暂无转写记录
+        <div v-if="transcriptsLoading" class="app-session-detail-loading">正在加载讨论实录...</div>
+        <div
+          v-else-if="!transcripts.length && !liveSegmentList.length"
+          class="app-session-detail-transcripts-empty"
+        >
+          暂无讨论实录
         </div>
         <div v-else ref="transcriptsListEl" class="app-session-detail-transcripts-scroll">
           <ul class="app-session-detail-transcripts-list">
@@ -929,6 +1039,7 @@ onUnmounted(() => {
                   {{ group.initial }}
                 </div>
                 <div class="app-session-detail-transcript-bubbles">
+                  <p class="app-session-detail-speaker-name">{{ group.speakerLabel }}</p>
                   <div
                     v-for="(item, idx) in group.messages"
                     :key="item.transcript_id"
@@ -943,6 +1054,38 @@ onUnmounted(() => {
                     >
                       {{ transcriptTimeLabel(item) }}
                     </p>
+                  </div>
+                </div>
+              </div>
+            </li>
+            <li
+              v-for="seg in liveSegmentList"
+              :key="seg.segment_key"
+              class="app-session-detail-transcript-group app-session-detail-transcript-group--live"
+              :class="{
+                'app-session-detail-transcript-group--pending': seg.status === 'pending_final',
+              }"
+            >
+              <div class="app-session-detail-transcript-row">
+                <div
+                  class="app-session-detail-transcript-avatar app-session-detail-avatar--gray"
+                  :title="seg.status === 'pending_final' ? '确认中' : '识别中'"
+                  aria-hidden="true"
+                >
+                  ...
+                </div>
+                <div class="app-session-detail-transcript-bubbles">
+                  <p class="app-session-detail-speaker-name">
+                    {{ seg.status === 'pending_final' ? '确认中' : '识别中' }}
+                  </p>
+                  <div
+                    class="app-session-detail-bubble"
+                    :class="{
+                      'app-session-detail-bubble--live': seg.status === 'live',
+                      'app-session-detail-bubble--pending': seg.status === 'pending_final',
+                    }"
+                  >
+                    <p class="app-session-detail-transcript-text">{{ seg.text }}</p>
                   </div>
                 </div>
               </div>
@@ -980,6 +1123,46 @@ onUnmounted(() => {
 @keyframes agent-dot-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }
+}
+
+.app-session-summary-panel {
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  border-radius: 8px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+}
+
+.app-session-summary-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.app-session-summary-icon {
+  font-size: 13px;
+  color: #3b82f6;
+}
+
+.app-session-summary-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1d4ed8;
+}
+
+.app-session-summary-version {
+  font-size: 11px;
+  color: #93c5fd;
+  margin-left: auto;
+}
+
+.app-session-summary-content {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #1e3a5f;
+  white-space: pre-wrap;
 }
 
 .app-session-detail-page {
@@ -1285,16 +1468,52 @@ onUnmounted(() => {
   background: #3b82f6;
 }
 
+.app-session-detail-avatar--sky {
+  background: #0ea5e9;
+}
+
+.app-session-detail-avatar--cyan {
+  background: #06b6d4;
+}
+
+.app-session-detail-avatar--teal {
+  background: #14b8a6;
+}
+
 .app-session-detail-avatar--emerald {
   background: #10b981;
+}
+
+.app-session-detail-avatar--green {
+  background: #22c55e;
+}
+
+.app-session-detail-avatar--lime {
+  background: #84cc16;
 }
 
 .app-session-detail-avatar--violet {
   background: #8b5cf6;
 }
 
+.app-session-detail-avatar--indigo {
+  background: #6366f1;
+}
+
 .app-session-detail-avatar--amber {
   background: #f59e0b;
+}
+
+.app-session-detail-avatar--orange {
+  background: #f97316;
+}
+
+.app-session-detail-avatar--rose {
+  background: #f43f5e;
+}
+
+.app-session-detail-avatar--gray {
+  background: #9ca3af;
 }
 
 .app-session-detail-transcript-bubbles {
@@ -1303,6 +1522,16 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.app-session-detail-speaker-name {
+  margin: 0 0 4px 2px;
+  font-size: 12px;
+  line-height: 1.2;
+  color: #6b7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .app-session-detail-bubble-stack {
@@ -1320,6 +1549,16 @@ onUnmounted(() => {
   border-top-left-radius: 4px;
   background: var(--app-bg-elevated);
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.10), 0 1px 2px -1px rgba(15, 23, 42, 0.08);
+}
+
+.app-session-detail-bubble--live {
+  opacity: 0.82;
+  border: 1px dashed #d1d5db;
+}
+
+.app-session-detail-bubble--pending {
+  opacity: 0.58;
+  border: 1px dashed #d1d5db;
 }
 
 .app-session-detail-bubble-time {

@@ -40,7 +40,7 @@ export interface PipelineResult {
  * 3. info-gain 依赖 skw 产出的 keywords，最后执行
  * 4. 汇总所有结果，按用户逐条写入 window_metrics
  */
-export async function runPerceptionPipeline(input: PipelineInput): Promise<PipelineResult> {
+export async function runPerceptionPipeline(input: PipelineInput): Promise<PipelineResult | undefined> {
   const { sessionId, memberIds, windowStart, windowEnd } = input;
 
   if (memberIds.length === 0) {

@@ -1,9 +1,12 @@
 """
 讨论摘要接口
-- GET /api/sessions/{session_id}/summary  获取最新一条讨论摘要
+- GET  /api/sessions/{session_id}/summary          获取最新一条讨论摘要
+- POST /api/internal/sessions/{session_id}/summary Agent 写库并广播（需 X-Admin-Token）
 """
 from __future__ import annotations
 
+import uuid
+from datetime import UTC, datetime
 from typing import Any, Mapping
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -11,8 +14,11 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .admin.deps import require_admin
 from .auth import get_current_user
 from .db import get_db
+from .ws_manager import ws_manager
+from .ws_protocol import build_summary_update
 
 router = APIRouter(prefix="/api", tags=["discussion-summary"])
 
@@ -25,6 +31,70 @@ class DiscussionSummaryOut(BaseModel):
     window_start: Any
     window_end: Any
     created_at: Any
+
+
+class SummaryNotifyIn(BaseModel):
+    content: str
+    window_start: datetime
+    window_end: datetime
+
+
+def _to_utc_naive(dt: datetime) -> datetime:
+    """
+    Normalize datetimes for DB writes.
+    The table currently stores naive timestamps, while API input may be timezone-aware.
+    """
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone(UTC).replace(tzinfo=None)
+
+
+@router.post(
+    "/internal/sessions/{session_id}/summary",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_admin)],
+)
+async def notify_summary(
+    session_id: str,
+    body: SummaryNotifyIn,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """
+    Agent 写摘要并广播。
+    1. 取当前最大 version + 1
+    2. 写入 discussion_summaries
+    3. WebSocket 广播 summary_update 给会话所有人
+    """
+    # 1. 原子写库：version = MAX(version)+1，避免并发竞争
+    summary_id = "ds" + uuid.uuid4().hex[:8]
+    version_result = await db.execute(
+        text(
+            """
+            INSERT INTO discussion_summaries (id, session_id, version, content, window_start, window_end, created_at)
+            SELECT :id, :session_id, COALESCE(MAX(version), 0) + 1, :content, :window_start, :window_end, NOW()
+            FROM discussion_summaries
+            WHERE session_id = :session_id
+            RETURNING version
+            """
+        ),
+        {
+            "id": summary_id,
+            "session_id": session_id,
+            "content": body.content,
+            "window_start": _to_utc_naive(body.window_start),
+            "window_end": _to_utc_naive(body.window_end),
+        },
+    )
+    new_version = version_result.mappings().first()["version"]
+    await db.commit()
+
+    # 3. WebSocket 广播
+    await ws_manager.broadcast_to_session(
+        session_id,
+        build_summary_update(body.content, new_version, session_id),
+    )
+
+    return {"id": summary_id, "version": new_version}
 
 
 @router.get(

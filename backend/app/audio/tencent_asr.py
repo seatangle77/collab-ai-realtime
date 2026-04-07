@@ -19,12 +19,16 @@ class Credential:
 
 
 class MyASRListener(SpeechRecognitionListener):
-    def __init__(self, session_id: str, on_result, on_error_callback, loop):
+    def __init__(self, session_id: str, on_result, on_partial_result, on_error_callback, loop):
         self.session_id = session_id
-        self.on_result = on_result                  # async def on_result(text, audio_bytes)
+        self.on_result = on_result                  # async def on_result(text, audio_bytes, segment_key=None)
+        self.on_partial_result = on_partial_result  # async def on_partial_result(segment_key, text, is_final)
         self.on_error_callback = on_error_callback  # 触发重连的同步回调
         self.loop = loop                            # asyncio event loop，用于线程回调桥接
         self.sentence_frames: list[bytes] = []
+        self._sentence_segment_texts: dict[str, list[str]] = {}
+        self._sentence_last_emit_ms: dict[str, float] = {}
+        self._partial_emit_interval_ms = 250
 
     def cache_audio(self, data: bytes):
         self.sentence_frames.append(data)
@@ -32,6 +36,63 @@ class MyASRListener(SpeechRecognitionListener):
     def on_sentence_begin(self, response):
         # 新句子开始，清空音频缓存，避免跨句累积
         self.sentence_frames = []
+
+    @staticmethod
+    def _sentence_key(response: dict, result: dict) -> str:
+        voice_id = str(response.get("voice_id", "unknown"))
+        idx = result.get("index", -1)
+        return f"{voice_id}:{idx}"
+
+    @staticmethod
+    def _split_segments(word_list: list[dict], sil_gap_ms: int) -> list[str]:
+        if not word_list:
+            return []
+        segments: list[list[dict]] = []
+        current_segment: list[dict] = [word_list[0]]
+        last_end = word_list[0].get("end_time", 0)
+        for w in word_list[1:]:
+            start = w.get("start_time", last_end)
+            end = w.get("end_time", start)
+            gap = start - last_end
+            if gap >= sil_gap_ms and current_segment:
+                segments.append(current_segment)
+                current_segment = [w]
+            else:
+                current_segment.append(w)
+            last_end = end
+        if current_segment:
+            segments.append(current_segment)
+        return ["".join(w.get("word", "") for w in seg).strip() for seg in segments]
+
+    def on_recognition_result_change(self, response):
+        result = response.get("result") or {}
+        word_list = result.get("word_list") or []
+        if not word_list:
+            return
+
+        now_ms = time.time() * 1000
+        sentence_key = self._sentence_key(response, result)
+        last_emit = self._sentence_last_emit_ms.get(sentence_key, 0.0)
+        if now_ms - last_emit < self._partial_emit_interval_ms:
+            return
+
+        seg_texts = self._split_segments(word_list, tencent_asr_settings.local_split_gap_ms)
+        if not seg_texts:
+            return
+        prev_texts = self._sentence_segment_texts.get(sentence_key, [])
+        for i, seg_text in enumerate(seg_texts):
+            if not seg_text:
+                continue
+            if i < len(prev_texts) and prev_texts[i] == seg_text:
+                continue
+            segment_key = f"{sentence_key}:{i}"
+            if self.on_partial_result:
+                asyncio.run_coroutine_threadsafe(
+                    self.on_partial_result(segment_key, seg_text, False),
+                    self.loop,
+                )
+        self._sentence_segment_texts[sentence_key] = seg_texts
+        self._sentence_last_emit_ms[sentence_key] = now_ms
 
     def on_sentence_end(self, response):
         """
@@ -43,6 +104,7 @@ class MyASRListener(SpeechRecognitionListener):
         """
         result = response.get("result") or {}
         word_list = result.get("word_list") or []
+        sentence_key = self._sentence_key(response, result)
 
         # 若没有词级时间戳，退回到原来的整句逻辑
         if not word_list:
@@ -51,46 +113,41 @@ class MyASRListener(SpeechRecognitionListener):
             self.sentence_frames = []
             if text:
                 asyncio.run_coroutine_threadsafe(
-                    self.on_result(text, audio_bytes),
+                    self.on_result(text, audio_bytes, segment_key=f"{sentence_key}:0"),
                     self.loop,
                 )
+                if self.on_partial_result:
+                    segment_key = f"{sentence_key}:0"
+                    asyncio.run_coroutine_threadsafe(
+                        self.on_partial_result(segment_key, text, True),
+                        self.loop,
+                    )
+            self._sentence_segment_texts.pop(sentence_key, None)
+            self._sentence_last_emit_ms.pop(sentence_key, None)
             return
 
-        # 按 0.6 秒静音切分
-        SIL_GAP_MS = 650
-        segments: list[list[dict]] = []
-        current_segment: list[dict] = [word_list[0]]
-        last_end = word_list[0].get("end_time", 0)
-
-        for w in word_list[1:]:
-            start = w.get("start_time", last_end)
-            end = w.get("end_time", start)
-            gap = start - last_end
-
-            if gap >= SIL_GAP_MS and current_segment:
-                segments.append(current_segment)
-                current_segment = [w]
-            else:
-                current_segment.append(w)
-
-            last_end = end
-
-        if current_segment:
-            segments.append(current_segment)
+        seg_texts = self._split_segments(word_list, tencent_asr_settings.local_split_gap_ms)
 
         # 目前先简单使用整句音频作为每一小段的 audio_bytes
         # 这样可以复用现有的声纹识别与写库逻辑，代价是会多次重复利用同一段音频。
         full_audio = b"".join(self.sentence_frames)
         self.sentence_frames = []
 
-        for seg_words in segments:
-            seg_text = "".join(w.get("word", "") for w in seg_words).strip()
+        for i, seg_text in enumerate(seg_texts):
             if not seg_text:
                 continue
+            segment_key = f"{sentence_key}:{i}"
             asyncio.run_coroutine_threadsafe(
-                self.on_result(seg_text, full_audio),
+                self.on_result(seg_text, full_audio, segment_key=segment_key),
                 self.loop,
             )
+            if self.on_partial_result:
+                asyncio.run_coroutine_threadsafe(
+                    self.on_partial_result(segment_key, seg_text, True),
+                    self.loop,
+                )
+        self._sentence_segment_texts.pop(sentence_key, None)
+        self._sentence_last_emit_ms.pop(sentence_key, None)
 
     def on_fail(self, response):
         logger.error(
@@ -105,7 +162,7 @@ class MyASRListener(SpeechRecognitionListener):
 
 
 class TencentASR:
-    def __init__(self, session_id: str, on_result, loop):
+    def __init__(self, session_id: str, on_result, on_partial_result, loop):
         """
         session_id : 当前会话 ID
         on_result  : async def on_result(text: str, audio_bytes: bytes)
@@ -120,6 +177,7 @@ class TencentASR:
         self.listener = MyASRListener(
             session_id,
             on_result,
+            on_partial_result,
             self._on_asr_error,
             loop,
         )
@@ -138,7 +196,8 @@ class TencentASR:
             self.listener,
         )
         self.recognizer.set_need_vad(1)           # 腾讯侧 VAD 自动断句
-        self.recognizer.set_vad_silence_time(650) # 静音 650ms 即断句
+        self.recognizer.set_vad_silence_time(tencent_asr_settings.vad_silence_time_ms)
+        self.recognizer.set_word_info(1)          # 开启词级时间戳，供本地二次切分
         self.recognizer.set_voice_format(1)       # 1 = PCM
 
     def _on_asr_error(self) -> None:

@@ -143,6 +143,45 @@ export async function generatePush(params: GeneratePushParams): Promise<string> 
   }
 }
 
+/** 将推送文案提交给后端写库并通过 WebSocket 定向发给目标用户 */
+export async function notifyPush(
+  sessionId: string,
+  targetUserId: string,
+  content: string,
+  stateId?: string,
+  triggerType?: string,
+): Promise<void> {
+  try {
+    await client.post(`/api/internal/sessions/${sessionId}/push-notify`, {
+      target_user_id: targetUserId,
+      content,
+      state_id: stateId ?? null,
+      trigger_type: triggerType ?? '',
+    });
+  } catch (err) {
+    logger.error('notify_push failed', { message: (err as Error).message });
+  }
+}
+
+/** 将生成的摘要提交给后端写库并触发 WebSocket 广播，失败时抛出异常 */
+export async function notifySummary(
+  sessionId: string,
+  content: string,
+  windowStart: Date,
+  windowEnd: Date,
+): Promise<void> {
+  try {
+    await client.post(`/api/internal/sessions/${sessionId}/summary`, {
+      content,
+      window_start: windowStart.toISOString(),
+      window_end: windowEnd.toISOString(),
+    });
+  } catch (err) {
+    logger.error('notify_summary failed', { message: (err as Error).message });
+    throw err;
+  }
+}
+
 /** 生成滚动摘要，失败时返回空字符串 */
 export async function generateSummary(
   transcripts: TranscriptItem[],

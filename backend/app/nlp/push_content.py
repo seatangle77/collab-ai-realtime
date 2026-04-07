@@ -9,9 +9,12 @@
 """
 from __future__ import annotations
 
+import logging
 from openai import OpenAI
 
 from ..settings import nlp_settings
+
+logger = logging.getLogger(__name__)
 
 # ── Prompt 模板 ───────────────────────────────────────────────────────────────
 
@@ -99,6 +102,12 @@ def generate_push_content(
     if not nlp_settings.qwen_api_key:
         return ""
 
+    transcript_count = len([l for l in transcripts.splitlines() if l.strip()]) if transcripts else 0
+    logger.info(
+        "[NLP/push] input: trigger=%s user=%s silence_s=%s speaking_ratio=%s transcripts=%d条",
+        trigger_type, username or "—", silence_s, round(speaking_ratio * 100, 1), transcript_count,
+    )
+
     try:
         client = _get_client()
         response = client.chat.completions.create(
@@ -110,6 +119,9 @@ def generate_push_content(
             ],
         )
         content = response.choices[0].message.content or ""
-        return content.strip()
-    except Exception:
+        result = content.strip()
+        logger.info("[NLP/push] output: \"%s\" (%d字)", result, len(result))
+        return result
+    except Exception as e:
+        logger.warning("[NLP/push] 调用失败: %s", e)
         return ""

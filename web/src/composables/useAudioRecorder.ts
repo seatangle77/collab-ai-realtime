@@ -2,8 +2,8 @@
  * useAudioRecorder
  *
  * 统一录音接口，根据运行环境自动选择：
- * - App（Android）→ capacitor-voice-recorder（原生录音，每 3s 分块）
- * - 浏览器        → MediaRecorder（WebM，每 1s 分块）
+ * - App（Android）→ capacitor-voice-recorder（原生录音，每 1s 分块）
+ * - 浏览器        → MediaRecorder（WebM，每 0.5s 分块）
  */
 import { ref } from 'vue'
 import { Capacitor } from '@capacitor/core'
@@ -19,7 +19,8 @@ export function useAudioRecorder() {
 
   // ── App 模式 ─────────────────────────────────────────────────
   let nativeChunkTimer: ReturnType<typeof setInterval> | null = null
-  const NATIVE_CHUNK_INTERVAL_MS = 3000
+  const NATIVE_CHUNK_INTERVAL_MS = 1000
+  const BROWSER_CHUNK_INTERVAL_MS = 500
 
   // ── 回调注册 ─────────────────────────────────────────────────
   let chunkCallback: ChunkCallback | null = null
@@ -55,7 +56,7 @@ export function useAudioRecorder() {
       if (!event.data || event.data.size === 0) return
       chunkCallback?.(event.data, event.data.type || 'audio/webm')
     }
-    recorder.start(1000)
+    recorder.start(BROWSER_CHUNK_INTERVAL_MS)
   }
 
   function stopBrowser(): void {
@@ -97,7 +98,7 @@ export function useAudioRecorder() {
     // 开始录音
     await VoiceRecorder.startRecording()
 
-    // 定时分块：每 3s 停录 → 取数据 → 触发回调 → 继续录
+    // 定时分块：每 1s 停录 → 取数据 → 触发回调 → 继续录
     nativeChunkTimer = setInterval(async () => {
       try {
         const result = await VoiceRecorder.stopRecording()

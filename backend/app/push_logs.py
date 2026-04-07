@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from typing import Any, Mapping
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -7,13 +8,81 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .admin.deps import require_admin
 from .auth import get_current_user
 from .db import get_db
+from .ws_manager import ws_manager
+from .ws_protocol import build_push_notification
 
 router = APIRouter(prefix="/api", tags=["push-logs"])
 
 VALID_PUSH_CHANNELS = {"web", "app", "glasses"}
 VALID_DELIVERY_STATUSES = {"pending", "delivered", "failed"}
+
+
+class PushNotifyIn(BaseModel):
+    target_user_id: str
+    content: str
+    state_id: str | None = None
+    trigger_type: str = ""
+
+
+@router.post(
+    "/internal/sessions/{session_id}/push-notify",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_admin)],
+)
+async def push_notify(
+    session_id: str,
+    body: PushNotifyIn,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """
+    Agent 写推送日志并通过 WebSocket 定向发给目标用户。
+    1. 写入 push_logs（delivery_status 根据 WS 是否在线决定）
+    2. 尝试 WebSocket 定向推送
+    3. 更新 delivery_status
+    """
+    log_id = "pl" + uuid.uuid4().hex[:8]
+
+    # 1. 写库（先 pending）
+    await db.execute(
+        text(
+            """
+            INSERT INTO push_logs (id, session_id, state_id, target_user_id, push_content, push_channel, delivery_status, triggered_at)
+            VALUES (:id, :session_id, :state_id, :target_user_id, :content, 'web', 'pending', NOW())
+            """
+        ),
+        {
+            "id": log_id,
+            "session_id": session_id,
+            "state_id": body.state_id,
+            "target_user_id": body.target_user_id,
+            "content": body.content,
+        },
+    )
+    await db.commit()
+
+    # 2. 定向 WebSocket 推送
+    sent = await ws_manager.send_to_user(
+        session_id,
+        body.target_user_id,
+        build_push_notification(body.content, body.target_user_id),
+    )
+
+    # 3. 更新投递状态
+    new_status = "delivered" if sent else "failed"
+    await db.execute(
+        text(
+            "UPDATE push_logs SET delivery_status = :s, delivered_at = NOW() WHERE id = :id"
+            if sent else
+            "UPDATE push_logs SET delivery_status = :s WHERE id = :id"
+        ),
+        {"s": new_status, "id": log_id},
+    )
+    await db.commit()
+
+    return {"id": log_id, "delivery_status": new_status, "ws_sent": sent}
 
 
 class PushLogOut(BaseModel):

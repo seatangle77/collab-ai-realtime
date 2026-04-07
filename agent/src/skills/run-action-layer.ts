@@ -6,7 +6,7 @@ import {
   getLastPushTimeForUser,
   getStateCooldownUntil,
 } from '../db/queries';
-import { generatePush } from '../http/nlp-client';
+import { generatePush, notifyPush } from '../http/nlp-client';
 import type { Trigger } from './run-reasoning-layer';
 import type { Transcript } from '../db/queries';
 
@@ -172,7 +172,7 @@ async function dispatchPush(params: {
     return;
   }
 
-  // 写 push_logs
+  // 写 push_logs（glasses 渠道，由 agent 直接写库）
   try {
     await writePushLog({
       session_id: sessionId,
@@ -181,8 +181,12 @@ async function dispatchPush(params: {
       push_content: content,
       push_channel: 'glasses',
     });
-    logger.info(`推送完成 用户=${targetUserId} state=${trigger.type} 文案="${content}"`, { sessionId });
   } catch (err) {
     logger.error('writePushLog 失败', { sessionId, message: (err as Error).message });
   }
+
+  // Web 渠道：通知后端写库并定向 WebSocket 推送
+  await notifyPush(sessionId, targetUserId, content, stateId, trigger.type);
+
+  logger.info(`推送完成 用户=${targetUserId} state=${trigger.type} 文案="${content}"`, { sessionId });
 }

@@ -1,10 +1,6 @@
 import { createLogger } from '../logger';
-import {
-  getTranscriptsInWindow,
-  getLastSummary,
-  writeDiscussionSummary,
-} from '../db/queries';
-import { generateSummary } from '../http/nlp-client';
+import { getTranscriptsInWindow, getLastSummary } from '../db/queries';
+import { generateSummary, notifySummary } from '../http/nlp-client';
 
 const logger = createLogger('summary');
 
@@ -24,7 +20,7 @@ export async function runSummary(
 
   // Step2：读上一轮摘要
   const lastSummary = await getLastSummary(sessionId);
-  const prevSummary = lastSummary?.summary_text ?? '';
+  const prevSummary = lastSummary?.content ?? '';
 
   // Step3：调 Qwen 生成摘要
   const items = valid.map((t) => ({ user_id: t.user_id ?? '未知', text: t.text! }));
@@ -35,14 +31,13 @@ export async function runSummary(
     return '';
   }
 
-  // Step4：写库
-  await writeDiscussionSummary({
-    session_id: sessionId,
-    summary_text: summaryText,
-    window_start: windowStart,
-    window_end: windowEnd,
-  });
-
-  logger.info(`摘要层完成 ${summaryText.length}字`, { sessionId, preview: summaryText.slice(0, 40) });
+  // Step4：提交后端写库并广播
+  try {
+    await notifySummary(sessionId, summaryText, windowStart, windowEnd);
+    logger.info(`摘要层完成 ${summaryText.length}字`, { sessionId, preview: summaryText.slice(0, 40) });
+  } catch (err) {
+    logger.error('摘要层：写库/广播失败，本轮摘要未持久化', { sessionId, message: (err as Error).message });
+    return '';
+  }
   return summaryText;
 }

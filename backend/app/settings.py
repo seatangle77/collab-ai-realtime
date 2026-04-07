@@ -65,6 +65,8 @@ class TencentASRSettings(BaseSettings):
     secret_id: str = ""
     secret_key: str = ""
     asr_engine: str = "16k_zh"
+    vad_silence_time_ms: int = 400
+    local_split_gap_ms: int = 400
 
 
 tencent_asr_settings = TencentASRSettings()

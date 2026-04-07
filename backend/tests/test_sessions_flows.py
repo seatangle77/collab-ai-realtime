@@ -245,9 +245,9 @@ def scenario_start_session(ctx: Dict[str, Any]) -> bool:
     ids = {s["id"] for s in r.json()}
     ok &= _log(ctx["session_id_1"] in ids, "start 后默认列表中会话可见场景", list(ids))
 
-    # 8. start session_id_2（not_started，group 已有 ongoing session_id_1）→ 409
+    # 8. member start session_id_2（本人会话，但群组已有 ongoing）→ 409
     r = requests.post(f"{BASE_URL}/api/sessions/{ctx['session_id_2']}/start", headers=headers_member)
-    ok &= _log(r.status_code == 409, "另一 not_started 会话 start 时 409（互斥）场景", {"status_code": r.status_code, "body": r.text})
+    ok &= _log(r.status_code == 409, "成员发起本人会话但群组已有 ongoing 返回 409 场景", {"status_code": r.status_code, "body": r.text})
 
     return ok
 
@@ -258,15 +258,23 @@ def scenario_start_session(ctx: Dict[str, Any]) -> bool:
 def scenario_end_session(ctx: Dict[str, Any]) -> bool:
     ok = True
 
-    # member 结束 session_1（ongoing）→ 200
+    # member 结束 session_1（ongoing）→ 403（仅发起人可结束）
     headers_member = {"Authorization": f"Bearer {ctx['member_token']}"}
     r = requests.post(
         f"{BASE_URL}/api/sessions/{ctx['session_id_1']}/end",
         headers=headers_member,
     )
+    ok &= _log(r.status_code == 403, "member 结束 ongoing 会话返回 403 场景", {"status_code": r.status_code, "body": r.text})
+
+    # leader（发起人）结束 session_1（ongoing）→ 200
+    headers_leader = {"Authorization": f"Bearer {ctx['leader_token']}"}
+    r = requests.post(
+        f"{BASE_URL}/api/sessions/{ctx['session_id_1']}/end",
+        headers=headers_leader,
+    )
     if r.status_code != 200:
-        return _log(False, "member 结束 ongoing 会话失败（期望 200）", {"status_code": r.status_code, "text": r.text})
-    ok &= _log(True, "member 结束 ongoing 会话场景", r.json())
+        return _log(False, "leader 结束 ongoing 会话失败（期望 200）", {"status_code": r.status_code, "text": r.text})
+    ok &= _log(True, "leader 结束 ongoing 会话场景", r.json())
 
     # session_id_2 是 not_started，member 结束应返回 400
     r = requests.post(
@@ -276,7 +284,6 @@ def scenario_end_session(ctx: Dict[str, Any]) -> bool:
     ok &= _log(r.status_code == 400, "结束 not_started 会话返回 400 场景", {"status_code": r.status_code, "body": r.text})
 
     # 默认列表不再包含 session_1，只包含 session_2 / session_3
-    headers_leader = {"Authorization": f"Bearer {ctx['leader_token']}"}
     r = requests.get(f"{BASE_URL}/api/groups/{ctx['group_id']}/sessions", headers=headers_leader)
     if r.status_code != 200:
         return _log(False, "结束后 leader 列出会话失败", {"status_code": r.status_code, "text": r.text})

@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audio.speaker_identifier import SpeakerIdentifier
 from app.audio.tencent_asr import TencentASR
 from app.transcript_realtime import insert_speech_transcript_and_broadcast
+from app.ws_manager import ws_manager
+from app.ws_protocol import build_transcript_segment
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +29,7 @@ class AudioService:
         self.session_id = session_id
         self._loop = asyncio.get_event_loop()
         self.identifier = SpeakerIdentifier(session_id)
-        self.asr = TencentASR(session_id, self._on_asr_result, self._loop)
+        self.asr = TencentASR(session_id, self._on_asr_result, self._on_asr_partial_result, self._loop)
         self._ffmpeg_proc: subprocess.Popen | None = None
         self._reader_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
@@ -117,7 +119,12 @@ class AudioService:
         stdout, _ = await proc.communicate(aac_bytes)
         return stdout
 
-    async def _on_asr_result(self, text: str, audio_bytes: bytes) -> None:
+    async def _on_asr_result(
+        self,
+        text: str,
+        audio_bytes: bytes,
+        segment_key: str | None = None,
+    ) -> None:
         """
         腾讯 ASR on_sentence_end 回调（已由 run_coroutine_threadsafe 桥接到 asyncio）。
         流程：音频长度检查 → Resemblyzer 识别说话人 → 写库 + 广播
@@ -154,9 +161,27 @@ class AudioService:
                 text=text,
                 speaker=speaker,
                 confidence=confidence,
+                segment_key=segment_key,
             )
         except Exception as e:
             logger.error("[AudioService] session=%s 写库/广播失败: %s", self.session_id, e)
+
+    async def _on_asr_partial_result(self, segment_key: str, text: str, is_final: bool) -> None:
+        try:
+            await ws_manager.broadcast_to_session(
+                self.session_id,
+                build_transcript_segment(
+                    {
+                        "session_id": self.session_id,
+                        "segment_key": segment_key,
+                        "text": text,
+                        "speaker": "unknown",
+                        "is_final": is_final,
+                    }
+                ),
+            )
+        except Exception as e:
+            logger.debug("[AudioService] session=%s 实时片段广播失败: %s", self.session_id, e)
 
     async def stop(self) -> None:
         """会话结束：关闭 ffmpeg → 等 reader 线程 → 停 ASR → 清声纹"""

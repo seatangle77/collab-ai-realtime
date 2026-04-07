@@ -25,6 +25,7 @@ from .ws_protocol import (
     build_error,
     build_pong,
     build_session_ended,
+    build_transcript_segment,
     build_transcript,
 )
 
@@ -59,6 +60,10 @@ def _parse_envelope(raw: str) -> tuple[str | None, dict[str, Any] | None, dict[s
 
 async def broadcast_transcript(session_id: str, data: dict[str, Any]) -> None:
     await ws_manager.broadcast_to_session(session_id, build_transcript(data))
+
+
+async def broadcast_transcript_segment(session_id: str, data: dict[str, Any]) -> None:
+    await ws_manager.broadcast_to_session(session_id, build_transcript_segment(data))
 
 
 async def broadcast_engagement_alert(session_id: str, data: dict[str, Any]) -> None:
@@ -160,17 +165,18 @@ async def ws_session_endpoint(
 ) -> None:
     # 解析 token，判断是否为发起者
     is_host = False
+    user_id: str = ""
     if token:
         try:
             payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
-            user_id: str = payload.get("sub", "")
+            user_id = payload.get("sub", "")
             if user_id:
                 created_by = await _get_session_created_by(session_id)
                 is_host = (created_by is not None and user_id == created_by)
         except JWTError:
             pass  # token 无效，降级为非发起者
 
-    await ws_manager.connect_session(session_id, websocket)
+    await ws_manager.connect_session(session_id, websocket, user_id=user_id)
     try:
         await websocket.send_json(build_connected(session_id))
 
