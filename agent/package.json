@@ -13,7 +13,8 @@
     "axios": "^1.7.2",
     "dotenv": "^16.4.5",
     "nanoid": "^3.3.7",
-    "pg": "^8.12.0"
+    "pg": "^8.12.0",
+    "redis": "^4.7.1"
   },
   "devDependencies": {
     "@types/jest": "^29.5.12",
@@ -27,7 +28,12 @@
   "jest": {
     "preset": "ts-jest",
     "testEnvironment": "node",
-    "testMatch": ["**/tests/**/*.test.ts"],
-    "moduleFileExtensions": ["ts", "js"]
+    "testMatch": [
+      "**/tests/**/*.test.ts"
+    ],
+    "moduleFileExtensions": [
+      "ts",
+      "js"
+    ]
   }
 }

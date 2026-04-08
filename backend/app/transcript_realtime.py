@@ -13,6 +13,7 @@ from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .db import DBNotConfiguredError, get_sessionmaker
+from .transcript_cache import append_transcript_to_cache
 
 
 def _to_utc_naive(dt: datetime) -> datetime:
@@ -136,6 +137,8 @@ async def insert_speech_transcript_and_broadcast(
             payload["speaker_name"] = name_result["name"] if name_result else None
         else:
             payload["speaker_name"] = None
+
+        await append_transcript_to_cache(session_id, payload)
 
         # 延迟导入，避免与 ws_sessions 循环依赖
         from .ws_sessions import broadcast_transcript

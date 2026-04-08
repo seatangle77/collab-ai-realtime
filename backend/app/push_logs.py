@@ -46,11 +46,12 @@ async def push_notify(
     log_id = "pl" + uuid.uuid4().hex[:8]
 
     # 1. 写库（先 pending）
-    await db.execute(
+    insert_result = await db.execute(
         text(
             """
             INSERT INTO push_logs (id, session_id, state_id, target_user_id, push_content, push_channel, delivery_status, triggered_at)
             VALUES (:id, :session_id, :state_id, :target_user_id, :content, 'web', 'pending', NOW())
+            RETURNING triggered_at
             """
         ),
         {
@@ -61,13 +62,18 @@ async def push_notify(
             "content": body.content,
         },
     )
+    inserted_row = insert_result.mappings().one()
     await db.commit()
 
     # 2. 定向 WebSocket 推送
     sent = await ws_manager.send_to_user(
         session_id,
         body.target_user_id,
-        build_push_notification(body.content, body.target_user_id),
+        build_push_notification(
+            body.content,
+            body.target_user_id,
+            inserted_row["triggered_at"].isoformat() if inserted_row["triggered_at"] else None,
+        ),
     )
 
     # 3. 更新投递状态

@@ -6,6 +6,8 @@ NLP 微服务路由
 """
 from __future__ import annotations
 
+from typing import Any, Literal
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
@@ -13,6 +15,14 @@ from ..admin.deps import require_admin
 from . import embedder, similarity, segmenter, tfidf, reasoning, push_content, summary
 
 router = APIRouter(prefix="/api/nlp", tags=["nlp"])
+
+BatchChallengeType = Literal[
+    "personal_stagnation",
+    "group_stagnation",
+    "shallow_expression",
+    "information_gap",
+    "none",
+]
 
 
 # ── 1. segment ────────────────────────────────────────────────────────────────
@@ -138,7 +148,53 @@ def generate_push(req: GeneratePushRequest, _: bool = Depends(require_admin)):
     return {"content": content}
 
 
-# ── 7. generate_summary ───────────────────────────────────────────────────────
+# ── 7. generate_push_batch ────────────────────────────────────────────────────
+
+class BatchMemberInput(BaseModel):
+    user_id: str
+
+
+class BatchTargetInput(BaseModel):
+    user_id: str
+    challenge_type: BatchChallengeType
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    diagnosis: str
+    design_goal: str
+
+
+class GeneratePushBatchRequest(BaseModel):
+    session_id: str
+    summary: str = ""
+    transcripts: str = ""
+    members: list[BatchMemberInput] = Field(default_factory=list)
+    targets: list[BatchTargetInput] = Field(default_factory=list)
+
+
+class BatchAnalysisItem(BaseModel):
+    user_id: str
+    challenge_type: BatchChallengeType
+    needs_prompt: bool
+    analysis: str
+    content: str
+
+
+class GeneratePushBatchResponse(BaseModel):
+    items: list[BatchAnalysisItem]
+
+
+@router.post("/generate_push_batch", response_model=GeneratePushBatchResponse)
+def generate_push_batch(req: GeneratePushBatchRequest, _: bool = Depends(require_admin)):
+    items = push_content.generate_push_content_batch(
+        session_id=req.session_id,
+        summary=req.summary,
+        transcripts=req.transcripts,
+        members=[m.model_dump() for m in req.members],
+        targets=[t.model_dump() for t in req.targets],
+    )
+    return {"items": items}
+
+
+# ── 8. generate_summary ───────────────────────────────────────────────────────
 
 class TranscriptItem(BaseModel):
     user_id: str

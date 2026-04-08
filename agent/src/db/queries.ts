@@ -1,5 +1,8 @@
 import { pool } from './client';
 import { nanoid } from 'nanoid';
+import { createLogger } from '../logger';
+
+const logger = createLogger('db-queries');
 
 // ── 共享类型 ──────────────────────────────────────────────────────────────────
 
@@ -108,6 +111,31 @@ export async function getTranscriptsInWindow(
     [sessionId, toUtcString(windowStart), toUtcString(windowEnd)],
   );
   return res.rows;
+}
+
+/** 优先从 Redis 读取最近窗口转写，失败或无结果时回退数据库 */
+export async function getTranscriptsInWindowPreferCache(
+  sessionId: string,
+  windowStart: Date,
+  windowEnd: Date,
+): Promise<Transcript[]> {
+  const { getCachedTranscriptsInWindow } = await import('../cache/transcript-cache');
+  const cached = await getCachedTranscriptsInWindow(sessionId, windowStart, windowEnd);
+  if (cached.length > 0) {
+    logger.info('using transcript cache window', {
+      sessionId,
+      count: cached.length,
+      windowStart: windowStart.toISOString(),
+      windowEnd: windowEnd.toISOString(),
+    });
+    return cached;
+  }
+  logger.info('transcript cache miss, falling back to db', {
+    sessionId,
+    windowStart: windowStart.toISOString(),
+    windowEnd: windowEnd.toISOString(),
+  });
+  return getTranscriptsInWindow(sessionId, windowStart, windowEnd);
 }
 
 /** 获取指定 session 最近一次 end 时间（用于 silence 检测） */

@@ -45,6 +45,45 @@ export interface GeneratePushParams {
   skw_score?: number;
 }
 
+export type ChallengeType =
+  | 'personal_stagnation'
+  | 'group_stagnation'
+  | 'shallow_expression'
+  | 'information_gap'
+  | 'none';
+
+export interface BatchMemberInput {
+  user_id: string;
+}
+
+export interface BatchTargetInput {
+  user_id: string;
+  challenge_type: ChallengeType;
+  evidence: Record<string, unknown>;
+  diagnosis: string;
+  design_goal: string;
+}
+
+export interface BatchGeneratePushAnalysisParams {
+  session_id: string;
+  summary: string;
+  transcripts: string;
+  members: BatchMemberInput[];
+  targets: BatchTargetInput[];
+}
+
+export interface BatchAnalysisItem {
+  user_id: string;
+  challenge_type: ChallengeType;
+  needs_prompt: boolean;
+  analysis: string;
+  content: string;
+}
+
+export interface BatchGeneratePushAnalysisResult {
+  items: BatchAnalysisItem[];
+}
+
 export interface TranscriptItem {
   user_id: string;
   text: string;
@@ -124,7 +163,7 @@ export async function tfidf(
 /** 判断文本是否含论证结构 */
 export async function hasReasoning(text: string): Promise<ReasoningResult> {
   try {
-    const res = await client.post<ReasoningResult>('/api/nlp/has_reasoning', { text });
+    const res = await client.post<ReasoningResult>('/api/nlp/has_reasoning', { text }, { timeout: 10_000 });
     return res.data;
   } catch (err) {
     logger.error('has_reasoning failed', { message: (err as Error).message });
@@ -135,11 +174,28 @@ export async function hasReasoning(text: string): Promise<ReasoningResult> {
 /** 生成推送文案，失败时返回空字符串 */
 export async function generatePush(params: GeneratePushParams): Promise<string> {
   try {
-    const res = await client.post<{ content: string }>('/api/nlp/generate_push', params);
+    const res = await client.post<{ content: string }>('/api/nlp/generate_push', params, { timeout: 12_000 });
     return res.data.content ?? '';
   } catch (err) {
     logger.error('generate_push failed', { message: (err as Error).message });
     return '';
+  }
+}
+
+/** 批量生成成员分析结果，失败时返回空数组 */
+export async function generatePushBatchAnalysis(
+  params: BatchGeneratePushAnalysisParams,
+): Promise<BatchAnalysisItem[]> {
+  try {
+    const res = await client.post<BatchGeneratePushAnalysisResult>(
+      '/api/nlp/generate_push_batch',
+      params,
+      { timeout: 12_000 },
+    );
+    return res.data.items ?? [];
+  } catch (err) {
+    logger.error('generate_push_batch failed', { message: (err as Error).message });
+    return [];
   }
 }
 
@@ -191,7 +247,7 @@ export async function generateSummary(
     const res = await client.post<{ summary: string }>('/api/nlp/generate_summary', {
       transcripts,
       prev_summary: prevSummary,
-    });
+    }, { timeout: 12_000 });
     return res.data.summary ?? '';
   } catch (err) {
     logger.error('generate_summary failed', { message: (err as Error).message });

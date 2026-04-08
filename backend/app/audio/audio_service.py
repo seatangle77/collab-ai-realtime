@@ -33,24 +33,32 @@ class AudioService:
         self._ffmpeg_proc: subprocess.Popen | None = None
         self._reader_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
+        # AAC 专用持久 ffmpeg 管道
+        self._aac_ffmpeg_proc: subprocess.Popen | None = None
+        self._aac_reader_thread: threading.Thread | None = None
+        self._aac_stop_event = threading.Event()
 
     async def start(self, db: AsyncSession, user_ids: list[str]) -> None:
         """加载声纹 + 启动 ffmpeg 管道 + 启动腾讯 ASR"""
         # 1. 加载声纹
         await self.identifier.load_profiles(db, user_ids)
 
-        # 2. 启动 ffmpeg 管道（WebM stdin → PCM stdout）
+        # 2. 启动 WebM ffmpeg 管道（低延迟模式）
         try:
             self._ffmpeg_proc = subprocess.Popen(
                 [
                     "ffmpeg",
                     "-loglevel", "quiet",
-                    "-f", "webm",       # 输入格式：WebM
-                    "-i", "pipe:0",     # 从 stdin 读
-                    "-ar", "16000",     # 采样率 16kHz
-                    "-ac", "1",         # 单声道
-                    "-f", "s16le",      # 输出 PCM 16bit little-endian
-                    "pipe:1",           # 输出到 stdout
+                    "-fflags", "nobuffer",      # 禁止输出缓冲，立刻输出 PCM
+                    "-flags", "low_delay",      # 低延迟模式
+                    "-probesize", "32",         # 减少探测阶段读取量
+                    "-analyzeduration", "0",    # 跳过流分析等待
+                    "-f", "webm",               # 输入格式：WebM
+                    "-i", "pipe:0",             # 从 stdin 读
+                    "-ar", "16000",             # 采样率 16kHz
+                    "-ac", "1",                 # 单声道
+                    "-f", "s16le",              # 输出 PCM 16bit little-endian
+                    "pipe:1",                   # 输出到 stdout
                 ],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
@@ -60,7 +68,7 @@ class AudioService:
             logger.error("[AudioService] session=%s ffmpeg 未安装，音频处理不可用", self.session_id)
             return
 
-        # 3. 启动 PCM reader 线程
+        # 3. 启动 WebM PCM reader 线程
         self._stop_event.clear()
         self._reader_thread = threading.Thread(
             target=self._pcm_reader,
@@ -69,20 +77,59 @@ class AudioService:
         )
         self._reader_thread.start()
 
+        # 3b. 启动 AAC 持久 ffmpeg 管道（低延迟模式）
+        try:
+            self._aac_ffmpeg_proc = subprocess.Popen(
+                [
+                    "ffmpeg",
+                    "-loglevel", "quiet",
+                    "-fflags", "nobuffer",
+                    "-flags", "low_delay",
+                    "-probesize", "32",
+                    "-analyzeduration", "0",
+                    "-f", "aac",                # ADTS AAC 流式输入
+                    "-i", "pipe:0",
+                    "-ar", "16000",
+                    "-ac", "1",
+                    "-f", "s16le",
+                    "pipe:1",
+                ],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
+            self._aac_stop_event.clear()
+            self._aac_reader_thread = threading.Thread(
+                target=self._pcm_reader,
+                args=(self._aac_ffmpeg_proc, self.asr, self._aac_stop_event),
+                daemon=True,
+            )
+            self._aac_reader_thread.start()
+        except FileNotFoundError:
+            logger.error("[AudioService] session=%s ffmpeg 未安装，AAC 管道不可用", self.session_id)
+            self._aac_ffmpeg_proc = None
+
         # 4. 启动腾讯 ASR
         self.asr.start()
         logger.info("[AudioService] session=%s 启动完成", self.session_id)
 
     async def handle_chunk(self, audio_bytes: bytes, mime_type: str = "audio/webm") -> None:
         """收到前端 audio_chunk，按格式路由处理"""
-        # Native(Android) AAC：每块单独转 PCM，直接写 ASR
+        # Native(Android) AAC：写入持久 ffmpeg 管道（reader 线程转发给 ASR）
         if mime_type.startswith("audio/aac") or mime_type.startswith("audio/mp4"):
+            if self._aac_ffmpeg_proc is None or self._aac_ffmpeg_proc.stdin is None:
+                return
+            if self._aac_ffmpeg_proc.poll() is not None:
+                logger.error(
+                    "[AudioService] session=%s AAC ffmpeg 进程已退出(returncode=%s)，本 chunk 丢弃",
+                    self.session_id, self._aac_ffmpeg_proc.returncode,
+                )
+                return
             try:
-                pcm_bytes = await self._convert_aac_chunk_to_pcm(audio_bytes)
-                if pcm_bytes:
-                    self.asr.write(pcm_bytes)
-            except Exception as e:
-                logger.warning("[AudioService] session=%s AAC→PCM 转换失败: %s", self.session_id, e)
+                self._aac_ffmpeg_proc.stdin.write(audio_bytes)
+                self._aac_ffmpeg_proc.stdin.flush()
+            except (BrokenPipeError, OSError) as e:
+                logger.warning("[AudioService] session=%s AAC ffmpeg stdin 写入失败: %s", self.session_id, e)
             return
 
         # Browser WebM：流式写入 ffmpeg 管道
@@ -101,23 +148,6 @@ class AudioService:
             self._ffmpeg_proc.stdin.flush()
         except (BrokenPipeError, OSError) as e:
             logger.warning("[AudioService] session=%s ffmpeg stdin 写入失败: %s", self.session_id, e)
-
-    async def _convert_aac_chunk_to_pcm(self, aac_bytes: bytes) -> bytes:
-        """将单个 ADTS AAC chunk 转换为 16kHz 单声道 s16le PCM"""
-        proc = await asyncio.create_subprocess_exec(
-            "ffmpeg", "-loglevel", "quiet",
-            "-f", "aac",       # ADTS AAC 流式输入
-            "-i", "pipe:0",
-            "-ar", "16000",
-            "-ac", "1",
-            "-f", "s16le",
-            "pipe:1",
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        stdout, _ = await proc.communicate(aac_bytes)
-        return stdout
 
     async def _on_asr_result(
         self,
@@ -186,20 +216,33 @@ class AudioService:
     async def stop(self) -> None:
         """会话结束：关闭 ffmpeg → 等 reader 线程 → 停 ASR → 清声纹"""
         self._stop_event.set()
+        self._aac_stop_event.set()
 
-        # 关闭 ffmpeg stdin，触发 ffmpeg 自然退出
+        # 关闭 WebM ffmpeg
         if self._ffmpeg_proc is not None:
             try:
                 if self._ffmpeg_proc.stdin:
                     self._ffmpeg_proc.stdin.close()
                 self._ffmpeg_proc.wait(timeout=5)
             except Exception as e:
-                logger.warning("[AudioService] session=%s ffmpeg 关闭异常: %s", self.session_id, e)
+                logger.warning("[AudioService] session=%s WebM ffmpeg 关闭异常: %s", self.session_id, e)
                 self._ffmpeg_proc.kill()
+
+        # 关闭 AAC ffmpeg
+        if self._aac_ffmpeg_proc is not None:
+            try:
+                if self._aac_ffmpeg_proc.stdin:
+                    self._aac_ffmpeg_proc.stdin.close()
+                self._aac_ffmpeg_proc.wait(timeout=5)
+            except Exception as e:
+                logger.warning("[AudioService] session=%s AAC ffmpeg 关闭异常: %s", self.session_id, e)
+                self._aac_ffmpeg_proc.kill()
 
         # 等 reader 线程结束
         if self._reader_thread is not None and self._reader_thread.is_alive():
             self._reader_thread.join(timeout=5)
+        if self._aac_reader_thread is not None and self._aac_reader_thread.is_alive():
+            self._aac_reader_thread.join(timeout=5)
 
         # 停止腾讯 ASR
         self.asr.stop()

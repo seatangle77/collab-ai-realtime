@@ -5,6 +5,7 @@ export interface InfoGapButton {
   id: string
   keyword: string
   skw_score: number
+  created_at?: string
 }
 
 const props = defineProps<{

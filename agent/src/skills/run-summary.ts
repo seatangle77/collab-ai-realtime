@@ -1,5 +1,5 @@
 import { createLogger } from '../logger';
-import { getTranscriptsInWindow, getLastSummary } from '../db/queries';
+import { getTranscriptsInWindowPreferCache, getLastSummary } from '../db/queries';
 import { generateSummary, notifySummary } from '../http/nlp-client';
 
 const logger = createLogger('summary');
@@ -10,7 +10,7 @@ export async function runSummary(
   windowEnd: Date,
 ): Promise<string> {
   // Step1：读本轮发言
-  const transcripts = await getTranscriptsInWindow(sessionId, windowStart, windowEnd);
+  const transcripts = await getTranscriptsInWindowPreferCache(sessionId, windowStart, windowEnd);
   const valid = transcripts.filter((t) => t.text && t.text.trim());
 
   if (valid.length === 0) {

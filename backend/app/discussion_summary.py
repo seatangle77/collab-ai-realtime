@@ -67,14 +67,14 @@ async def notify_summary(
     """
     # 1. 原子写库：version = MAX(version)+1，避免并发竞争
     summary_id = "ds" + uuid.uuid4().hex[:8]
-    version_result = await db.execute(
+    insert_result = await db.execute(
         text(
             """
             INSERT INTO discussion_summaries (id, session_id, version, content, window_start, window_end, created_at)
             SELECT :id, :session_id, COALESCE(MAX(version), 0) + 1, :content, :window_start, :window_end, NOW()
             FROM discussion_summaries
             WHERE session_id = :session_id
-            RETURNING version
+            RETURNING id, version, window_start, window_end, created_at
             """
         ),
         {
@@ -85,13 +85,22 @@ async def notify_summary(
             "window_end": _to_utc_naive(body.window_end),
         },
     )
-    new_version = version_result.mappings().first()["version"]
+    inserted_row = insert_result.mappings().first()
+    new_version = inserted_row["version"]
     await db.commit()
 
     # 3. WebSocket 广播
     await ws_manager.broadcast_to_session(
         session_id,
-        build_summary_update(body.content, new_version, session_id),
+        build_summary_update(
+            body.content,
+            new_version,
+            session_id,
+            summary_id=inserted_row["id"],
+            window_start=inserted_row["window_start"].isoformat() if inserted_row["window_start"] else None,
+            window_end=inserted_row["window_end"].isoformat() if inserted_row["window_end"] else None,
+            created_at=inserted_row["created_at"].isoformat() if inserted_row["created_at"] else None,
+        ),
     )
 
     return {"id": summary_id, "version": new_version}
@@ -150,3 +159,49 @@ async def get_latest_summary(
         )
 
     return DiscussionSummaryOut.model_validate(dict(row))
+
+
+@router.get(
+    "/sessions/{session_id}/summaries",
+    response_model=list[DiscussionSummaryOut],
+)
+async def list_summary_history(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: Mapping[str, Any] = Depends(get_current_user),
+) -> list[DiscussionSummaryOut]:
+    """
+    获取指定会话的全部讨论摘要历史，便于前端按分析窗口展示时间线。
+    仅会话活跃成员可访问。
+    """
+    member_result = await db.execute(
+        text(
+            """
+            SELECT 1 FROM chat_sessions cs
+            JOIN group_memberships gm ON gm.group_id = cs.group_id
+            WHERE cs.id    = :session_id
+              AND gm.user_id = :user_id
+              AND gm.status  = 'active'
+            """
+        ),
+        {"session_id": session_id, "user_id": current_user["id"]},
+    )
+    if not member_result.first():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="仅会话活跃成员可访问",
+        )
+
+    result = await db.execute(
+        text(
+            """
+            SELECT id, session_id, version, content, window_start, window_end, created_at
+            FROM discussion_summaries
+            WHERE session_id = :session_id
+            ORDER BY created_at DESC, version DESC
+            """
+        ),
+        {"session_id": session_id},
+    )
+    rows = result.mappings().all()
+    return [DiscussionSummaryOut.model_validate(dict(row)) for row in rows]

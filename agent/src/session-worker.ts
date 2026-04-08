@@ -4,20 +4,23 @@ import {
   getSessionMembers,
   getLastSpeakEndGlobal,
   getLastSummary,
-  getTranscriptsInWindow,
+  getTranscriptsInWindowPreferCache,
 } from './db/queries';
 import { runPerceptionPipeline } from './skills/run-perception-pipeline';
 import { runReasoningLayer } from './skills/run-reasoning-layer';
 import { runActionLayer } from './skills/run-action-layer';
 import { runSummary } from './skills/run-summary';
+import { computeHasReasoning } from './skills/perception/reasoning';
 
 const logger = createLogger('session-worker');
 
 export class SessionWorker {
   private readonly sessionId: string;
   private shortTimer: ReturnType<typeof setInterval> | null = null;
-  private longTimer: ReturnType<typeof setInterval> | null = null;
+  private analysisTimer: ReturnType<typeof setTimeout> | null = null;
+  private summaryTimer: ReturnType<typeof setTimeout> | null = null;
   private running = false;
+  private static readonly SUMMARY_LEAD_MS = 15_000;
 
   constructor(sessionId: string) {
     this.sessionId = sessionId;
@@ -33,10 +36,28 @@ export class SessionWorker {
       void this.checkGroupSilence();
     }, config.agent.shortIntervalMs);
 
-    // 120s 定时器：完整感知层 pipeline
-    this.longTimer = setInterval(() => {
-      void this.runFullPipeline();
-    }, config.agent.longIntervalMs);
+    // 摘要链提前 15s 启动，尽量在分析前产出最新上下文。
+    this.scheduleSummaryTimer(
+      Math.max(0, config.agent.longIntervalMs - SessionWorker.SUMMARY_LEAD_MS),
+    );
+    // 完整分析链保持原 120s 周期。
+    this.scheduleAnalysisTimer(config.agent.longIntervalMs);
+  }
+
+  private scheduleAnalysisTimer(delayMs: number): void {
+    if (!this.running) return;
+    this.analysisTimer = setTimeout(() => {
+      void this.runAnalysisPipeline()
+        .finally(() => this.scheduleAnalysisTimer(config.agent.longIntervalMs));
+    }, delayMs);
+  }
+
+  private scheduleSummaryTimer(delayMs: number): void {
+    if (!this.running) return;
+    this.summaryTimer = setTimeout(() => {
+      void this.runSummaryPipeline()
+        .finally(() => this.scheduleSummaryTimer(config.agent.longIntervalMs));
+    }, delayMs);
   }
 
   stop(): void {
@@ -47,9 +68,13 @@ export class SessionWorker {
       clearInterval(this.shortTimer);
       this.shortTimer = null;
     }
-    if (this.longTimer !== null) {
-      clearInterval(this.longTimer);
-      this.longTimer = null;
+    if (this.analysisTimer !== null) {
+      clearTimeout(this.analysisTimer);
+      this.analysisTimer = null;
+    }
+    if (this.summaryTimer !== null) {
+      clearTimeout(this.summaryTimer);
+      this.summaryTimer = null;
     }
 
     logger.info('Worker stopped', { sessionId: this.sessionId });
@@ -81,7 +106,7 @@ export class SessionWorker {
 
   // ── 120s：完整感知层 pipeline ────────────────────────────────────────────────
 
-  private async runFullPipeline(): Promise<void> {
+  private async runAnalysisPipeline(): Promise<void> {
     try {
       const members = await getSessionMembers(this.sessionId);
       const memberIds = members.map((m) => m.user_id);
@@ -89,6 +114,13 @@ export class SessionWorker {
 
       const windowEnd = new Date();
       const windowStart = new Date(windowEnd.getTime() - config.agent.longIntervalMs);
+      const startedAt = Date.now();
+      logger.info('analysis pipeline started', {
+        sessionId: this.sessionId,
+        window_start: windowStart.toISOString(),
+        window_end: windowEnd.toISOString(),
+        member_count: memberIds.length,
+      });
 
       // Step1：感知层
       const result = await runPerceptionPipeline({
@@ -102,25 +134,65 @@ export class SessionWorker {
       if (!result) return;
       const triggers = runReasoningLayer(result, memberIds);
 
+      // hasReasoning（Qwen）后台异步，不阻塞主流程
+      void computeHasReasoning(this.sessionId, windowStart, windowEnd, memberIds).catch((err) => {
+        logger.error('hasReasoning failed', { sessionId: this.sessionId, message: (err as Error).message });
+      });
+
       // Step3：读当前摘要与本轮发言（行动层 Prompt 需要）
       const summaryRow = await getLastSummary(this.sessionId);
       const summaryText = summaryRow?.content ?? '';
-      const transcripts = await getTranscriptsInWindow(this.sessionId, windowStart, windowEnd);
+      const transcripts = await getTranscriptsInWindowPreferCache(this.sessionId, windowStart, windowEnd);
 
-      // Step4：行动层
-      await runActionLayer({
+      // Step4：行动层单独执行；摘要改由独立定时链负责。
+      void runActionLayer({
         sessionId: this.sessionId,
         triggers,
         windowStart,
         memberIds,
         summaryText,
         transcripts,
+      }).catch((err) => {
+        logger.error('action failed', {
+          sessionId: this.sessionId,
+          message: (err as Error).message,
+        });
       });
 
-      // Step5：摘要层
-      await runSummary(this.sessionId, windowStart, windowEnd);
+      logger.info('analysis pipeline finished', {
+        sessionId: this.sessionId,
+        window_start: windowStart.toISOString(),
+        window_end: windowEnd.toISOString(),
+        duration_ms: Date.now() - startedAt,
+        trigger_count: triggers.length,
+      });
     } catch (err) {
-      logger.error('runFullPipeline failed', {
+      logger.error('runAnalysisPipeline failed', {
+        sessionId: this.sessionId,
+        message: (err as Error).message,
+      });
+    }
+  }
+
+  private async runSummaryPipeline(): Promise<void> {
+    try {
+      const windowEnd = new Date();
+      const windowStart = new Date(windowEnd.getTime() - config.agent.longIntervalMs);
+      const startedAt = Date.now();
+      logger.info('summary pipeline started', {
+        sessionId: this.sessionId,
+        window_start: windowStart.toISOString(),
+        window_end: windowEnd.toISOString(),
+      });
+      await runSummary(this.sessionId, windowStart, windowEnd);
+      logger.info('summary pipeline finished', {
+        sessionId: this.sessionId,
+        window_start: windowStart.toISOString(),
+        window_end: windowEnd.toISOString(),
+        duration_ms: Date.now() - startedAt,
+      });
+    } catch (err) {
+      logger.error('runSummaryPipeline failed', {
         sessionId: this.sessionId,
         message: (err as Error).message,
       });

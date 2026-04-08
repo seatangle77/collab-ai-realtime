@@ -9,6 +9,9 @@ __pycache__/
 
 web/node_modules/
 web/dist/
+agent/node_modules/
+agent/dist/
+.DS_Store
 
 # Local voice sample audio (generated at runtime/tests)
 local-voice-audio/

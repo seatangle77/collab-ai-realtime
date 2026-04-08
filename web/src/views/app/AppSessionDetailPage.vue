@@ -56,15 +56,62 @@ const metaExpanded = ref(false)
 const { onChunk, startRecording, stopRecording } = useAudioRecorder()
 const transcriptsListEl = ref<HTMLElement | null>(null)
 
+interface DiscussionSummaryItem {
+  id: string
+  session_id: string
+  version: number
+  content: string
+  window_start: string
+  window_end: string
+  created_at: string
+}
+
+interface PushLogItem {
+  id: string
+  session_id: string
+  state_id?: string | null
+  push_content?: string | null
+  push_channel: string
+  jpush_message_id?: string | null
+  delivery_status: string
+  triggered_at: string
+  delivered_at?: string | null
+}
+
+interface TimelineEvent {
+  id: string
+  kind: 'session_started' | 'summary' | 'push' | 'info_gap'
+  occurredAt: string
+  title: string
+  content?: string
+  version?: number
+  windowStart?: string
+  windowEnd?: string
+  keyword?: string
+}
+
 // ── 推送通知 ──────────────────────────────────────────────────────────────────
 const pushContent = ref('')
 const pushVisible = ref(false)
+const recentPushes = ref<Array<{ content: string; at: number }>>([])
 
-function showPushNotification(content: string) {
+function showPushNotification(content: string, triggeredAt?: string | null) {
   pushContent.value = content
+  const fallbackTs = Date.now()
+  const parsed = triggeredAt ? new Date(triggeredAt).getTime() : NaN
+  recentPushes.value = [{ content, at: Number.isNaN(parsed) ? fallbackTs : parsed }, ...recentPushes.value].slice(0, 5)
   pushVisible.value = false
   // 强制触发 watch（即使上一条还没消失也能重新触发）
   requestAnimationFrame(() => { pushVisible.value = true })
+}
+
+function pushTimeLabel(ts: number): string {
+  return new Date(ts).toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
 }
 
 // ── AI 分析倒计时 ─────────────────────────────────────────────────────────────
@@ -91,6 +138,9 @@ function stopAgentCountdown() {
 // ── 讨论摘要 ──────────────────────────────────────────────────────────────────
 const currentSummary = ref('')
 const summaryVersion = ref(0)
+const summaryHistory = ref<DiscussionSummaryItem[]>([])
+const pushLogs = ref<PushLogItem[]>([])
+const agentTimeline = ref<TimelineEvent[]>([])
 
 async function fetchLatestSummary() {
   try {
@@ -106,6 +156,40 @@ async function fetchLatestSummary() {
   }
 }
 
+async function fetchSummaryHistory() {
+  try {
+    const data = await appHttp.get<DiscussionSummaryItem[]>(
+      `/api/sessions/${sessionId}/summaries`,
+    )
+    summaryHistory.value = data
+    rebuildAgentTimeline()
+  } catch {
+    summaryHistory.value = []
+    rebuildAgentTimeline()
+  }
+}
+
+async function fetchPushLogs() {
+  try {
+    const data = await appHttp.get<PushLogItem[]>(
+      `/api/sessions/${sessionId}/push-logs`,
+    )
+    pushLogs.value = data
+    recentPushes.value = data
+      .filter((item) => item.push_content)
+      .map((item) => ({
+        content: item.push_content ?? '',
+        at: new Date(item.triggered_at).getTime(),
+      }))
+      .filter((item) => !Number.isNaN(item.at))
+      .slice(0, 5)
+    rebuildAgentTimeline()
+  } catch {
+    pushLogs.value = []
+    rebuildAgentTimeline()
+  }
+}
+
 // ── 信息缺口按钮 ──────────────────────────────────────────────────────────────
 const infoGapButtons = ref<InfoGapButton[]>([])
 
@@ -115,6 +199,7 @@ async function fetchInfoGapButtons() {
       `/api/sessions/${sessionId}/info-gap/buttons`,
     )
     infoGapButtons.value = data
+    rebuildAgentTimeline()
   } catch {
     // 静默失败，不影响主流程
   }
@@ -122,6 +207,94 @@ async function fetchInfoGapButtons() {
 
 function handleInfoGapButtonClicked(buttonId: string) {
   infoGapButtons.value = infoGapButtons.value.filter((b) => b.id !== buttonId)
+  rebuildAgentTimeline()
+}
+
+function timelineSortValue(value: string | undefined): number {
+  if (!value) return 0
+  const t = new Date(value).getTime()
+  return Number.isNaN(t) ? 0 : t
+}
+
+function timelineTimeLabel(value: string | undefined): string {
+  return formatDateTimeToCST(value ?? null)
+}
+
+function timelineWindowLabel(item: TimelineEvent): string {
+  if (!item.windowStart || !item.windowEnd) return '-'
+  return `${formatDateTimeToCST(item.windowStart)} - ${formatDateTimeToCST(item.windowEnd)}`
+}
+
+function upsertSummaryEvent(summary: DiscussionSummaryItem) {
+  const idx = summaryHistory.value.findIndex((item) => item.id === summary.id)
+  if (idx >= 0) {
+    summaryHistory.value[idx] = summary
+  } else {
+    summaryHistory.value = [summary, ...summaryHistory.value]
+  }
+  rebuildAgentTimeline()
+}
+
+function upsertPushEvent(push: PushLogItem) {
+  const idx = pushLogs.value.findIndex((item) => item.id === push.id)
+  if (idx >= 0) {
+    pushLogs.value[idx] = push
+  } else {
+    pushLogs.value = [push, ...pushLogs.value]
+  }
+  rebuildAgentTimeline()
+}
+
+function rebuildAgentTimeline() {
+  const items: TimelineEvent[] = []
+
+  if (session.value?.started_at) {
+    items.push({
+      id: `session-started-${session.value.id}`,
+      kind: 'session_started',
+      occurredAt: session.value.started_at,
+      title: '会话已发起',
+      content: session.value.session_title,
+    })
+  }
+
+  for (const summary of summaryHistory.value) {
+    items.push({
+      id: `summary-${summary.id}`,
+      kind: 'summary',
+      occurredAt: summary.created_at,
+      title: 'Agent 完成一轮分析',
+      content: summary.content,
+      version: summary.version,
+      windowStart: summary.window_start,
+      windowEnd: summary.window_end,
+    })
+  }
+
+  for (const push of pushLogs.value) {
+    if (!push.push_content) continue
+    items.push({
+      id: `push-${push.id}`,
+      kind: 'push',
+      occurredAt: push.triggered_at,
+      title: 'Agent 发出建议',
+      content: push.push_content,
+    })
+  }
+
+  for (const button of infoGapButtons.value) {
+    if (!button.created_at) continue
+    items.push({
+      id: `info-gap-${button.id}`,
+      kind: 'info_gap',
+      occurredAt: button.created_at,
+      title: '生成信息缺口提示',
+      keyword: button.keyword,
+      content: `关键词：${button.keyword}`,
+    })
+  }
+
+  agentTimeline.value = items.sort((a, b) => timelineSortValue(b.occurredAt) - timelineSortValue(a.occurredAt))
 }
 
 const wsStatusLabel = computed(() => {
@@ -213,6 +386,7 @@ async function loadData() {
     ])
     if (sessionResult.status === 'fulfilled' && sessionResult.value) {
       session.value = sessionResult.value
+      rebuildAgentTimeline()
     } else {
       error.value = '会话不存在或无权访问'
     }
@@ -258,6 +432,7 @@ async function handleLaunchSession() {
     try {
       const updated = await startSession(sessionId)
       session.value = updated
+      rebuildAgentTimeline()
     } catch (err) {
       ElMessage.error(extractErrorMessage(err))
       return
@@ -313,6 +488,7 @@ async function handleEnd() {
     // 再通知后端
     const updated = await endSession(sessionId)
     session.value = updated
+    rebuildAgentTimeline()
     ElMessage.success('会话已结束')
     await loadTranscripts()
   } catch (err) {
@@ -337,6 +513,7 @@ async function handleEditTitle() {
   try {
     const updated = await updateSession(sessionId, newTitle)
     session.value = updated
+    rebuildAgentTimeline()
     ElMessage.success('标题已更新')
   } catch (err) {
     ElMessage.error(extractErrorMessage(err))
@@ -579,16 +756,47 @@ function handleWsMessage(event: MessageEvent<string>) {
     return
   }
   if (msgType === 'summary_update') {
-    const d = data as { content?: string; version?: number }
+    const d = data as {
+      id?: string | null
+      content?: string
+      version?: number
+      window_start?: string | null
+      window_end?: string | null
+      created_at?: string | null
+    }
     if (typeof d.content === 'string' && d.content) {
       currentSummary.value = d.content
       summaryVersion.value = d.version ?? summaryVersion.value
+      if (d.id && d.created_at && d.window_start && d.window_end && typeof d.version === 'number') {
+        upsertSummaryEvent({
+          id: d.id,
+          session_id: sessionId,
+          version: d.version,
+          content: d.content,
+          window_start: d.window_start,
+          window_end: d.window_end,
+          created_at: d.created_at,
+        })
+      }
     }
     return
   }
   if (msgType === 'push_notification') {
-    const d = data as { content?: string; target_user_id?: string }
-    if (d.content) showPushNotification(d.content)
+    const d = data as { content?: string; target_user_id?: string; triggered_at?: string | null }
+    if (d.content) {
+      showPushNotification(d.content, d.triggered_at)
+      upsertPushEvent({
+        id: `live-push-${d.triggered_at ?? Date.now()}-${d.content}`,
+        session_id: sessionId,
+        state_id: null,
+        push_content: d.content,
+        push_channel: 'web',
+        jpush_message_id: null,
+        delivery_status: 'delivered',
+        triggered_at: d.triggered_at ?? new Date().toISOString(),
+        delivered_at: null,
+      })
+    }
     return
   }
   if (msgType === 'info_gap_button') {
@@ -598,6 +806,7 @@ function handleWsMessage(event: MessageEvent<string>) {
       const existingIds = new Set(infoGapButtons.value.map((b) => b.id))
       const newBtns = d.buttons.filter((b) => !existingIds.has(b.id))
       infoGapButtons.value = [...infoGapButtons.value, ...newBtns]
+      rebuildAgentTimeline()
     }
     return
   }
@@ -836,6 +1045,10 @@ onMounted(async () => {
   reconnectAttempt.value = 0
   currentUser.value = loadCurrentUser()
   await loadData()
+  await Promise.allSettled([
+    fetchSummaryHistory(),
+    fetchPushLogs(),
+  ])
   // 仅会话已「进行中」时才自动连接 WS（如刷新页面场景）
   if (session.value?.status === 'ongoing') {
     openWebSocket()
@@ -985,6 +1198,54 @@ onUnmounted(() => {
           <span class="app-session-summary-version">v{{ summaryVersion }}</span>
         </div>
         <p class="app-session-summary-content">{{ currentSummary }}</p>
+      </div>
+
+      <div v-if="agentTimeline.length > 0" class="app-agent-timeline-panel">
+        <div class="app-agent-timeline-header">
+          <span class="app-agent-timeline-label">Agent 时间线</span>
+          <span class="app-agent-timeline-sub">展示会话开始、分析窗口和建议发送时间</span>
+        </div>
+        <ul class="app-agent-timeline-list">
+          <li
+            v-for="item in agentTimeline"
+            :key="item.id"
+            class="app-agent-timeline-item"
+            :class="`is-${item.kind}`"
+          >
+            <div class="app-agent-timeline-time">{{ timelineTimeLabel(item.occurredAt) }}</div>
+            <div class="app-agent-timeline-body">
+              <div class="app-agent-timeline-title-row">
+                <span class="app-agent-timeline-title">{{ item.title }}</span>
+                <span v-if="item.kind === 'summary' && item.version" class="app-agent-timeline-badge">v{{ item.version }}</span>
+              </div>
+              <div v-if="item.kind === 'summary'" class="app-agent-timeline-window">
+                分析窗口：{{ timelineWindowLabel(item) }}
+              </div>
+              <div v-if="item.kind === 'info_gap' && item.keyword" class="app-agent-timeline-window">
+                关键词：{{ item.keyword }}
+              </div>
+              <p v-if="item.content" class="app-agent-timeline-content">{{ item.content }}</p>
+            </div>
+          </li>
+        </ul>
+      </div>
+
+      <!-- 最近 AI 建议（常驻，避免提示一闪而过） -->
+      <div v-if="recentPushes.length > 0" class="app-ai-suggestions-panel">
+        <div class="app-ai-suggestions-header">
+          <span class="app-ai-suggestions-label">最近 AI 建议</span>
+          <span class="app-ai-suggestions-sub">保留最近 {{ recentPushes.length }} 条</span>
+        </div>
+        <ul class="app-ai-suggestions-list">
+          <li
+            v-for="item in recentPushes"
+            :key="`${item.at}-${item.content}`"
+            class="app-ai-suggestions-item"
+          >
+            <span class="app-ai-suggestions-time">{{ pushTimeLabel(item.at) }}</span>
+            <span class="app-ai-suggestions-content">{{ item.content }}</span>
+          </li>
+        </ul>
       </div>
 
       <div class="app-session-detail-transcripts">
@@ -1163,6 +1424,149 @@ onUnmounted(() => {
   line-height: 1.6;
   color: #1e3a5f;
   white-space: pre-wrap;
+}
+
+.app-agent-timeline-panel {
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid #dbeafe;
+}
+
+.app-agent-timeline-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.app-agent-timeline-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.app-agent-timeline-sub {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.app-agent-timeline-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.app-agent-timeline-item {
+  display: grid;
+  grid-template-columns: 148px 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.app-agent-timeline-time {
+  font-size: 12px;
+  color: #475569;
+  font-variant-numeric: tabular-nums;
+}
+
+.app-agent-timeline-body {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+}
+
+.app-agent-timeline-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.app-agent-timeline-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.app-agent-timeline-badge {
+  font-size: 11px;
+  color: #1d4ed8;
+  background: #dbeafe;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.app-agent-timeline-window {
+  font-size: 12px;
+  color: #475569;
+  margin-bottom: 4px;
+}
+
+.app-agent-timeline-content {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #1e293b;
+  white-space: pre-wrap;
+}
+
+.app-ai-suggestions-panel {
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  border-radius: 8px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+}
+
+.app-ai-suggestions-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.app-ai-suggestions-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #92400e;
+}
+
+.app-ai-suggestions-sub {
+  font-size: 11px;
+  color: #b45309;
+}
+
+.app-ai-suggestions-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.app-ai-suggestions-item {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.app-ai-suggestions-time {
+  color: #a16207;
+  font-variant-numeric: tabular-nums;
+}
+
+.app-ai-suggestions-content {
+  color: #78350f;
 }
 
 .app-session-detail-page {

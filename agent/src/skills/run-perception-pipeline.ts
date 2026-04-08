@@ -55,22 +55,20 @@ export async function runPerceptionPipeline(input: PipelineInput): Promise<Pipel
     窗口结束: windowEnd.toISOString(),
   });
 
-  // ── Step 1：并行执行互不依赖的 6 个 skill ────────────────────────────────────
-  logger.info('[Step 1] 并行执行：发言比例 / 静默检测 / TTR / 论证密度 / 语义重复 / Qwen论证检测', { sessionId });
+  // ── Step 1：并行执行互不依赖的 5 个纯计算 skill（hasReasoning 已移出，由调用方后台执行）────
+  logger.info('[Step 1] 并行执行：发言比例 / 静默检测 / TTR / 论证密度 / 语义重复', { sessionId });
   const [
     speakingRatioRes,
     silenceRes,
     ttrRes,
     argDensityRes,
     srepRes,
-    reasoningRes,
   ] = await Promise.allSettled([
     computeSpeakingRatio(sessionId, windowStart, windowEnd, memberIds),
     computeSilence(sessionId, windowStart, windowEnd, memberIds),
     computeTtr(sessionId, windowStart, windowEnd, memberIds),
     computeArgDensity(sessionId, windowStart, windowEnd, memberIds),
     computeSrep(sessionId, windowStart, windowEnd, memberIds),
-    computeHasReasoning(sessionId, windowStart, windowEnd, memberIds),
   ]);
 
   const speakingRatios = settledValue(speakingRatioRes, '发言比例')?.ratios ?? {};
@@ -78,9 +76,8 @@ export async function runPerceptionPipeline(input: PipelineInput): Promise<Pipel
   const ttrs = settledValue(ttrRes, '词汇多样性TTR')?.ttrs ?? {};
   const argDensities = settledValue(argDensityRes, '论证密度')?.argDensities ?? {};
   const sreps = settledValue(srepRes, '语义重复度Srep')?.sreps ?? {};
-  const reasoningResult = settledValue(reasoningRes, 'Qwen论证检测');
-  const hasReasoningMap = reasoningResult?.hasReasoningMap ?? {};
-  const hasEvidenceMap = reasoningResult?.hasEvidenceMap ?? {};
+  const hasReasoningMap: Record<string, boolean | null> = {};
+  const hasEvidenceMap: Record<string, boolean | null> = {};
 
   // ── Step 2：skw（内部写 keyword_skw 表）────────────────────────────────────
   logger.info('[Step 2] 执行关键词提取与跨成员语义分析（Skw）', { sessionId });

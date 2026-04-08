@@ -22,3 +22,4 @@ jieba
 scikit-learn
 openai
 jpush
+redis
