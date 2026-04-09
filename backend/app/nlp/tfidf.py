@@ -12,14 +12,28 @@ import jieba
 from sklearn.feature_extraction.text import TfidfVectorizer
 import numpy as np
 
+from .lexicon_loader import (
+    get_reweight_config,
+    load_gap_exclude_words,
+    load_highfreq_words,
+    load_subjective_words,
+)
 from .segmenter import STOPWORDS
+
+GAP_EXCLUDE_WORDS = load_gap_exclude_words()
+SUBJECTIVE_WORDS = load_subjective_words()
+HIGHFREQ_WORDS = load_highfreq_words()
+REWEIGHT_CONFIG = get_reweight_config()
 
 
 def _tokenize(text: str) -> list[str]:
     """jieba 分词 + 去停用词，供 TfidfVectorizer 使用"""
     return [
         t for t in jieba.lcut(text)
-        if t.strip() and t not in STOPWORDS and len(t) > 1
+        if t.strip()
+        and len(t) > 1
+        and t not in STOPWORDS
+        and t not in GAP_EXCLUDE_WORDS
     ]
 
 
@@ -38,6 +52,30 @@ def _find_context(text: str, keyword: str) -> str:
         if keyword in sentence:
             return sentence
     return ""
+
+
+def _apply_reweight(feature_names: list[str], raw_scores: np.ndarray) -> np.ndarray:
+    """
+    轻量重加权：
+    - gap_exclude_words: 硬排除（分数置 0）
+    - NTUSD 主观词: 乘以 ntusd_weight
+    - SUBTLEX 高频词: 乘以 subtlex_weight
+    """
+    scores = raw_scores.copy()
+    enable_ntusd_reweight = bool(REWEIGHT_CONFIG["enable_ntusd_reweight"])
+    enable_subtlex_reweight = bool(REWEIGHT_CONFIG["enable_subtlex_reweight"])
+    ntusd_weight = float(REWEIGHT_CONFIG["ntusd_weight"])
+    subtlex_weight = float(REWEIGHT_CONFIG["subtlex_weight"])
+
+    for idx, word in enumerate(feature_names):
+        if word in GAP_EXCLUDE_WORDS:
+            scores[idx] = 0.0
+            continue
+        if enable_ntusd_reweight and word in SUBJECTIVE_WORDS:
+            scores[idx] *= ntusd_weight
+        if enable_subtlex_reweight and word in HIGHFREQ_WORDS:
+            scores[idx] *= subtlex_weight
+    return scores
 
 
 def extract_tfidf(member_texts: dict[str, str], top_n: int = 5) -> dict:
@@ -69,10 +107,18 @@ def extract_tfidf(member_texts: dict[str, str], top_n: int = 5) -> dict:
 
     feature_names: list[str] = vectorizer.get_feature_names_out().tolist()
 
-    # 跨成员求和，得到全局词重要性排名
-    summed_scores = np.asarray(tfidf_matrix.sum(axis=0)).flatten()
-    top_indices = summed_scores.argsort()[::-1][:top_n]
-    keywords = [feature_names[i] for i in top_indices]
+    # 跨成员求和，得到全局词重要性排名，再做轻量重加权
+    raw_scores = np.asarray(tfidf_matrix.sum(axis=0)).flatten()
+    final_scores = _apply_reweight(feature_names, raw_scores)
+
+    keywords: list[str] = []
+    sorted_indices = final_scores.argsort()[::-1]
+    for idx in sorted_indices:
+        if final_scores[idx] <= 0:
+            continue
+        keywords.append(feature_names[idx])
+        if len(keywords) >= top_n:
+            break
 
     # 为每位成员、每个关键词找到上下文句子
     member_keyword_contexts: dict[str, dict[str, str]] = {}

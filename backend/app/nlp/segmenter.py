@@ -7,8 +7,10 @@ from __future__ import annotations
 
 import jieba
 
+from .lexicon_loader import load_external_stopwords, load_pystopwords
+
 # ── 停用词表（语气词、助词、连接词等，不计入 TTR） ──────────────────────────
-STOPWORDS: set[str] = {
+BASE_STOPWORDS: set[str] = {
     "的", "了", "在", "是", "我", "有", "和", "就", "不", "人", "都",
     "一", "上", "也", "很", "到", "说", "要", "去", "你", "会",
     "着", "看", "好", "自己", "这", "那", "他", "她", "它",
@@ -26,6 +28,18 @@ ARG_WORDS: set[str] = {
     "因为", "所以", "因此", "但是", "然而", "虽然", "尽管",
     "由于", "导致", "基于", "相反", "不过", "反而",
 }
+
+# 合并顺序：
+# 1) 内置词表
+# 2) 本地 stopwords/*.txt
+# 3) pystopwords（可选，依赖缺失时自动忽略）
+# 4) 论证词词表（避免 "因为/所以" 进入 TF-IDF）
+STOPWORDS: set[str] = (
+    BASE_STOPWORDS
+    | load_external_stopwords()
+    | load_pystopwords()
+    | ARG_WORDS
+)
 
 
 def segment(text: str) -> dict:

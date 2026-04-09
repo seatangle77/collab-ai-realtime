@@ -19,6 +19,7 @@ soundfile
 # NLP 微服务
 sentence-transformers
 jieba
+pystopwords
 scikit-learn
 openai
 jpush
