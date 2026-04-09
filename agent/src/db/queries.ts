@@ -314,14 +314,14 @@ export async function writePushQueueItem(row: {
     `INSERT INTO push_queue
        (id, session_id, target_user_id, state_type, push_content,
         content_embedding, analysis_window_start, status, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6::vector, $7, 'pending', NOW())`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', NOW())`,
     [
       id,
       row.session_id,
       row.target_user_id,
       row.state_type,
       row.push_content,
-      toPgVectorLiteral(row.content_embedding),
+      row.content_embedding,
       toUtcString(row.analysis_window_start),
     ],
   );
@@ -344,14 +344,14 @@ export async function writePushLog(row: {
     `INSERT INTO push_logs
        (id, session_id, state_id, target_user_id,
         push_content, content_embedding, push_channel, delivery_status, triggered_at, delivered_at)
-     VALUES ($1, $2, $3, $4, $5, $6::vector, $7, $8, NOW(), $9)`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9)`,
     [
       id,
       row.session_id,
       row.state_id,
       row.target_user_id,
       row.push_content,
-      toPgVectorLiteral(row.content_embedding),
+      row.content_embedding,
       row.push_channel,
       row.delivery_status ?? 'pending',
       row.delivered_at ? toUtcString(row.delivered_at) : null,
@@ -363,7 +363,7 @@ export async function writePushLog(row: {
 export async function getPendingPushQueue(sessionId: string): Promise<PushQueueRow[]> {
   const res = await pool.query<Omit<PushQueueRow, 'content_embedding'> & { content_embedding_raw: string | null }>(
     `SELECT id, session_id, target_user_id, state_type, push_content,
-            content_embedding::text AS content_embedding_raw,
+            array_to_json(content_embedding)::text AS content_embedding_raw,
             analysis_window_start, status, created_at, delivered_at
      FROM push_queue
      WHERE session_id = $1
@@ -387,7 +387,7 @@ export async function getRecentDeliveredEmbeddings(
   limit = 2,
 ): Promise<Array<{ content_embedding: number[] }>> {
   const res = await pool.query<{ content_embedding_raw: string | null }>(
-    `SELECT pl.content_embedding::text AS content_embedding_raw
+    `SELECT array_to_json(pl.content_embedding)::text AS content_embedding_raw
      FROM push_logs pl
      JOIN discussion_states ds ON ds.id = pl.state_id
      WHERE pl.session_id = $1
@@ -450,22 +450,25 @@ export async function updatePushQueueStatus(
   );
 }
 
-/** 写入 info_gap_buttons（静默按钮，等待用户点击） */
+/** 写入 info_gap_buttons（静默按钮，等待用户点击）。
+ *  返回生成的 id；若因 ON CONFLICT 未插入则返回 null。 */
 export async function writeInfoGapButton(row: {
   session_id: string;
   user_id: string;
   keyword: string;
   skw_score: number;
   window_start: Date;
-}): Promise<void> {
+}): Promise<string | null> {
   const id = 'igb_' + nanoid(12);
-  await pool.query(
+  const res = await pool.query<{ id: string }>(
     `INSERT INTO info_gap_buttons
        (id, session_id, user_id, keyword, skw_score, window_start, status, created_at)
      VALUES ($1, $2, $3, $4, $5, $6, 'pending', NOW())
-     ON CONFLICT DO NOTHING`,
+     ON CONFLICT DO NOTHING
+     RETURNING id`,
     [id, row.session_id, row.user_id, row.keyword, row.skw_score, toUtcString(row.window_start)],
   );
+  return res.rows[0]?.id ?? null;
 }
 
 /** 读取最近一条摘要 */

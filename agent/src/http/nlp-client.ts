@@ -219,6 +219,28 @@ export async function notifyPush(
   }
 }
 
+/** 通知后端将新 info_gap 按钮通过 WebSocket 推给目标用户 */
+export async function notifyInfoGapButton(params: {
+  session_id: string;
+  user_id: string;
+  button_id: string;
+  keyword: string;
+  skw_score: number;
+  window_start: string;
+}): Promise<void> {
+  try {
+    await client.post(`/api/internal/sessions/${params.session_id}/info-gap/notify`, {
+      user_id: params.user_id,
+      button_id: params.button_id,
+      keyword: params.keyword,
+      skw_score: params.skw_score,
+      window_start: params.window_start,
+    });
+  } catch (err) {
+    logger.error('notify_info_gap_button failed', { message: (err as Error).message });
+  }
+}
+
 /** 将生成的摘要提交给后端写库并触发 WebSocket 广播，失败时抛出异常 */
 export async function notifySummary(
   sessionId: string,

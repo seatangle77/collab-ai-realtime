@@ -6,6 +6,7 @@ import {
 import {
   generatePushBatchAnalysis,
   embed,
+  notifyInfoGapButton,
 } from '../http/nlp-client';
 import type {
   BatchTargetInput,
@@ -74,17 +75,39 @@ export async function runActionLayer(params: {
   const infoGapTriggers = triggers.filter((t) => t.type === 'info_gap');
   for (const trigger of infoGapTriggers) {
     for (const uid of trigger.targetUsers) {
+      let buttonId: string | null = null;
       try {
-        await writeInfoGapButton({
+        buttonId = await writeInfoGapButton({
           session_id: sessionId,
           user_id: uid,
           keyword: trigger.keyword!,
           skw_score: trigger.skwScore!,
           window_start: windowStart,
         });
-        logger.info(`[信息缺口] 写按钮 用户=${uid} 关键词=${trigger.keyword}`, { sessionId });
+        if (buttonId) {
+          logger.info(`[信息缺口] 写按钮 用户=${uid} 关键词=${trigger.keyword} id=${buttonId}`, { sessionId });
+        } else {
+          logger.info(`[信息缺口] 按钮已存在，跳过 用户=${uid} 关键词=${trigger.keyword}`, { sessionId });
+        }
       } catch (err) {
         logger.error(`[信息缺口] 写按钮失败 用户=${uid}`, { sessionId, message: (err as Error).message });
+        continue;
+      }
+
+      // 写库成功后，通知前端通过 WebSocket 刷新按钮
+      if (buttonId) {
+        try {
+          await notifyInfoGapButton({
+            session_id: sessionId,
+            user_id: uid,
+            button_id: buttonId,
+            keyword: trigger.keyword!,
+            skw_score: trigger.skwScore!,
+            window_start: windowStart.toISOString(),
+          });
+        } catch (err) {
+          logger.warn(`[信息缺口] WS 通知失败 用户=${uid}`, { sessionId, message: (err as Error).message });
+        }
       }
     }
   }

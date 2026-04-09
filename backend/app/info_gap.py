@@ -15,9 +15,12 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .admin.deps import require_admin
 from .auth import get_current_user
 from .db import get_db
 from .jpush_client import send_push_to_registration_id
+from .ws_manager import ws_manager
+from .ws_protocol import build_info_gap_button
 
 router = APIRouter(prefix="/api", tags=["info-gap"])
 
@@ -75,6 +78,55 @@ async def _assert_session_member(
 
 
 # ── 接口 ──────────────────────────────────────────────────────────────────────
+
+class InfoGapNotifyIn(BaseModel):
+    user_id: str
+    button_id: str
+    keyword: str
+    skw_score: float
+    window_start: str  # ISO 8601
+
+
+@router.post(
+    "/internal/sessions/{session_id}/info-gap/notify",
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_admin)],
+)
+async def notify_info_gap_button(
+    session_id: str,
+    body: InfoGapNotifyIn,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """
+    Agent 写完 info_gap_buttons 后调此接口，把新按钮通过 WebSocket 推给目标用户。
+    """
+    analysis_run_id = _build_reasoning_run_id(session_id, body.window_start)
+
+    # 读取 created_at（让前端时间轴能用）
+    result = await db.execute(
+        text("SELECT created_at FROM info_gap_buttons WHERE id = :id"),
+        {"id": body.button_id},
+    )
+    row = result.mappings().first()
+    created_at = row["created_at"].isoformat() if row and row["created_at"] else None
+
+    button_payload = {
+        "id": body.button_id,
+        "keyword": body.keyword,
+        "skw_score": body.skw_score,
+        "analysis_run_id": analysis_run_id,
+        "window_start": body.window_start,
+        "created_at": created_at,
+    }
+
+    sent = await ws_manager.send_to_user(
+        session_id,
+        body.user_id,
+        build_info_gap_button([button_payload]),
+    )
+
+    return {"sent": sent, "button_id": body.button_id}
+
 
 @router.get(
     "/sessions/{session_id}/info-gap/buttons",
