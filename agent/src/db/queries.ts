@@ -216,12 +216,12 @@ export async function getLastSpeakEndPerUser(
   return res.rows;
 }
 
-/** 获取 session 全局最近发言 end（群体沉默检测用） */
+/** 获取 session 全局最近一条转写创建时间（群体沉默检测用） */
 export async function getLastSpeakEndGlobal(
   sessionId: string,
 ): Promise<Date | null> {
   const res = await pool.query<{ last_end: Date | null }>(
-    `SELECT MAX("end") AS last_end
+    `SELECT MAX(created_at) AS last_end
      FROM speech_transcripts
      WHERE session_id = $1`,
     [sessionId],

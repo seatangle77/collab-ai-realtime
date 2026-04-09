@@ -12,8 +12,11 @@ import { runActionLayer } from './skills/run-action-layer';
 import { runPushDispatcher } from './skills/run-push-dispatcher';
 import { runSummary } from './skills/run-summary';
 import { computeHasReasoning } from './skills/perception/reasoning';
+import { notifyGroupSilence } from './http/nlp-client';
 
 const logger = createLogger('session-worker');
+const GROUP_SILENCE_THRESHOLD_S = 30;
+const GROUP_SILENCE_FIXED_CONTENT = '小组已沉默超过30秒，大家可以继续讨论～';
 
 function buildRunId(kind: 'summary' | 'reasoning', sessionId: string, windowStart: Date): string {
   return `${kind}:${sessionId}:${windowStart.toISOString()}`;
@@ -26,6 +29,7 @@ export class SessionWorker {
   private analysisTimer: ReturnType<typeof setTimeout> | null = null;
   private summaryTimer: ReturnType<typeof setTimeout> | null = null;
   private dispatchTimer: ReturnType<typeof setInterval> | null = null;
+  private lastGroupSilenceTriggerAt: number | null = null;
   private running = false;
   private static readonly SUMMARY_LEAD_MS = 15_000;
   private static readonly DISPATCH_INTERVAL_MS = 5_000;
@@ -137,11 +141,26 @@ export class SessionWorker {
       const silenceMs = Date.now() - lastEnd.getTime();
       const silenceS = silenceMs / 1000;
 
-      if (silenceS > 30) {
+      if (silenceS > GROUP_SILENCE_THRESHOLD_S) {
+        if (!this.canTriggerGroupSilenceNow(Date.now())) {
+          logger.info('Group silence detected but in cooldown', {
+            sessionId: this.sessionId,
+            scheduled_for: scheduledFor.toISOString(),
+            silence_s: Math.round(silenceS),
+          });
+          return;
+        }
+
+        const sent = await notifyGroupSilence(this.sessionId, GROUP_SILENCE_FIXED_CONTENT);
+        if (sent) {
+          this.markGroupSilenceTriggered(Date.now());
+        }
+
         logger.info('Group silence detected', {
           sessionId: this.sessionId,
           scheduled_for: scheduledFor.toISOString(),
           silence_s: Math.round(silenceS),
+          notified: sent,
         });
       }
     } catch (err) {
@@ -191,7 +210,15 @@ export class SessionWorker {
 
       // Step2：推理层
       if (!result) return;
-      const triggers = runReasoningLayer(result, memberIds);
+      let triggers = runReasoningLayer(result, memberIds);
+
+      if (triggers.some((trigger) => trigger.type === 'group_silence') && !this.canTriggerGroupSilenceNow(Date.now())) {
+        triggers = triggers.filter((trigger) => trigger.type !== 'group_silence');
+        logger.info('analysis group_silence skipped by cooldown gate', {
+          sessionId: this.sessionId,
+          scheduled_for: scheduledFor.toISOString(),
+        });
+      }
 
       // hasReasoning（Qwen）后台异步，不阻塞主流程
       void computeHasReasoning(this.sessionId, windowStart, windowEnd, memberIds).catch((err) => {
@@ -211,6 +238,7 @@ export class SessionWorker {
         memberIds,
         summaryText,
         transcripts,
+        onGroupSilenceNotified: () => this.markGroupSilenceTriggered(Date.now()),
       }).catch((err) => {
         logger.error('action failed', {
           sessionId: this.sessionId,
@@ -283,5 +311,16 @@ export class SessionWorker {
         message: (err as Error).message,
       });
     }
+  }
+
+  private canTriggerGroupSilenceNow(nowMs: number): boolean {
+    if (this.lastGroupSilenceTriggerAt === null) {
+      return true;
+    }
+    return nowMs - this.lastGroupSilenceTriggerAt >= config.agent.longIntervalMs;
+  }
+
+  private markGroupSilenceTriggered(nowMs: number): void {
+    this.lastGroupSilenceTriggerAt = nowMs;
   }
 }

@@ -7,6 +7,7 @@ AudioService 边界 & 异常单元测试（用例 24-29）
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import os
 import sys
 import time
@@ -27,6 +28,7 @@ if env_path.exists():
 
 from app.audio.audio_service import (
     AudioService,
+    GROUP_SILENCE_FIXED_CONTENT,
     create_audio_service,
     destroy_audio_service,
     get_audio_service,
@@ -182,6 +184,45 @@ async def test_29_stop_idempotent():
     _log(ok and ok2, "29: destroy 两次不报错（幂等）且 get 返回 None")
 
 
+async def test_30_on_silence_detected_broadcasts_group_notification():
+    """30: _on_silence_detected 会广播 group_notification"""
+    sid = "s_edge_30"
+    service = AudioService(sid)
+    with patch("app.audio.audio_service.ws_manager.broadcast_to_session", new_callable=AsyncMock) as mock_broadcast:
+        await service._on_silence_detected(31)
+        ok = mock_broadcast.called
+        payload = mock_broadcast.call_args[0][1] if ok else {}
+        ok = ok and payload.get("type") == "group_notification"
+        ok = ok and payload.get("data", {}).get("content") == GROUP_SILENCE_FIXED_CONTENT
+        _log(ok, "30: _on_silence_detected 正确广播 group_notification", payload if not ok else None)
+
+
+def test_31_vad_silence_threshold_and_cooldown():
+    """31: VAD 满足阈值触发一次，冷却期内不重复触发"""
+    sid = "s_edge_31"
+    service = AudioService(sid)
+
+    class _FakeVad:
+        def is_speech(self, frame, sample_rate):
+            return False
+
+    service._vad = _FakeVad()
+    service._last_speech_at = time.time() - 31
+    service._silence_notified_at = None
+
+    done_future = concurrent.futures.Future()
+    done_future.set_result(None)
+    def _submit(coro, _loop):
+        coro.close()
+        return done_future
+
+    with patch("app.audio.audio_service.asyncio.run_coroutine_threadsafe", side_effect=_submit) as mock_submit:
+        service._process_vad_chunk(b"\x00" * 3200, bytearray())
+        service._process_vad_chunk(b"\x00" * 3200, bytearray())
+        ok = mock_submit.call_count == 1
+        _log(ok, "31: VAD 30s 触发 + 120s 冷却生效", f"call_count={mock_submit.call_count}" if not ok else None)
+
+
 # ── 入口 ──────────────────────────────────────────────────────────
 
 async def main():
@@ -195,6 +236,8 @@ async def main():
     await test_27_resemblyzer_exception_fallback()
     await test_28_stop_no_deadlock()
     await test_29_stop_idempotent()
+    await test_30_on_silence_detected_broadcasts_group_notification()
+    test_31_vad_silence_threshold_and_cooldown()
 
     print("=" * 60)
     total = PASS + FAIL

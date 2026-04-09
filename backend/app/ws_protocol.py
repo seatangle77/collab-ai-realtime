@@ -87,6 +87,19 @@ def build_push_notification(
     }
 
 
+def build_group_notification(
+    content: str,
+    triggered_at: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "type": "group_notification",
+        "data": {
+            "content": content,
+            "triggered_at": triggered_at,
+        },
+    }
+
+
 def build_summary_update(
     content: str,
     version: int,

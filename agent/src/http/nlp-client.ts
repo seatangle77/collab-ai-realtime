@@ -219,6 +219,20 @@ export async function notifyPush(
   }
 }
 
+/** 发送群组沉默广播（target_user_id='ALL'） */
+export async function notifyGroupSilence(
+  sessionId: string,
+  content: string,
+): Promise<boolean> {
+  try {
+    await client.post(`/api/internal/sessions/${sessionId}/group-notify`, { content });
+    return true;
+  } catch (err) {
+    logger.error('notify_group_silence failed', { message: (err as Error).message });
+    return false;
+  }
+}
+
 /** 通知后端将新 info_gap 按钮通过 WebSocket 推给目标用户 */
 export async function notifyInfoGapButton(params: {
   session_id: string;
@@ -274,5 +288,23 @@ export async function generateSummary(
   } catch (err) {
     logger.error('generate_summary failed', { message: (err as Error).message });
     return '';
+  }
+}
+
+/**
+ * 查询当前 session 是否有人正在说话（VAD 信号）。
+ * 推送前调用，有人说话时跳过本次推送。
+ * 出错时返回 false，不阻塞推送。
+ */
+export async function checkVadSpeaking(sessionId: string): Promise<boolean> {
+  try {
+    const res = await client.get<{ is_speaking: boolean }>(
+      `/api/internal/sessions/${sessionId}/vad-speaking`,
+      { timeout: 2_000 },
+    );
+    return res.data.is_speaking ?? false;
+  } catch (err) {
+    logger.warn('check_vad_speaking failed, defaulting to false', { message: (err as Error).message });
+    return false;
   }
 }

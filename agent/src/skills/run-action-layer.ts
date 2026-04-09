@@ -6,6 +6,7 @@ import {
 import {
   generatePushBatchAnalysis,
   embed,
+  notifyGroupSilence,
   notifyInfoGapButton,
 } from '../http/nlp-client';
 import type {
@@ -17,6 +18,7 @@ import type { Transcript } from '../db/queries';
 
 const logger = createLogger('action-layer');
 const AI_TARGET_USER_ALL = 'ALL';
+const GROUP_SILENCE_FIXED_CONTENT = '小组已沉默超过30秒，大家可以继续讨论～';
 
 type BatchSupportedTrigger = Exclude<Trigger['type'], 'info_gap'>;
 
@@ -57,8 +59,9 @@ export async function runActionLayer(params: {
   memberIds: string[];
   summaryText: string;
   transcripts: Transcript[];
+  onGroupSilenceNotified?: () => void;
 }): Promise<void> {
-  const { sessionId, triggers, windowStart, memberIds, summaryText, transcripts } = params;
+  const { sessionId, triggers, windowStart, memberIds, summaryText, transcripts, onGroupSilenceNotified } = params;
 
   if (triggers.length === 0) {
     logger.info('行动层：无触发，跳过', { sessionId });
@@ -113,6 +116,20 @@ export async function runActionLayer(params: {
   }
 
   // ── 处理其余3种触发（走冷却和优先级）───────────────────────────────────────
+  const groupSilenceTriggers = triggers.filter((t) => t.type === 'group_silence');
+  if (groupSilenceTriggers.length > 0) {
+    const sent = await notifyGroupSilence(sessionId, GROUP_SILENCE_FIXED_CONTENT);
+    if (sent) {
+      logger.info('group_silence 直接广播成功', { sessionId });
+      onGroupSilenceNotified?.();
+    } else {
+      logger.warn('group_silence 广播失败', { sessionId });
+    }
+    logger.info('group_silence 触发时按优先级跳过其余个人推送', { sessionId });
+    return;
+  }
+
+  // ── 处理其余2种触发（走冷却和优先级）───────────────────────────────────────
   const mainTriggers = triggers
     .filter(isBatchSupportedTrigger)
     .sort((a, b) => (PRIORITY[a.type] ?? 99) - (PRIORITY[b.type] ?? 99));

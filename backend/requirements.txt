@@ -12,6 +12,7 @@ websocket-client
 
 # 模块六：音频处理
 resemblyzer
+webrtcvad
 numpy
 librosa
 soundfile

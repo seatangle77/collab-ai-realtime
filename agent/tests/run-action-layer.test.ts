@@ -18,6 +18,7 @@ jest.mock('../src/http/nlp-client');
 const mockWritePushQueueItem = queries.writePushQueueItem as jest.MockedFunction<typeof queries.writePushQueueItem>;
 const mockWriteInfoGapButton = queries.writeInfoGapButton as jest.MockedFunction<typeof queries.writeInfoGapButton>;
 const mockGeneratePushBatchAnalysis = nlpClient.generatePushBatchAnalysis as jest.MockedFunction<typeof nlpClient.generatePushBatchAnalysis>;
+const mockNotifyGroupSilence = nlpClient.notifyGroupSilence as jest.MockedFunction<typeof nlpClient.notifyGroupSilence>;
 const mockEmbed = nlpClient.embed as jest.MockedFunction<typeof nlpClient.embed>;
 
 const SESSION = 's_test';
@@ -56,8 +57,9 @@ describe('行动层：队列写入', () => {
   beforeEach(() => {
     jest.resetAllMocks();
     mockWritePushQueueItem.mockResolvedValue('pq_mock');
-    mockWriteInfoGapButton.mockResolvedValue(undefined);
+    mockWriteInfoGapButton.mockResolvedValue(null);
     mockEmbed.mockResolvedValue([[0.1, 0.2, 0.3]]);
+    mockNotifyGroupSilence.mockResolvedValue(true);
     mockGeneratePushBatchAnalysis.mockResolvedValue([
       {
         user_id: 'uA',
@@ -94,20 +96,13 @@ describe('行动层：优先级', () => {
   beforeEach(() => {
     jest.resetAllMocks();
     mockWritePushQueueItem.mockResolvedValue('pq_mock');
-    mockWriteInfoGapButton.mockResolvedValue(undefined);
+    mockWriteInfoGapButton.mockResolvedValue(null);
     mockEmbed.mockResolvedValue([[0.1, 0.2, 0.3]]);
-    mockGeneratePushBatchAnalysis.mockResolvedValue([
-      {
-        user_id: 'ALL',
-        challenge_type: 'group_stagnation',
-        needs_prompt: true,
-        analysis: '群体停滞',
-        content: '请大家换个角度继续讨论',
-      },
-    ]);
+    mockNotifyGroupSilence.mockResolvedValue(true);
+    mockGeneratePushBatchAnalysis.mockResolvedValue([]);
   });
 
-  it('group_silence + shallow_discussion 同时触发时，优先为 group_silence 入队', async () => {
+  it('group_silence + shallow_discussion 同时触发时，优先发群组提醒并跳过个人推送', async () => {
     const triggers: Trigger[] = [
       { type: 'group_silence', targetUsers: MEMBERS, triggerMetrics: { silence_s: 35 } },
       { type: 'shallow_discussion', userId: 'uA', targetUsers: ['uA'], triggerMetrics: { description: 'TTR偏低' } },
@@ -115,10 +110,9 @@ describe('行动层：优先级', () => {
 
     await runActionLayer({ ...BASE_PARAMS, triggers });
 
-    expect(mockWritePushQueueItem).toHaveBeenCalledTimes(MEMBERS.length);
-    expect(
-      mockWritePushQueueItem.mock.calls.every(([row]) => row.state_type === 'group_silence'),
-    ).toBe(true);
+    expect(mockNotifyGroupSilence).toHaveBeenCalledTimes(1);
+    expect(mockGeneratePushBatchAnalysis).not.toHaveBeenCalled();
+    expect(mockWritePushQueueItem).not.toHaveBeenCalled();
   });
 });
 
@@ -126,8 +120,9 @@ describe('行动层：info_gap 不入队', () => {
   beforeEach(() => {
     jest.resetAllMocks();
     mockWritePushQueueItem.mockResolvedValue('pq_mock');
-    mockWriteInfoGapButton.mockResolvedValue(undefined);
+    mockWriteInfoGapButton.mockResolvedValue(null);
     mockEmbed.mockResolvedValue([[0.1, 0.2, 0.3]]);
+    mockNotifyGroupSilence.mockResolvedValue(true);
     mockGeneratePushBatchAnalysis.mockResolvedValue([]);
   });
 

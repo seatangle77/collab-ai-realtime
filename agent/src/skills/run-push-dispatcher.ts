@@ -1,45 +1,30 @@
 import { createLogger } from '../logger';
 import {
-  getRecentDeliveredEmbeddings,
-  getStateTypeCountInWindow,
   getPendingPushQueue,
   updatePushQueueStatus,
   writeDiscussionState,
   writePushLog,
 } from '../db/queries';
 import { notifyPush } from '../http/nlp-client';
+import { runPushFilterChain } from './push/run-push-filter-chain';
+import { sameRoundDedupFilter } from './push/filters/same-round-dedup';
+import { contentSimilarityFilter } from './push/filters/content-similarity';
+import { vadCheckFilter } from './push/filters/vad-check';
+import type { PushFilter } from './push/types';
 
 const logger = createLogger('push-dispatcher');
-const SIMILARITY_THRESHOLD = 0.6;
-// 暂定 0.6，后续根据实测效果考虑调整至 0.65 或 0.7
+
+const PUSH_FILTERS: PushFilter[] = [
+  sameRoundDedupFilter,    // 1. 同轮去重（纯内存，最快）
+  contentSimilarityFilter, // 2. 内容相似度（DB 查询）
+  vadCheckFilter,          // 3. VAD 说话检测（HTTP，最慢）
+];
 
 export const pushDispatcherHooks = {
   async shouldSkipPushQueueItem(): Promise<boolean> {
     return false;
   },
 };
-
-export function cosineSimilarity(a: number[], b: number[]): number {
-  if (a.length === 0 || b.length === 0 || a.length !== b.length) {
-    return 0;
-  }
-
-  let dot = 0;
-  let normA = 0;
-  let normB = 0;
-
-  for (let i = 0; i < a.length; i += 1) {
-    dot += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
-  }
-
-  if (normA === 0 || normB === 0) {
-    return 0;
-  }
-
-  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
-}
 
 export async function runPushDispatcher(sessionId: string): Promise<void> {
   const pendingItems = await getPendingPushQueue(sessionId);
@@ -55,47 +40,34 @@ export async function runPushDispatcher(sessionId: string): Promise<void> {
     try {
       if (await pushDispatcherHooks.shouldSkipPushQueueItem()) {
         await updatePushQueueStatus(item.id, 'skipped');
-        logger.info(`push skipped queue_id=${item.id} user=${item.target_user_id}`, { sessionId });
+        logger.info(`push skipped by hook queue_id=${item.id} user=${item.target_user_id}`, { sessionId });
         continue;
       }
 
-      if (reservedUsers.has(item.target_user_id)) {
-        await updatePushQueueStatus(item.id, 'skipped');
-        logger.info(`push skipped by same-round dedupe queue_id=${item.id} user=${item.target_user_id}`, { sessionId });
-        continue;
-      }
-
-      const deliveredCount = await getStateTypeCountInWindow(
-        item.session_id,
-        item.target_user_id,
-        item.state_type,
+      const outcome = await runPushFilterChain(
+        { sessionId, item, reservedUsers },
+        PUSH_FILTERS,
       );
-      if (deliveredCount >= 2) {
+
+      if (outcome.action === 'skip') {
         await updatePushQueueStatus(item.id, 'skipped');
-        logger.info(`push skipped by frequency limit queue_id=${item.id} user=${item.target_user_id}`, {
-          sessionId,
-          deliveredCount,
-        });
+        logger.info(
+          `push skipped queue_id=${item.id} user=${item.target_user_id} by=${outcome.by} reason=${outcome.reasonCode}`,
+          { sessionId },
+        );
         continue;
       }
 
-      const recentEmbeddings = await getRecentDeliveredEmbeddings(
-        item.session_id,
-        item.target_user_id,
-        item.state_type,
-        2,
-      );
-      const hitSimilarityThreshold = recentEmbeddings.some((history) => (
-        cosineSimilarity(item.content_embedding, history.content_embedding) >= SIMILARITY_THRESHOLD
-      ));
-      if (hitSimilarityThreshold) {
-        await updatePushQueueStatus(item.id, 'skipped');
-        logger.info(`push skipped by content similarity queue_id=${item.id} user=${item.target_user_id}`, {
-          sessionId,
-        });
+      if (outcome.action === 'defer') {
+        // 保留 pending 状态，下一个 dispatcher 周期自动重试
+        logger.info(
+          `push deferred queue_id=${item.id} user=${item.target_user_id} by=${outcome.by} reason=${outcome.reasonCode}`,
+          { sessionId },
+        );
         continue;
       }
 
+      // outcome.action === 'proceed' → 执行推送
       const stateId = await writeDiscussionState({
         session_id: item.session_id,
         state_type: item.state_type,

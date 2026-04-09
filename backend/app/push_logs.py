@@ -12,7 +12,7 @@ from .admin.deps import require_admin
 from .auth import get_current_user
 from .db import get_db
 from .ws_manager import ws_manager
-from .ws_protocol import build_push_notification
+from .ws_protocol import build_group_notification, build_push_notification
 
 router = APIRouter(prefix="/api", tags=["push-logs"])
 
@@ -25,6 +25,10 @@ class PushNotifyIn(BaseModel):
     content: str
     state_id: str | None = None
     trigger_type: str = ""
+
+
+class GroupNotifyIn(BaseModel):
+    content: str
 
 
 def _build_reasoning_run_id(session_id: str, window_start: Any) -> str | None:
@@ -110,6 +114,70 @@ async def push_notify(
     await db.commit()
 
     return {"id": log_id, "delivery_status": new_status, "ws_sent": sent}
+
+
+@router.post(
+    "/internal/sessions/{session_id}/group-notify",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_admin)],
+)
+async def group_notify(
+    session_id: str,
+    body: GroupNotifyIn,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """
+    Agent 触发群组通知：
+    1. 写入 push_logs（target_user_id='ALL'）
+    2. 向会话内在线成员广播 group_notification
+    3. 更新 delivery_status
+    """
+    log_id = "pl" + uuid.uuid4().hex[:8]
+
+    insert_result = await db.execute(
+        text(
+            """
+            INSERT INTO push_logs (id, session_id, state_id, target_user_id, push_content, push_channel, delivery_status, triggered_at)
+            VALUES (:id, :session_id, NULL, 'ALL', :content, 'web', 'pending', NOW())
+            RETURNING triggered_at
+            """
+        ),
+        {
+            "id": log_id,
+            "session_id": session_id,
+            "content": body.content,
+        },
+    )
+    inserted_row = insert_result.mappings().one()
+    await db.commit()
+
+    active_conn_count = len(ws_manager.session_connections.get(session_id, set()))
+    if active_conn_count > 0:
+        await ws_manager.broadcast_to_session(
+            session_id,
+            build_group_notification(
+                body.content,
+                inserted_row["triggered_at"].isoformat() if inserted_row["triggered_at"] else None,
+            ),
+        )
+
+    delivered = active_conn_count > 0
+    new_status = "delivered" if delivered else "failed"
+    await db.execute(
+        text(
+            "UPDATE push_logs SET delivery_status = :s, delivered_at = NOW() WHERE id = :id"
+            if delivered else
+            "UPDATE push_logs SET delivery_status = :s WHERE id = :id"
+        ),
+        {"s": new_status, "id": log_id},
+    )
+    await db.commit()
+
+    return {
+        "id": log_id,
+        "delivery_status": new_status,
+        "online_connections": active_conn_count,
+    }
 
 
 class PushLogOut(BaseModel):

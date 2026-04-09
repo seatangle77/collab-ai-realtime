@@ -32,6 +32,7 @@ from .info_gap import router as info_gap_router
 from .discussion_summary import router as discussion_summary_router
 from .window_metrics_api import router as window_metrics_router
 from .admin.test_seed import router as test_seed_router
+from .vad import router as vad_router
 
 app = FastAPI()
 
@@ -79,6 +80,7 @@ app.include_router(info_gap_router)
 app.include_router(discussion_summary_router)
 app.include_router(window_metrics_router)
 app.include_router(test_seed_router)
+app.include_router(vad_router)
 
 # 本地开发环境下直接通过 FastAPI 提供音频静态访问能力，
 # 与生产环境中通过 Nginx 映射 /audio/voice-profiles 到挂载目录的行为保持一致。
