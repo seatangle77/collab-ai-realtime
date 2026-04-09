@@ -67,13 +67,22 @@ def build_session_ended(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def build_push_notification(content: str, target_user_id: str, triggered_at: str | None = None) -> dict[str, Any]:
+def build_push_notification(
+    content: str,
+    target_user_id: str,
+    triggered_at: str | None = None,
+    *,
+    analysis_run_id: str | None = None,
+    analysis_window_start: str | None = None,
+) -> dict[str, Any]:
     return {
         "type": "push_notification",
         "data": {
             "content": content,
             "target_user_id": target_user_id,
             "triggered_at": triggered_at,
+            "analysis_run_id": analysis_run_id,
+            "analysis_window_start": analysis_window_start,
         },
     }
 
@@ -84,6 +93,7 @@ def build_summary_update(
     session_id: str,
     *,
     summary_id: str | None = None,
+    analysis_run_id: str | None = None,
     window_start: str | None = None,
     window_end: str | None = None,
     created_at: str | None = None,
@@ -95,17 +105,17 @@ def build_summary_update(
             "session_id": session_id,
             "version": version,
             "content": content,
+            "analysis_run_id": analysis_run_id,
             "window_start": window_start,
             "window_end": window_end,
             "created_at": created_at,
         },
     }
 
-
 def build_info_gap_button(buttons: list[dict[str, Any]]) -> dict[str, Any]:
     """
     buttons 每项格式：
-    { "id": str, "keyword": str, "skw_score": float }
+    { "id": str, "keyword": str, "skw_score": float, "analysis_run_id": str, "window_start": str }
     """
     return {
         "type": "info_gap_button",

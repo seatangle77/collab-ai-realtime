@@ -203,6 +203,7 @@ class TencentASR:
     def _on_asr_error(self) -> None:
         """ASR 连接异常时触发，最多重连 MAX_RETRIES 次，间隔递增"""
         if self._stopped:
+            logger.warning("[TencentASR] session=%s 忽略重连：已停止", self.session_id)
             return
 
         if self._retry_count >= MAX_RETRIES:
@@ -228,12 +229,30 @@ class TencentASR:
             logger.error("[TencentASR] session=%s 重连失败: %s", self.session_id, e)
 
     def start(self) -> None:
+        logger.info("[TencentASR] session=%s start", self.session_id)
         self.recognizer.start()
 
     def write(self, pcm_bytes: bytes) -> None:
         """每收到一个 audio_chunk 调一次：同时缓存音频 + 发给 ASR"""
         self.listener.cache_audio(pcm_bytes)
+        wait_started = time.perf_counter()
+        status = getattr(self.recognizer, "status", None)
+        if status == 1:
+            logger.warning(
+                "[TencentASR] session=%s write_waiting_for_open pcm_bytes=%d",
+                self.session_id,
+                len(pcm_bytes),
+            )
         self.recognizer.write(pcm_bytes)
+        wait_elapsed_ms = (time.perf_counter() - wait_started) * 1000
+        if wait_elapsed_ms >= 300:
+            logger.warning(
+                "[TencentASR] session=%s write_slow pcm_bytes=%d elapsed_ms=%.1f status=%s",
+                self.session_id,
+                len(pcm_bytes),
+                wait_elapsed_ms,
+                getattr(self.recognizer, "status", None),
+            )
 
     def stop(self) -> None:
         self._stopped = True

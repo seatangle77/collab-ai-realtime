@@ -5,6 +5,7 @@ import asyncio
 import logging
 import subprocess
 import threading
+import time
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,6 +23,7 @@ MIN_PCM_BYTES = int(16000 * 2 * 0.5)
 
 # PCM reader 每次读取块大小（0.1 秒）
 PCM_READ_CHUNK = 3200
+PCM_READER_HEARTBEAT_SEC = 5
 
 
 class AudioService:
@@ -113,11 +115,20 @@ class AudioService:
         self.asr.start()
         logger.info("[AudioService] session=%s 启动完成", self.session_id)
 
-    async def handle_chunk(self, audio_bytes: bytes, mime_type: str = "audio/webm") -> None:
+    async def handle_chunk(
+        self,
+        audio_bytes: bytes,
+        mime_type: str = "audio/webm",
+        seq: int | None = None,
+    ) -> None:
         """收到前端 audio_chunk，按格式路由处理"""
         # Native(Android) AAC：写入持久 ffmpeg 管道（reader 线程转发给 ASR）
         if mime_type.startswith("audio/aac") or mime_type.startswith("audio/mp4"):
             if self._aac_ffmpeg_proc is None or self._aac_ffmpeg_proc.stdin is None:
+                logger.warning(
+                    "[AudioService] session=%s seq=%s AAC ffmpeg 不可用，chunk 丢弃",
+                    self.session_id, seq,
+                )
                 return
             if self._aac_ffmpeg_proc.poll() is not None:
                 logger.error(
@@ -126,14 +137,25 @@ class AudioService:
                 )
                 return
             try:
+                write_started = time.perf_counter()
                 self._aac_ffmpeg_proc.stdin.write(audio_bytes)
                 self._aac_ffmpeg_proc.stdin.flush()
+                write_elapsed_ms = (time.perf_counter() - write_started) * 1000
+                if write_elapsed_ms >= 200:
+                    logger.warning(
+                        "[AudioService] session=%s seq=%s AAC ffmpeg_write_slow bytes=%d elapsed_ms=%.1f",
+                        self.session_id, seq, len(audio_bytes), write_elapsed_ms,
+                    )
             except (BrokenPipeError, OSError) as e:
                 logger.warning("[AudioService] session=%s AAC ffmpeg stdin 写入失败: %s", self.session_id, e)
             return
 
         # Browser WebM：流式写入 ffmpeg 管道
         if self._ffmpeg_proc is None or self._ffmpeg_proc.stdin is None:
+            logger.warning(
+                "[AudioService] session=%s seq=%s WebM ffmpeg 不可用，chunk 丢弃",
+                self.session_id, seq,
+            )
             return
 
         if self._ffmpeg_proc.poll() is not None:
@@ -144,8 +166,15 @@ class AudioService:
             return
 
         try:
+            write_started = time.perf_counter()
             self._ffmpeg_proc.stdin.write(audio_bytes)
             self._ffmpeg_proc.stdin.flush()
+            write_elapsed_ms = (time.perf_counter() - write_started) * 1000
+            if write_elapsed_ms >= 200:
+                logger.warning(
+                    "[AudioService] session=%s seq=%s WebM ffmpeg_write_slow bytes=%d elapsed_ms=%.1f",
+                    self.session_id, seq, len(audio_bytes), write_elapsed_ms,
+                )
         except (BrokenPipeError, OSError) as e:
             logger.warning("[AudioService] session=%s ffmpeg stdin 写入失败: %s", self.session_id, e)
 
@@ -259,14 +288,39 @@ class AudioService:
         stop_event: threading.Event,
     ) -> None:
         """后台线程：持续从 ffmpeg stdout 读 PCM，转发给腾讯 ASR"""
+        session_id = getattr(asr, "session_id", "unknown")
+        read_count = 0
+        total_bytes = 0
+        last_heartbeat_at = time.monotonic()
+        logger.info("[AudioService] session=%s pcm_reader_started", session_id)
         while not stop_event.is_set():
             try:
                 data = proc.stdout.read(PCM_READ_CHUNK)
             except Exception:
+                logger.exception("[AudioService] session=%s pcm_reader_read_failed", session_id)
                 break
             if not data:
+                logger.warning("[AudioService] session=%s pcm_reader_eof", session_id)
                 break
+            read_count += 1
+            total_bytes += len(data)
+            now = time.monotonic()
+            if now - last_heartbeat_at >= PCM_READER_HEARTBEAT_SEC:
+                logger.info(
+                    "[AudioService] session=%s pcm_reader_heartbeat reads=%d pcm_bytes=%d",
+                    session_id,
+                    read_count,
+                    total_bytes,
+                )
+                last_heartbeat_at = now
             asr.write(data)
+        logger.warning(
+            "[AudioService] session=%s pcm_reader_stopped reads=%d pcm_bytes=%d stop_set=%s",
+            session_id,
+            read_count,
+            total_bytes,
+            stop_event.is_set(),
+        )
 
 
 # ── Session 注册表 ──────────────────────────────────────────────

@@ -15,6 +15,7 @@ function makeTranscript(userId: string, durationS: number) {
   return {
     transcript_id: 'tr_x',
     user_id: userId,
+    speaker_name: null,
     text: 'hello',
     start: WIN_START,
     end: new Date(WIN_START.getTime() + durationS * 1000),
@@ -56,7 +57,7 @@ describe('computeSpeakingRatio', () => {
 
   it('duration 为 null 时用 start/end 推算', async () => {
     mockGetTranscripts.mockResolvedValue([
-      { transcript_id: 'tr_x', user_id: 'u1', text: 'hi',
+      { transcript_id: 'tr_x', user_id: 'u1', speaker_name: null, text: 'hi',
         start: WIN_START,
         end: new Date(WIN_START.getTime() + 60_000),
         duration: null },
@@ -67,7 +68,7 @@ describe('computeSpeakingRatio', () => {
 
   it('user_id 为 null 的记录忽略', async () => {
     mockGetTranscripts.mockResolvedValue([
-      { transcript_id: 'tr_x', user_id: null, text: 'hi',
+      { transcript_id: 'tr_x', user_id: null, speaker_name: null, text: 'hi',
         start: WIN_START, end: WIN_END, duration: 60 },
     ]);
     const { ratios } = await computeSpeakingRatio(SESSION, WIN_START, WIN_END, MEMBERS);

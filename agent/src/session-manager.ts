@@ -41,10 +41,15 @@ export class SessionManager {
       // 注册新 session
       for (const session of ongoingSessions) {
         if (!this.workers.has(session.id)) {
-          const worker = new SessionWorker(session.id);
+          const sessionStartedAt = session.started_at ?? new Date();
+          const worker = new SessionWorker(session.id, sessionStartedAt);
           this.workers.set(session.id, worker);
           worker.start();
-          logger.info('Worker registered', { sessionId: session.id });
+          logger.info('Worker registered', {
+            sessionId: session.id,
+            session_started_at: sessionStartedAt.toISOString(),
+            started_at_missing: session.started_at == null,
+          });
         }
       }
 

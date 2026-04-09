@@ -97,8 +97,8 @@ async def test_append_transcript_to_cache_writes_sorted_set_and_trims():
     assert calls[0][1][0] == "transcript:session:s1"
     score = int(end.timestamp() * 1000)
     assert list(calls[0][1][1].values()) == [score]
-    assert calls[1][1] == ("transcript:session:s1", 0, score - (240 * 1000))
-    assert calls[2][1] == ("transcript:session:s1", 1800)
+    assert calls[1][1] == ("transcript:session:s1", 0, score - (900 * 1000))
+    assert calls[2][1] == ("transcript:session:s1", 3600)
 
 
 async def test_append_transcript_to_cache_skips_when_timestamp_missing():

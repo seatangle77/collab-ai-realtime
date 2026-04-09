@@ -4,7 +4,9 @@
 """
 from __future__ import annotations
 
+import logging
 import os
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
@@ -14,6 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .db import DBNotConfiguredError, get_sessionmaker
 from .transcript_cache import append_transcript_to_cache
+
+logger = logging.getLogger(__name__)
 
 
 def _to_utc_naive(dt: datetime) -> datetime:
@@ -69,6 +73,7 @@ async def insert_speech_transcript_and_broadcast(
     transcript_text = text
     if not transcript_text or not transcript_text.strip():
         return None
+    total_started = time.perf_counter()
 
     try:
         session_factory = get_sessionmaker()
@@ -76,6 +81,7 @@ async def insert_speech_transcript_and_broadcast(
         return None
 
     async with session_factory() as db:  # type: AsyncSession
+        db_started = time.perf_counter()
         sess_row = await db.execute(
             sa_text("SELECT group_id FROM chat_sessions WHERE id = :id"),
             {"id": session_id},
@@ -120,6 +126,7 @@ async def insert_speech_transcript_and_broadcast(
             },
         )
         await db.commit()
+        db_elapsed_ms = (time.perf_counter() - db_started) * 1000
         row = result.mappings().one()
         payload = _row_to_ws_payload(row)
         if segment_key:
@@ -143,7 +150,30 @@ async def insert_speech_transcript_and_broadcast(
         # 延迟导入，避免与 ws_sessions 循环依赖
         from .ws_sessions import broadcast_transcript
 
+        broadcast_started = time.perf_counter()
         await broadcast_transcript(session_id, payload)
+        broadcast_elapsed_ms = (time.perf_counter() - broadcast_started) * 1000
+        total_elapsed_ms = (time.perf_counter() - total_started) * 1000
+        if total_elapsed_ms >= 300:
+            logger.warning(
+                "[transcript_realtime] session=%s transcript_slow tid=%s text_len=%d db_ms=%.1f broadcast_ms=%.1f total_ms=%.1f",
+                session_id,
+                payload.get("transcript_id"),
+                len(transcript_text.strip()),
+                db_elapsed_ms,
+                broadcast_elapsed_ms,
+                total_elapsed_ms,
+            )
+        else:
+            logger.info(
+                "[transcript_realtime] session=%s transcript_saved tid=%s text_len=%d db_ms=%.1f broadcast_ms=%.1f total_ms=%.1f",
+                session_id,
+                payload.get("transcript_id"),
+                len(transcript_text.strip()),
+                db_elapsed_ms,
+                broadcast_elapsed_ms,
+                total_elapsed_ms,
+            )
         return payload
 
 

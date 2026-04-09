@@ -163,7 +163,7 @@ export async function tfidf(
 /** 判断文本是否含论证结构 */
 export async function hasReasoning(text: string): Promise<ReasoningResult> {
   try {
-    const res = await client.post<ReasoningResult>('/api/nlp/has_reasoning', { text }, { timeout: 10_000 });
+    const res = await client.post<ReasoningResult>('/api/nlp/has_reasoning', { text }, { timeout: 30_000 });
     return res.data;
   } catch (err) {
     logger.error('has_reasoning failed', { message: (err as Error).message });
@@ -174,7 +174,7 @@ export async function hasReasoning(text: string): Promise<ReasoningResult> {
 /** 生成推送文案，失败时返回空字符串 */
 export async function generatePush(params: GeneratePushParams): Promise<string> {
   try {
-    const res = await client.post<{ content: string }>('/api/nlp/generate_push', params, { timeout: 12_000 });
+    const res = await client.post<{ content: string }>('/api/nlp/generate_push', params, { timeout: 30_000 });
     return res.data.content ?? '';
   } catch (err) {
     logger.error('generate_push failed', { message: (err as Error).message });
@@ -190,7 +190,7 @@ export async function generatePushBatchAnalysis(
     const res = await client.post<BatchGeneratePushAnalysisResult>(
       '/api/nlp/generate_push_batch',
       params,
-      { timeout: 12_000 },
+      { timeout: 45_000 },
     );
     return res.data.items ?? [];
   } catch (err) {
@@ -247,7 +247,7 @@ export async function generateSummary(
     const res = await client.post<{ summary: string }>('/api/nlp/generate_summary', {
       transcripts,
       prev_summary: prevSummary,
-    }, { timeout: 12_000 });
+    }, { timeout: 45_000 });
     return res.data.summary ?? '';
   } catch (err) {
     logger.error('generate_summary failed', { message: (err as Error).message });

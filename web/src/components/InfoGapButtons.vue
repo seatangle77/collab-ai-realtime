@@ -5,6 +5,8 @@ export interface InfoGapButton {
   id: string
   keyword: string
   skw_score: number
+  analysis_run_id?: string
+  window_start?: string
   created_at?: string
 }
 

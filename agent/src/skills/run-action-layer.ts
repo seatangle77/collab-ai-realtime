@@ -1,14 +1,11 @@
 import { createLogger } from '../logger';
 import {
-  writeDiscussionState,
-  writePushLog,
+  writePushQueueItem,
   writeInfoGapButton,
-  getLastPushTimeForUser,
-  getStateCooldownUntil,
 } from '../db/queries';
 import {
   generatePushBatchAnalysis,
-  notifyPush,
+  embed,
 } from '../http/nlp-client';
 import type {
   BatchTargetInput,
@@ -22,10 +19,11 @@ const AI_TARGET_USER_ALL = 'ALL';
 
 type BatchSupportedTrigger = Exclude<Trigger['type'], 'info_gap'>;
 
-// ── 冷却时间常量 ──────────────────────────────────────────────────────────────
-
-const COOLDOWN_SAME_STATE_MS  = 240_000;  // 同状态 240s
-const COOLDOWN_CROSS_STATE_MS = 120_000;  // 同用户跨状态 120s
+function isBatchSupportedTrigger(
+  trigger: Trigger,
+): trigger is Trigger & { type: BatchSupportedTrigger } {
+  return trigger.type !== 'info_gap';
+}
 
 // ── 优先级（数字越小越优先） ───────────────────────────────────────────────────
 
@@ -43,7 +41,7 @@ interface PreparedBatchTarget {
   metrics: Record<string, unknown>;
 }
 
-interface CooldownPassedTarget {
+interface SelectedTarget {
   trigger: Trigger & { type: BatchSupportedTrigger };
   aiTargetUserId: string;
   recipientUserIds: string[];
@@ -93,10 +91,10 @@ export async function runActionLayer(params: {
 
   // ── 处理其余3种触发（走冷却和优先级）───────────────────────────────────────
   const mainTriggers = triggers
-    .filter((t) => t.type !== 'info_gap')
+    .filter(isBatchSupportedTrigger)
     .sort((a, b) => (PRIORITY[a.type] ?? 99) - (PRIORITY[b.type] ?? 99));
 
-  const cooldownPassedTargets: CooldownPassedTarget[] = [];
+  const selectedTargets: SelectedTarget[] = [];
   const reservedUsers = new Set<string>();
 
   for (const trigger of mainTriggers) {
@@ -106,9 +104,6 @@ export async function runActionLayer(params: {
       for (const uid of trigger.targetUsers) {
         if (reservedUsers.has(uid)) continue;
 
-        const passed = await checkCooldown(sessionId, trigger.type, uid);
-        if (!passed) continue;
-
         recipientUserIds.push(uid);
       }
 
@@ -117,7 +112,7 @@ export async function runActionLayer(params: {
       }
 
       recipientUserIds.forEach((uid) => reservedUsers.add(uid));
-      cooldownPassedTargets.push({
+      selectedTargets.push({
         trigger,
         aiTargetUserId: AI_TARGET_USER_ALL,
         recipientUserIds,
@@ -128,11 +123,8 @@ export async function runActionLayer(params: {
     for (const uid of trigger.targetUsers) {
       if (reservedUsers.has(uid)) continue;
 
-      const passed = await checkCooldown(sessionId, trigger.type, uid);
-      if (!passed) continue;
-
       reservedUsers.add(uid);
-      cooldownPassedTargets.push({
+      selectedTargets.push({
         trigger,
         aiTargetUserId: uid,
         recipientUserIds: [uid],
@@ -140,12 +132,12 @@ export async function runActionLayer(params: {
     }
   }
 
-  const batchTargets = buildBatchTargetsForAI(cooldownPassedTargets);
+  const batchTargets = buildBatchTargetsForAI(selectedTargets);
 
   logger.info(`进入 batch AI 的目标数量=${batchTargets.length}`, { sessionId });
 
   if (batchTargets.length === 0) {
-    logger.info('行动层：冷却筛选后无可用目标，跳过 batch AI', { sessionId });
+    logger.info('行动层：无可用目标，跳过 batch AI', { sessionId });
     return;
   }
 
@@ -180,9 +172,7 @@ export async function runActionLayer(params: {
         triggerType: prepared.triggerType,
         targetUserId: recipientUserId,
         content: item.content.trim(),
-        analysis: item.analysis,
         windowStart,
-        metrics: prepared.metrics,
       });
       if (persisted) {
         persistedCount += 1;
@@ -193,41 +183,7 @@ export async function runActionLayer(params: {
   logger.info(`最终真正落库推送的数量=${persistedCount}`, { sessionId });
 }
 
-// ── 冷却检查 ──────────────────────────────────────────────────────────────────
-
-async function checkCooldown(
-  sessionId: string,
-  stateType: string,
-  userId: string,
-): Promise<boolean> {
-  const now = Date.now();
-
-  // 单状态冷却：同一 state_type 对该用户的冷却截止时间
-  try {
-    const cooldownUntil = await getStateCooldownUntil(sessionId, stateType, userId);
-    if (cooldownUntil && cooldownUntil.getTime() > now) {
-      logger.info(`冷却中跳过 用户=${userId} state=${stateType} 剩余${Math.round((cooldownUntil.getTime() - now) / 1000)}s`, { sessionId });
-      return false;
-    }
-  } catch (err) {
-    logger.error('getStateCooldownUntil 失败', { sessionId, message: (err as Error).message });
-  }
-
-  // 跨状态冷却：该用户任意推送后 120s 内不再推
-  try {
-    const lastPush = await getLastPushTimeForUser(sessionId, userId);
-    if (lastPush && now - lastPush.getTime() < COOLDOWN_CROSS_STATE_MS) {
-      logger.info(`跨状态冷却 用户=${userId} 距上次推送${Math.round((now - lastPush.getTime()) / 1000)}s`, { sessionId });
-      return false;
-    }
-  } catch (err) {
-    logger.error('getLastPushTimeForUser 失败', { sessionId, message: (err as Error).message });
-  }
-
-  return true;
-}
-
-function buildBatchTargetsForAI(candidates: CooldownPassedTarget[]): PreparedBatchTarget[] {
+function buildBatchTargetsForAI(candidates: SelectedTarget[]): PreparedBatchTarget[] {
   return candidates.map(({ trigger, aiTargetUserId, recipientUserIds }) => {
     const metrics = trigger.triggerMetrics;
     const challengeType = toChallengeType(trigger.type);
@@ -330,45 +286,32 @@ async function persistPushDecision(params: {
   triggerType: Trigger['type'];
   targetUserId: string;
   content: string;
-  analysis: string;
   windowStart: Date;
-  metrics: Record<string, unknown>;
 }): Promise<boolean> {
-  const { sessionId, triggerType, targetUserId, content, analysis, windowStart, metrics } = params;
+  const { sessionId, triggerType, targetUserId, content, windowStart } = params;
 
-  // 写 discussion_states
-  const cooldownUntil = new Date(Date.now() + COOLDOWN_SAME_STATE_MS);
-  let stateId: string;
   try {
-    stateId = await writeDiscussionState({
+    const embeddings = await embed([content]);
+    const contentEmbedding = embeddings[0];
+
+    if (!contentEmbedding || contentEmbedding.length === 0) {
+      logger.warn('push embedding 为空，跳过入队', { sessionId, targetUserId });
+      return false;
+    }
+
+    await writePushQueueItem({
       session_id: sessionId,
-      state_type: triggerType,
       target_user_id: targetUserId,
-      trigger_metrics: { ...metrics, analysis },
-      window_start: windowStart,
-      push_cooldown_until: cooldownUntil,
+      state_type: triggerType,
+      push_content: content,
+      content_embedding: contentEmbedding,
+      analysis_window_start: windowStart,
     });
   } catch (err) {
-    logger.error('writeDiscussionState 失败', { sessionId, message: (err as Error).message });
+    logger.error('writePushQueueItem 失败', { sessionId, message: (err as Error).message });
     return false;
   }
 
-  // 写 push_logs（glasses 渠道，由 agent 直接写库）
-  try {
-    await writePushLog({
-      session_id: sessionId,
-      state_id: stateId,
-      target_user_id: targetUserId,
-      push_content: content,
-      push_channel: 'glasses',
-    });
-  } catch (err) {
-    logger.error('writePushLog 失败', { sessionId, message: (err as Error).message });
-  }
-
-  // Web 渠道：通知后端写库并定向 WebSocket 推送
-  await notifyPush(sessionId, targetUserId, content, stateId, triggerType);
-
-  logger.info(`推送完成 用户=${targetUserId} state=${triggerType} 文案="${content}"`, { sessionId });
+  logger.info(`推送已入队 用户=${targetUserId} state=${triggerType} 文案="${content}"`, { sessionId });
   return true;
 }

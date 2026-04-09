@@ -29,6 +29,8 @@ class InfoGapButtonOut(BaseModel):
     keyword: str
     skw_score: float
     status: str
+    analysis_run_id: str
+    window_start: Any
     created_at: Any
 
 
@@ -41,6 +43,11 @@ class ClickResponse(BaseModel):
 
 
 # ── 工具函数 ──────────────────────────────────────────────────────────────────
+
+
+def _build_reasoning_run_id(session_id: str, window_start: Any) -> str:
+    value = window_start.isoformat() if hasattr(window_start, "isoformat") else str(window_start)
+    return f"reasoning:{session_id}:{value}"
 
 async def _assert_session_member(
     session_id: str,
@@ -84,7 +91,7 @@ async def get_info_gap_buttons(
     result = await db.execute(
         text(
             """
-            SELECT id, keyword, skw_score, status, created_at
+            SELECT id, keyword, skw_score, status, window_start, created_at
             FROM info_gap_buttons
             WHERE session_id = :session_id
               AND user_id    = :user_id
@@ -95,7 +102,12 @@ async def get_info_gap_buttons(
         {"session_id": session_id, "user_id": current_user["id"]},
     )
     rows = result.mappings().all()
-    return [InfoGapButtonOut.model_validate(dict(r)) for r in rows]
+    items: list[InfoGapButtonOut] = []
+    for row in rows:
+        payload = dict(row)
+        payload["analysis_run_id"] = _build_reasoning_run_id(session_id, payload["window_start"])
+        items.append(InfoGapButtonOut.model_validate(payload))
+    return items
 
 
 @router.post(

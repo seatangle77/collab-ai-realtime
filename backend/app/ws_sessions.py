@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import logging
+import time
 from typing import Any
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
@@ -220,9 +221,25 @@ async def ws_session_endpoint(
                 audio_b64 = _data.get("audio_b64")
                 mime_type = _data.get("mime_type", "audio/webm")
                 audio_bytes = base64.b64decode(audio_b64)
+                recv_started = time.perf_counter()
+
+                _logger.info(
+                    "[ws_audio] session=%s seq=%s received mime=%s audio_bytes=%d",
+                    session_id,
+                    seq,
+                    mime_type,
+                    len(audio_bytes),
+                )
 
                 # 先回 ACK
                 await websocket.send_json(build_audio_chunk_ack(seq))
+                ack_elapsed_ms = (time.perf_counter() - recv_started) * 1000
+                _logger.info(
+                    "[ws_audio] session=%s seq=%s ack_sent elapsed_ms=%.1f",
+                    session_id,
+                    seq,
+                    ack_elapsed_ms,
+                )
 
                 # 懒加载 AudioService（第一个 chunk 时创建）
                 service = get_audio_service(session_id)
@@ -232,13 +249,35 @@ async def ws_session_endpoint(
                         session_factory = get_sessionmaker()
                         async with session_factory() as db:
                             service = await create_audio_service(session_id, db, user_ids)
+                        _logger.info(
+                            "[ws_audio] session=%s seq=%s audio_service_created members=%d",
+                            session_id,
+                            seq,
+                            len(user_ids),
+                        )
                     except Exception:
                         _logger.exception("AudioService 初始化失败 session_id=%s", session_id)
 
                 # 把音频 bytes 交给 AudioService 处理
                 if service is not None:
                     try:
-                        await service.handle_chunk(audio_bytes, mime_type)
+                        handle_started = time.perf_counter()
+                        await service.handle_chunk(audio_bytes, mime_type, seq=seq)
+                        handle_elapsed_ms = (time.perf_counter() - handle_started) * 1000
+                        if handle_elapsed_ms >= 300:
+                            _logger.warning(
+                                "[ws_audio] session=%s seq=%s handle_chunk_slow elapsed_ms=%.1f",
+                                session_id,
+                                seq,
+                                handle_elapsed_ms,
+                            )
+                        else:
+                            _logger.info(
+                                "[ws_audio] session=%s seq=%s handle_chunk_done elapsed_ms=%.1f",
+                                session_id,
+                                seq,
+                                handle_elapsed_ms,
+                            )
                     except Exception:
                         _logger.exception("handle_chunk 失败 session_id=%s seq=%s", session_id, seq)
                 continue

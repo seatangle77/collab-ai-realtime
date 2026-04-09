@@ -27,6 +27,13 @@ class PushNotifyIn(BaseModel):
     trigger_type: str = ""
 
 
+def _build_reasoning_run_id(session_id: str, window_start: Any) -> str | None:
+    if window_start is None:
+        return None
+    value = window_start.isoformat() if hasattr(window_start, "isoformat") else str(window_start)
+    return f"reasoning:{session_id}:{value}"
+
+
 @router.post(
     "/internal/sessions/{session_id}/push-notify",
     status_code=status.HTTP_201_CREATED,
@@ -43,6 +50,18 @@ async def push_notify(
     2. 尝试 WebSocket 定向推送
     3. 更新 delivery_status
     """
+    analysis_window_start = None
+    analysis_run_id = None
+    if body.state_id:
+        state_result = await db.execute(
+            text("SELECT window_start FROM discussion_states WHERE id = :id"),
+            {"id": body.state_id},
+        )
+        state_row = state_result.mappings().first()
+        if state_row:
+            analysis_window_start = state_row["window_start"]
+            analysis_run_id = _build_reasoning_run_id(session_id, analysis_window_start)
+
     log_id = "pl" + uuid.uuid4().hex[:8]
 
     # 1. 写库（先 pending）
@@ -73,6 +92,8 @@ async def push_notify(
             body.content,
             body.target_user_id,
             inserted_row["triggered_at"].isoformat() if inserted_row["triggered_at"] else None,
+            analysis_run_id=analysis_run_id,
+            analysis_window_start=analysis_window_start.isoformat() if analysis_window_start else None,
         ),
     )
 
@@ -95,6 +116,8 @@ class PushLogOut(BaseModel):
     id: str
     session_id: str
     state_id: str | None = None
+    analysis_run_id: str | None = None
+    analysis_window_start: Any = None
     push_content: str | None = None
     push_channel: str
     jpush_message_id: str | None = None
@@ -178,10 +201,12 @@ async def get_session_push_logs(
             f"""
             SELECT
                 pl.id, pl.session_id, pl.state_id,
+                ds.window_start AS analysis_window_start,
                 pl.push_content, pl.push_channel,
                 pl.jpush_message_id, pl.delivery_status,
                 pl.triggered_at, pl.delivered_at
             FROM push_logs pl
+            LEFT JOIN discussion_states ds ON ds.id = pl.state_id
             WHERE {where_sql}
             ORDER BY pl.triggered_at DESC
             """
@@ -189,4 +214,9 @@ async def get_session_push_logs(
         params,
     )
     rows = result.mappings().all()
-    return [PushLogOut.model_validate(dict(row)) for row in rows]
+    items: list[PushLogOut] = []
+    for row in rows:
+        payload = dict(row)
+        payload["analysis_run_id"] = _build_reasoning_run_id(payload["session_id"], payload["analysis_window_start"])
+        items.append(PushLogOut.model_validate(payload))
+    return items

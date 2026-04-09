@@ -8,6 +8,7 @@ const TRANSCRIPT_CACHE_KEY_PREFIX = 'transcript:session';
 interface CachedTranscript {
   transcript_id?: string;
   user_id?: string | null;
+  speaker_name?: string | null;
   text?: string | null;
   start?: string;
   end?: string;
@@ -30,11 +31,16 @@ function toTranscript(item: CachedTranscript): Transcript | null {
   return {
     transcript_id: item.transcript_id,
     user_id: item.user_id ?? null,
+    speaker_name: item.speaker_name ?? null,
     text: item.text ?? '',
     start: new Date(item.start),
     end: new Date(item.end),
     duration: item.duration ?? null,
   };
+}
+
+function withinWindow(item: Transcript, windowStart: Date, windowEnd: Date): boolean {
+  return item.start.getTime() >= windowStart.getTime() && item.end.getTime() <= windowEnd.getTime();
 }
 
 export async function getCachedTranscriptsInWindow(
@@ -64,7 +70,8 @@ export async function getCachedTranscriptsInWindow(
           return null;
         }
       })
-      .filter((item: Transcript | null): item is Transcript => item !== null);
+      .filter((item: Transcript | null): item is Transcript => item !== null)
+      .filter((item) => withinWindow(item, windowStart, windowEnd));
     logger.info('read transcript cache window', {
       sessionId,
       count: transcripts.length,

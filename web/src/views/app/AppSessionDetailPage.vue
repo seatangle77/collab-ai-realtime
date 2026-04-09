@@ -61,6 +61,7 @@ interface DiscussionSummaryItem {
   session_id: string
   version: number
   content: string
+  analysis_run_id: string
   window_start: string
   window_end: string
   created_at: string
@@ -70,6 +71,8 @@ interface PushLogItem {
   id: string
   session_id: string
   state_id?: string | null
+  analysis_run_id?: string | null
+  analysis_window_start?: string | null
   push_content?: string | null
   push_channel: string
   jpush_message_id?: string | null
@@ -78,16 +81,24 @@ interface PushLogItem {
   delivered_at?: string | null
 }
 
-interface TimelineEvent {
+interface AnalysisClockItem {
+  key: string
+  label: string
+  secondsLeft: number
+}
+
+interface AnalysisRunCard {
   id: string
-  kind: 'session_started' | 'summary' | 'push' | 'info_gap'
-  occurredAt: string
+  kind: 'summary_run' | 'reasoning_run'
   title: string
-  content?: string
-  version?: number
-  windowStart?: string
-  windowEnd?: string
-  keyword?: string
+  scheduledAt: string
+  producedAt?: string
+  windowStart: string
+  windowEnd: string
+  summaryContent?: string
+  summaryVersion?: number
+  pushes: string[]
+  keywords: string[]
 }
 
 // ── 推送通知 ──────────────────────────────────────────────────────────────────
@@ -114,33 +125,74 @@ function pushTimeLabel(ts: number): string {
   })
 }
 
-// ── AI 分析倒计时 ─────────────────────────────────────────────────────────────
-const AGENT_INTERVAL_S = 120
-const agentCountdown = ref(AGENT_INTERVAL_S)
-let agentCountdownTimer: ReturnType<typeof setInterval> | null = null
+// ── AI 分析时钟 ───────────────────────────────────────────────────────────────
+const SILENCE_INTERVAL_S = 30
+const SUMMARY_FIRST_OFFSET_S = 105
+const REASONING_INTERVAL_S = 120
+const clockNowMs = ref(Date.now())
+let analysisClockTimer: ReturnType<typeof setInterval> | null = null
 
-function startAgentCountdown() {
-  stopAgentCountdown()
-  agentCountdown.value = AGENT_INTERVAL_S
-  agentCountdownTimer = setInterval(() => {
-    agentCountdown.value -= 1
-    if (agentCountdown.value <= 0) agentCountdown.value = AGENT_INTERVAL_S
+function startAnalysisClock() {
+  stopAnalysisClock()
+  clockNowMs.value = Date.now()
+  analysisClockTimer = setInterval(() => {
+    clockNowMs.value = Date.now()
   }, 1000)
 }
 
-function stopAgentCountdown() {
-  if (agentCountdownTimer !== null) {
-    clearInterval(agentCountdownTimer)
-    agentCountdownTimer = null
+function stopAnalysisClock() {
+  if (analysisClockTimer !== null) {
+    clearInterval(analysisClockTimer)
+    analysisClockTimer = null
   }
 }
+
+function parseMs(value: string | undefined | null): number | null {
+  if (!value) return null
+  const ts = new Date(value).getTime()
+  return Number.isNaN(ts) ? null : ts
+}
+
+function secondsUntilNextAligned(sessionStartMs: number | null, firstOffsetS: number, intervalS: number): number {
+  if (sessionStartMs == null) return intervalS
+  const nowMs = clockNowMs.value
+  const firstAt = sessionStartMs + firstOffsetS * 1000
+  if (nowMs <= firstAt) {
+    return Math.max(0, Math.ceil((firstAt - nowMs) / 1000))
+  }
+  const elapsed = nowMs - firstAt
+  const remainder = elapsed % (intervalS * 1000)
+  const leftMs = remainder === 0 ? 0 : intervalS * 1000 - remainder
+  return Math.max(0, Math.ceil(leftMs / 1000))
+}
+
+const analysisClocks = computed<AnalysisClockItem[]>(() => {
+  const sessionStartMs = parseMs(session.value?.started_at ?? null)
+  return [
+    {
+      key: 'silence',
+      label: '群组沉默分析',
+      secondsLeft: secondsUntilNextAligned(sessionStartMs, SILENCE_INTERVAL_S, SILENCE_INTERVAL_S),
+    },
+    {
+      key: 'summary',
+      label: '摘要分析',
+      secondsLeft: secondsUntilNextAligned(sessionStartMs, SUMMARY_FIRST_OFFSET_S, REASONING_INTERVAL_S),
+    },
+    {
+      key: 'reasoning',
+      label: '推理提示分析',
+      secondsLeft: secondsUntilNextAligned(sessionStartMs, REASONING_INTERVAL_S, REASONING_INTERVAL_S),
+    },
+  ]
+})
 
 // ── 讨论摘要 ──────────────────────────────────────────────────────────────────
 const currentSummary = ref('')
 const summaryVersion = ref(0)
 const summaryHistory = ref<DiscussionSummaryItem[]>([])
 const pushLogs = ref<PushLogItem[]>([])
-const agentTimeline = ref<TimelineEvent[]>([])
+const agentTimelineRuns = ref<AnalysisRunCard[]>([])
 
 async function fetchLatestSummary() {
   try {
@@ -220,9 +272,11 @@ function timelineTimeLabel(value: string | undefined): string {
   return formatDateTimeToCST(value ?? null)
 }
 
-function timelineWindowLabel(item: TimelineEvent): string {
-  if (!item.windowStart || !item.windowEnd) return '-'
-  return `${formatDateTimeToCST(item.windowStart)} - ${formatDateTimeToCST(item.windowEnd)}`
+const timelineLegend = '计划开始 = 这一轮按时钟应触发的时间；覆盖窗口 = 这一轮实际分析的讨论区间；实际产出 = 摘要或建议真正写出/发出的时间。'
+
+function timelineWindowLabel(windowStart: string | undefined, windowEnd: string | undefined): string {
+  if (!windowStart || !windowEnd) return '-'
+  return `${formatDateTimeToCST(windowStart)} - ${formatDateTimeToCST(windowEnd)}`
 }
 
 function upsertSummaryEvent(summary: DiscussionSummaryItem) {
@@ -245,56 +299,88 @@ function upsertPushEvent(push: PushLogItem) {
   rebuildAgentTimeline()
 }
 
-function rebuildAgentTimeline() {
-  const items: TimelineEvent[] = []
+function buildSummaryRunId(windowStart: string): string {
+  return `summary:${sessionId}:${windowStart}`
+}
 
-  if (session.value?.started_at) {
-    items.push({
-      id: `session-started-${session.value.id}`,
-      kind: 'session_started',
-      occurredAt: session.value.started_at,
-      title: '会话已发起',
-      content: session.value.session_title,
-    })
-  }
+function buildReasoningRunId(windowStart: string): string {
+  return `reasoning:${sessionId}:${windowStart}`
+}
+
+function addSecondsToIso(value: string, seconds: number): string {
+  const baseMs = parseMs(value)
+  if (baseMs == null) return value
+  return new Date(baseMs + seconds * 1000).toISOString()
+}
+
+function rebuildAgentTimeline() {
+  const runs: AnalysisRunCard[] = []
 
   for (const summary of summaryHistory.value) {
-    items.push({
-      id: `summary-${summary.id}`,
-      kind: 'summary',
-      occurredAt: summary.created_at,
-      title: 'Agent 完成一轮分析',
-      content: summary.content,
-      version: summary.version,
+    runs.push({
+      id: summary.analysis_run_id || buildSummaryRunId(summary.window_start),
+      kind: 'summary_run',
+      title: '摘要分析',
+      scheduledAt: summary.window_end,
+      producedAt: summary.created_at,
       windowStart: summary.window_start,
       windowEnd: summary.window_end,
+      summaryContent: summary.content,
+      summaryVersion: summary.version,
+      pushes: [],
+      keywords: [],
     })
   }
 
+  const reasoningRunMap = new Map<string, AnalysisRunCard>()
   for (const push of pushLogs.value) {
-    if (!push.push_content) continue
-    items.push({
-      id: `push-${push.id}`,
-      kind: 'push',
-      occurredAt: push.triggered_at,
-      title: 'Agent 发出建议',
-      content: push.push_content,
-    })
+    const windowStart = push.analysis_window_start
+    if (!windowStart) continue
+    const runId = push.analysis_run_id || buildReasoningRunId(windowStart)
+    const run = reasoningRunMap.get(runId) ?? {
+      id: runId,
+      kind: 'reasoning_run',
+      title: '推理提示分析',
+      scheduledAt: addSecondsToIso(windowStart, REASONING_INTERVAL_S),
+      producedAt: push.triggered_at,
+      windowStart,
+      windowEnd: addSecondsToIso(windowStart, REASONING_INTERVAL_S),
+      pushes: [],
+      keywords: [],
+    }
+    if (push.push_content) run.pushes.push(push.push_content)
+    if (!run.producedAt || timelineSortValue(push.triggered_at) > timelineSortValue(run.producedAt)) {
+      run.producedAt = push.triggered_at
+    }
+    reasoningRunMap.set(runId, run)
   }
 
   for (const button of infoGapButtons.value) {
-    if (!button.created_at) continue
-    items.push({
-      id: `info-gap-${button.id}`,
-      kind: 'info_gap',
-      occurredAt: button.created_at,
-      title: '生成信息缺口提示',
-      keyword: button.keyword,
-      content: `关键词：${button.keyword}`,
-    })
+    const windowStart = button.window_start
+    if (!windowStart || !button.created_at) continue
+    const runId = button.analysis_run_id || buildReasoningRunId(windowStart)
+    const run = reasoningRunMap.get(runId) ?? {
+      id: runId,
+      kind: 'reasoning_run',
+      title: '推理提示分析',
+      scheduledAt: addSecondsToIso(windowStart, REASONING_INTERVAL_S),
+      producedAt: button.created_at,
+      windowStart,
+      windowEnd: addSecondsToIso(windowStart, REASONING_INTERVAL_S),
+      pushes: [],
+      keywords: [],
+    }
+    if (!run.keywords.includes(button.keyword)) {
+      run.keywords.push(button.keyword)
+    }
+    if (!run.producedAt || timelineSortValue(button.created_at) > timelineSortValue(run.producedAt)) {
+      run.producedAt = button.created_at
+    }
+    reasoningRunMap.set(runId, run)
   }
 
-  agentTimeline.value = items.sort((a, b) => timelineSortValue(b.occurredAt) - timelineSortValue(a.occurredAt))
+  runs.push(...Array.from(reasoningRunMap.values()))
+  agentTimelineRuns.value = runs.sort((a, b) => timelineSortValue(b.scheduledAt) - timelineSortValue(a.scheduledAt))
 }
 
 const wsStatusLabel = computed(() => {
@@ -442,7 +528,7 @@ async function handleLaunchSession() {
     pendingRecordingStart.value = true
     wsIntentionalClose = false
     openWebSocket()
-    startAgentCountdown()
+    startAnalysisClock()
   } finally {
     launching.value = false
   }
@@ -482,7 +568,7 @@ async function handleEnd() {
   try {
     // 先停止录音、关闭 WS
     stopRecording()
-    stopAgentCountdown()
+    stopAnalysisClock()
     wsIntentionalClose = true
     ws?.close(1000, 'host_ended')
     // 再通知后端
@@ -742,7 +828,7 @@ function handleWsMessage(event: MessageEvent<string>) {
       session.value = { ...session.value, status: 'ended' }
     }
     stopRecording()
-    stopAgentCountdown()
+    stopAnalysisClock()
     wsIntentionalClose = true
     ws?.close(1000, 'session_ended')
     void loadTranscripts()
@@ -760,6 +846,7 @@ function handleWsMessage(event: MessageEvent<string>) {
       id?: string | null
       content?: string
       version?: number
+      analysis_run_id?: string | null
       window_start?: string | null
       window_end?: string | null
       created_at?: string | null
@@ -773,6 +860,7 @@ function handleWsMessage(event: MessageEvent<string>) {
           session_id: sessionId,
           version: d.version,
           content: d.content,
+          analysis_run_id: d.analysis_run_id ?? buildSummaryRunId(d.window_start),
           window_start: d.window_start,
           window_end: d.window_end,
           created_at: d.created_at,
@@ -782,13 +870,21 @@ function handleWsMessage(event: MessageEvent<string>) {
     return
   }
   if (msgType === 'push_notification') {
-    const d = data as { content?: string; target_user_id?: string; triggered_at?: string | null }
+    const d = data as {
+      content?: string
+      target_user_id?: string
+      triggered_at?: string | null
+      analysis_run_id?: string | null
+      analysis_window_start?: string | null
+    }
     if (d.content) {
       showPushNotification(d.content, d.triggered_at)
       upsertPushEvent({
         id: `live-push-${d.triggered_at ?? Date.now()}-${d.content}`,
         session_id: sessionId,
         state_id: null,
+        analysis_run_id: d.analysis_run_id ?? null,
+        analysis_window_start: d.analysis_window_start ?? null,
         push_content: d.content,
         push_channel: 'web',
         jpush_message_id: null,
@@ -1054,7 +1150,7 @@ onMounted(async () => {
     openWebSocket()
     void fetchInfoGapButtons()
     void fetchLatestSummary()
-    startAgentCountdown()
+    startAnalysisClock()
   } else if (session.value?.status === 'ended') {
     void fetchLatestSummary()
   }
@@ -1074,7 +1170,7 @@ onUnmounted(() => {
   appStateListener = null
   unmounted = true
   stopRecording()
-  stopAgentCountdown()
+  stopAnalysisClock()
   closeWsForUnmount()
   wsStatus.value = 'disconnected'
 })
@@ -1184,10 +1280,16 @@ onUnmounted(() => {
         @clicked="handleInfoGapButtonClicked"
       />
 
-      <!-- AI 分析倒计时（会话进行中时显示） -->
+      <!-- AI 分析时钟（会话进行中时显示） -->
       <div v-if="session.status === 'ongoing'" class="app-agent-status-bar">
         <span class="app-agent-status-dot" aria-hidden="true"></span>
-        AI 分析中 &nbsp;·&nbsp; 下次更新 {{ agentCountdown }}s 后
+        <template v-for="(clock, index) in analysisClocks" :key="clock.key">
+          <span v-if="index > 0" class="app-agent-status-sep">&nbsp;·&nbsp;</span>
+          {{ clock.label }} {{ clock.secondsLeft }}s 后
+        </template>
+      </div>
+      <div v-if="session.status === 'ongoing'" class="app-agent-status-note">
+        倒计时按会话开始时间恢复，刷新页面后会继续对齐真实分析时钟。
       </div>
 
       <!-- 讨论摘要（有内容时显示） -->
@@ -1198,33 +1300,42 @@ onUnmounted(() => {
           <span class="app-session-summary-version">v{{ summaryVersion }}</span>
         </div>
         <p class="app-session-summary-content">{{ currentSummary }}</p>
+        <p class="app-session-summary-note">这里显示的是最新摘要内容，不代表分析开始时间；具体时间请看下方轮次时间线。</p>
       </div>
 
-      <div v-if="agentTimeline.length > 0" class="app-agent-timeline-panel">
+      <div v-if="agentTimelineRuns.length > 0" class="app-agent-timeline-panel">
         <div class="app-agent-timeline-header">
           <span class="app-agent-timeline-label">Agent 时间线</span>
-          <span class="app-agent-timeline-sub">展示会话开始、分析窗口和建议发送时间</span>
+          <span class="app-agent-timeline-sub">按分析轮次展示计划时间、覆盖窗口与实际产出</span>
         </div>
+        <div class="app-agent-timeline-note">{{ timelineLegend }}</div>
         <ul class="app-agent-timeline-list">
           <li
-            v-for="item in agentTimeline"
-            :key="item.id"
+            v-for="run in agentTimelineRuns"
+            :key="run.id"
             class="app-agent-timeline-item"
-            :class="`is-${item.kind}`"
+            :class="`is-${run.kind}`"
           >
-            <div class="app-agent-timeline-time">{{ timelineTimeLabel(item.occurredAt) }}</div>
+            <div class="app-agent-timeline-time">{{ timelineTimeLabel(run.scheduledAt) }}</div>
             <div class="app-agent-timeline-body">
               <div class="app-agent-timeline-title-row">
-                <span class="app-agent-timeline-title">{{ item.title }}</span>
-                <span v-if="item.kind === 'summary' && item.version" class="app-agent-timeline-badge">v{{ item.version }}</span>
+                <span class="app-agent-timeline-title">{{ run.title }}</span>
+                <span v-if="run.kind === 'summary_run' && run.summaryVersion" class="app-agent-timeline-badge">v{{ run.summaryVersion }}</span>
               </div>
-              <div v-if="item.kind === 'summary'" class="app-agent-timeline-window">
-                分析窗口：{{ timelineWindowLabel(item) }}
+              <div class="app-agent-timeline-window">
+                计划开始：{{ timelineTimeLabel(run.scheduledAt) }}
               </div>
-              <div v-if="item.kind === 'info_gap' && item.keyword" class="app-agent-timeline-window">
-                关键词：{{ item.keyword }}
+              <div class="app-agent-timeline-window">
+                覆盖窗口：{{ timelineWindowLabel(run.windowStart, run.windowEnd) }}
               </div>
-              <p v-if="item.content" class="app-agent-timeline-content">{{ item.content }}</p>
+              <div v-if="run.producedAt" class="app-agent-timeline-window">
+                实际产出：{{ timelineTimeLabel(run.producedAt) }}
+              </div>
+              <p v-if="run.summaryContent" class="app-agent-timeline-content">{{ run.summaryContent }}</p>
+              <p v-for="push in run.pushes" :key="`${run.id}-${push}`" class="app-agent-timeline-content">{{ push }}</p>
+              <div v-if="run.keywords.length > 0" class="app-agent-timeline-window">
+                信息缺口：{{ run.keywords.join('、') }}
+              </div>
             </div>
           </li>
         </ul>
@@ -1372,6 +1483,12 @@ onUnmounted(() => {
   color: #15803d;
 }
 
+.app-agent-status-note {
+  margin: -4px 0 12px;
+  font-size: 11px;
+  color: #4b5563;
+}
+
 .app-agent-status-dot {
   width: 7px;
   height: 7px;
@@ -1426,6 +1543,13 @@ onUnmounted(() => {
   white-space: pre-wrap;
 }
 
+.app-session-summary-note {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #475569;
+}
+
 .app-agent-timeline-panel {
   padding: 14px 16px;
   margin-bottom: 12px;
@@ -1451,6 +1575,13 @@ onUnmounted(() => {
 .app-agent-timeline-sub {
   font-size: 11px;
   color: #64748b;
+}
+
+.app-agent-timeline-note {
+  margin-bottom: 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #475569;
 }
 
 .app-agent-timeline-list {

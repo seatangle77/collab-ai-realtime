@@ -20,6 +20,7 @@ export interface SessionMember {
 export interface Transcript {
   transcript_id: string;
   user_id: string | null;
+  speaker_name: string | null;
   text: string | null;
   start: Date;
   end: Date;
@@ -54,6 +55,19 @@ export interface HistoricalKeyword {
   keyword: string;
 }
 
+export interface PushQueueRow {
+  id: string;
+  session_id: string;
+  target_user_id: string;
+  state_type: string;
+  push_content: string;
+  content_embedding: number[];
+  analysis_window_start: Date;
+  status: 'pending' | 'delivered' | 'skipped' | 'failed';
+  created_at: Date;
+  delivered_at: Date | null;
+}
+
 // ── 工具函数 ──────────────────────────────────────────────────────────────────
 
 /**
@@ -64,6 +78,32 @@ export interface HistoricalKeyword {
  */
 function toUtcString(date: Date): string {
   return date.toISOString().replace('T', ' ').replace('Z', '');
+}
+
+function toPgVectorLiteral(vector: number[]): string {
+  return `[${vector.join(',')}]`;
+}
+
+function parsePgVector(value: unknown): number[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => Number(item));
+  }
+
+  if (typeof value !== 'string') {
+    return [];
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('[') || !trimmed.endsWith(']')) {
+    return [];
+  }
+
+  const body = trimmed.slice(1, -1).trim();
+  if (!body) {
+    return [];
+  }
+
+  return body.split(',').map((item) => Number(item.trim()));
 }
 
 // ── 查询函数 ──────────────────────────────────────────────────────────────────
@@ -98,16 +138,19 @@ export async function getTranscriptsInWindow(
   windowEnd: Date,
 ): Promise<Transcript[]> {
   const res = await pool.query<Transcript>(
-    `SELECT transcript_id,
-            COALESCE(NULLIF(user_id, ''), NULLIF(speaker, ''), NULLIF(speaker, 'unknown')) AS user_id,
-            text, start, "end", duration
-     FROM speech_transcripts
-     WHERE session_id = $1
-       AND start >= $2
-       AND "end" <= $3
-       AND text IS NOT NULL
-       AND text != ''
-     ORDER BY start ASC`,
+    `SELECT t.transcript_id,
+            COALESCE(NULLIF(t.user_id, ''), NULLIF(t.speaker, ''), NULLIF(t.speaker, 'unknown')) AS user_id,
+            u.name AS speaker_name,
+            t.text, t.start, t."end", t.duration
+     FROM speech_transcripts t
+     LEFT JOIN users_info u
+            ON u.id = COALESCE(NULLIF(t.user_id, ''), NULLIF(t.speaker, ''))
+     WHERE t.session_id = $1
+       AND t.start >= $2
+       AND t."end" <= $3
+       AND t.text IS NOT NULL
+       AND t.text != ''
+     ORDER BY t.start ASC`,
     [sessionId, toUtcString(windowStart), toUtcString(windowEnd)],
   );
   return res.rows;
@@ -121,21 +164,38 @@ export async function getTranscriptsInWindowPreferCache(
 ): Promise<Transcript[]> {
   const { getCachedTranscriptsInWindow } = await import('../cache/transcript-cache');
   const cached = await getCachedTranscriptsInWindow(sessionId, windowStart, windowEnd);
-  if (cached.length > 0) {
-    logger.info('using transcript cache window', {
+  const dbRows = await getTranscriptsInWindow(sessionId, windowStart, windowEnd);
+
+  if (cached.length === 0) {
+    logger.info('transcript cache miss, using db window', {
       sessionId,
-      count: cached.length,
+      count: dbRows.length,
       windowStart: windowStart.toISOString(),
       windowEnd: windowEnd.toISOString(),
     });
-    return cached;
+    return dbRows;
   }
-  logger.info('transcript cache miss, falling back to db', {
+
+  const cachedIds = cached.map((item) => item.transcript_id).join(',');
+  const dbIds = dbRows.map((item) => item.transcript_id).join(',');
+  if (cachedIds !== dbIds) {
+    logger.warn('transcript cache coverage mismatch, using db window', {
+      sessionId,
+      cached_count: cached.length,
+      db_count: dbRows.length,
+      windowStart: windowStart.toISOString(),
+      windowEnd: windowEnd.toISOString(),
+    });
+    return dbRows;
+  }
+
+  logger.info('using transcript cache window', {
     sessionId,
+    count: cached.length,
     windowStart: windowStart.toISOString(),
     windowEnd: windowEnd.toISOString(),
   });
-  return getTranscriptsInWindow(sessionId, windowStart, windowEnd);
+  return cached;
 }
 
 /** 获取指定 session 最近一次 end 时间（用于 silence 检测） */
@@ -221,14 +281,13 @@ export async function writeDiscussionState(row: {
   target_user_id?: string;
   trigger_metrics: Record<string, unknown>;
   window_start: Date;
-  push_cooldown_until: Date;
 }): Promise<string> {
   const id = 'ds_' + nanoid(12);
   await pool.query(
     `INSERT INTO discussion_states
        (id, session_id, state_type, target_user_id, trigger_metrics,
-        window_start, push_cooldown_until, triggered_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
+        window_start, triggered_at)
+     VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
     [
       id,
       row.session_id,
@@ -236,7 +295,34 @@ export async function writeDiscussionState(row: {
       row.target_user_id ?? null,
       JSON.stringify(row.trigger_metrics),
       toUtcString(row.window_start),
-      toUtcString(row.push_cooldown_until),
+    ],
+  );
+  return id;
+}
+
+/** 写入 push_queue，返回生成的 id */
+export async function writePushQueueItem(row: {
+  session_id: string;
+  target_user_id: string;
+  state_type: string;
+  push_content: string;
+  content_embedding: number[];
+  analysis_window_start: Date;
+}): Promise<string> {
+  const id = 'pq_' + nanoid(12);
+  await pool.query(
+    `INSERT INTO push_queue
+       (id, session_id, target_user_id, state_type, push_content,
+        content_embedding, analysis_window_start, status, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6::vector, $7, 'pending', NOW())`,
+    [
+      id,
+      row.session_id,
+      row.target_user_id,
+      row.state_type,
+      row.push_content,
+      toPgVectorLiteral(row.content_embedding),
+      toUtcString(row.analysis_window_start),
     ],
   );
   return id;
@@ -248,47 +334,120 @@ export async function writePushLog(row: {
   state_id: string;
   target_user_id: string;
   push_content: string;
+  content_embedding: number[];
   push_channel: 'glasses' | 'app';
+  delivery_status?: 'pending' | 'delivered' | 'failed';
+  delivered_at?: Date;
 }): Promise<void> {
   const id = 'pl_' + nanoid(12);
   await pool.query(
     `INSERT INTO push_logs
        (id, session_id, state_id, target_user_id,
-        push_content, push_channel, delivery_status, triggered_at)
-     VALUES ($1, $2, $3, $4, $5, $6, 'pending', NOW())`,
-    [id, row.session_id, row.state_id, row.target_user_id, row.push_content, row.push_channel],
+        push_content, content_embedding, push_channel, delivery_status, triggered_at, delivered_at)
+     VALUES ($1, $2, $3, $4, $5, $6::vector, $7, $8, NOW(), $9)`,
+    [
+      id,
+      row.session_id,
+      row.state_id,
+      row.target_user_id,
+      row.push_content,
+      toPgVectorLiteral(row.content_embedding),
+      row.push_channel,
+      row.delivery_status ?? 'pending',
+      row.delivered_at ? toUtcString(row.delivered_at) : null,
+    ],
   );
 }
 
-/** 跨状态冷却：查询某用户最近一次收到推送的时间 */
-export async function getLastPushTimeForUser(
+/** 读取某 session 下待处理的 push_queue 项 */
+export async function getPendingPushQueue(sessionId: string): Promise<PushQueueRow[]> {
+  const res = await pool.query<Omit<PushQueueRow, 'content_embedding'> & { content_embedding_raw: string | null }>(
+    `SELECT id, session_id, target_user_id, state_type, push_content,
+            content_embedding::text AS content_embedding_raw,
+            analysis_window_start, status, created_at, delivered_at
+     FROM push_queue
+     WHERE session_id = $1
+       AND status = 'pending'
+     ORDER BY created_at ASC`,
+    [sessionId],
+  );
+  return res.rows.map((row) => {
+    const { content_embedding_raw, ...rest } = row;
+    return {
+      ...rest,
+      content_embedding: parsePgVector(content_embedding_raw),
+    };
+  });
+}
+
+export async function getRecentDeliveredEmbeddings(
   sessionId: string,
   userId: string,
-): Promise<Date | null> {
-  const res = await pool.query<{ last_push: Date | null }>(
-    `SELECT MAX(triggered_at) AS last_push
-     FROM push_logs
-     WHERE session_id = $1 AND target_user_id = $2`,
-    [sessionId, userId],
+  stateType: string,
+  limit = 2,
+): Promise<Array<{ content_embedding: number[] }>> {
+  const res = await pool.query<{ content_embedding_raw: string | null }>(
+    `SELECT pl.content_embedding::text AS content_embedding_raw
+     FROM push_logs pl
+     JOIN discussion_states ds ON ds.id = pl.state_id
+     WHERE pl.session_id = $1
+       AND pl.target_user_id = $2
+       AND ds.state_type = $3
+       AND pl.push_channel = 'glasses'
+       AND pl.delivery_status = 'delivered'
+       AND pl.content_embedding IS NOT NULL
+     ORDER BY pl.triggered_at DESC
+     LIMIT $4`,
+    [sessionId, userId, stateType, limit],
   );
-  return res.rows[0]?.last_push ?? null;
+
+  return res.rows.map((row) => ({
+    content_embedding: parsePgVector(row.content_embedding_raw),
+  }));
 }
 
-/** 单状态冷却：查询某 state_type 对某用户的冷却截止时间 */
-export async function getStateCooldownUntil(
+export async function getStateTypeCountInWindow(
   sessionId: string,
+  userId: string,
   stateType: string,
-  userId?: string,
-): Promise<Date | null> {
-  const res = await pool.query<{ cooldown_until: Date | null }>(
-    `SELECT MAX(push_cooldown_until) AS cooldown_until
-     FROM discussion_states
+  windowMs = 600_000,
+): Promise<number> {
+  const res = await pool.query<{ count: string }>(
+    `SELECT COUNT(*)::text AS count
+     FROM push_queue
      WHERE session_id = $1
-       AND state_type = $2
-       AND ($3::text IS NULL OR target_user_id = $3)`,
-    [sessionId, stateType, userId ?? null],
+       AND target_user_id = $2
+       AND state_type = $3
+       AND status = 'delivered'
+       AND analysis_window_start >= NOW() - ($4 * INTERVAL '1 millisecond')`,
+    [sessionId, userId, stateType, windowMs],
   );
-  return res.rows[0]?.cooldown_until ?? null;
+
+  return Number(res.rows[0]?.count ?? '0');
+}
+
+/** 更新 push_queue 状态 */
+export async function updatePushQueueStatus(
+  id: string,
+  status: 'delivered' | 'skipped' | 'failed',
+  deliveredAt?: Date,
+): Promise<void> {
+  if (deliveredAt) {
+    await pool.query(
+      `UPDATE push_queue
+       SET status = $2, delivered_at = $3
+       WHERE id = $1`,
+      [id, status, toUtcString(deliveredAt)],
+    );
+    return;
+  }
+
+  await pool.query(
+    `UPDATE push_queue
+     SET status = $2
+     WHERE id = $1`,
+    [id, status],
+  );
 }
 
 /** 写入 info_gap_buttons（静默按钮，等待用户点击） */

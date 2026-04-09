@@ -137,17 +137,17 @@ _BATCH_USER_TEMPLATE = """以下是本轮小组讨论的上下文，请你为需
 10. 不要输出任何解释，只返回 JSON。
 
 再次强调，只返回以下格式：
-{
+{{
   "items": [
-    {
+    {{
       "user_id": "u1",
       "challenge_type": "personal_stagnation",
       "needs_prompt": true,
       "analysis": "...",
       "content": "..."
-    }
+    }}
   ]
-}"""
+}}"""
 
 
 # ── Qwen 调用 ─────────────────────────────────────────────────────────────────

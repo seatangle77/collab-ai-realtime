@@ -23,7 +23,7 @@ export async function runSummary(
   const prevSummary = lastSummary?.content ?? '';
 
   // Step3：调 Qwen 生成摘要
-  const items = valid.map((t) => ({ user_id: t.user_id ?? '未知', text: t.text! }));
+  const items = valid.map((t) => ({ user_id: t.speaker_name ?? t.user_id ?? '未知', text: t.text! }));
   const summaryText = await generateSummary(items, prevSummary);
 
   if (!summaryText) {

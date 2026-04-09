@@ -9,9 +9,10 @@ from .redis_client import get_redis_client
 
 logger = logging.getLogger(__name__)
 
-TRANSCRIPT_CACHE_RETENTION_SECONDS = 240
+# 必须明显大于单轮 120s 分析窗口，避免 Redis 清理过快导致窗口内容不完整。
+TRANSCRIPT_CACHE_RETENTION_SECONDS = 900
 TRANSCRIPT_CACHE_KEY_PREFIX = "transcript:session"
-TRANSCRIPT_CACHE_TTL_SECONDS = 1800
+TRANSCRIPT_CACHE_TTL_SECONDS = 3600
 
 
 def _to_timestamp_ms(value: datetime | str | None) -> int:
@@ -42,9 +43,10 @@ async def append_transcript_to_cache(session_id: str, transcript: dict[str, Any]
         return
 
     key = _cache_key(session_id)
-    score = _to_timestamp_ms(transcript.get("end") or transcript.get("created_at") or transcript.get("start"))
+    # Redis 窗口口径与数据库保持一致：统一按发言结束时间落到窗口时间轴上。
+    score = _to_timestamp_ms(transcript.get("end"))
     if score <= 0:
-        logger.warning("skip transcript cache append because timestamp is missing", extra={"session_id": session_id})
+        logger.warning("skip transcript cache append because end timestamp is missing", extra={"session_id": session_id})
         return
 
     cutoff_score = score - (TRANSCRIPT_CACHE_RETENTION_SECONDS * 1000)
@@ -87,7 +89,12 @@ async def get_cached_transcripts_in_window(
     items: list[dict[str, Any]] = []
     for row in rows:
         try:
-            items.append(json.loads(row))
+            item = json.loads(row)
+            start_ms = _to_timestamp_ms(item.get("start"))
+            end_ms = _to_timestamp_ms(item.get("end"))
+            if start_ms < min_score or end_ms > max_score:
+                continue
+            items.append(item)
         except json.JSONDecodeError:
             logger.warning("skip invalid cached transcript json", extra={"session_id": session_id})
     return items

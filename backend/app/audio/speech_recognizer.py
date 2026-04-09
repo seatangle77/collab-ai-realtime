@@ -239,10 +239,27 @@ class SpeechRecognizer:
         
 
     def write(self, data):
+        wait_started = time.perf_counter()
+        warned_wait = False
         while self.status == STARTED:
+            waited_ms = (time.perf_counter() - wait_started) * 1000
+            if not warned_wait and waited_ms >= 300:
+                logger.warning(
+                    "%s write blocked waiting for websocket open elapsed_ms=%.1f",
+                    self.voice_id or "unknown",
+                    waited_ms,
+                )
+                warned_wait = True
             time.sleep(0.1)
         if self.status == OPENED: 
             self.ws.sock.send_binary(data)
+            total_wait_ms = (time.perf_counter() - wait_started) * 1000
+            if total_wait_ms >= 300:
+                logger.warning(
+                    "%s write resumed after wait elapsed_ms=%.1f",
+                    self.voice_id or "unknown",
+                    total_wait_ms,
+                )
 
     def start(self):
         def on_message(ws, message):
@@ -284,6 +301,7 @@ class SpeechRecognizer:
 
         def on_open(ws):
             self.status = OPENED
+            logger.info("%s websocket opened", self.voice_id)
 
         query_arr = self.create_query_arr()
         if self.voice_id == "":

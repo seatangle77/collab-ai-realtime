@@ -16,7 +16,7 @@ const WIN_START = new Date('2024-01-01T10:00:00Z');
 const WIN_END   = new Date('2024-01-01T10:02:00Z');
 
 function makeTranscript(userId: string, text: string) {
-  return { transcript_id: 'tr_x', user_id: userId, text,
+  return { transcript_id: 'tr_x', user_id: userId, speaker_name: null, text,
            start: WIN_START, end: WIN_END, duration: 10 };
 }
 
@@ -65,7 +65,7 @@ describe('computeArgDensity', () => {
 
   it('只有空白字符的文本：不调用 NLP，置 null', async () => {
     mockGetTranscripts.mockResolvedValue([
-      { transcript_id: 'tr_x', user_id: 'u1', text: '   ',
+      { transcript_id: 'tr_x', user_id: 'u1', speaker_name: null, text: '   ',
         start: WIN_START, end: WIN_END, duration: 5 },
     ]);
     const { argDensities } = await computeArgDensity(SESSION, WIN_START, WIN_END, ['u1']);
@@ -88,7 +88,7 @@ describe('computeArgDensity', () => {
 
   it('text 为 null 的转写记录跳过', async () => {
     mockGetTranscripts.mockResolvedValue([
-      { transcript_id: 'tr_x', user_id: 'u1', text: null,
+      { transcript_id: 'tr_x', user_id: 'u1', speaker_name: null, text: null,
         start: WIN_START, end: WIN_END, duration: 5 },
     ]);
     const { argDensities } = await computeArgDensity(SESSION, WIN_START, WIN_END, ['u1']);

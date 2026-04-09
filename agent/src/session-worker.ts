@@ -9,55 +9,85 @@ import {
 import { runPerceptionPipeline } from './skills/run-perception-pipeline';
 import { runReasoningLayer } from './skills/run-reasoning-layer';
 import { runActionLayer } from './skills/run-action-layer';
+import { runPushDispatcher } from './skills/run-push-dispatcher';
 import { runSummary } from './skills/run-summary';
 import { computeHasReasoning } from './skills/perception/reasoning';
 
 const logger = createLogger('session-worker');
 
+function buildRunId(kind: 'summary' | 'reasoning', sessionId: string, windowStart: Date): string {
+  return `${kind}:${sessionId}:${windowStart.toISOString()}`;
+}
+
 export class SessionWorker {
   private readonly sessionId: string;
-  private shortTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly sessionStartedAt: Date;
+  private shortTimer: ReturnType<typeof setTimeout> | null = null;
   private analysisTimer: ReturnType<typeof setTimeout> | null = null;
   private summaryTimer: ReturnType<typeof setTimeout> | null = null;
+  private dispatchTimer: ReturnType<typeof setInterval> | null = null;
   private running = false;
   private static readonly SUMMARY_LEAD_MS = 15_000;
+  private static readonly DISPATCH_INTERVAL_MS = 5_000;
 
-  constructor(sessionId: string) {
+  constructor(sessionId: string, sessionStartedAt: Date) {
     this.sessionId = sessionId;
+    this.sessionStartedAt = sessionStartedAt;
   }
 
   start(): void {
     if (this.running) return;
     this.running = true;
-    logger.info('Worker started', { sessionId: this.sessionId });
+    logger.info('Worker started', {
+      sessionId: this.sessionId,
+      session_started_at: this.sessionStartedAt.toISOString(),
+    });
 
-    // 30s 定时器：群体沉默检测
-    this.shortTimer = setInterval(() => {
-      void this.checkGroupSilence();
-    }, config.agent.shortIntervalMs);
-
-    // 摘要链提前 15s 启动，尽量在分析前产出最新上下文。
-    this.scheduleSummaryTimer(
-      Math.max(0, config.agent.longIntervalMs - SessionWorker.SUMMARY_LEAD_MS),
-    );
-    // 完整分析链保持原 120s 周期。
-    this.scheduleAnalysisTimer(config.agent.longIntervalMs);
+    // 三条时钟都锚定到会话开始时间，而不是 Worker 实际启动时间。
+    this.scheduleSilenceTimer();
+    this.scheduleSummaryTimer();
+    this.scheduleAnalysisTimer();
+    this.startDispatchLoop();
   }
 
-  private scheduleAnalysisTimer(delayMs: number): void {
+  private scheduleSilenceTimer(): void {
     if (!this.running) return;
+    const scheduledFor = this.nextAlignedAt(config.agent.shortIntervalMs, config.agent.shortIntervalMs);
+    this.shortTimer = setTimeout(() => {
+      void this.checkGroupSilence(scheduledFor)
+        .finally(() => this.scheduleSilenceTimer());
+    }, Math.max(0, scheduledFor.getTime() - Date.now()));
+  }
+
+  private scheduleAnalysisTimer(): void {
+    if (!this.running) return;
+    const scheduledFor = this.nextAlignedAt(config.agent.longIntervalMs, config.agent.longIntervalMs);
     this.analysisTimer = setTimeout(() => {
-      void this.runAnalysisPipeline()
-        .finally(() => this.scheduleAnalysisTimer(config.agent.longIntervalMs));
-    }, delayMs);
+      void this.runAnalysisPipeline(scheduledFor)
+        .finally(() => this.scheduleAnalysisTimer());
+    }, Math.max(0, scheduledFor.getTime() - Date.now()));
   }
 
-  private scheduleSummaryTimer(delayMs: number): void {
+  private scheduleSummaryTimer(): void {
     if (!this.running) return;
+    const firstOffset = Math.max(0, config.agent.longIntervalMs - SessionWorker.SUMMARY_LEAD_MS);
+    const scheduledFor = this.nextAlignedAt(firstOffset, config.agent.longIntervalMs);
     this.summaryTimer = setTimeout(() => {
-      void this.runSummaryPipeline()
-        .finally(() => this.scheduleSummaryTimer(config.agent.longIntervalMs));
-    }, delayMs);
+      void this.runSummaryPipeline(scheduledFor)
+        .finally(() => this.scheduleSummaryTimer());
+    }, Math.max(0, scheduledFor.getTime() - Date.now()));
+  }
+
+  private nextAlignedAt(firstOffsetMs: number, intervalMs: number): Date {
+    const baseMs = this.sessionStartedAt.getTime() + firstOffsetMs;
+    const nowMs = Date.now();
+    if (nowMs <= baseMs) {
+      return new Date(baseMs);
+    }
+
+    const elapsedSinceBase = nowMs - baseMs;
+    const intervalsPassed = Math.ceil(elapsedSinceBase / intervalMs);
+    return new Date(baseMs + intervalsPassed * intervalMs);
   }
 
   stop(): void {
@@ -65,7 +95,7 @@ export class SessionWorker {
     this.running = false;
 
     if (this.shortTimer !== null) {
-      clearInterval(this.shortTimer);
+      clearTimeout(this.shortTimer);
       this.shortTimer = null;
     }
     if (this.analysisTimer !== null) {
@@ -76,13 +106,30 @@ export class SessionWorker {
       clearTimeout(this.summaryTimer);
       this.summaryTimer = null;
     }
+    if (this.dispatchTimer !== null) {
+      clearInterval(this.dispatchTimer);
+      this.dispatchTimer = null;
+    }
 
     logger.info('Worker stopped', { sessionId: this.sessionId });
   }
 
+  private startDispatchLoop(): void {
+    if (!this.running || this.dispatchTimer !== null) return;
+
+    this.dispatchTimer = setInterval(() => {
+      void runPushDispatcher(this.sessionId).catch((err) => {
+        logger.error('runPushDispatcher failed', {
+          sessionId: this.sessionId,
+          message: (err as Error).message,
+        });
+      });
+    }, SessionWorker.DISPATCH_INTERVAL_MS);
+  }
+
   // ── 30s：群体沉默检测 ────────────────────────────────────────────────────────
 
-  private async checkGroupSilence(): Promise<void> {
+  private async checkGroupSilence(scheduledFor: Date): Promise<void> {
     try {
       const lastEnd = await getLastSpeakEndGlobal(this.sessionId);
       if (!lastEnd) return;
@@ -93,6 +140,7 @@ export class SessionWorker {
       if (silenceS > 30) {
         logger.info('Group silence detected', {
           sessionId: this.sessionId,
+          scheduled_for: scheduledFor.toISOString(),
           silence_s: Math.round(silenceS),
         });
       }
@@ -106,17 +154,28 @@ export class SessionWorker {
 
   // ── 120s：完整感知层 pipeline ────────────────────────────────────────────────
 
-  private async runAnalysisPipeline(): Promise<void> {
+  private async runAnalysisPipeline(scheduledFor: Date): Promise<void> {
     try {
       const members = await getSessionMembers(this.sessionId);
       const memberIds = members.map((m) => m.user_id);
       if (memberIds.length === 0) return;
 
-      const windowEnd = new Date();
+      const windowEnd = scheduledFor;
       const windowStart = new Date(windowEnd.getTime() - config.agent.longIntervalMs);
       const startedAt = Date.now();
-      logger.info('analysis pipeline started', {
+      const runId = buildRunId('reasoning', this.sessionId, windowStart);
+      logger.info('===== reasoning run begin =====', {
+        run_id: runId,
         sessionId: this.sessionId,
+        scheduled_for: scheduledFor.toISOString(),
+        window_start: windowStart.toISOString(),
+        window_end: windowEnd.toISOString(),
+      });
+      logger.info('analysis pipeline started', {
+        run_id: runId,
+        sessionId: this.sessionId,
+        scheduled_for: scheduledFor.toISOString(),
+        actual_started_at: new Date(startedAt).toISOString(),
         window_start: windowStart.toISOString(),
         window_end: windowEnd.toISOString(),
         member_count: memberIds.length,
@@ -160,11 +219,19 @@ export class SessionWorker {
       });
 
       logger.info('analysis pipeline finished', {
+        run_id: runId,
         sessionId: this.sessionId,
+        scheduled_for: scheduledFor.toISOString(),
+        actual_finished_at: new Date().toISOString(),
         window_start: windowStart.toISOString(),
         window_end: windowEnd.toISOString(),
         duration_ms: Date.now() - startedAt,
         trigger_count: triggers.length,
+      });
+      logger.info('===== reasoning run end =====', {
+        run_id: runId,
+        sessionId: this.sessionId,
+        scheduled_for: scheduledFor.toISOString(),
       });
     } catch (err) {
       logger.error('runAnalysisPipeline failed', {
@@ -174,22 +241,41 @@ export class SessionWorker {
     }
   }
 
-  private async runSummaryPipeline(): Promise<void> {
+  private async runSummaryPipeline(scheduledFor: Date): Promise<void> {
     try {
-      const windowEnd = new Date();
+      const windowEnd = scheduledFor;
       const windowStart = new Date(windowEnd.getTime() - config.agent.longIntervalMs);
       const startedAt = Date.now();
-      logger.info('summary pipeline started', {
+      const runId = buildRunId('summary', this.sessionId, windowStart);
+      logger.info('===== summary run begin =====', {
+        run_id: runId,
         sessionId: this.sessionId,
+        scheduled_for: scheduledFor.toISOString(),
+        window_start: windowStart.toISOString(),
+        window_end: windowEnd.toISOString(),
+      });
+      logger.info('summary pipeline started', {
+        run_id: runId,
+        sessionId: this.sessionId,
+        scheduled_for: scheduledFor.toISOString(),
+        actual_started_at: new Date(startedAt).toISOString(),
         window_start: windowStart.toISOString(),
         window_end: windowEnd.toISOString(),
       });
       await runSummary(this.sessionId, windowStart, windowEnd);
       logger.info('summary pipeline finished', {
+        run_id: runId,
         sessionId: this.sessionId,
+        scheduled_for: scheduledFor.toISOString(),
+        actual_finished_at: new Date().toISOString(),
         window_start: windowStart.toISOString(),
         window_end: windowEnd.toISOString(),
         duration_ms: Date.now() - startedAt,
+      });
+      logger.info('===== summary run end =====', {
+        run_id: runId,
+        sessionId: this.sessionId,
+        scheduled_for: scheduledFor.toISOString(),
       });
     } catch (err) {
       logger.error('runSummaryPipeline failed', {

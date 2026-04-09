@@ -17,7 +17,7 @@ const WIN_START = new Date('2024-01-01T10:00:00Z');
 const WIN_END   = new Date('2024-01-01T10:02:00Z');
 
 function makeTranscript(userId: string, text: string) {
-  return { transcript_id: 'tr_x', user_id: userId, text,
+  return { transcript_id: 'tr_x', user_id: userId, speaker_name: null, text,
            start: WIN_START, end: WIN_END, duration: 10 };
 }
 

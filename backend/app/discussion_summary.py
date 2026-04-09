@@ -28,6 +28,7 @@ class DiscussionSummaryOut(BaseModel):
     session_id: str
     version: int
     content: str
+    analysis_run_id: str
     window_start: Any
     window_end: Any
     created_at: Any
@@ -47,6 +48,11 @@ def _to_utc_naive(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         return dt
     return dt.astimezone(UTC).replace(tzinfo=None)
+
+
+def _build_summary_run_id(session_id: str, window_start: Any) -> str:
+    value = window_start.isoformat() if hasattr(window_start, "isoformat") else str(window_start)
+    return f"summary:{session_id}:{value}"
 
 
 @router.post(
@@ -97,6 +103,7 @@ async def notify_summary(
             new_version,
             session_id,
             summary_id=inserted_row["id"],
+            analysis_run_id=_build_summary_run_id(session_id, inserted_row["window_start"]),
             window_start=inserted_row["window_start"].isoformat() if inserted_row["window_start"] else None,
             window_end=inserted_row["window_end"].isoformat() if inserted_row["window_end"] else None,
             created_at=inserted_row["created_at"].isoformat() if inserted_row["created_at"] else None,
@@ -158,7 +165,9 @@ async def get_latest_summary(
             detail="该会话暂无讨论摘要",
         )
 
-    return DiscussionSummaryOut.model_validate(dict(row))
+    payload = dict(row)
+    payload["analysis_run_id"] = _build_summary_run_id(payload["session_id"], payload["window_start"])
+    return DiscussionSummaryOut.model_validate(payload)
 
 
 @router.get(
@@ -204,4 +213,9 @@ async def list_summary_history(
         {"session_id": session_id},
     )
     rows = result.mappings().all()
-    return [DiscussionSummaryOut.model_validate(dict(row)) for row in rows]
+    items: list[DiscussionSummaryOut] = []
+    for row in rows:
+        payload = dict(row)
+        payload["analysis_run_id"] = _build_summary_run_id(payload["session_id"], payload["window_start"])
+        items.append(DiscussionSummaryOut.model_validate(payload))
+    return items
