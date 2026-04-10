@@ -5,12 +5,52 @@ import { useRoute, useRouter } from 'vue-router'
 const router = useRouter()
 const route = useRoute()
 
-const menuItems = computed(() => [
-  { path: '/admin/users', label: '用户管理' },
-  { path: '/admin/groups', label: '群组管理' },
-  { path: '/admin/memberships', label: '成员关系' },
-  { path: '/admin/chat-sessions', label: '会话管理' },
-  { path: '/admin/voice-profiles', label: '声纹管理' },
+interface AdminMenuItem {
+  path: string
+  label: string
+}
+
+interface AdminMenuGroup {
+  label: string
+  items: AdminMenuItem[]
+}
+
+const menuGroups = computed<AdminMenuGroup[]>(() => [
+  {
+    label: '基础数据',
+    items: [
+      { path: '/admin/users', label: '用户管理' },
+      { path: '/admin/groups', label: '群组管理' },
+      { path: '/admin/memberships', label: '成员关系' },
+      { path: '/admin/chat-sessions', label: '会话管理' },
+      { path: '/admin/voice-profiles', label: '声纹管理' },
+      { path: '/admin/session-text-messages', label: '文字消息' },
+    ],
+  },
+  {
+    label: 'AI 分析',
+    items: [
+      { path: '/admin/discussion-states', label: '讨论状态' },
+      { path: '/admin/engagement-metrics', label: '参与度指标' },
+      { path: '/admin/window-metrics', label: '窗口指标' },
+      { path: '/admin/discussion-summaries', label: '讨论摘要' },
+      { path: '/admin/info-gap-buttons', label: '信息缺口按钮' },
+      { path: '/admin/keyword-skw', label: '关键词 SKW' },
+    ],
+  },
+  {
+    label: '推送管理',
+    items: [
+      { path: '/admin/push-queue', label: '推送队列' },
+      { path: '/admin/push-logs', label: '推送日志' },
+    ],
+  },
+  {
+    label: '系统配置',
+    items: [
+      { path: '/admin/discussion-rules', label: '讨论规则' },
+    ],
+  },
 ])
 
 const activePath = computed(() => route.path)
@@ -33,14 +73,20 @@ function go(path: string) {
         active-text-color="#f97316"
         class="admin-menu"
       >
-        <el-menu-item
-          v-for="item in menuItems"
-          :key="item.path"
-          :index="item.path"
-          @click="go(item.path)"
+        <el-menu-item-group
+          v-for="group in menuGroups"
+          :key="group.label"
         >
-          {{ item.label }}
-        </el-menu-item>
+          <template #title>{{ group.label }}</template>
+          <el-menu-item
+            v-for="item in group.items"
+            :key="item.path"
+            :index="item.path"
+            @click="go(item.path)"
+          >
+            {{ item.label }}
+          </el-menu-item>
+        </el-menu-item-group>
       </el-menu>
     </el-aside>
     <el-container>
@@ -77,6 +123,18 @@ function go(path: string) {
   border-right: none;
 }
 
+:deep(.el-menu-item-group__title) {
+  padding: 10px 12px 6px;
+  color: #9ca3af;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+:deep(.el-menu-item-group__title + ul) {
+  margin-bottom: 10px;
+}
+
 .admin-header {
   display: flex;
   align-items: center;
@@ -96,4 +154,3 @@ function go(path: string) {
   background: #f5f5f7;
 }
 </style>
-

@@ -103,3 +103,200 @@ export interface AdminVoiceProfileDetail {
   primary_group_name?: string | null
 }
 
+// ── 讨论规则配置 ──────────────────────────────────────────────────────
+export interface AdminDiscussionRule {
+  silence_threshold_minutes: number
+  speaking_ratio_min: number
+  speaking_ratio_max: number
+  cosine_similarity_threshold: number
+  min_session_duration_minutes: number
+  push_interval_minutes: number
+  max_push_per_member: number
+  analysis_enabled: boolean
+  updated_at: string
+  personal_stagnation_ratio: number | null
+  group_silence_threshold_s: number | null
+  srep_threshold: number | null
+  ttr_threshold: number | null
+  arg_density_threshold: number | null
+  info_gain_threshold: number | null
+  skw_threshold_low: number | null
+  skw_threshold_high: number | null
+  same_state_cooldown_s: number | null
+  cross_state_cooldown_s: number | null
+}
+
+export interface AdminDiscussionRuleUpdate {
+  silence_threshold_minutes?: number
+  speaking_ratio_min?: number
+  speaking_ratio_max?: number
+  cosine_similarity_threshold?: number
+  min_session_duration_minutes?: number
+  push_interval_minutes?: number
+  max_push_per_member?: number
+  analysis_enabled?: boolean
+  personal_stagnation_ratio?: number
+  group_silence_threshold_s?: number
+  srep_threshold?: number
+  ttr_threshold?: number
+  arg_density_threshold?: number
+  info_gain_threshold?: number
+  skw_threshold_low?: number
+  skw_threshold_high?: number
+  same_state_cooldown_s?: number
+  cross_state_cooldown_s?: number
+}
+
+// ── 讨论状态 ─────────────────────────────────────────────────────────
+export type DiscussionStateType =
+  | 'low_participation'
+  | 'over_dominance'
+  | 'disengaged'
+  | 'deadlock'
+  | 'topic_drift'
+  | 'low_depth'
+  | 'homogeneous'
+
+export interface AdminDiscussionState {
+  id: string
+  session_id: string
+  triggered_at: string
+  state_type: DiscussionStateType
+  target_user_id: string | null
+  target_user_name: string | null
+  trigger_metrics: Record<string, unknown> | null
+  ai_analysis_done: boolean
+  push_sent: boolean
+  window_start: string | null
+  push_cooldown_until: string | null
+}
+
+// ── 参与度指标 ────────────────────────────────────────────────────────
+export interface AdminEngagementMetric {
+  id: string
+  session_id: string
+  user_id: string
+  user_name: string | null
+  calculated_at: string
+  speaking_ratio: number | null
+  speaking_frequency: number | null
+  silence_duration_s: number | null
+  mattr_score: number | null
+  avg_sentence_length: number | null
+  response_rate: number | null
+  new_idea_rate: number | null
+  topic_cosine_similarity: number | null
+  semantic_cohesion: number | null
+  semantic_uniqueness: number | null
+}
+
+// ── 推送日志 ──────────────────────────────────────────────────────────
+export type PushChannel = 'web' | 'app' | 'glasses'
+export type DeliveryStatus = 'pending' | 'delivered' | 'failed'
+
+export interface AdminPushLog {
+  id: string
+  session_id: string
+  session_title: string | null
+  state_id: string | null
+  state_type: string | null
+  target_user_id: string
+  target_user_name: string | null
+  push_content: string | null
+  push_channel: PushChannel
+  jpush_message_id: string | null
+  delivery_status: DeliveryStatus
+  triggered_at: string
+  delivered_at: string | null
+}
+
+// ── 推送队列 ──────────────────────────────────────────────────────────
+export type PushQueueStatus = 'pending' | 'delivered'
+
+export interface AdminPushQueue {
+  id: string
+  session_id: string
+  session_title: string | null
+  target_user_id: string
+  target_user_name: string | null
+  state_type: DiscussionStateType
+  push_content: string
+  analysis_window_start: string
+  status: PushQueueStatus
+  created_at: string
+  delivered_at: string | null
+}
+
+// ── 窗口指标 ──────────────────────────────────────────────────────────
+export interface AdminWindowMetric {
+  id: string
+  session_id: string
+  user_id: string
+  user_name: string | null
+  window_start: string
+  window_end: string
+  speaking_ratio: number | null
+  silence_s: number | null
+  ttr: number | null
+  arg_density: number | null
+  srep: number | null
+  info_gain: number | null
+  has_reasoning: boolean | null
+  has_evidence: boolean | null
+  created_at: string | null
+}
+
+// ── 讨论摘要 ──────────────────────────────────────────────────────────
+export interface AdminDiscussionSummary {
+  id: string
+  session_id: string
+  session_title: string | null
+  version: number
+  content: string
+  window_start: string
+  window_end: string
+  created_at: string | null
+}
+
+// ── 信息缺口按钮 ──────────────────────────────────────────────────────
+export type InfoGapButtonStatus = 'pending' | 'clicked' | 'dismissed'
+
+export interface AdminInfoGapButton {
+  id: string
+  session_id: string
+  user_id: string
+  user_name: string | null
+  keyword: string
+  skw_score: number | null
+  status: InfoGapButtonStatus | null
+  window_start: string
+  created_at: string | null
+  clicked_at: string | null
+}
+
+// ── 关键词 SKW ────────────────────────────────────────────────────────
+export interface AdminKeywordSkw {
+  id: string
+  session_id: string
+  window_start: string
+  keyword: string
+  user_a_id: string
+  user_a_name: string | null
+  user_b_id: string
+  user_b_name: string | null
+  skw_score: number
+  created_at: string | null
+}
+
+// ── 文字消息 ──────────────────────────────────────────────────────────
+export interface AdminSessionTextMessage {
+  id: string
+  group_id: string
+  session_id: string
+  user_id: string | null
+  user_name: string | null
+  sender_name: string | null
+  content: string | null
+  created_at: string | null
+}
+

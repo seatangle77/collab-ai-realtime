@@ -104,6 +104,56 @@ const routes: RouteRecordRaw[] = [
         component: () => import('../views/admin/AdminChatSessionsPage.vue'),
       },
       {
+        path: 'discussion-rules',
+        name: 'AdminDiscussionRules',
+        component: () => import('../views/admin/AdminDiscussionRulesPage.vue'),
+      },
+      {
+        path: 'discussion-states',
+        name: 'AdminDiscussionStates',
+        component: () => import('../views/admin/AdminDiscussionStatesPage.vue'),
+      },
+      {
+        path: 'engagement-metrics',
+        name: 'AdminEngagementMetrics',
+        component: () => import('../views/admin/AdminEngagementMetricsPage.vue'),
+      },
+      {
+        path: 'push-logs',
+        name: 'AdminPushLogs',
+        component: () => import('../views/admin/AdminPushLogsPage.vue'),
+      },
+      {
+        path: 'push-queue',
+        name: 'AdminPushQueue',
+        component: () => import('../views/admin/AdminPushQueuePage.vue'),
+      },
+      {
+        path: 'window-metrics',
+        name: 'AdminWindowMetrics',
+        component: () => import('../views/admin/AdminWindowMetricsPage.vue'),
+      },
+      {
+        path: 'discussion-summaries',
+        name: 'AdminDiscussionSummaries',
+        component: () => import('../views/admin/AdminDiscussionSummariesPage.vue'),
+      },
+      {
+        path: 'info-gap-buttons',
+        name: 'AdminInfoGapButtons',
+        component: () => import('../views/admin/AdminInfoGapButtonsPage.vue'),
+      },
+      {
+        path: 'keyword-skw',
+        name: 'AdminKeywordSkw',
+        component: () => import('../views/admin/AdminKeywordSkwPage.vue'),
+      },
+      {
+        path: 'session-text-messages',
+        name: 'AdminSessionTextMessages',
+        component: () => import('../views/admin/AdminSessionTextMessagesPage.vue'),
+      },
+      {
         path: 'voice-profiles',
         name: 'AdminVoiceProfiles',
         component: () => import('../views/admin/AdminVoiceProfilesPage.vue'),

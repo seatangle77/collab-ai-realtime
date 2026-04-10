@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from .deps import require_admin
-from .schemas import Page, PageMeta
+from .schemas import BatchDeleteRequest, BatchDeleteResponse, Page, PageMeta
 
 
 router = APIRouter(
@@ -202,3 +202,31 @@ async def list_engagement_metrics(
         items=items,
         meta=PageMeta(total=total, page=page, page_size=page_size),
     )
+
+
+@router.delete("/{metric_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_engagement_metric(
+    metric_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    result = await db.execute(
+        text("DELETE FROM engagement_metrics WHERE id = :id RETURNING id"),
+        {"id": metric_id},
+    )
+    await db.commit()
+    if not result.first():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="参与度指标记录不存在")
+
+
+@router.post("/batch-delete", response_model=BatchDeleteResponse)
+async def batch_delete_engagement_metrics(
+    payload: BatchDeleteRequest,
+    db: AsyncSession = Depends(get_db),
+) -> BatchDeleteResponse:
+    result = await db.execute(
+        text("DELETE FROM engagement_metrics WHERE id = ANY(:ids) RETURNING id"),
+        {"ids": payload.ids},
+    )
+    await db.commit()
+    deleted = len(result.fetchall())
+    return BatchDeleteResponse(deleted=deleted)
