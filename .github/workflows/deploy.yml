@@ -39,8 +39,8 @@ jobs:
           target: "/root/workspace/collab-ai-realtime/web/"
           strip_components: 1
 
-      # 5. SSH 服务器：更新后端代码并重启服务
-      - name: Deploy backend & restart
+      # 5. SSH 服务器：更新后端与 agent，并重启服务
+      - name: Deploy backend and agent
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -62,5 +62,13 @@ jobs:
 
             # 重启后端
             systemctl restart collab-ai
+
+            # 更新 agent 依赖并构建
+            cd /root/workspace/collab-ai-realtime/agent
+            npm ci
+            npm run build
+
+            # 重启 agent（服务文件已在服务器手动配置）
+            systemctl restart collab-ai-agent
 
             echo "✅ 部署完成"
