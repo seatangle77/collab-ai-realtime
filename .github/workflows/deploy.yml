@@ -65,6 +65,9 @@ jobs:
 
             # 更新 agent 依赖并构建
             cd /root/workspace/collab-ai-realtime/agent
+            export PATH="/root/.nvm/versions/node/v22.22.2/bin:$PATH"
+            node -v
+            npm -v
             npm ci
             npm run build
 
