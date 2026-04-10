@@ -3,14 +3,16 @@ backend/__pycache__/
 backend/app/__pycache__/
 backend/*.pyc
 backend/.env
-backend/.env.local
-backend/.env.production
 __pycache__/
 
 web/node_modules/
 web/dist/
 agent/node_modules/
 agent/dist/
+agent/.env
+
+# 统一密钥文件（本地和服务器各自维护，不提交）
+secrets.env
 .DS_Store
 
 # Local voice sample audio (generated at runtime/tests)

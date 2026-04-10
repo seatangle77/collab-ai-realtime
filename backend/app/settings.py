@@ -2,29 +2,31 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from dotenv import load_dotenv
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
+SECRETS_FILE = str(BACKEND_DIR.parent / "secrets.env")
+
+# 提前加载密钥文件，使 os.getenv() 全局可见（auth.py 等直接读环境变量的地方）
+load_dotenv(SECRETS_FILE, override=False)
+
+
+_ENV_FILES = (
+    SECRETS_FILE,                          # 统一密钥（不进git）
+    str(BACKEND_DIR / ".env.production"),  # 生产配置（可进git）
+    "/etc/collab-ai-realtime.env",         # 线上覆盖（不进git）
+    str(BACKEND_DIR / ".env.local"),       # 本地配置（可进git）
+)
 
 
 class Settings(BaseSettings):
-    """
-    约定：
-    - 非敏感默认值进 git（host/port/name/user）
-    - 密码只从环境变量/服务器环境文件注入（不进 git）
-    - 线上更规范：/etc/collab-ai-realtime.env
-    """
-
     model_config = SettingsConfigDict(
         env_prefix="DB_",
-        env_file=(
-            str(BACKEND_DIR / ".env.production"),  # 服务器项目目录可选（不进git）
-            "/etc/collab-ai-realtime.env",  # 线上更规范（不进git）
-            str(BACKEND_DIR / ".env.local"),  # 本地开发优先级最高（不进git）
-        ),
+        env_file=_ENV_FILES,
         extra="ignore",
     )
 
@@ -53,11 +55,7 @@ settings = Settings()
 class TencentASRSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="TENCENT_",
-        env_file=(
-            str(BACKEND_DIR / ".env.production"),
-            "/etc/collab-ai-realtime.env",
-            str(BACKEND_DIR / ".env.local"),  # 本地开发优先级最高
-        ),
+        env_file=_ENV_FILES,
         extra="ignore",
     )
 
@@ -75,19 +73,11 @@ tencent_asr_settings = TencentASRSettings()
 class NLPSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="NLP_",
-        env_file=(
-            str(BACKEND_DIR / ".env.production"),
-            "/etc/collab-ai-realtime.env",
-            str(BACKEND_DIR / ".env.local"),  # 本地开发优先级最高
-        ),
+        env_file=_ENV_FILES,
         extra="ignore",
     )
 
-    # sentence-transformers 模型名，可通过环境变量 NLP_EMBED_MODEL 覆盖
     embed_model: str = "paraphrase-multilingual-MiniLM-L12-v2"
-
-    # 论证判定 LLM：Qwen，模型名可通过环境变量 NLP_REASONING_MODEL 覆盖
-    # 香港区域使用国际端点，稳定性更好
     reasoning_model: str = "qwen-plus"
     qwen_api_key: str = Field(default="")
     qwen_base_url: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
@@ -99,11 +89,7 @@ nlp_settings = NLPSettings()
 class JPushSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="JPUSH_",
-        env_file=(
-            str(BACKEND_DIR / ".env.production"),
-            "/etc/collab-ai-realtime.env",
-            str(BACKEND_DIR / ".env.local"),  # 本地开发优先级最高
-        ),
+        env_file=_ENV_FILES,
         extra="ignore",
     )
 

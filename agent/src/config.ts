@@ -1,5 +1,9 @@
 import dotenv from 'dotenv';
-dotenv.config();
+import path from 'path';
+const env = process.env.NODE_ENV ?? 'local';
+// 先加载环境配置，再加载密钥（密钥优先级更高）
+dotenv.config({ path: `.env.${env}` });
+dotenv.config({ path: path.resolve(__dirname, '../../secrets.env') });
 
 function requireEnv(key: string, fallback?: string): string {
   const val = process.env[key] ?? fallback;
@@ -19,7 +23,7 @@ export const config = {
   },
   nlp: {
     baseUrl: process.env.NLP_BASE_URL ?? 'http://localhost:8000',
-    adminToken: requireEnv('ADMIN_TOKEN', ''),
+    adminToken: requireEnv('ADMIN_API_KEY', ''),
   },
   agent: {
     shortIntervalMs: parseInt(process.env.SHORT_INTERVAL_MS ?? '30000', 10),
