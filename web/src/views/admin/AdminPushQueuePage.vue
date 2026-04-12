@@ -196,8 +196,8 @@ onMounted(() => { fetchData() })
         </el-table-column>
         <el-table-column label="状态类型" min-width="120">
           <template #default="{ row }">
-            <el-tag :type="DISCUSSION_STATE_TAGS[row.state_type]">
-              {{ DISCUSSION_STATE_LABELS[row.state_type] }}
+            <el-tag :type="DISCUSSION_STATE_TAGS[row.state_type as DiscussionStateType]">
+              {{ DISCUSSION_STATE_LABELS[row.state_type as DiscussionStateType] }}
             </el-tag>
           </template>
         </el-table-column>
@@ -212,7 +212,7 @@ onMounted(() => { fetchData() })
         <el-table-column label="队列状态" min-width="100">
           <template #default="{ row }">
             <el-tag :type="row.status === 'pending' ? 'warning' : 'success'">
-              {{ STATUS_LABELS[row.status] }}
+              {{ STATUS_LABELS[row.status as PushQueueStatus] }}
             </el-tag>
           </template>
         </el-table-column>

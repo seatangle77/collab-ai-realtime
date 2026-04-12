@@ -73,7 +73,7 @@ interface PushLogItem {
 const pushContent = ref('')
 const pushVisible = ref(false)
 
-function showPushNotification(content: string, triggeredAt?: string | null) {
+function showPushNotification(content: string, _triggeredAt?: string | null) {
   pushContent.value = content
   pushVisible.value = false
   // 强制触发 watch（即使上一条还没消失也能重新触发）

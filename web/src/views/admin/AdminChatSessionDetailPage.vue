@@ -272,7 +272,6 @@ const transcriptTimelineItems = computed<TimelineItem[]>(() => {
   return [...transcriptItems, ...pushItems].sort((a, b) => a.sortAt - b.sortAt)
 })
 
-const topSummary = computed(() => discussionSummaries.value[0] ?? null)
 
 const analysisTimeline = computed<AnalysisTimelineEntry[]>(() => {
   const summaryEntries: AnalysisTimelineEntry[] = discussionSummaries.value.map((item) => {
@@ -512,7 +511,7 @@ function openAddTranscript() {
 async function submitAddTranscript() {
   if (!addTranscriptFormRef.value || !session.value) return
   await addTranscriptFormRef.value.validate(async (valid) => {
-    if (!valid) return
+    if (!valid || !session.value) return
     try {
       const payload: CreateAdminTranscriptPayload = {
         session_id: sessionId,

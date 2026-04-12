@@ -200,7 +200,7 @@ onMounted(() => { fetchData() })
             <el-tag
               :type="row.status === 'clicked' ? 'success' : row.status === 'pending' ? 'warning' : 'info'"
             >
-              {{ row.status ? STATUS_LABELS[row.status] : '-' }}
+              {{ row.status ? STATUS_LABELS[row.status as InfoGapButtonStatus] : '-' }}
             </el-tag>
           </template>
         </el-table-column>
