@@ -5,6 +5,7 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { MoreFilled, Plus } from '@element-plus/icons-vue'
 import { formatDateTimeToCST } from '../../utils/datetime'
+import AppEmptyState from '../../components/AppEmptyState.vue'
 import { listMyGroups } from '../../api/appGroups'
 import {
   type AppChatSession,
@@ -334,12 +335,13 @@ onMounted(() => {
     </div>
 
     <div v-if="!hasCurrentGroup" class="app-sessions-empty-group">
-      <p class="app-sessions-empty-text">
-        当前未选择群组，请先前往「我的群组」选择或加入一个群组。
-      </p>
-      <button type="button" class="app-sessions-primary-btn" @click="goToGroups">
-        前往我的群组
-      </button>
+      <AppEmptyState
+        icon="👥"
+        title="当前未选择群组"
+        description="请先前往「我的群组」选择或加入一个群组。"
+        action-label="前往我的群组"
+        @action="goToGroups"
+      />
     </div>
 
     <template v-else>
@@ -384,13 +386,15 @@ onMounted(() => {
         <div v-if="loading" class="app-sessions-loading">正在加载会话列表...</div>
 
         <!-- 空状态：用 el-empty + 内联新建按钮 -->
-        <el-empty
+        <AppEmptyState
           v-else-if="filteredSessions.length === 0"
-          :image-size="80"
-          description="暂无会话，点击下方按钮创建第一个"
-        >
-          <el-button type="primary" @click="openCreateDialog">新建会话</el-button>
-        </el-empty>
+          icon="🗂️"
+          title="暂无会话"
+          description="当前筛选条件下还没有会话，点击下方按钮创建第一个。"
+          action-label="新建会话"
+          compact
+          @action="openCreateDialog"
+        />
 
         <ul v-else class="app-sessions-list">
           <li
@@ -402,15 +406,15 @@ onMounted(() => {
             <div class="app-sessions-item-main">
               <div class="app-sessions-item-title-row">
                 <span class="app-sessions-item-title">{{ session.session_title }}</span>
-                <el-tag
-                  :type="statusTagType(session)"
-                  size="small"
-                  effect="light"
-                  class="app-sessions-item-tag"
-                >
-                  {{ formatStatus(session) }}
-                </el-tag>
               </div>
+              <el-tag
+                :type="statusTagType(session)"
+                size="small"
+                effect="light"
+                class="app-sessions-item-tag"
+              >
+                {{ formatStatus(session) }}
+              </el-tag>
               <div class="app-sessions-item-meta">
                 创建：{{ formatDateTimeToCST(session.created_at) }}
                 <span class="app-sessions-item-meta-sep">·</span>
@@ -538,7 +542,7 @@ onMounted(() => {
 
 <style scoped>
 .app-sessions {
-  max-width: 880px;
+  max-width: var(--app-content-width-default);
   margin: 0 auto;
   padding-bottom: 88px; /* FAB + 与 AppLayout 底栏留白 */
 }
@@ -554,7 +558,7 @@ onMounted(() => {
 
 .app-sessions-title {
   margin: 0;
-  font-size: 1.25rem;
+  font-size: var(--app-font-size-title);
   font-weight: 700;
   color: var(--app-text-primary);
   letter-spacing: -0.02em;
@@ -567,13 +571,7 @@ onMounted(() => {
 
 .app-sessions-empty-group {
   margin-top: 16px;
-  padding: 18px 20px;
-  border-radius: var(--app-radius-md);
-  background: var(--app-bg-elevated);
-  border: 1px dashed var(--app-border);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  border-radius: var(--app-radius-card);
   box-shadow: var(--app-shadow-card);
 }
 
@@ -603,7 +601,7 @@ onMounted(() => {
 }
 
 .app-sessions-tab {
-  border-radius: 999px;
+  border-radius: var(--app-radius-pill);
   border: none;
   padding: 8px 16px;
   font-size: 14px;
@@ -636,7 +634,7 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-pill);
   border: 1px solid var(--app-primary);
   padding: 8px 16px;
   font-size: 14px;
@@ -668,7 +666,7 @@ onMounted(() => {
 
 /* 会话列表 */
 .app-sessions-list-wrapper {
-  margin-top: 4px;
+  margin-top: 12px;
 }
 
 .app-sessions-loading {
@@ -691,8 +689,8 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 14px 16px;
-  border-radius: var(--app-radius-md);
+  padding: 18px 20px;
+  border-radius: var(--app-radius-card);
   background: var(--app-bg-elevated);
   border: 1px solid var(--app-border);
   box-shadow: var(--app-shadow-card);
@@ -720,7 +718,6 @@ onMounted(() => {
 .app-sessions-item-title-row {
   display: flex;
   align-items: center;
-  gap: 8px;
   margin-bottom: 6px;
 }
 
@@ -734,7 +731,8 @@ onMounted(() => {
 }
 
 .app-sessions-item-tag {
-  flex-shrink: 0;
+  display: inline-flex;
+  margin-bottom: 8px;
 }
 
 .app-sessions-item-meta {
@@ -753,7 +751,7 @@ onMounted(() => {
   flex-shrink: 0;
   width: 36px;
   height: 36px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-pill);
   border: none;
   background: transparent;
   color: var(--app-text-muted);
@@ -791,7 +789,7 @@ onMounted(() => {
   bottom: 88px; /* 底部 tab bar + 安全区之上 */
   width: 52px;
   height: 52px;
-  border-radius: 50%;
+  border-radius: var(--app-radius-pill);
   border: none;
   background: var(--app-primary);
   color: #ffffff;

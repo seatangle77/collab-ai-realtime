@@ -23,6 +23,22 @@
   --app-radius-md: 12px;
   --app-radius-sm: 8px;
 
+  --app-font-size-title: 22px;
+  --app-font-size-heading: 16px;
+  --app-font-size-body: 14px;
+  --app-font-size-caption: 12px;
+
+  --app-content-width-default: 840px;
+  --app-content-width-narrow: 720px;
+
+  --app-color-ai: #f59e0b;
+  --app-color-ai-soft: #fffbeb;
+  --app-color-ai-border: #fcd34d;
+
+  --app-radius-pill: 999px;
+  --app-radius-bubble: 16px;
+  --app-radius-card: 12px;
+
   --app-shadow-card: 0 1px 3px rgba(15, 23, 42, 0.10), 0 1px 2px -1px rgba(15, 23, 42, 0.08);
   --app-shadow-soft: 0 10px 30px rgba(15, 23, 42, 0.08);
 

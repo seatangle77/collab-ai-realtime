@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Microphone } from '@element-plus/icons-vue'
+import { Delete, Microphone } from '@element-plus/icons-vue'
+import AppEmptyState from '../../components/AppEmptyState.vue'
 import {
   getMyVoiceProfile,
   updateMySamples,
@@ -28,6 +29,7 @@ const mediaRecorder = ref<MediaRecorder | null>(null)
 let recordingTimer: number | undefined
 
 const hasEmbedding = computed(() => !!profile.value?.voice_embedding)
+const currentStep = computed(() => (hasEmbedding.value ? 2 : 1))
 
 function parseEmbeddingStatusLabel(): string {
   const status = profile.value?.embedding_status
@@ -241,6 +243,17 @@ onMounted(() => {
       <p class="app-voice-profile-desc">录制或上传音频样本，生成专属声纹用于说话人识别。</p>
 
       <template v-if="profile">
+        <div class="voice-stepbar" aria-label="声纹设置步骤">
+          <div class="voice-stepbar-item" :data-active="currentStep >= 1">
+            <span class="voice-stepbar-dot">1</span>
+            <span class="voice-stepbar-text">添加音频样本</span>
+          </div>
+          <div class="voice-stepbar-line" aria-hidden="true"></div>
+          <div class="voice-stepbar-item" :data-active="currentStep >= 2">
+            <span class="voice-stepbar-dot">2</span>
+            <span class="voice-stepbar-text">生成声纹</span>
+          </div>
+        </div>
         <h3 class="voice-step-heading">第一步：添加音频样本</h3>
         <div class="record-card">
           <div class="record-tabs">
@@ -270,9 +283,11 @@ onMounted(() => {
                 type="primary"
                 size="default"
                 :icon="Microphone"
+                class="record-action-btn"
                 :disabled="editableUrls.length >= 5"
                 @click="startRecording"
               >
+                <span class="record-action-btn__pulse" aria-hidden="true"></span>
                 开始录音
               </el-button>
               <span class="recording-hint">每段建议 10–15 秒</span>
@@ -280,7 +295,15 @@ onMounted(() => {
 
             <!-- 录音中 -->
             <template v-else-if="isRecording">
-              <el-button type="danger" size="default" @click="stopRecording">停止录音</el-button>
+              <el-button
+                type="danger"
+                size="default"
+                class="record-action-btn record-action-btn--recording"
+                @click="stopRecording"
+              >
+                <span class="record-action-btn__pulse" aria-hidden="true"></span>
+                停止录音
+              </el-button>
               <span class="recording-indicator">录音中… {{ recordingDuration }}s</span>
             </template>
 
@@ -320,9 +343,13 @@ onMounted(() => {
         <p class="voice-samples-count">已添加 {{ editableUrls.length }} / 5 条样本</p>
         <div class="samples-editor">
           <div class="samples-list">
-            <div v-if="editableUrls.length === 0" class="samples-empty">
-              暂无样本，请在上方添加。
-            </div>
+            <AppEmptyState
+              v-if="editableUrls.length === 0"
+              icon="🎙️"
+              title="暂无样本"
+              description="请先通过录音或粘贴 URL 添加样本。"
+              compact
+            />
             <div
               v-for="(url, idx) in editableUrls"
               :key="idx"
@@ -335,7 +362,15 @@ onMounted(() => {
                   <div class="sample-progress-fill" />
                 </div>
               </div>
-              <el-button type="danger" plain size="small" @click="handleRemoveUrl(idx)">删除</el-button>
+              <el-button
+                type="danger"
+                plain
+                size="small"
+                :icon="Delete"
+                circle
+                :aria-label="`删除第 ${idx + 1} 条样本`"
+                @click="handleRemoveUrl(idx)"
+              />
             </div>
           </div>
         </div>
@@ -397,9 +432,9 @@ onMounted(() => {
 
 .app-voice-profile-card {
   width: 100%;
-  max-width: 720px;
-  padding: 22px 22px;
-  border-radius: var(--app-radius-lg);
+  max-width: var(--app-content-width-narrow);
+  padding: 18px 20px;
+  border-radius: var(--app-radius-card);
   background: var(--app-bg-elevated);
   box-shadow: var(--app-shadow-soft);
   border: 1px solid var(--app-border);
@@ -407,7 +442,7 @@ onMounted(() => {
 
 .app-voice-profile-title {
   margin: 0 0 8px;
-  font-size: 22px;
+  font-size: var(--app-font-size-title);
   font-weight: 700;
   color: var(--app-text-primary);
   letter-spacing: -0.02em;
@@ -418,6 +453,55 @@ onMounted(() => {
   font-size: 14px;
   line-height: 1.65;
   color: var(--app-text-secondary);
+}
+
+.voice-stepbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.voice-stepbar-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--app-text-muted);
+}
+
+.voice-stepbar-item[data-active='true'] {
+  color: var(--app-text-primary);
+}
+
+.voice-stepbar-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--app-radius-pill);
+  border: 1px solid var(--app-border-strong);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--app-font-size-caption);
+  font-weight: 700;
+  background: var(--app-bg-elevated);
+}
+
+.voice-stepbar-item[data-active='true'] .voice-stepbar-dot {
+  border-color: var(--app-primary);
+  background: var(--app-primary);
+  color: var(--app-bg-elevated);
+}
+
+.voice-stepbar-text {
+  font-size: var(--app-font-size-body);
+  font-weight: 500;
+}
+
+.voice-stepbar-line {
+  flex: 1;
+  min-width: 24px;
+  height: 1px;
+  background: var(--app-border);
 }
 
 .voice-step-heading {
@@ -444,16 +528,36 @@ onMounted(() => {
 /* 录音 / URL 区（卡片，对齐 demo） */
 .record-card {
   border: 1px solid var(--app-border);
-  border-radius: var(--app-radius-md);
+  border-radius: var(--app-radius-card);
   background: var(--app-bg-elevated);
   box-shadow: var(--app-shadow-card);
-  padding: 16px 18px 18px;
+  padding: 18px 20px;
 }
 
 .recording-indicator {
   font-size: 14px;
   font-weight: 500;
   color: var(--app-danger);
+}
+
+.record-action-btn {
+  width: 100%;
+  min-height: 48px;
+}
+
+.record-action-btn--recording {
+  width: auto;
+  min-width: 140px;
+}
+
+.record-action-btn__pulse {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 2px;
+  border-radius: var(--app-radius-pill);
+  background: currentColor;
+  animation: voice-record-pulse 1.2s ease-in-out infinite;
 }
 
 .recording-hint {
@@ -583,6 +687,7 @@ onMounted(() => {
   flex-wrap: wrap;
   gap: 12px;
   min-height: 44px;
+  width: 100%;
 }
 
 .url-add-row {
@@ -664,5 +769,18 @@ onMounted(() => {
   overflow-x: auto;
   max-height: 200px;
   overflow-y: auto;
+}
+
+@keyframes voice-record-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.45;
+    transform: scale(1.35);
+  }
 }
 </style>

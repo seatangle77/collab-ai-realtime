@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type APIRequestContext, type APIResponse } from '@playwright/test'
 
 test.setTimeout(60000)
 
@@ -74,14 +74,44 @@ async function loginViaUI(page: import('@playwright/test').Page, user: TestUser)
   await expect(page).toHaveURL(/\/app\/?$/)
 }
 
+async function getWithRetry(
+  request: APIRequestContext,
+  url: string,
+  options?: Parameters<APIRequestContext['get']>[1],
+): Promise<APIResponse> {
+  try {
+    return await request.get(url, options)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (!message.includes('socket hang up')) {
+      throw error
+    }
+    return await request.get(url, options)
+  }
+}
+
 // ── 模拟 WebSocket 推送消息 ───────────────────────────────────────────────────
 
 async function injectWsMessage(page: import('@playwright/test').Page, message: object) {
+  await page.waitForFunction(
+    () => Boolean((window as any).__appSessionDetailInjectWsMessage || (window as any).__lastWs),
+    undefined,
+    { timeout: 10000 },
+  )
   await page.evaluate((msg) => {
-    // 找到页面中存活的 WebSocket 实例并触发 onmessage
+    const inject = (window as any).__appSessionDetailInjectWsMessage
+    if (typeof inject === 'function') {
+      inject(msg)
+      return
+    }
     const event = new MessageEvent('message', { data: JSON.stringify(msg) })
-    // 通过 monkey-patch 方式注入
-    ;(window as any).__lastWs?.dispatchEvent(event)
+    const ws = (window as any).__lastWs
+    if (!ws) return
+    if (typeof ws.onmessage === 'function') {
+      ws.onmessage(event)
+      return
+    }
+    ws.dispatchEvent(event)
   }, message)
 }
 
@@ -117,6 +147,7 @@ test.describe('PushNotification - 推送消息 Toast', () => {
 
     await expect(page.locator('.push-notification')).toBeVisible({ timeout: 3000 })
     await expect(page.locator('.push-content')).toContainText('大家可以深入讨论一下这个观点')
+    await expect(page.locator('.app-session-detail-ai-card')).toContainText('大家可以深入讨论一下这个观点')
   })
 
   test('A-2: Toast 在 3~5 秒后自动消失', async ({ page }) => {
@@ -195,6 +226,23 @@ test.describe('PushNotification - 推送消息 Toast', () => {
     const visible = await page.locator('.push-notification').isVisible()
     // 空 content 时 showPushNotification 不被调用（因为 if(d.content) 判断）
     expect(visible).toBe(false)
+  })
+
+  test('A-6: 发给其他用户的 push_notification 不会插入当前用户实录', async ({ page }) => {
+    await patchWsForCapture(page)
+    const user = await registerAndLogin('a6')
+    const { sessionId } = await createGroupAndSession(user.token, 'a6')
+    await loginViaUI(page, user)
+    await page.goto(`/app/sessions/${sessionId}`)
+    await page.waitForTimeout(2000)
+
+    await injectWsMessage(page, {
+      type: 'push_notification',
+      data: { content: '这条不是给当前用户的', target_user_id: 'someone-else' },
+    })
+
+    await page.waitForTimeout(500)
+    await expect(page.locator('.app-session-detail-ai-card').filter({ hasText: '这条不是给当前用户的' })).toHaveCount(0)
   })
 })
 
@@ -329,22 +377,20 @@ test.describe('InfoGapButtons - 信息缺口关键词按钮', () => {
     const { sessionId } = await createGroupAndSession(user.token, 'b6')
     await loginViaUI(page, user)
     await page.goto(`/app/sessions/${sessionId}`)
-    await page.waitForTimeout(2000)
+    await page.waitForFunction(() => Boolean((window as any).__lastWs), undefined, { timeout: 10000 })
+    await page.waitForTimeout(500)
 
     await injectWsMessage(page, {
       type: 'info_gap_button',
       data: { buttons: [{ id: 'btn_dup_007', keyword: '重复词', skw_score: 0.2 }] },
     })
-    await page.waitForTimeout(300)
+    await expect(page.locator('.info-gap-btn').filter({ hasText: '重复词' })).toBeVisible({ timeout: 5000 })
     // 再推一次相同 id
     await injectWsMessage(page, {
       type: 'info_gap_button',
       data: { buttons: [{ id: 'btn_dup_007', keyword: '重复词', skw_score: 0.2 }] },
     })
-    await page.waitForTimeout(300)
-
-    const count = await page.locator('.info-gap-btn').filter({ hasText: '重复词' }).count()
-    expect(count).toBe(1)
+    await expect(page.locator('.info-gap-btn').filter({ hasText: '重复词' })).toHaveCount(1, { timeout: 5000 })
   })
 
   test('B-7: 会话结束后 InfoGapButtons 不显示', async ({ page }) => {
@@ -353,14 +399,15 @@ test.describe('InfoGapButtons - 信息缺口关键词按钮', () => {
     const { sessionId } = await createGroupAndSession(user.token, 'b7')
     await loginViaUI(page, user)
     await page.goto(`/app/sessions/${sessionId}`)
-    await page.waitForTimeout(2000)
+    await page.waitForFunction(() => Boolean((window as any).__lastWs), undefined, { timeout: 10000 })
+    await page.waitForTimeout(500)
 
     // 先推按钮
     await injectWsMessage(page, {
       type: 'info_gap_button',
       data: { buttons: [{ id: 'btn_end_008', keyword: '结束后词', skw_score: 0.2 }] },
     })
-    await expect(page.locator('.info-gap-btn').filter({ hasText: '结束后词' })).toBeVisible({ timeout: 3000 })
+    await expect(page.locator('.info-gap-btn').filter({ hasText: '结束后词' })).toBeVisible({ timeout: 5000 })
 
     // 会话结束
     await injectWsMessage(page, {
@@ -380,7 +427,7 @@ test.describe('InfoGapButtons - 信息缺口关键词按钮', () => {
 
 test.describe('GET info-gap/buttons - API 集成', () => {
   test('C-1: 无 token → API 返回 401', async ({ request }) => {
-    const res = await request.get(`${API_BASE}/api/sessions/s_fake/info-gap/buttons`)
+    const res = await getWithRetry(request, `${API_BASE}/api/sessions/s_fake/info-gap/buttons`)
     expect(res.status()).toBe(401)
   })
 
@@ -388,7 +435,7 @@ test.describe('GET info-gap/buttons - API 集成', () => {
     const user = await registerAndLogin('c2')
     const { sessionId } = await createGroupAndSession(user.token, 'c2')
     const outsider = await registerAndLogin('c2out')
-    const res = await request.get(`${API_BASE}/api/sessions/${sessionId}/info-gap/buttons`, {
+    const res = await getWithRetry(request, `${API_BASE}/api/sessions/${sessionId}/info-gap/buttons`, {
       headers: { Authorization: `Bearer ${outsider.token}` },
     })
     expect(res.status()).toBe(403)
@@ -397,7 +444,7 @@ test.describe('GET info-gap/buttons - API 集成', () => {
   test('C-3: 成员访问 → 200，返回数组', async ({ request }) => {
     const user = await registerAndLogin('c3')
     const { sessionId } = await createGroupAndSession(user.token, 'c3')
-    const res = await request.get(`${API_BASE}/api/sessions/${sessionId}/info-gap/buttons`, {
+    const res = await getWithRetry(request, `${API_BASE}/api/sessions/${sessionId}/info-gap/buttons`, {
       headers: { Authorization: `Bearer ${user.token}` },
     })
     expect(res.status()).toBe(200)
@@ -414,7 +461,7 @@ test.describe('GET summary - API 集成', () => {
   test('D-1: 无摘要 → 404', async ({ request }) => {
     const user = await registerAndLogin('d1')
     const { sessionId } = await createGroupAndSession(user.token, 'd1')
-    const res = await request.get(`${API_BASE}/api/sessions/${sessionId}/summary`, {
+    const res = await getWithRetry(request, `${API_BASE}/api/sessions/${sessionId}/summary`, {
       headers: { Authorization: `Bearer ${user.token}` },
     })
     expect(res.status()).toBe(404)
@@ -424,7 +471,7 @@ test.describe('GET summary - API 集成', () => {
     const user = await registerAndLogin('d2')
     const { sessionId } = await createGroupAndSession(user.token, 'd2')
     const outsider = await registerAndLogin('d2out')
-    const res = await request.get(`${API_BASE}/api/sessions/${sessionId}/summary`, {
+    const res = await getWithRetry(request, `${API_BASE}/api/sessions/${sessionId}/summary`, {
       headers: { Authorization: `Bearer ${outsider.token}` },
     })
     expect(res.status()).toBe(403)
@@ -439,7 +486,7 @@ test.describe('GET window-metrics - API 集成', () => {
   test('E-1: 普通用户 → 403', async ({ request }) => {
     const user = await registerAndLogin('e1')
     const { sessionId } = await createGroupAndSession(user.token, 'e1')
-    const res = await request.get(`${API_BASE}/api/sessions/${sessionId}/window-metrics`, {
+    const res = await getWithRetry(request, `${API_BASE}/api/sessions/${sessionId}/window-metrics`, {
       headers: { Authorization: `Bearer ${user.token}` },
     })
     expect(res.status()).toBe(403)
@@ -448,14 +495,14 @@ test.describe('GET window-metrics - API 集成', () => {
   test('E-2: Admin token 无数据 → 404', async ({ request }) => {
     const user = await registerAndLogin('e2')
     const { sessionId } = await createGroupAndSession(user.token, 'e2')
-    const res = await request.get(`${API_BASE}/api/sessions/${sessionId}/window-metrics`, {
+    const res = await getWithRetry(request, `${API_BASE}/api/sessions/${sessionId}/window-metrics`, {
       headers: { 'X-Admin-Token': ADMIN_API_KEY },
     })
     expect(res.status()).toBe(404)
   })
 
   test('E-3: 会话不存在 → 404', async ({ request }) => {
-    const res = await request.get(`${API_BASE}/api/sessions/s_nonexistent/window-metrics`, {
+    const res = await getWithRetry(request, `${API_BASE}/api/sessions/s_nonexistent/window-metrics`, {
       headers: { 'X-Admin-Token': ADMIN_API_KEY },
     })
     expect(res.status()).toBe(404)

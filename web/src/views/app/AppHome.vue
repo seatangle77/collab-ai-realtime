@@ -101,7 +101,7 @@ const currentGroup = computed<AppGroupSummary | null>(() => {
 
 .app-home-stack {
   width: 100%;
-  max-width: 720px;
+  max-width: var(--app-content-width-narrow);
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -109,8 +109,8 @@ const currentGroup = computed<AppGroupSummary | null>(() => {
 
 .app-home-card {
   width: 100%;
-  padding: 22px 22px;
-  border-radius: var(--app-radius-lg);
+  padding: 18px 20px;
+  border-radius: var(--app-radius-card);
   background: var(--app-bg-elevated);
   box-shadow: var(--app-shadow-soft);
   border: 1px solid var(--app-border);
@@ -118,7 +118,7 @@ const currentGroup = computed<AppGroupSummary | null>(() => {
 
 .app-home-title {
   margin: 0 0 8px;
-  font-size: 22px;
+  font-size: var(--app-font-size-title);
   font-weight: 700;
   color: var(--app-text-primary);
   letter-spacing: -0.02em;
@@ -166,8 +166,8 @@ const currentGroup = computed<AppGroupSummary | null>(() => {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 16px;
-  border-radius: var(--app-radius-md);
+  padding: 18px 20px;
+  border-radius: var(--app-radius-card);
   background: var(--app-bg-elevated);
   border: 1px solid var(--app-border);
   box-shadow: var(--app-shadow-card);
@@ -175,12 +175,14 @@ const currentGroup = computed<AppGroupSummary | null>(() => {
   color: inherit;
   transition:
     border-color 0.18s ease,
-    box-shadow 0.18s ease;
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
 }
 
 .app-home-quick:hover {
   border-color: var(--app-primary);
   box-shadow: var(--app-shadow-soft);
+  transform: translateY(-2px);
 }
 
 .app-home-quick-icon {

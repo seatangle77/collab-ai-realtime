@@ -74,6 +74,25 @@ async function addTranscript(
   return data.transcript_id as string
 }
 
+async function addPushLog(
+  sessionId: string,
+  targetUserId: string,
+  content: string,
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/admin/push-logs/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Admin-Token': ADMIN_API_KEY },
+    body: JSON.stringify({
+      session_id: sessionId,
+      target_user_id: targetUserId,
+      push_channel: 'web',
+      delivery_status: 'delivered',
+      push_content: content,
+    }),
+  })
+  if (!res.ok) throw new Error(`添加 push log 失败: ${await res.text()}`)
+}
+
 async function loginAsAdminAndGoToDetail(
   page: import('@playwright/test').Page,
   sessionId: string,
@@ -96,8 +115,8 @@ test.describe('AdminChatSessionDetail - 基础加载', () => {
 
     await loginAsAdminAndGoToDetail(page, sessionId)
 
-    await expect(page.locator('.admin-session-detail-name')).toBeVisible()
-    await expect(page.locator('.admin-session-detail-id')).toContainText(sessionId)
+    await expect(page.locator('.admin-session-hero__title')).toBeVisible()
+    await expect(page.getByText(`会话 ID：${sessionId}`)).toBeVisible()
   })
 
   test('A-2: 页面显示「群组 ID」和「群组名称」信息', async ({ page }) => {
@@ -108,7 +127,9 @@ test.describe('AdminChatSessionDetail - 基础加载', () => {
 
     await loginAsAdminAndGoToDetail(page, sessionId)
 
-    await expect(page.getByText(groupId)).toBeVisible()
+    await expect(
+      page.locator('.admin-session-meta__item').filter({ hasText: '群组 ID' }),
+    ).toContainText(groupId)
   })
 
   test('A-3: 点击「返回会话列表」跳回 /admin/chat-sessions', async ({ page }) => {
@@ -133,7 +154,7 @@ test.describe('AdminChatSessionDetail - 会话信息编辑', () => {
     const sessionId = await createSession(accessToken, groupId, `B1编辑测试-${Date.now()}`)
 
     await loginAsAdminAndGoToDetail(page, sessionId)
-    await page.getByRole('button', { name: '编辑会话' }).click()
+    await page.getByRole('button', { name: '编辑' }).click()
 
     await expect(page.getByRole('dialog')).toBeVisible()
     await expect(page.getByLabel('会话标题')).toBeVisible()
@@ -146,12 +167,12 @@ test.describe('AdminChatSessionDetail - 会话信息编辑', () => {
     const newTitle = `B2新标题-${Date.now()}`
 
     await loginAsAdminAndGoToDetail(page, sessionId)
-    await page.getByRole('button', { name: '编辑会话' }).click()
+    await page.getByRole('button', { name: '编辑' }).click()
 
     await page.getByLabel('会话标题').fill(newTitle)
     await page.getByRole('button', { name: '保存' }).click()
 
-    await expect(page.locator('.admin-session-detail-name')).toContainText(newTitle)
+    await expect(page.locator('.admin-session-hero__title')).toContainText(newTitle)
   })
 
   test('B-3: 取消编辑 dialog，标题不变', async ({ page }) => {
@@ -161,11 +182,11 @@ test.describe('AdminChatSessionDetail - 会话信息编辑', () => {
     const sessionId = await createSession(accessToken, groupId, originalTitle)
 
     await loginAsAdminAndGoToDetail(page, sessionId)
-    await page.getByRole('button', { name: '编辑会话' }).click()
+    await page.getByRole('button', { name: '编辑' }).click()
     await page.getByLabel('会话标题').fill('不该保存的标题')
     await page.getByRole('button', { name: '取消' }).click()
 
-    await expect(page.locator('.admin-session-detail-name')).toContainText(originalTitle)
+    await expect(page.locator('.admin-session-hero__title')).toContainText(originalTitle)
   })
 
   test('B-4: 会话标题为空时不能保存，显示校验提示', async ({ page }) => {
@@ -174,7 +195,7 @@ test.describe('AdminChatSessionDetail - 会话信息编辑', () => {
     const sessionId = await createSession(accessToken, groupId, `B4校验测试-${Date.now()}`)
 
     await loginAsAdminAndGoToDetail(page, sessionId)
-    await page.getByRole('button', { name: '编辑会话' }).click()
+    await page.getByRole('button', { name: '编辑' }).click()
     await page.getByLabel('会话标题').fill('')
     await page.getByRole('button', { name: '保存' }).click()
 
@@ -201,11 +222,13 @@ test.describe.serial('AdminChatSessionDetail - 转写管理', () => {
 
   test('C-1: 无转写时显示「暂无转写记录」', async ({ page }) => {
     await loginAsAdminAndGoToDetail(page, sessionId)
-    await expect(page.locator('.admin-session-detail-empty')).toContainText('暂无转写记录')
+    await page.getByRole('tab', { name: '原始数据' }).click()
+    await expect(page.getByText('暂无转写记录')).toBeVisible()
   })
 
   test('C-2: 点击「新增转写」弹出 dialog', async ({ page }) => {
     await loginAsAdminAndGoToDetail(page, sessionId)
+    await page.getByRole('tab', { name: '原始数据' }).click()
     await page.getByRole('button', { name: '新增转写' }).click()
     await expect(page.getByRole('dialog')).toBeVisible()
     await expect(page.getByLabel('内容')).toBeVisible()
@@ -213,6 +236,7 @@ test.describe.serial('AdminChatSessionDetail - 转写管理', () => {
 
   test('C-3: 填写并保存新增转写，转写列表显示新记录', async ({ page }) => {
     await loginAsAdminAndGoToDetail(page, sessionId)
+    await page.getByRole('tab', { name: '原始数据' }).click()
     await page.getByRole('button', { name: '新增转写' }).click()
 
     const addDialog = page.getByRole('dialog', { name: '新增转写' })
@@ -234,11 +258,14 @@ test.describe.serial('AdminChatSessionDetail - 转写管理', () => {
     expect(response.ok()).toBeTruthy()
 
     await expect(page.locator('.el-table__row').first()).toBeVisible()
-    await expect(page.getByText('C3新增转写文本')).toBeVisible()
+    await expect(
+      page.locator('.el-table').getByText('C3新增转写文本'),
+    ).toBeVisible()
   })
 
   test('C-4: 点击「编辑」弹出编辑转写 dialog，修改后保存', async ({ page }) => {
     await loginAsAdminAndGoToDetail(page, sessionId)
+    await page.getByRole('tab', { name: '原始数据' }).click()
 
     await page.locator('.el-table__row').first().getByRole('button', { name: '编辑' }).click()
     const editDialog = page.getByRole('dialog', { name: '编辑转写' })
@@ -255,11 +282,14 @@ test.describe.serial('AdminChatSessionDetail - 转写管理', () => {
     ])
     expect(patchRes.ok()).toBeTruthy()
 
-    await expect(page.getByText('C4修改后的转写文本')).toBeVisible()
+    await expect(
+      page.locator('.el-table').getByText('C4修改后的转写文本'),
+    ).toBeVisible()
   })
 
   test('C-5: is_edited 标签在编辑后显示「已编辑」', async ({ page }) => {
     await loginAsAdminAndGoToDetail(page, sessionId)
+    await page.getByRole('tab', { name: '原始数据' }).click()
     await expect(page.locator('.el-table__row').first().getByText('已编辑')).toBeVisible()
   })
 
@@ -267,6 +297,7 @@ test.describe.serial('AdminChatSessionDetail - 转写管理', () => {
     // 先通过 API 再加一条，保证有记录可批量删
     transcriptId = await addTranscript(sessionId, groupId, '批量说话人', '批量删除文本')
     await loginAsAdminAndGoToDetail(page, sessionId)
+    await page.getByRole('tab', { name: '原始数据' }).click()
 
     await page.locator('.el-table__row').filter({ hasText: '批量删除文本' }).locator('.el-checkbox').click()
     await expect(page.getByRole('button', { name: /批量删除/ })).not.toBeDisabled()
@@ -287,19 +318,23 @@ test.describe.serial('AdminChatSessionDetail - 转写管理', () => {
 
   test('C-7: 点击单条「删除」弹出确认并删除', async ({ page }) => {
     await loginAsAdminAndGoToDetail(page, sessionId)
+    await page.getByRole('tab', { name: '原始数据' }).click()
+    const transcriptCard = page.locator('.raw-grid .el-card').first()
+    const transcriptRows = transcriptCard.locator('.el-table__row')
+    const transcriptEmpty = transcriptCard.getByText('暂无转写记录')
     // 等数据加载完（表格行或空态至少一个可见）
     await expect(
-      page.locator('.el-table__row').first().or(page.locator('.admin-session-detail-empty')),
+      transcriptRows.first().or(transcriptEmpty),
     ).toBeVisible()
-    const rowCount = await page.locator('.el-table__row').count()
+    const rowCount = await transcriptRows.count()
 
     if (rowCount > 0) {
-      await page.locator('.el-table__row').first().getByRole('button', { name: '删除' }).click()
+      await transcriptRows.first().getByRole('button', { name: '删除' }).click()
       await page.locator('.el-message-box').getByRole('button', { name: '删除' }).click()
-      await expect(page.locator('.el-table__row')).toHaveCount(rowCount - 1)
+      await expect(transcriptRows).toHaveCount(rowCount - 1)
     } else {
       // 若已无记录，直接验证空态
-      await expect(page.locator('.admin-session-detail-empty')).toBeVisible()
+      await expect(transcriptEmpty).toBeVisible()
     }
   })
 })
@@ -321,16 +356,52 @@ test.describe.serial('AdminChatSessionDetail - 删除会话', () => {
 
   test('D-1: 点击「删除会话」弹出确认 dialog', async ({ page }) => {
     await loginAsAdminAndGoToDetail(page, sessionId)
-    await page.getByRole('button', { name: '删除会话' }).click()
+    await page.getByRole('button', { name: '删除' }).click()
     await expect(page.getByRole('dialog')).toBeVisible()
   })
 
   test('D-2: 确认删除后跳回会话列表', async ({ page }) => {
     await loginAsAdminAndGoToDetail(page, sessionId)
-    await page.getByRole('button', { name: '删除会话' }).click()
+    await page.getByRole('button', { name: '删除' }).click()
     await page.locator('.el-message-box').getByRole('button', { name: '删除' }).click()
 
     await expect(page).toHaveURL(/\/admin\/chat-sessions$/)
+  })
+})
+
+test.describe('AdminChatSessionDetail - 新布局', () => {
+  test('F-1: 顶部显示实时状态卡和三个 Tab', async ({ page }) => {
+    const leader = await registerAndLogin('f1')
+    const groupId = await createGroup(leader.accessToken, `Admin-SD-F1群-${Date.now()}`)
+    const sessionId = await createSession(leader.accessToken, groupId, `F1布局测试-${Date.now()}`)
+
+    await loginAsAdminAndGoToDetail(page, sessionId)
+
+    await expect(page.getByText('实时状态')).toBeVisible()
+    await expect(page.getByRole('tab', { name: '讨论实录' })).toBeVisible()
+    await expect(page.getByRole('tab', { name: 'AI 分析' })).toBeVisible()
+    await expect(page.getByRole('tab', { name: '原始数据' })).toBeVisible()
+  })
+
+  test('F-2: 讨论实录 Tab 中显示嵌入的 AI 建议卡片', async ({ page }) => {
+    const leader = await registerAndLogin('f2-leader')
+    const member = await registerAndLogin('f2-member')
+    const groupId = await createGroup(leader.accessToken, `Admin-SD-F2群-${Date.now()}`)
+    const joinRes = await fetch(`${API_BASE}/api/groups/${groupId}/join`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${member.accessToken}` },
+    })
+    if (!joinRes.ok) throw new Error(`加入群组失败: ${await joinRes.text()}`)
+    const sessionId = await createSession(leader.accessToken, groupId, `F2实录测试-${Date.now()}`)
+    await addTranscript(sessionId, groupId, '张三', '先聊一下成本')
+    await addPushLog(sessionId, member.userId, '建议你主动提出风险与成本优先级')
+
+    await loginAsAdminAndGoToDetail(page, sessionId)
+    await page.getByRole('tab', { name: '讨论实录' }).click()
+
+    await expect(page.locator('.timeline-bubble--transcript')).toContainText('先聊一下成本')
+    await expect(page.locator('.timeline-bubble--push')).toContainText('AI 建议')
+    await expect(page.locator('.timeline-bubble--push')).toContainText('建议你主动提出风险与成本优先级')
   })
 })
 

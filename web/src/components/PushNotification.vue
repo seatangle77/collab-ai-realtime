@@ -88,13 +88,19 @@ watch(
   font-size: 14px;
   line-height: 1.5;
   text-align: left;
-  pointer-events: auto;
+  pointer-events: none;
   backdrop-filter: blur(6px);
   border: 1px solid #374151;
   box-shadow: 0 12px 24px rgba(0, 0, 0, 0.25);
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.push-title,
+.push-content,
+.push-close-btn {
+  pointer-events: auto;
 }
 
 .push-title {

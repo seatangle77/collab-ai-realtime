@@ -127,6 +127,62 @@ async function injectFakeMicrophone(page: Page): Promise<void> {
   })
 }
 
+async function setupFakeMediaRecorder(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    // @ts-expect-error override in test environment
+    window.navigator.mediaDevices = window.navigator.mediaDevices || ({} as MediaDevices)
+    // @ts-expect-error test polyfill
+    window.navigator.mediaDevices.getUserMedia = async () => {
+      return {
+        getTracks() {
+          return [
+            {
+              stop() {
+                // no-op for tests
+              },
+            },
+          ]
+        },
+      } as unknown as MediaStream
+    }
+
+    class FakeMediaRecorder {
+      stream: MediaStream
+      ondataavailable: ((event: BlobEvent) => void) | null = null
+      onstop: (() => void) | null = null
+      timer: number | null = null
+
+      constructor(stream: MediaStream) {
+        this.stream = stream
+      }
+
+      start(timeslice?: number) {
+        const emitChunk = () => {
+          const blob = new Blob(['fake-audio'], { type: 'audio/webm' })
+          const event = { data: blob } as BlobEvent
+          this.ondataavailable?.(event)
+        }
+
+        emitChunk()
+        if (typeof timeslice === 'number' && timeslice > 0) {
+          this.timer = window.setInterval(emitChunk, timeslice)
+        }
+      }
+
+      stop() {
+        if (this.timer != null) {
+          window.clearInterval(this.timer)
+          this.timer = null
+        }
+        this.onstop?.()
+      }
+    }
+
+    // @ts-expect-error assign polyfill
+    window.MediaRecorder = FakeMediaRecorder as any
+  })
+}
+
 // ════════════════════════════════════════════════════════════════
 // E. WS 连接与状态
 // ════════════════════════════════════════════════════════════════
@@ -191,7 +247,7 @@ test.describe('E. WS 连接与状态', () => {
     await addTranscriptAdmin(sessionId, groupId, '说话人B', 'E37第二句')
 
     await expect(
-      page.locator('.app-session-detail-transcript-item, [data-testid="transcript-item"]')
+      page.locator('.app-session-detail-transcript-group')
     ).toHaveCount(2, { timeout: 10000 })
   })
 })
@@ -208,6 +264,8 @@ test.describe('F. 录音与音频发送', () => {
     const sessionId = await createSession(user.token, groupId)
     await startSession(user.token, sessionId)
 
+    await setupFakeMediaRecorder(page)
+
     // 监听 WS 消息（须在 goto 前注册，否则捕获不到已建立的连接）
     const wsMessages: string[] = []
     page.on('websocket', ws => {
@@ -216,9 +274,6 @@ test.describe('F. 录音与音频发送', () => {
       })
     })
 
-    // 不使用 injectFakeMicrophone：Chromium --use-fake-device-for-media-stream flag
-    // 已提供真实 fake audio device，addInitScript 里的 AudioContext 会处于 suspended
-    // 状态导致 MediaRecorder 录到空 blob
     await loginViaUI(page, user)
     await page.goto(`/app/sessions/${sessionId}`)
 
@@ -228,12 +283,12 @@ test.describe('F. 录音与音频发送', () => {
     await expect(recordBtn).toBeEnabled({ timeout: 10000 })
 
     await recordBtn.click()
-    await page.waitForTimeout(3000)
 
-    const hasAudioChunk = wsMessages.some(m => {
-      try { return JSON.parse(m)?.type === 'audio_chunk' } catch { return false }
-    })
-    expect(hasAudioChunk).toBeTruthy()
+    await expect.poll(() => {
+      return wsMessages.some(m => {
+        try { return JSON.parse(m)?.type === 'audio_chunk' } catch { return false }
+      })
+    }, { timeout: 10000 }).toBeTruthy()
   })
 
   test('F-39: 停止录音 → audio_chunk 不再发送', async ({ page }) => {
@@ -311,7 +366,7 @@ test.describe('G. 转写展示', () => {
     await page.goto(`/app/sessions/${sessionId}`)
 
     await expect(
-      page.locator('.app-session-detail-transcript-speaker, [data-testid="transcript-speaker"]').first()
+      page.locator('.app-session-detail-speaker-name').first()
     ).toContainText('张三', { timeout: 15000 })
     await expect(
       page.locator('.app-session-detail-transcript-text, [data-testid="transcript-text"]').first()
@@ -330,7 +385,7 @@ test.describe('G. 转写展示', () => {
     await page.goto(`/app/sessions/${sessionId}`)
 
     const speakerEl = page.locator(
-      '.app-session-detail-transcript-speaker, [data-testid="transcript-speaker"]'
+      '.app-session-detail-speaker-name'
     ).first()
     await expect(speakerEl).toBeVisible({ timeout: 15000 })
 

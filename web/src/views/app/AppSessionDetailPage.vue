@@ -6,6 +6,8 @@ import { App as CapApp } from '@capacitor/app'
 import { useAudioRecorder } from '../../composables/useAudioRecorder'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { MoreFilled } from '@element-plus/icons-vue'
+import AppEmptyState from '../../components/AppEmptyState.vue'
 import {
   type AppChatSession,
   type AppTranscript,
@@ -18,7 +20,6 @@ import {
   endSessionBeacon,
 } from '../../api/appSessions'
 import { listMyGroups } from '../../api/appGroups'
-import { formatDateTimeToCST } from '../../utils/datetime'
 import { extractErrorMessage } from '../../utils/error'
 import PushNotification from '../../components/PushNotification.vue'
 import InfoGapButtons, { type InfoGapButton } from '../../components/InfoGapButtons.vue'
@@ -48,28 +49,15 @@ const transcriptsLoading = ref(false)
 const error = ref('')
 /** 里程碑 3/6：WS 状态 + 指数退避重连 */
 const wsStatus = ref<'connecting' | 'connected' | 'reconnecting' | 'disconnected'>('disconnected')
-const wsErrorMessage = ref('')
-const lastPongAt = ref<number | null>(null)
 const reconnectAttempt = ref(0)
 const pendingRecordingStart = ref(false)
-const metaExpanded = ref(false)
-const { onChunk, startRecording, stopRecording } = useAudioRecorder()
+const { isRecording, onChunk, startRecording, stopRecording } = useAudioRecorder()
 const transcriptsListEl = ref<HTMLElement | null>(null)
-
-interface DiscussionSummaryItem {
-  id: string
-  session_id: string
-  version: number
-  content: string
-  analysis_run_id: string
-  window_start: string
-  window_end: string
-  created_at: string
-}
 
 interface PushLogItem {
   id: string
   session_id: string
+  target_user_id?: string | null
   state_id?: string | null
   analysis_run_id?: string | null
   analysis_window_start?: string | null
@@ -81,70 +69,15 @@ interface PushLogItem {
   delivered_at?: string | null
 }
 
-interface AnalysisClockItem {
-  key: string
-  label: string
-  secondsLeft: number
-}
-
-interface AnalysisRunCard {
-  id: string
-  kind: 'summary_run' | 'reasoning_run'
-  title: string
-  scheduledAt: string
-  producedAt?: string
-  windowStart: string
-  windowEnd: string
-  summaryContent?: string
-  summaryVersion?: number
-  pushes: string[]
-  keywords: string[]
-}
-
 // ── 推送通知 ──────────────────────────────────────────────────────────────────
 const pushContent = ref('')
 const pushVisible = ref(false)
-const recentPushes = ref<Array<{ content: string; at: number }>>([])
 
 function showPushNotification(content: string, triggeredAt?: string | null) {
   pushContent.value = content
-  const fallbackTs = Date.now()
-  const parsed = triggeredAt ? new Date(triggeredAt).getTime() : NaN
-  recentPushes.value = [{ content, at: Number.isNaN(parsed) ? fallbackTs : parsed }, ...recentPushes.value].slice(0, 5)
   pushVisible.value = false
   // 强制触发 watch（即使上一条还没消失也能重新触发）
   requestAnimationFrame(() => { pushVisible.value = true })
-}
-
-function pushTimeLabel(ts: number): string {
-  return new Date(ts).toLocaleTimeString('zh-CN', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  })
-}
-
-// ── AI 分析时钟 ───────────────────────────────────────────────────────────────
-const SILENCE_INTERVAL_S = 30
-const SUMMARY_FIRST_OFFSET_S = 105
-const REASONING_INTERVAL_S = 120
-const clockNowMs = ref(Date.now())
-let analysisClockTimer: ReturnType<typeof setInterval> | null = null
-
-function startAnalysisClock() {
-  stopAnalysisClock()
-  clockNowMs.value = Date.now()
-  analysisClockTimer = setInterval(() => {
-    clockNowMs.value = Date.now()
-  }, 1000)
-}
-
-function stopAnalysisClock() {
-  if (analysisClockTimer !== null) {
-    clearInterval(analysisClockTimer)
-    analysisClockTimer = null
-  }
 }
 
 function parseMs(value: string | undefined | null): number | null {
@@ -153,46 +86,10 @@ function parseMs(value: string | undefined | null): number | null {
   return Number.isNaN(ts) ? null : ts
 }
 
-function secondsUntilNextAligned(sessionStartMs: number | null, firstOffsetS: number, intervalS: number): number {
-  if (sessionStartMs == null) return intervalS
-  const nowMs = clockNowMs.value
-  const firstAt = sessionStartMs + firstOffsetS * 1000
-  if (nowMs <= firstAt) {
-    return Math.max(0, Math.ceil((firstAt - nowMs) / 1000))
-  }
-  const elapsed = nowMs - firstAt
-  const remainder = elapsed % (intervalS * 1000)
-  const leftMs = remainder === 0 ? 0 : intervalS * 1000 - remainder
-  return Math.max(0, Math.ceil(leftMs / 1000))
-}
-
-const analysisClocks = computed<AnalysisClockItem[]>(() => {
-  const sessionStartMs = parseMs(session.value?.started_at ?? null)
-  return [
-    {
-      key: 'silence',
-      label: '群组沉默分析',
-      secondsLeft: secondsUntilNextAligned(sessionStartMs, SILENCE_INTERVAL_S, SILENCE_INTERVAL_S),
-    },
-    {
-      key: 'summary',
-      label: '摘要分析',
-      secondsLeft: secondsUntilNextAligned(sessionStartMs, SUMMARY_FIRST_OFFSET_S, REASONING_INTERVAL_S),
-    },
-    {
-      key: 'reasoning',
-      label: '推理提示分析',
-      secondsLeft: secondsUntilNextAligned(sessionStartMs, REASONING_INTERVAL_S, REASONING_INTERVAL_S),
-    },
-  ]
-})
-
 // ── 讨论摘要 ──────────────────────────────────────────────────────────────────
 const currentSummary = ref('')
 const summaryVersion = ref(0)
-const summaryHistory = ref<DiscussionSummaryItem[]>([])
 const pushLogs = ref<PushLogItem[]>([])
-const agentTimelineRuns = ref<AnalysisRunCard[]>([])
 
 async function fetchLatestSummary() {
   try {
@@ -208,37 +105,18 @@ async function fetchLatestSummary() {
   }
 }
 
-async function fetchSummaryHistory() {
-  try {
-    const data = await appHttp.get<DiscussionSummaryItem[]>(
-      `/api/sessions/${sessionId}/summaries`,
-    )
-    summaryHistory.value = data
-    rebuildAgentTimeline()
-  } catch {
-    summaryHistory.value = []
-    rebuildAgentTimeline()
-  }
-}
-
 async function fetchPushLogs() {
   try {
     const data = await appHttp.get<PushLogItem[]>(
       `/api/sessions/${sessionId}/push-logs`,
     )
-    pushLogs.value = data
-    recentPushes.value = data
-      .filter((item) => item.push_content)
-      .map((item) => ({
-        content: item.push_content ?? '',
-        at: new Date(item.triggered_at).getTime(),
-      }))
-      .filter((item) => !Number.isNaN(item.at))
-      .slice(0, 5)
-    rebuildAgentTimeline()
+    pushLogs.value = data.filter((item) => {
+      if (!item.push_content) return false
+      if (!currentUser.value?.id) return true
+      return !item.target_user_id || item.target_user_id === currentUser.value.id
+    })
   } catch {
     pushLogs.value = []
-    rebuildAgentTimeline()
   }
 }
 
@@ -251,7 +129,6 @@ async function fetchInfoGapButtons() {
       `/api/sessions/${sessionId}/info-gap/buttons`,
     )
     infoGapButtons.value = data
-    rebuildAgentTimeline()
   } catch {
     // 静默失败，不影响主流程
   }
@@ -259,142 +136,31 @@ async function fetchInfoGapButtons() {
 
 function handleInfoGapButtonClicked(buttonId: string) {
   infoGapButtons.value = infoGapButtons.value.filter((b) => b.id !== buttonId)
-  rebuildAgentTimeline()
-}
-
-function timelineSortValue(value: string | undefined): number {
-  if (!value) return 0
-  const t = new Date(value).getTime()
-  return Number.isNaN(t) ? 0 : t
-}
-
-function timelineTimeLabel(value: string | undefined): string {
-  return formatDateTimeToCST(value ?? null)
-}
-
-const timelineLegend = '计划开始 = 这一轮按时钟应触发的时间；覆盖窗口 = 这一轮实际分析的讨论区间；实际产出 = 摘要或建议真正写出/发出的时间。'
-
-function timelineWindowLabel(windowStart: string | undefined, windowEnd: string | undefined): string {
-  if (!windowStart || !windowEnd) return '-'
-  return `${formatDateTimeToCST(windowStart)} - ${formatDateTimeToCST(windowEnd)}`
-}
-
-function upsertSummaryEvent(summary: DiscussionSummaryItem) {
-  const idx = summaryHistory.value.findIndex((item) => item.id === summary.id)
-  if (idx >= 0) {
-    summaryHistory.value[idx] = summary
-  } else {
-    summaryHistory.value = [summary, ...summaryHistory.value]
-  }
-  rebuildAgentTimeline()
 }
 
 function upsertPushEvent(push: PushLogItem) {
+  if (!push.push_content) return
+  if (currentUser.value?.id && push.target_user_id && push.target_user_id !== currentUser.value.id) {
+    return
+  }
   const idx = pushLogs.value.findIndex((item) => item.id === push.id)
   if (idx >= 0) {
     pushLogs.value[idx] = push
   } else {
     pushLogs.value = [push, ...pushLogs.value]
   }
-  rebuildAgentTimeline()
-}
-
-function buildSummaryRunId(windowStart: string): string {
-  return `summary:${sessionId}:${windowStart}`
-}
-
-function buildReasoningRunId(windowStart: string): string {
-  return `reasoning:${sessionId}:${windowStart}`
-}
-
-function addSecondsToIso(value: string, seconds: number): string {
-  const baseMs = parseMs(value)
-  if (baseMs == null) return value
-  return new Date(baseMs + seconds * 1000).toISOString()
-}
-
-function rebuildAgentTimeline() {
-  const runs: AnalysisRunCard[] = []
-
-  for (const summary of summaryHistory.value) {
-    runs.push({
-      id: summary.analysis_run_id || buildSummaryRunId(summary.window_start),
-      kind: 'summary_run',
-      title: '摘要分析',
-      scheduledAt: summary.window_end,
-      producedAt: summary.created_at,
-      windowStart: summary.window_start,
-      windowEnd: summary.window_end,
-      summaryContent: summary.content,
-      summaryVersion: summary.version,
-      pushes: [],
-      keywords: [],
-    })
-  }
-
-  const reasoningRunMap = new Map<string, AnalysisRunCard>()
-  for (const push of pushLogs.value) {
-    const windowStart = push.analysis_window_start
-    if (!windowStart) continue
-    const runId = push.analysis_run_id || buildReasoningRunId(windowStart)
-    const run = reasoningRunMap.get(runId) ?? {
-      id: runId,
-      kind: 'reasoning_run',
-      title: '推理提示分析',
-      scheduledAt: addSecondsToIso(windowStart, REASONING_INTERVAL_S),
-      producedAt: push.triggered_at,
-      windowStart,
-      windowEnd: addSecondsToIso(windowStart, REASONING_INTERVAL_S),
-      pushes: [],
-      keywords: [],
-    }
-    if (push.push_content) run.pushes.push(push.push_content)
-    if (!run.producedAt || timelineSortValue(push.triggered_at) > timelineSortValue(run.producedAt)) {
-      run.producedAt = push.triggered_at
-    }
-    reasoningRunMap.set(runId, run)
-  }
-
-  for (const button of infoGapButtons.value) {
-    const windowStart = button.window_start
-    if (!windowStart || !button.created_at) continue
-    const runId = button.analysis_run_id || buildReasoningRunId(windowStart)
-    const run = reasoningRunMap.get(runId) ?? {
-      id: runId,
-      kind: 'reasoning_run',
-      title: '推理提示分析',
-      scheduledAt: addSecondsToIso(windowStart, REASONING_INTERVAL_S),
-      producedAt: button.created_at,
-      windowStart,
-      windowEnd: addSecondsToIso(windowStart, REASONING_INTERVAL_S),
-      pushes: [],
-      keywords: [],
-    }
-    if (!run.keywords.includes(button.keyword)) {
-      run.keywords.push(button.keyword)
-    }
-    if (!run.producedAt || timelineSortValue(button.created_at) > timelineSortValue(run.producedAt)) {
-      run.producedAt = button.created_at
-    }
-    reasoningRunMap.set(runId, run)
-  }
-
-  runs.push(...Array.from(reasoningRunMap.values()))
-  agentTimelineRuns.value = runs.sort((a, b) => timelineSortValue(b.scheduledAt) - timelineSortValue(a.scheduledAt))
 }
 
 const wsStatusLabel = computed(() => {
   switch (wsStatus.value) {
     case 'connecting':
-      return '连接中'
+      return '正在连接...'
     case 'connected':
-      return '已连接'
+      return ''
     case 'reconnecting':
-      return reconnectAttempt.value > 0
-        ? `连接中断，正在重连（第 ${reconnectAttempt.value} 次）`
-        : '连接中断（待恢复）'
+      return '网络不稳定，正在恢复...'
     case 'disconnected':
-      return '已断开'
+      return '连接已断开'
     default:
       return ''
   }
@@ -425,6 +191,18 @@ const launching = ref(false)
 const canStart = computed(() => session.value?.status === 'not_started' && !launching.value)
 const canCancel = computed(() => session.value?.status === 'not_started')
 const canEnd = computed(() => session.value?.status === 'ongoing')
+const canStartRecording = computed(() => {
+  return isHost.value && session.value?.status === 'ongoing' && wsStatus.value === 'connected' && !isRecording.value
+})
+const canStopRecording = computed(() => {
+  return isHost.value && session.value?.status === 'ongoing' && isRecording.value
+})
+const summaryExpanded = ref(false)
+const hasSummary = computed(() => !!currentSummary.value)
+const summaryToggleLabel = computed(() => (summaryExpanded.value ? '收起' : '展开'))
+const shouldShowWsStatus = computed(() => {
+  return session.value?.status === 'ongoing' && wsStatus.value !== 'connected'
+})
 
 const isHost = computed(() => {
   if (!session.value?.created_by) return true // 老数据兼容
@@ -472,7 +250,6 @@ async function loadData() {
     ])
     if (sessionResult.status === 'fulfilled' && sessionResult.value) {
       session.value = sessionResult.value
-      rebuildAgentTimeline()
     } else {
       error.value = '会话不存在或无权访问'
     }
@@ -518,7 +295,6 @@ async function handleLaunchSession() {
     try {
       const updated = await startSession(sessionId)
       session.value = updated
-      rebuildAgentTimeline()
     } catch (err) {
       ElMessage.error(extractErrorMessage(err))
       return
@@ -528,7 +304,6 @@ async function handleLaunchSession() {
     pendingRecordingStart.value = true
     wsIntentionalClose = false
     openWebSocket()
-    startAnalysisClock()
   } finally {
     launching.value = false
   }
@@ -568,15 +343,32 @@ async function handleEnd() {
   try {
     // 先停止录音、关闭 WS
     stopRecording()
-    stopAnalysisClock()
     wsIntentionalClose = true
     ws?.close(1000, 'host_ended')
     // 再通知后端
     const updated = await endSession(sessionId)
     session.value = updated
-    rebuildAgentTimeline()
     ElMessage.success('会话已结束')
     await loadTranscripts()
+  } catch (err) {
+    ElMessage.error(extractErrorMessage(err))
+  }
+}
+
+async function handleStartRecording() {
+  if (!canStartRecording.value) return
+  chunkSeq = 0
+  try {
+    await startRecording()
+  } catch (err) {
+    ElMessage.error(extractErrorMessage(err))
+  }
+}
+
+async function handleStopRecording() {
+  if (!canStopRecording.value) return
+  try {
+    await stopRecording()
   } catch (err) {
     ElMessage.error(extractErrorMessage(err))
   }
@@ -599,7 +391,6 @@ async function handleEditTitle() {
   try {
     const updated = await updateSession(sessionId, newTitle)
     session.value = updated
-    rebuildAgentTimeline()
     ElMessage.success('标题已更新')
   } catch (err) {
     ElMessage.error(extractErrorMessage(err))
@@ -622,9 +413,26 @@ function handleBeforeUnload() {
 
 function handleManualReconnect() {
   reconnectAttempt.value = 0
-  wsErrorMessage.value = ''
   wsIntentionalClose = false
   openWebSocket()
+}
+
+function toggleSummaryExpanded() {
+  summaryExpanded.value = !summaryExpanded.value
+}
+
+function handleSessionAction(command: string) {
+  if (command === 'edit') {
+    void handleEditTitle()
+    return
+  }
+  if (command === 'cancel') {
+    void handleCancel()
+    return
+  }
+  if (command === 'leave') {
+    handleLeave()
+  }
 }
 
 function buildWsUrl(id: string): string {
@@ -683,7 +491,7 @@ async function sendAudioChunk(blob: Blob) {
 // 注册音频分块回调，每块数据直接发送 WS
 onChunk((blob) => {
   void sendAudioChunk(blob).catch((err) => {
-    wsErrorMessage.value = extractErrorMessage(err)
+    console.warn('sendAudioChunk failed:', err)
   })
 })
 
@@ -705,25 +513,21 @@ function handleWsMessage(event: MessageEvent<string>) {
   try {
     payload = JSON.parse(event.data)
   } catch {
-    wsErrorMessage.value = '收到非法消息格式'
     return
   }
   if (typeof payload !== 'object' || payload === null) {
-    wsErrorMessage.value = '消息格式无效'
     return
   }
   const p = payload as { type?: unknown; data?: unknown }
   const msgType = p.type
   const data = p.data
   if (typeof msgType !== 'string' || typeof data !== 'object' || data === null) {
-    wsErrorMessage.value = '消息缺少 type 或 data'
     return
   }
   if (msgType === 'connected') {
     reconnectAttempt.value = 0
     clearReconnectTimer()
     wsStatus.value = 'connected'
-    wsErrorMessage.value = ''
     void refetchTranscriptsAndMerge()
     if (pendingRecordingStart.value) {
       pendingRecordingStart.value = false
@@ -735,12 +539,9 @@ function handleWsMessage(event: MessageEvent<string>) {
     return
   }
   if (msgType === 'pong') {
-    lastPongAt.value = Date.now()
     return
   }
   if (msgType === 'error') {
-    const d = data as { message?: string }
-    wsErrorMessage.value = d?.message || 'WebSocket 错误'
     return
   }
   if (msgType === 'audio_chunk_ack') {
@@ -828,7 +629,6 @@ function handleWsMessage(event: MessageEvent<string>) {
       session.value = { ...session.value, status: 'ended' }
     }
     stopRecording()
-    stopAnalysisClock()
     wsIntentionalClose = true
     ws?.close(1000, 'session_ended')
     void loadTranscripts()
@@ -854,18 +654,6 @@ function handleWsMessage(event: MessageEvent<string>) {
     if (typeof d.content === 'string' && d.content) {
       currentSummary.value = d.content
       summaryVersion.value = d.version ?? summaryVersion.value
-      if (d.id && d.created_at && d.window_start && d.window_end && typeof d.version === 'number') {
-        upsertSummaryEvent({
-          id: d.id,
-          session_id: sessionId,
-          version: d.version,
-          content: d.content,
-          analysis_run_id: d.analysis_run_id ?? buildSummaryRunId(d.window_start),
-          window_start: d.window_start,
-          window_end: d.window_end,
-          created_at: d.created_at,
-        })
-      }
     }
     return
   }
@@ -877,11 +665,13 @@ function handleWsMessage(event: MessageEvent<string>) {
       analysis_run_id?: string | null
       analysis_window_start?: string | null
     }
-    if (d.content) {
+    const isForCurrentUser = !d.target_user_id || !currentUser.value?.id || d.target_user_id === currentUser.value.id
+    if (d.content && isForCurrentUser) {
       showPushNotification(d.content, d.triggered_at)
       upsertPushEvent({
         id: `live-push-${d.triggered_at ?? Date.now()}-${d.content}`,
         session_id: sessionId,
+        target_user_id: d.target_user_id ?? currentUser.value?.id ?? null,
         state_id: null,
         analysis_run_id: d.analysis_run_id ?? null,
         analysis_window_start: d.analysis_window_start ?? null,
@@ -902,10 +692,25 @@ function handleWsMessage(event: MessageEvent<string>) {
       const existingIds = new Set(infoGapButtons.value.map((b) => b.id))
       const newBtns = d.buttons.filter((b) => !existingIds.has(b.id))
       infoGapButtons.value = [...infoGapButtons.value, ...newBtns]
-      rebuildAgentTimeline()
     }
     return
   }
+}
+
+function attachTestMessageInjector() {
+  if (typeof window === 'undefined') return
+  ;(window as any).__appSessionDetailInjectWsMessage = (message: unknown) => {
+    try {
+      handleWsMessage(new MessageEvent('message', { data: JSON.stringify(message) }))
+    } catch {
+      // Test hook only; ignore malformed payloads.
+    }
+  }
+}
+
+function detachTestMessageInjector() {
+  if (typeof window === 'undefined') return
+  delete (window as any).__appSessionDetailInjectWsMessage
 }
 
 function speakerInitial(speaker: string | null | undefined): string {
@@ -925,6 +730,17 @@ function speakerKey(t: AppTranscript): string {
 
 function speakerDisplayLabel(t: AppTranscript): string {
   return (t.speaker_name || t.speaker || '未知说话人').trim() || '未知说话人'
+}
+
+function pushDisplayTime(value: string | null | undefined): string {
+  const parsed = parseMs(value)
+  if (parsed == null) return ''
+  return new Date(parsed).toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
 }
 
 const AVATAR_CLASS_BY_HASH = [
@@ -976,6 +792,20 @@ interface TranscriptMessageGroup {
   messages: AppTranscript[]
 }
 
+interface TranscriptGroupTimelineItem {
+  type: 'transcript_group'
+  key: string
+  group: TranscriptMessageGroup
+}
+
+interface SuggestionTimelineItem {
+  type: 'push'
+  key: string
+  push: PushLogItem
+}
+
+type TranscriptTimelineItem = TranscriptGroupTimelineItem | SuggestionTimelineItem
+
 interface LiveTranscriptSegment {
   segment_key: string
   text: string
@@ -983,32 +813,87 @@ interface LiveTranscriptSegment {
   status: 'live' | 'pending_final'
 }
 
-function buildTranscriptGroups(items: AppTranscript[]): TranscriptMessageGroup[] {
-  const sorted = [...items].sort((a, b) => {
-    const sa = String(a.start ?? '')
-    const sb = String(b.start ?? '')
-    return sa.localeCompare(sb)
-  })
-  const groups: TranscriptMessageGroup[] = []
-  for (const t of sorted) {
-    const key = speakerKey(t)
-    const prev = groups[groups.length - 1]
-    if (prev && prev.groupKey === key) {
-      prev.messages.push(t)
-    } else {
-      groups.push({
-        groupKey: key,
-        speakerLabel: speakerDisplayLabel(t),
-        initial: speakerInitial(t.speaker_name || t.speaker),
-        avatarClass: avatarClassForKey(key),
-        messages: [t],
-      })
-    }
-  }
-  return groups
+function transcriptSortTimestamp(item: AppTranscript): number {
+  const createdAt = parseMs(item.created_at)
+  if (createdAt != null) return createdAt
+  const startTime = parseMs(String(item.start ?? ''))
+  if (startTime != null) return startTime
+  return 0
 }
 
-const groupedTranscripts = computed(() => buildTranscriptGroups(transcripts.value))
+function pushSortTimestamp(item: PushLogItem): number {
+  return parseMs(item.triggered_at) ?? 0
+}
+
+function buildTranscriptItems(transcriptItems: AppTranscript[], pushItems: PushLogItem[]): TranscriptTimelineItem[] {
+  const events = [
+    ...transcriptItems.map((item, index) => ({
+      type: 'transcript' as const,
+      key: item.transcript_id || `transcript-${index}`,
+      at: transcriptSortTimestamp(item),
+      item,
+      order: index,
+    })),
+    ...pushItems.map((item, index) => ({
+      type: 'push' as const,
+      key: item.id || `push-${index}`,
+      at: pushSortTimestamp(item),
+      item,
+      order: index,
+    })),
+  ].sort((a, b) => {
+    if (a.at !== b.at) return a.at - b.at
+    if (a.type !== b.type) return a.type === 'transcript' ? -1 : 1
+    return a.order - b.order
+  })
+
+  const result: TranscriptTimelineItem[] = []
+  let currentGroup: TranscriptMessageGroup | null = null
+  let groupIndex = 0
+
+  const flushGroup = () => {
+    if (!currentGroup) return
+    result.push({
+      type: 'transcript_group',
+      key: `group-${currentGroup.groupKey}-${groupIndex}`,
+      group: currentGroup,
+    })
+    groupIndex += 1
+    currentGroup = null
+  }
+
+  for (const event of events) {
+    if (event.type === 'push') {
+      flushGroup()
+      result.push({
+        type: 'push',
+        key: `push-${event.key}`,
+        push: event.item,
+      })
+      continue
+    }
+
+    const transcript = event.item
+    const key = speakerKey(transcript)
+    if (!currentGroup || currentGroup.groupKey !== key) {
+      flushGroup()
+      currentGroup = {
+        groupKey: key,
+        speakerLabel: speakerDisplayLabel(transcript),
+        initial: speakerInitial(transcript.speaker_name || transcript.speaker),
+        avatarClass: avatarClassForKey(key),
+        messages: [transcript],
+      }
+    } else {
+      currentGroup.messages.push(transcript)
+    }
+  }
+
+  flushGroup()
+  return result
+}
+
+const transcriptItems = computed(() => buildTranscriptItems(transcripts.value, pushLogs.value))
 const liveSegments = ref<Record<string, LiveTranscriptSegment>>({})
 const liveSegmentList = computed(() => Object.values(liveSegments.value))
 
@@ -1020,10 +905,18 @@ function scrollTranscriptsToBottom() {
 }
 
 watch(
-  () => transcripts.value.length,
+  () => transcriptItems.value.length,
   () => {
     scrollTranscriptsToBottom()
   },
+)
+
+watch(
+  () => session.value?.status,
+  (status) => {
+    summaryExpanded.value = status === 'ended'
+  },
+  { immediate: true },
 )
 
 function mergeTranscriptsById(local: AppTranscript[], remote: AppTranscript[]): AppTranscript[] {
@@ -1047,7 +940,7 @@ async function refetchTranscriptsAndMerge() {
     transcripts.value = mergeTranscriptsById(transcripts.value, remote)
     scrollTranscriptsToBottom()
   } catch (err) {
-    wsErrorMessage.value = extractErrorMessage(err)
+    console.warn('refetchTranscriptsAndMerge failed:', err)
   }
 }
 
@@ -1065,7 +958,6 @@ function scheduleReconnect() {
   reconnectAttempt.value += 1
   if (reconnectAttempt.value > MAX_RECONNECT_TRIES) {
     wsStatus.value = 'disconnected'
-    wsErrorMessage.value = '重连失败次数过多，请刷新页面'
     return
   }
 
@@ -1103,9 +995,6 @@ function openWebSocket() {
   }
 
   wsStatus.value = 'connecting'
-  if (reconnectAttempt.value === 0) {
-    wsErrorMessage.value = ''
-  }
 
   const socket = new WebSocket(buildWsUrl(sessionId))
   ws = socket
@@ -1120,7 +1009,6 @@ function openWebSocket() {
   }
   socket.onerror = () => {
     if (unmounted || wsIntentionalClose) return
-    wsErrorMessage.value = '连接发生错误'
   }
   socket.onclose = () => {
     clearPingTimer()
@@ -1139,10 +1027,10 @@ onMounted(async () => {
   unmounted = false
   wsIntentionalClose = false
   reconnectAttempt.value = 0
+  attachTestMessageInjector()
   currentUser.value = loadCurrentUser()
   await loadData()
   await Promise.allSettled([
-    fetchSummaryHistory(),
     fetchPushLogs(),
   ])
   // 仅会话已「进行中」时才自动连接 WS（如刷新页面场景）
@@ -1150,9 +1038,9 @@ onMounted(async () => {
     openWebSocket()
     void fetchInfoGapButtons()
     void fetchLatestSummary()
-    startAnalysisClock()
   } else if (session.value?.status === 'ended') {
     void fetchLatestSummary()
+    void fetchInfoGapButtons()
   }
   window.addEventListener('beforeunload', handleBeforeUnload)
   if (Capacitor.isNativePlatform()) {
@@ -1168,9 +1056,9 @@ onUnmounted(() => {
   window.removeEventListener('beforeunload', handleBeforeUnload)
   appStateListener?.remove()
   appStateListener = null
+  detachTestMessageInjector()
   unmounted = true
   stopRecording()
-  stopAnalysisClock()
   closeWsForUnmount()
   wsStatus.value = 'disconnected'
 })
@@ -1202,23 +1090,8 @@ onUnmounted(() => {
             {{ statusLabel }}
           </el-tag>
         </div>
-        <button
-          type="button"
-          class="app-session-detail-meta-toggle"
-          @click="metaExpanded = !metaExpanded"
-        >
-          详细信息 {{ metaExpanded ? '▴' : '▾' }}
-        </button>
-        <div v-show="metaExpanded" class="app-session-detail-meta">
-          <span>会话 ID：{{ session.id }}</span>
-          <span>创建时间：{{ formatDateTimeToCST(session.created_at) }}</span>
-          <span>最后更新：{{ formatDateTimeToCST(session.last_updated) }}</span>
-          <span v-if="session.started_at">开始时间：{{ formatDateTimeToCST(session.started_at) }}</span>
-          <span v-if="session.ended_at">结束时间：{{ formatDateTimeToCST(session.ended_at) }}</span>
-        </div>
         <div class="app-session-detail-actions">
           <template v-if="isHost">
-            <!-- not_started：发起 + 取消 -->
             <template v-if="session.status === 'not_started'">
               <button
                 type="button"
@@ -1230,140 +1103,131 @@ onUnmounted(() => {
                 <span class="app-session-detail-btn-icon" aria-hidden="true">▶</span>
                 发起
               </button>
-              <button
-                type="button"
-                class="app-session-detail-danger-btn"
-                @click="handleCancel"
-                title="取消会话"
-              >
-                取消会话
-              </button>
+              <el-dropdown trigger="click" @command="handleSessionAction">
+                <button
+                  type="button"
+                  class="app-session-detail-more-btn"
+                  aria-label="更多操作"
+                >
+                  <el-icon :size="18">
+                    <MoreFilled />
+                  </el-icon>
+                </button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="edit">修改标题</el-dropdown-item>
+                    <el-dropdown-item command="cancel" class="app-session-detail-dropdown-danger">
+                      取消会话
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </template>
-            <!-- ongoing：结束 -->
             <template v-else-if="session.status === 'ongoing'">
               <button
                 type="button"
-                class="app-session-detail-danger-btn app-session-detail-icon-btn"
+                class="app-session-detail-danger-btn app-session-detail-icon-btn app-session-detail-danger-btn--primary"
                 @click="handleEnd"
                 title="结束会话"
               >
                 <span class="app-session-detail-btn-icon" aria-hidden="true">⏹</span>
                 结束
               </button>
+              <el-dropdown trigger="click" @command="handleSessionAction">
+                <button
+                  type="button"
+                  class="app-session-detail-more-btn"
+                  aria-label="更多操作"
+                >
+                  <el-icon :size="18">
+                    <MoreFilled />
+                  </el-icon>
+                </button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="edit">修改标题</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </template>
-            <!-- 修改标题（always visible for host when not ended） -->
+          </template>
+          <template v-else>
             <button
-              v-if="session.status !== 'ended'"
               type="button"
               class="app-session-detail-secondary-btn"
-              @click="handleEditTitle"
+              @click="handleLeave"
             >
-              修改标题
+              离开会话
             </button>
           </template>
-          <button
-            v-else
-            type="button"
-            class="app-session-detail-secondary-btn"
-            @click="handleLeave"
-          >
-            离开会话
-          </button>
         </div>
       </div>
 
-      <!-- 信息缺口关键词按钮（会话进行中时显示） -->
-      <InfoGapButtons
-        v-if="session.status === 'ongoing' && infoGapButtons.length > 0"
-        :session-id="sessionId"
-        :buttons="infoGapButtons"
-        @clicked="handleInfoGapButtonClicked"
-      />
-
-      <!-- AI 分析时钟（会话进行中时显示） -->
-      <div v-if="session.status === 'ongoing'" class="app-agent-status-bar">
-        <span class="app-agent-status-dot" aria-hidden="true"></span>
-        <template v-for="(clock, index) in analysisClocks" :key="clock.key">
-          <span v-if="index > 0" class="app-agent-status-sep">&nbsp;·&nbsp;</span>
-          {{ clock.label }} {{ clock.secondsLeft }}s 后
-        </template>
-      </div>
-      <div v-if="session.status === 'ongoing'" class="app-agent-status-note">
-        倒计时按会话开始时间恢复，刷新页面后会继续对齐真实分析时钟。
-      </div>
-
-      <!-- 讨论摘要（有内容时显示） -->
-      <div v-if="currentSummary" class="app-session-summary-panel">
+      <div v-if="hasSummary" class="app-session-summary-panel" :data-expanded="summaryExpanded">
         <div class="app-session-summary-header">
           <span class="app-session-summary-icon" aria-hidden="true">◈</span>
           <span class="app-session-summary-label">讨论摘要</span>
           <span class="app-session-summary-version">v{{ summaryVersion }}</span>
-        </div>
-        <p class="app-session-summary-content">{{ currentSummary }}</p>
-        <p class="app-session-summary-note">这里显示的是最新摘要内容，不代表分析开始时间；具体时间请看下方轮次时间线。</p>
-      </div>
-
-      <div v-if="agentTimelineRuns.length > 0" class="app-agent-timeline-panel">
-        <div class="app-agent-timeline-header">
-          <span class="app-agent-timeline-label">Agent 时间线</span>
-          <span class="app-agent-timeline-sub">按分析轮次展示计划时间、覆盖窗口与实际产出</span>
-        </div>
-        <div class="app-agent-timeline-note">{{ timelineLegend }}</div>
-        <ul class="app-agent-timeline-list">
-          <li
-            v-for="run in agentTimelineRuns"
-            :key="run.id"
-            class="app-agent-timeline-item"
-            :class="`is-${run.kind}`"
+          <button
+            type="button"
+            class="app-session-summary-toggle"
+            @click="toggleSummaryExpanded"
           >
-            <div class="app-agent-timeline-time">{{ timelineTimeLabel(run.scheduledAt) }}</div>
-            <div class="app-agent-timeline-body">
-              <div class="app-agent-timeline-title-row">
-                <span class="app-agent-timeline-title">{{ run.title }}</span>
-                <span v-if="run.kind === 'summary_run' && run.summaryVersion" class="app-agent-timeline-badge">v{{ run.summaryVersion }}</span>
-              </div>
-              <div class="app-agent-timeline-window">
-                计划开始：{{ timelineTimeLabel(run.scheduledAt) }}
-              </div>
-              <div class="app-agent-timeline-window">
-                覆盖窗口：{{ timelineWindowLabel(run.windowStart, run.windowEnd) }}
-              </div>
-              <div v-if="run.producedAt" class="app-agent-timeline-window">
-                实际产出：{{ timelineTimeLabel(run.producedAt) }}
-              </div>
-              <p v-if="run.summaryContent" class="app-agent-timeline-content">{{ run.summaryContent }}</p>
-              <p v-for="push in run.pushes" :key="`${run.id}-${push}`" class="app-agent-timeline-content">{{ push }}</p>
-              <div v-if="run.keywords.length > 0" class="app-agent-timeline-window">
-                信息缺口：{{ run.keywords.join('、') }}
-              </div>
-            </div>
-          </li>
-        </ul>
-      </div>
-
-      <!-- 最近 AI 建议（常驻，避免提示一闪而过） -->
-      <div v-if="recentPushes.length > 0" class="app-ai-suggestions-panel">
-        <div class="app-ai-suggestions-header">
-          <span class="app-ai-suggestions-label">最近 AI 建议</span>
-          <span class="app-ai-suggestions-sub">保留最近 {{ recentPushes.length }} 条</span>
+            {{ summaryToggleLabel }}
+            <span aria-hidden="true">{{ summaryExpanded ? '▴' : '▾' }}</span>
+          </button>
         </div>
-        <ul class="app-ai-suggestions-list">
-          <li
-            v-for="item in recentPushes"
-            :key="`${item.at}-${item.content}`"
-            class="app-ai-suggestions-item"
-          >
-            <span class="app-ai-suggestions-time">{{ pushTimeLabel(item.at) }}</span>
-            <span class="app-ai-suggestions-content">{{ item.content }}</span>
-          </li>
-        </ul>
+        <div v-if="summaryExpanded" class="app-session-summary-body">
+          <p class="app-session-summary-content">{{ currentSummary }}</p>
+          <p class="app-session-summary-note">最新版本，具体轮次见后台</p>
+        </div>
       </div>
 
       <div class="app-session-detail-transcripts">
-        <h3 class="app-session-detail-transcripts-title">
-          讨论实录
-          <span v-if="!isHost" class="app-session-detail-readonly-badge">只读</span>
-        </h3>
+        <div class="app-session-detail-transcripts-header">
+          <h3 class="app-session-detail-transcripts-title">
+            讨论实录
+            <span v-if="!isHost" class="app-session-detail-readonly-badge">只读</span>
+          </h3>
+          <div
+            v-if="shouldShowWsStatus"
+            class="app-session-detail-ws-status"
+            data-testid="ws-status"
+            :class="`is-${wsStatus}`"
+          >
+            <span class="app-session-detail-ws-status-dot" aria-hidden="true"></span>
+            <span>{{ wsStatusLabel }}</span>
+          </div>
+        </div>
+        <div
+          v-if="isHost && session.status === 'ongoing'"
+          class="app-session-detail-recorder-bar"
+        >
+          <button
+            v-if="!isRecording"
+            type="button"
+            class="app-session-detail-primary-btn app-session-detail-icon-btn"
+            :disabled="!canStartRecording"
+            data-testid="record-start"
+            @click="handleStartRecording"
+          >
+            <span class="app-session-detail-btn-icon" aria-hidden="true">●</span>
+            开始录音
+          </button>
+          <button
+            v-else
+            type="button"
+            class="app-session-detail-danger-btn app-session-detail-icon-btn"
+            data-testid="record-stop"
+            @click="handleStopRecording"
+          >
+            <span class="app-session-detail-btn-icon" aria-hidden="true">■</span>
+            停止录音
+          </button>
+          <span class="app-session-detail-recorder-meta">
+            {{ isRecording ? '录音中，音频会实时发送到会话连接。' : '连接成功后可开始录音并实时发送音频。' }}
+          </span>
+        </div>
         <div
           v-if="wsStatus !== 'connected' && session?.status === 'ongoing'"
           class="app-session-detail-ws-banner"
@@ -1389,45 +1253,74 @@ onUnmounted(() => {
 
         <div v-if="transcriptsLoading" class="app-session-detail-loading">正在加载讨论实录...</div>
         <div
-          v-else-if="!transcripts.length && !liveSegmentList.length"
+          v-else-if="!transcriptItems.length && !liveSegmentList.length"
           class="app-session-detail-transcripts-empty"
         >
-          暂无讨论实录
+          <AppEmptyState
+            icon="📝"
+            title="暂无讨论实录"
+            description="会话开始后，转录内容会出现在这里。"
+            compact
+          />
         </div>
         <div v-else ref="transcriptsListEl" class="app-session-detail-transcripts-scroll">
+          <div
+            v-if="session.status === 'ongoing' && infoGapButtons.length > 0"
+            class="app-session-detail-info-gap-sticky"
+          >
+            <div class="app-session-detail-info-gap-head">
+              <span class="app-session-detail-info-gap-icon" aria-hidden="true">💡</span>
+              <span class="app-session-detail-info-gap-label">AI 建议关注：</span>
+            </div>
+            <InfoGapButtons
+              :session-id="sessionId"
+              :buttons="infoGapButtons"
+              @clicked="handleInfoGapButtonClicked"
+            />
+          </div>
           <ul class="app-session-detail-transcripts-list">
             <li
-              v-for="(group, gIdx) in groupedTranscripts"
-              :key="`${group.groupKey}-${gIdx}`"
+              v-for="item in transcriptItems"
+              :key="item.key"
               class="app-session-detail-transcript-group"
             >
-              <div class="app-session-detail-transcript-row">
+              <div v-if="item.type === 'transcript_group'" class="app-session-detail-transcript-row">
                 <div
                   class="app-session-detail-transcript-avatar"
-                  :class="group.avatarClass"
-                  :title="group.speakerLabel"
+                  :class="item.group.avatarClass"
+                  :title="item.group.speakerLabel"
                   aria-hidden="true"
                 >
-                  {{ group.initial }}
+                  {{ item.group.initial }}
                 </div>
                 <div class="app-session-detail-transcript-bubbles">
-                  <p class="app-session-detail-speaker-name">{{ group.speakerLabel }}</p>
+                  <p class="app-session-detail-speaker-name">{{ item.group.speakerLabel }}</p>
                   <div
-                    v-for="(item, idx) in group.messages"
-                    :key="item.transcript_id"
+                    v-for="(message, idx) in item.group.messages"
+                    :key="message.transcript_id"
                     class="app-session-detail-bubble-stack"
                   >
                     <div class="app-session-detail-bubble">
-                      <p class="app-session-detail-transcript-text">{{ item.text }}</p>
+                      <p class="app-session-detail-transcript-text">{{ message.text }}</p>
                     </div>
                     <p
-                      v-if="idx === group.messages.length - 1"
+                      v-if="idx === item.group.messages.length - 1"
                       class="app-session-detail-bubble-time"
                     >
-                      {{ transcriptTimeLabel(item) }}
+                      {{ transcriptTimeLabel(message) }}
                     </p>
                   </div>
                 </div>
+              </div>
+              <div v-else class="app-session-detail-ai-card">
+                <div class="app-session-detail-ai-card__head">
+                  <span class="app-session-detail-ai-card__icon" aria-hidden="true">◈</span>
+                  <span class="app-session-detail-ai-card__label">AI 建议</span>
+                  <span class="app-session-detail-ai-card__time">
+                    {{ pushDisplayTime(item.push.triggered_at) }}
+                  </span>
+                </div>
+                <p class="app-session-detail-ai-card__content">{{ item.push.push_content }}</p>
               </div>
             </li>
             <li
@@ -1470,238 +1363,74 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.app-agent-status-bar {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 7px 14px;
-  margin-bottom: 12px;
-  border-radius: 8px;
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
-  font-size: 12px;
-  color: #15803d;
-}
-
-.app-agent-status-note {
-  margin: -4px 0 12px;
-  font-size: 11px;
-  color: #4b5563;
-}
-
-.app-agent-status-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #22c55e;
-  flex-shrink: 0;
-  animation: agent-dot-pulse 2s ease-in-out infinite;
-}
-
-@keyframes agent-dot-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
-}
-
 .app-session-summary-panel {
   padding: 12px 16px;
   margin-bottom: 12px;
-  border-radius: 8px;
-  background: #eff6ff;
-  border: 1px solid #bfdbfe;
+  border-radius: var(--app-radius-card);
+  background: var(--app-bg-elevated);
+  border: 1px solid var(--app-border);
+  box-shadow: var(--app-shadow-card);
 }
 
 .app-session-summary-header {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 6px;
 }
 
 .app-session-summary-icon {
   font-size: 13px;
-  color: #3b82f6;
+  color: var(--app-color-ai);
 }
 
 .app-session-summary-label {
-  font-size: 12px;
+  font-size: var(--app-font-size-caption);
   font-weight: 600;
-  color: #1d4ed8;
+  color: var(--app-text-primary);
 }
 
 .app-session-summary-version {
   font-size: 11px;
-  color: #93c5fd;
+  color: var(--app-text-muted);
+}
+
+.app-session-summary-toggle {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: transparent;
+  color: var(--app-text-secondary);
+  font-size: var(--app-font-size-caption);
+  cursor: pointer;
+  padding: 0;
+}
+
+.app-session-summary-toggle:hover {
+  color: var(--app-text-primary);
+}
+
+.app-session-summary-body {
+  margin-top: 10px;
 }
 
 .app-session-summary-content {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--app-font-size-body);
   line-height: 1.6;
-  color: #1e3a5f;
+  color: var(--app-text-primary);
   white-space: pre-wrap;
 }
 
 .app-session-summary-note {
   margin: 8px 0 0;
-  font-size: 11px;
-  line-height: 1.5;
-  color: #475569;
-}
-
-.app-agent-timeline-panel {
-  padding: 14px 16px;
-  margin-bottom: 12px;
-  border-radius: 8px;
-  background: #f8fafc;
-  border: 1px solid #dbeafe;
-}
-
-.app-agent-timeline-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.app-agent-timeline-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: #0f172a;
-}
-
-.app-agent-timeline-sub {
-  font-size: 11px;
-  color: #64748b;
-}
-
-.app-agent-timeline-note {
-  margin-bottom: 10px;
-  font-size: 11px;
-  line-height: 1.5;
-  color: #475569;
-}
-
-.app-agent-timeline-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.app-agent-timeline-item {
-  display: grid;
-  grid-template-columns: 148px 1fr;
-  gap: 12px;
-  align-items: start;
-}
-
-.app-agent-timeline-time {
-  font-size: 12px;
-  color: #475569;
-  font-variant-numeric: tabular-nums;
-}
-
-.app-agent-timeline-body {
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-}
-
-.app-agent-timeline-title-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 4px;
-}
-
-.app-agent-timeline-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: #0f172a;
-}
-
-.app-agent-timeline-badge {
-  font-size: 11px;
-  color: #1d4ed8;
-  background: #dbeafe;
-  border-radius: 999px;
-  padding: 2px 8px;
-}
-
-.app-agent-timeline-window {
-  font-size: 12px;
-  color: #475569;
-  margin-bottom: 4px;
-}
-
-.app-agent-timeline-content {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.55;
-  color: #1e293b;
-  white-space: pre-wrap;
-}
-
-.app-ai-suggestions-panel {
-  padding: 12px 16px;
-  margin-bottom: 12px;
-  border-radius: 8px;
-  background: #fffbeb;
-  border: 1px solid #fde68a;
-}
-
-.app-ai-suggestions-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-}
-
-.app-ai-suggestions-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: #92400e;
-}
-
-.app-ai-suggestions-sub {
-  font-size: 11px;
-  color: #b45309;
-}
-
-.app-ai-suggestions-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.app-ai-suggestions-item {
-  display: grid;
-  grid-template-columns: 72px 1fr;
-  gap: 8px;
-  font-size: 13px;
-  line-height: 1.45;
-}
-
-.app-ai-suggestions-time {
-  color: #a16207;
-  font-variant-numeric: tabular-nums;
-}
-
-.app-ai-suggestions-content {
-  color: #78350f;
+  font-size: var(--app-font-size-caption);
+  color: var(--app-text-secondary);
 }
 
 .app-session-detail-page {
-  max-width: 860px;
+  max-width: var(--app-content-width-default);
   margin: 0 auto;
   padding: 8px 0 16px;
 }
@@ -1724,25 +1453,25 @@ onUnmounted(() => {
 
 .app-session-detail-loading {
   padding: 16px 0;
-  font-size: 13px;
-  color: #6b7280;
+  font-size: var(--app-font-size-caption);
+  color: var(--app-text-secondary);
 }
 
 .app-session-detail-error {
   padding: 16px 18px;
-  border-radius: 12px;
-  background: #fef2f2;
+  border-radius: var(--app-radius-card);
+  background: var(--app-danger-soft);
   border: 1px solid #fecaca;
   color: #b91c1c;
-  font-size: 14px;
+  font-size: var(--app-font-size-body);
 }
 
 .app-session-detail-header {
   padding: 18px 20px;
-  border-radius: 12px;
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.04);
+  border-radius: var(--app-radius-card);
+  background: var(--app-bg-elevated);
+  border: 1px solid var(--app-border);
+  box-shadow: var(--app-shadow-card);
   margin-bottom: 20px;
 }
 
@@ -1755,52 +1484,30 @@ onUnmounted(() => {
 
 .app-session-detail-title {
   margin: 0;
-  font-size: 18px;
+  font-size: var(--app-font-size-title);
   font-weight: 600;
-  color: #111827;
+  color: var(--app-text-primary);
+  flex: 1;
 }
 
 .app-session-detail-status-tag {
   flex-shrink: 0;
 }
 
-.app-session-detail-meta-toggle {
-  background: none;
-  border: none;
-  padding: 0 0 10px;
-  font-size: 12px;
-  color: #6b7280;
-  cursor: pointer;
-  display: block;
-  text-align: left;
-}
-
-.app-session-detail-meta-toggle:hover {
-  color: #374151;
-}
-
-.app-session-detail-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  font-size: 12px;
-  color: #6b7280;
-  margin-bottom: 14px;
-}
-
 .app-session-detail-actions {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   flex-wrap: wrap;
+  align-items: center;
 }
 
 .app-session-detail-primary-btn {
-  border-radius: 999px;
-  border: 1px solid #2563eb;
+  border-radius: var(--app-radius-pill);
+  border: 1px solid var(--app-primary);
   padding: 6px 16px;
   font-size: 13px;
-  background: #2563eb;
-  color: #ffffff;
+  background: var(--app-primary);
+  color: var(--app-bg-elevated);
   cursor: pointer;
 }
 
@@ -1810,7 +1517,7 @@ onUnmounted(() => {
 }
 
 .app-session-detail-primary-btn:not(:disabled):hover {
-  background: #1d4ed8;
+  background: var(--app-primary-hover);
 }
 
 .app-session-detail-icon-btn {
@@ -1825,31 +1532,35 @@ onUnmounted(() => {
 }
 
 .app-session-detail-secondary-btn {
-  border-radius: 999px;
-  border: 1px solid #e5e7eb;
+  border-radius: var(--app-radius-pill);
+  border: 1px solid var(--app-border);
   padding: 6px 14px;
   font-size: 13px;
-  background: #ffffff;
-  color: #374151;
+  background: var(--app-bg-elevated);
+  color: var(--app-text-primary);
   cursor: pointer;
 }
 
 .app-session-detail-secondary-btn:hover {
-  background: #f3f4f6;
+  background: var(--app-bg-page);
 }
 
 .app-session-detail-danger-btn {
-  border-radius: 999px;
+  border-radius: var(--app-radius-pill);
   border: 1px solid rgba(248, 113, 113, 0.5);
   padding: 6px 14px;
   font-size: 13px;
-  background: #ffffff;
+  background: var(--app-bg-elevated);
   color: #b91c1c;
   cursor: pointer;
 }
 
+.app-session-detail-danger-btn--primary {
+  margin-left: auto;
+}
+
 .app-session-detail-danger-btn:hover:enabled {
-  background: #fef2f2;
+  background: var(--app-danger-soft);
   border-color: #ef4444;
 }
 
@@ -1860,17 +1571,26 @@ onUnmounted(() => {
 
 .app-session-detail-transcripts {
   padding: 18px 20px;
-  border-radius: 12px;
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.04);
+  border-radius: var(--app-radius-card);
+  background: var(--app-bg-elevated);
+  border: 1px solid var(--app-border);
+  box-shadow: var(--app-shadow-card);
+}
+
+.app-session-detail-transcripts-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
 }
 
 .app-session-detail-transcripts-title {
-  margin: 0 0 14px;
-  font-size: 15px;
+  margin: 0;
+  font-size: var(--app-font-size-heading);
   font-weight: 600;
-  color: #111827;
+  color: var(--app-text-primary);
   display: flex;
   align-items: center;
 }
@@ -1878,9 +1598,9 @@ onUnmounted(() => {
 .app-session-detail-readonly-badge {
   font-size: 11px;
   font-weight: 400;
-  color: #9ca3af;
-  background: #f3f4f6;
-  border-radius: 999px;
+  color: var(--app-text-muted);
+  background: var(--app-bg-page);
+  border-radius: var(--app-radius-pill);
   padding: 2px 8px;
   margin-left: 8px;
 }
@@ -1937,17 +1657,50 @@ onUnmounted(() => {
   opacity: 0.75;
 }
 
+.app-session-detail-ws-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: var(--app-radius-pill);
+  border: 1px solid #dbeafe;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: var(--app-font-size-caption);
+  line-height: 1;
+}
+
+.app-session-detail-ws-status.is-reconnecting {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #a16207;
+}
+
+.app-session-detail-ws-status.is-disconnected {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.app-session-detail-ws-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
 .app-session-detail-recorder-bar {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
 }
 
 .app-session-detail-recorder-meta {
-  font-size: 12px;
-  color: #4b5563;
+  font-size: var(--app-font-size-caption);
+  color: var(--app-text-secondary);
 }
 
 .app-session-detail-transcripts-empty {
@@ -1962,9 +1715,59 @@ onUnmounted(() => {
   min-height: 220px;
   overflow-y: auto;
   margin: 0 -8px;
-  padding: 16px 12px 8px;
+  padding: 12px 12px 8px;
   border-radius: var(--app-radius-md);
   background: var(--app-bg-page);
+}
+
+.app-session-detail-info-gap-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border-radius: var(--app-radius-md);
+  background: rgba(248, 250, 252, 0.96);
+  border: 1px solid var(--app-border);
+  backdrop-filter: blur(8px);
+}
+
+.app-session-detail-info-gap-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.app-session-detail-info-gap-icon {
+  font-size: 14px;
+}
+
+.app-session-detail-info-gap-label {
+  font-size: var(--app-font-size-caption);
+  font-weight: 600;
+  color: var(--app-text-primary);
+}
+
+.app-session-detail-info-gap-sticky :deep(.info-gap-container) {
+  padding: 0;
+  gap: 10px;
+  opacity: 1;
+}
+
+.app-session-detail-info-gap-sticky :deep(.info-gap-btn) {
+  padding: 8px 14px;
+  border-radius: var(--app-radius-pill);
+  border: 1px solid var(--app-color-ai-border);
+  background: var(--app-color-ai-soft);
+  color: var(--app-color-ai);
+  font-size: var(--app-font-size-body);
+}
+
+.app-session-detail-info-gap-sticky :deep(.info-gap-btn:hover:not(:disabled)) {
+  background: var(--app-color-ai-border);
 }
 
 .app-session-detail-transcripts-list {
@@ -1978,6 +1781,51 @@ onUnmounted(() => {
 
 .app-session-detail-transcript-group {
   list-style: none;
+}
+
+.app-session-detail-ai-card {
+  margin: 0 auto;
+  width: min(100%, 540px);
+  padding: 10px 14px;
+  border-radius: var(--app-radius-sm);
+  background: var(--app-color-ai-soft);
+  border: 1px solid var(--app-color-ai-border);
+  border-left: 3px solid var(--app-color-ai);
+  box-shadow: none;
+}
+
+.app-session-detail-ai-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+  font-size: var(--app-font-size-caption);
+  color: #9a3412;
+}
+
+.app-session-detail-ai-card__icon {
+  font-size: 13px;
+}
+
+.app-session-detail-ai-card__label {
+  font-weight: 600;
+  color: var(--app-color-ai);
+}
+
+.app-session-detail-ai-card__time {
+  margin-left: auto;
+  color: var(--app-color-ai);
+  font-variant-numeric: tabular-nums;
+}
+
+.app-session-detail-ai-card__content {
+  margin: 0;
+  font-size: var(--app-font-size-body);
+  line-height: 1.7;
+  color: var(--app-text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .app-session-detail-transcript-row {
@@ -2061,9 +1909,9 @@ onUnmounted(() => {
 
 .app-session-detail-speaker-name {
   margin: 0 0 4px 2px;
-  font-size: 12px;
+  font-size: var(--app-font-size-caption);
   line-height: 1.2;
-  color: #6b7280;
+  color: var(--app-text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2080,10 +1928,10 @@ onUnmounted(() => {
   align-self: flex-start;
   max-width: 100%;
   padding: 10px 16px;
-  border-radius: 16px;
+  border-radius: var(--app-radius-bubble);
   border-top-left-radius: 4px;
   background: var(--app-bg-elevated);
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.10), 0 1px 2px -1px rgba(15, 23, 42, 0.08);
+  box-shadow: var(--app-shadow-card);
 }
 
 .app-session-detail-bubble--live {
@@ -2108,5 +1956,27 @@ onUnmounted(() => {
   font-size: 15px;
   line-height: 1.6;
   color: var(--app-text-primary);
+}
+
+.app-session-detail-more-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--app-radius-pill);
+  border: 1px solid var(--app-border);
+  background: var(--app-bg-elevated);
+  color: var(--app-text-secondary);
+  cursor: pointer;
+}
+
+.app-session-detail-more-btn:hover {
+  background: var(--app-bg-page);
+  color: var(--app-text-primary);
+}
+
+.app-session-detail-dropdown-danger {
+  color: #b91c1c;
 }
 </style>

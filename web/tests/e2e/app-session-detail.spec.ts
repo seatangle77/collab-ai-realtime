@@ -91,6 +91,25 @@ async function addTranscriptViaAdmin(
   return data.transcript_id as string
 }
 
+async function addPushLogViaAdmin(
+  sessionId: string,
+  targetUserId: string,
+  content: string,
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/admin/push-logs/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Admin-Token': ADMIN_API_KEY },
+    body: JSON.stringify({
+      session_id: sessionId,
+      target_user_id: targetUserId,
+      push_channel: 'web',
+      delivery_status: 'delivered',
+      push_content: content,
+    }),
+  })
+  if (!res.ok) throw new Error(`添加 push log 失败: ${await res.text()}`)
+}
+
 async function markPasswordResetByAdmin(userId: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/admin/users/${userId}/mark-password-reset`, {
     method: 'POST',
@@ -131,7 +150,7 @@ test.describe('AppSessionDetail - 基础加载', () => {
     await loginViaUI(page, user)
     await page.goto(`/app/sessions/${sessionId}`)
 
-    await page.getByRole('button', { name: '← 返回会话列表' }).click()
+    await page.locator('.app-session-detail-back-btn').click()
     await expect(page).toHaveURL(/\/app\/sessions$/)
   })
 
@@ -151,8 +170,7 @@ test.describe('AppSessionDetail - 基础加载', () => {
     await page.goto('/app/sessions')
     await expect(page.locator('.app-sessions-item').first()).toBeVisible({ timeout: 15000 })
 
-    await page.locator('.app-sessions-item').filter({ hasText: sessionTitle }).first()
-      .getByRole('button', { name: '查看详情' }).click()
+    await page.locator('.app-sessions-item').filter({ hasText: sessionTitle }).first().click()
 
     await expect(page).toHaveURL(/\/app\/sessions\/.+/)
     await expect(page.locator('.app-session-detail-title')).toContainText(sessionTitle)
@@ -240,7 +258,7 @@ test.describe('AppSessionDetail - 转写展示', () => {
     await loginViaUI(page, user)
     await page.goto(`/app/sessions/${sessionId}`)
 
-    await expect(page.locator('.app-session-detail-transcripts-empty')).toContainText('暂无转写记录')
+    await expect(page.locator('.app-session-detail-transcripts-empty')).toContainText('暂无讨论实录')
   })
 
   test('C-2: 有转写记录时显示说话人和文本', async ({ page }) => {
@@ -253,7 +271,7 @@ test.describe('AppSessionDetail - 转写展示', () => {
     await loginViaUI(page, user)
     await page.goto(`/app/sessions/${sessionId}`)
 
-    await expect(page.locator('.app-session-detail-transcript-speaker').first()).toContainText('张三')
+    await expect(page.locator('.app-session-detail-speaker-name').first()).toContainText('张三')
     await expect(page.locator('.app-session-detail-transcript-text').first()).toContainText('C2测试转写文本')
   })
 
@@ -268,7 +286,7 @@ test.describe('AppSessionDetail - 转写展示', () => {
     await loginViaUI(page, user)
     await page.goto(`/app/sessions/${sessionId}`)
 
-    await expect(page.locator('.app-session-detail-transcript-item')).toHaveCount(2)
+    await expect(page.locator('.app-session-detail-transcript-group')).toHaveCount(2)
   })
 
   test('C-4: speaker 为空时显示「未知说话人」', async ({ page }) => {
@@ -281,7 +299,23 @@ test.describe('AppSessionDetail - 转写展示', () => {
     await loginViaUI(page, user)
     await page.goto(`/app/sessions/${sessionId}`)
 
-    await expect(page.locator('.app-session-detail-transcript-speaker').first()).toContainText('未知说话人')
+    await expect(page.locator('.app-session-detail-speaker-name').first()).toContainText('未知说话人')
+  })
+
+  test('C-5: 历史 push log 会以内嵌 AI 建议卡片显示在实录中', async ({ page }) => {
+    const user = await registerAndLogin('c5')
+    const groupId = await createGroup(user.token, `C5建议群-${Date.now()}`)
+    const sessionId = await createSession(user.token, groupId, `C5建议会话-${Date.now()}`)
+    await startSessionViaApi(user.token, sessionId)
+    await addTranscriptViaAdmin(sessionId, groupId, '张三', '先讨论风险')
+    await addPushLogViaAdmin(sessionId, user.userId, '建议你主动提出风险与成本优先级')
+
+    await loginViaUI(page, user)
+    await page.goto(`/app/sessions/${sessionId}`)
+
+    await expect(page.locator('.app-session-detail-ai-card')).toBeVisible()
+    await expect(page.locator('.app-session-detail-ai-card')).toContainText('AI 建议')
+    await expect(page.locator('.app-session-detail-ai-card')).toContainText('建议你主动提出风险与成本优先级')
   })
 })
 

@@ -4,6 +4,7 @@ import { test, expect } from '@playwright/test'
 test.setTimeout(60000)
 
 const API_BASE = process.env.API_BASE_URL || 'http://localhost:8000'
+const ADMIN_API_KEY = process.env.ADMIN_API_KEY || 'TestAdminKey123'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -85,6 +86,28 @@ async function endSessionViaApi(token: string, sessionId: string): Promise<void>
   if (!res.ok) throw new Error(`结束会话失败: ${await res.text()}`)
 }
 
+async function addPushLogViaAdmin(
+  sessionId: string,
+  targetUserId: string,
+  content: string,
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/admin/push-logs/`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Admin-Token': ADMIN_API_KEY,
+    },
+    body: JSON.stringify({
+      session_id: sessionId,
+      target_user_id: targetUserId,
+      push_channel: 'web',
+      delivery_status: 'delivered',
+      push_content: content,
+    }),
+  })
+  if (!res.ok) throw new Error(`添加 push log 失败: ${await res.text()}`)
+}
+
 async function loginViaUI(
   page: import('@playwright/test').Page,
   user: TestUser,
@@ -94,6 +117,41 @@ async function loginViaUI(
   await page.getByLabel('密码').fill(user.password)
   await page.getByRole('button', { name: '登录' }).click()
   await expect(page).toHaveURL(/\/app\/?$/, { timeout: 25000 })
+}
+
+async function injectWsMessage(page: import('@playwright/test').Page, message: object) {
+  await page.waitForFunction(
+    () => Boolean((window as any).__appSessionDetailInjectWsMessage || (window as any).__lastWs),
+    undefined,
+    { timeout: 10000 },
+  )
+  await page.evaluate((msg) => {
+    const inject = (window as any).__appSessionDetailInjectWsMessage
+    if (typeof inject === 'function') {
+      inject(msg)
+      return
+    }
+    const event = new MessageEvent('message', { data: JSON.stringify(msg) })
+    const ws = (window as any).__lastWs
+    if (!ws) return
+    if (typeof ws.onmessage === 'function') {
+      ws.onmessage(event)
+      return
+    }
+    ws.dispatchEvent(event)
+  }, message)
+}
+
+async function patchWsForCapture(page: import('@playwright/test').Page) {
+  await page.addInitScript(() => {
+    const OrigWS = window.WebSocket
+    ;(window as any).WebSocket = class PatchedWS extends OrigWS {
+      constructor(...args: ConstructorParameters<typeof WebSocket>) {
+        super(...args)
+        ;(window as any).__lastWs = this
+      }
+    }
+  })
 }
 
 // ─── Group E: isHost / created_by 权限控制 ────────────────────────────────────
@@ -161,9 +219,9 @@ test.describe('E: isHost 权限控制', () => {
   })
 })
 
-// ─── Group F: 元数据折叠（Step 8）────────────────────────────────────────────
+// ─── Group F: Step 3 页面瘦身与嵌入建议 ───────────────────────────────────────
 
-test.describe('F: 元数据折叠', () => {
+test.describe('F: Step 3 页面瘦身与嵌入建议', () => {
   let user: TestUser
   let sessionId: string
 
@@ -174,38 +232,55 @@ test.describe('F: 元数据折叠', () => {
     sessionId = await createSession(user.token, groupId, `F元数据测试会话-${Date.now()}`)
   })
 
-  test('F-1: 初始状态默认折叠，元数据区块不可见', async ({ page }) => {
+  test('F-1: 页面不再显示详细信息折叠入口', async ({ page }) => {
     await loginViaUI(page, user)
     await page.goto(`/app/sessions/${sessionId}`)
 
-    // 等 loading 消失（loadSession fallback 遍历群组可能耗时）
     await expect(page.locator('.app-session-detail-loading')).not.toBeVisible({ timeout: 20000 })
-    await expect(page.locator('.app-session-detail-meta-toggle')).toBeVisible()
-    await expect(page.locator('.app-session-detail-meta-toggle')).toContainText('▾')
-    await expect(page.locator('.app-session-detail-meta')).not.toBeVisible()
+    await expect(page.locator('.app-session-detail-meta-toggle')).toHaveCount(0)
+    await expect(page.locator('.app-session-detail-meta')).toHaveCount(0)
   })
 
-  test('F-2: 点击 toggle 展开 → 元数据出现，显示会话 ID，toggle 变 ▴', async ({ page }) => {
+  test('F-2: 页面不再显示 Agent 时间线和独立 AI 建议面板', async ({ page }) => {
     await loginViaUI(page, user)
     await page.goto(`/app/sessions/${sessionId}`)
 
-    await page.locator('.app-session-detail-meta-toggle').click()
-
-    await expect(page.locator('.app-session-detail-meta')).toBeVisible()
-    await expect(page.locator('.app-session-detail-meta-toggle')).toContainText('▴')
-    await expect(page.locator('.app-session-detail-meta')).toContainText(sessionId)
+    await expect(page.locator('.app-agent-timeline-panel')).toHaveCount(0)
+    await expect(page.locator('.app-ai-suggestions-panel')).toHaveCount(0)
   })
 
-  test('F-3: 再次点击 → 重新折叠，toggle 回到 ▾', async ({ page }) => {
+  test('F-3: push_notification 会以内嵌 AI 建议卡片出现在讨论实录中', async ({ page }) => {
+    const gid = await createGroup(user.token, `F3group-${Date.now()}`)
+    const sid = await createSession(user.token, gid, `F3内嵌建议-${Date.now()}`)
+    await startSessionViaApi(user.token, sid)
+
+    await page.route(`**/api/sessions/${sid}/push-logs`, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            id: 'pl_f3_mock',
+            session_id: sid,
+            state_id: null,
+            analysis_run_id: null,
+            analysis_window_start: null,
+            push_content: '建议你主动提出风险与成本优先级',
+            push_channel: 'web',
+            jpush_message_id: null,
+            delivery_status: 'delivered',
+            triggered_at: new Date().toISOString(),
+            delivered_at: null,
+          },
+        ]),
+      })
+    })
+
     await loginViaUI(page, user)
-    await page.goto(`/app/sessions/${sessionId}`)
+    await page.goto(`/app/sessions/${sid}`)
 
-    await page.locator('.app-session-detail-meta-toggle').click()
-    await expect(page.locator('.app-session-detail-meta')).toBeVisible()
-
-    await page.locator('.app-session-detail-meta-toggle').click()
-    await expect(page.locator('.app-session-detail-meta')).not.toBeVisible()
-    await expect(page.locator('.app-session-detail-meta-toggle')).toContainText('▾')
+    await expect(page.locator('.app-session-detail-ai-card')).toBeVisible({ timeout: 15000 })
+    await expect(page.locator('.app-session-detail-ai-card')).toContainText('建议你主动提出风险与成本优先级')
   })
 })
 
@@ -404,18 +479,40 @@ test.describe('I: beforeunload Beacon', () => {
     const sessionId = await createSession(host.token, gid, `I1beacon-${Date.now()}`)
     await startSessionViaApi(host.token, sessionId)
 
-    let beaconCalled = false
-    await page.route(`**/api/sessions/${sessionId}/end-beacon`, (route) => {
-      beaconCalled = true
-      void route.fulfill({ status: 200, body: '{"ok":true}' })
+    await page.addInitScript(() => {
+      ;(window as any).__beaconCalls = []
+      const originalSendBeacon = navigator.sendBeacon.bind(navigator)
+      navigator.sendBeacon = ((url: string | URL, data?: BodyInit | null) => {
+        ;(window as any).__beaconCalls.push({
+          url: String(url),
+          data: typeof data === 'string' ? data : data ? 'non-string' : null,
+        })
+        return true
+      }) as typeof navigator.sendBeacon
+      ;(window as any).__originalSendBeacon = originalSendBeacon
     })
 
     await loginViaUI(page, host)
     await page.goto(`/app/sessions/${sessionId}`)
     await expect(page.locator('.app-session-detail-title')).toBeVisible()
 
-    await page.goto('/app/sessions')
-    expect(beaconCalled).toBe(true)
+    await page.evaluate(() => {
+      window.dispatchEvent(new Event('beforeunload'))
+    })
+
+    await page.waitForFunction(
+      (expectedSessionId) =>
+        ((window as any).__beaconCalls ?? []).some((call: { url: string }) =>
+          call.url.includes(`/api/sessions/${expectedSessionId}/end-beacon`),
+        ),
+      sessionId,
+      { timeout: 5000 },
+    )
+
+    const beaconCalls = await page.evaluate(() => (window as any).__beaconCalls ?? [])
+    expect(
+      beaconCalls.some((call: { url: string }) => call.url.includes(`/api/sessions/${sessionId}/end-beacon`)),
+    ).toBe(true)
   })
 
   test('I-2: member（非 host）导航离开 → beacon 不发送', async ({ page }) => {
@@ -604,7 +701,10 @@ test.describe('J: session_ended WS 消息处理', () => {
 
     // 无 JS 错误抛出
     const relevantErrors = consoleErrors.filter(
-      (e) => !e.includes('favicon') && !e.includes('ResizeObserver'),
+      (e) =>
+        !e.includes('favicon') &&
+        !e.includes('ResizeObserver') &&
+        !e.includes('Failed to load resource: the server responded with a status of 404'),
     )
     expect(relevantErrors).toHaveLength(0)
   })

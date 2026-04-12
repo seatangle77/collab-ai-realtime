@@ -5,6 +5,7 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, RefreshRight, SwitchButton } from '@element-plus/icons-vue'
 import { formatDateTimeToCST } from '../../utils/datetime'
+import AppEmptyState from '../../components/AppEmptyState.vue'
 import {
   type AppGroupDetail,
   type AppGroupSummary,
@@ -358,22 +359,22 @@ onMounted(() => {
 
     <div class="app-groups-overview">
       <div class="app-groups-overview-pill">
-        <span class="app-groups-overview-label">已加入群组</span>
         <span class="app-groups-overview-value">{{ totalMyGroups }}</span>
+        <span class="app-groups-overview-label">已加入群组</span>
       </div>
       <div class="app-groups-overview-pill">
-        <span class="app-groups-overview-label">当前群成员</span>
         <span class="app-groups-overview-value">
           {{ activeGroupDetail ? currentMemberCount : '—' }}
         </span>
+        <span class="app-groups-overview-label">当前群成员</span>
       </div>
       <div class="app-groups-overview-pill">
-        <span class="app-groups-overview-label">可加入群组</span>
         <span class="app-groups-overview-value">{{ totalDiscoverGroups }}</span>
+        <span class="app-groups-overview-label">可加入群组</span>
       </div>
     </div>
 
-    <el-card class="app-groups-card" shadow="never">
+    <el-card class="app-groups-card app-groups-card--secondary" shadow="never">
       <div class="app-groups-list-header">
         <div>
           <h3 class="app-groups-list-title">我的群组</h3>
@@ -384,9 +385,15 @@ onMounted(() => {
         <el-button type="primary" size="small" :icon="Plus" @click="openCreateDialog">新建群组</el-button>
       </div>
 
-      <p v-if="!groups.length && !loading" class="app-groups-empty">
-        你还没有加入任何群组，可以先新建一个群组，或等待他人创建并邀请你加入。
-      </p>
+      <AppEmptyState
+        v-if="!groups.length && !loading"
+        icon="👥"
+        title="你还没有加入任何群组"
+        description="可以先新建一个群组，或等待他人创建并邀请你加入。"
+        action-label="新建群组"
+        compact
+        @action="openCreateDialog"
+      />
 
       <div v-else class="app-groups-list" :class="{ 'is-loading': loading }">
         <div
@@ -439,7 +446,7 @@ onMounted(() => {
             :value="g.id"
           />
         </el-select>
-        <el-button type="primary" :disabled="!joinGroupId" @click="handleJoinGroup">
+        <el-button plain :disabled="!joinGroupId" @click="handleJoinGroup">
           加入群组
         </el-button>
       </div>
@@ -491,6 +498,13 @@ onMounted(() => {
         <div class="app-groups-members">
           <h4 class="app-groups-members-title">成员列表</h4>
           <div v-if="detailLoading" class="app-groups-members-loading">成员信息加载中...</div>
+          <AppEmptyState
+            v-else-if="activeGroupDetail.members.length === 0"
+            icon="🧑‍🤝‍🧑"
+            title="群组内还没有成员"
+            description="当前群组暂无可展示成员，稍后再回来看看。"
+            compact
+          />
           <div v-else class="app-groups-members-list">
             <div
               v-for="m in activeGroupDetail.members"
@@ -536,12 +550,11 @@ onMounted(() => {
         </div>
       </template>
       <template v-else>
-        <div class="app-groups-detail-empty">
-          <p class="app-groups-detail-empty-title">尚未选择群组</p>
-          <p class="app-groups-detail-empty-desc">
-            先在上方「我的群组」中选择一个群组，或者创建 / 加入一个群组后，在这里查看成员与详细信息。
-          </p>
-        </div>
+        <AppEmptyState
+          icon="📭"
+          title="尚未选择群组"
+          description="先在上方「我的群组」中选择一个群组，或者创建 / 加入一个群组后，在这里查看成员与详细信息。"
+        />
       </template>
     </el-card>
 
@@ -563,7 +576,7 @@ onMounted(() => {
 
 <style scoped>
 .app-groups {
-  max-width: 880px;
+  max-width: var(--app-content-width-default);
   margin: 0 auto;
   padding-bottom: 8px;
 }
@@ -579,7 +592,7 @@ onMounted(() => {
 
 .app-groups-title {
   margin: 0;
-  font-size: 1.25rem;
+  font-size: var(--app-font-size-title);
   font-weight: 700;
   color: var(--app-text-primary);
   letter-spacing: -0.02em;
@@ -602,7 +615,7 @@ onMounted(() => {
   align-items: center;
   gap: 4px;
   padding: 2px 10px;
-  border-radius: 999px;
+  border-radius: var(--app-radius-pill);
   background: var(--app-bg-page);
   border: 1px solid var(--app-border);
   color: var(--app-text-secondary);
@@ -628,20 +641,22 @@ onMounted(() => {
 
 .app-groups-overview-pill {
   display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  border-radius: 999px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 10px 14px;
+  border-radius: var(--app-radius-pill);
   background: #f1f5f9;
-  font-size: 13px;
   color: var(--app-text-secondary);
 }
 
 .app-groups-overview-label {
+  font-size: var(--app-font-size-caption);
   font-weight: 500;
 }
 
 .app-groups-overview-value {
+  font-size: var(--app-font-size-heading);
   font-weight: 700;
   color: var(--app-text-primary);
 }
@@ -649,14 +664,19 @@ onMounted(() => {
 /* 卡片分区 */
 .app-groups-card {
   margin-bottom: 16px;
-  border-radius: var(--app-radius-md);
+  border-radius: var(--app-radius-card);
   border: 1px solid var(--app-border);
   background: var(--app-bg-elevated);
   box-shadow: var(--app-shadow-card);
 }
 
 .app-groups-card :deep(.el-card__body) {
-  padding: 16px 18px;
+  padding: 18px 20px;
+}
+
+.app-groups-card--secondary {
+  border-style: dashed;
+  background: #fbfdff;
 }
 
 .app-groups-list-header {
@@ -702,8 +722,8 @@ onMounted(() => {
 .app-groups-list-item {
   display: flex;
   align-items: stretch;
-  padding: 14px 16px;
-  border-radius: var(--app-radius-md);
+  padding: 18px 20px;
+  border-radius: var(--app-radius-card);
   border: 1px solid var(--app-border);
   background: var(--app-bg-elevated);
   box-shadow: var(--app-shadow-card);
@@ -748,16 +768,16 @@ onMounted(() => {
   font-size: 11px;
   font-weight: 600;
   padding: 2px 8px;
-  border-radius: 999px;
-  background: #fef3c7;
-  color: #b45309;
+  border-radius: var(--app-radius-pill);
+  background: var(--app-color-ai-soft);
+  color: var(--app-color-ai);
 }
 
 .app-groups-list-current {
   font-size: 11px;
   font-weight: 600;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--app-radius-pill);
   background: #dbeafe;
   color: var(--app-primary);
 }
@@ -817,7 +837,7 @@ onMounted(() => {
 
 .app-groups-detail-name {
   margin: 0;
-  font-size: 18px;
+  font-size: var(--app-font-size-title);
   font-weight: 700;
   color: var(--app-text-primary);
 }
@@ -894,8 +914,8 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 12px 14px;
-  border-radius: var(--app-radius-md);
+  padding: 18px 20px;
+  border-radius: var(--app-radius-card);
   background: var(--app-bg-page);
 }
 
@@ -975,4 +995,3 @@ onMounted(() => {
   gap: 8px;
 }
 </style>
-
