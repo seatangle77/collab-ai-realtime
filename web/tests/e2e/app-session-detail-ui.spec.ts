@@ -304,7 +304,7 @@ test.describe('Step 6 - AppSessionDetail UI', () => {
     await expect(page.locator('.app-session-detail-ai-card')).toContainText('同一秒内重复的建议')
   })
 
-  test('runtime push later merged with polled history still renders a single suggestion', async ({ page }) => {
+  test('runtime push later merged with polled history still renders a single suggestion when history includes target_user_id', async ({ page }) => {
     const session = buildSession('ongoing')
     let pushLogFetchCount = 0
     await mockSessionDetailApis(page, session, { pushLogs: [] })
@@ -316,6 +316,8 @@ test.describe('Step 6 - AppSessionDetail UI', () => {
             {
               id: 'push-persisted-1',
               session_id: session.id,
+              // Regression guard: history payload must keep target_user_id,
+              // otherwise the UI cannot merge it with the live WS suggestion.
               target_user_id: currentUser.id,
               push_content: '实时与历史合并的建议',
               push_channel: 'web',

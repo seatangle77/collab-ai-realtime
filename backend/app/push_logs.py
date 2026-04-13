@@ -200,6 +200,7 @@ async def group_notify(
 class PushLogOut(BaseModel):
     id: str
     session_id: str
+    target_user_id: str | None = None
     state_id: str | None = None
     analysis_run_id: str | None = None
     analysis_window_start: Any = None
@@ -286,6 +287,7 @@ async def get_session_push_logs(
             f"""
             SELECT
                 pl.id, pl.session_id, pl.state_id,
+                pl.target_user_id,
                 ds.window_start AS analysis_window_start,
                 pl.push_content, pl.push_channel,
                 pl.jpush_message_id, pl.delivery_status,

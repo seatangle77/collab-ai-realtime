@@ -133,9 +133,10 @@ def scenario_fields_complete() -> bool:
     if not data:
         return _log(False, "GET /push-logs 期望有记录但返回空", data)
     item = data[0]
-    required = ["id", "session_id", "push_channel", "delivery_status", "triggered_at"]
+    required = ["id", "session_id", "target_user_id", "push_channel", "delivery_status", "triggered_at"]
     ok = all(f in item for f in required)
-    return _log(ok, "GET /push-logs 字段完整性验证", item)
+    ok &= item.get("target_user_id") == leader["id"]
+    return _log(ok, "GET /push-logs 字段完整性验证（含 target_user_id 契约）", item)
 
 
 # ─────────────────────────────────────────────────
