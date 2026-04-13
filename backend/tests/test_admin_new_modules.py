@@ -142,48 +142,9 @@ test_batch_delete_boundaries(URL_DS)
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Step 2: engagement_metrics
+# Step 2: push_queue
 # ═══════════════════════════════════════════════════════════════════════
-section("Step 2: engagement_metrics — DELETE / batch-delete")
-
-URL_EM = f"{BASE}/api/admin/engagement-metrics"
-
-data = check("GET list（全量）", requests.get(f"{URL_EM}/", headers=HEADERS))
-
-# 查询条件
-check("filter: session_id 精确",
-      requests.get(f"{URL_EM}/?session_id=s_fake", headers=HEADERS))
-check("filter: user_id 精确",
-      requests.get(f"{URL_EM}/?user_id=u_fake", headers=HEADERS))
-check("filter: calculated_from",
-      requests.get(f"{URL_EM}/?calculated_from=2024-01-01T00:00:00", headers=HEADERS))
-check("filter: calculated_from + calculated_to",
-      requests.get(f"{URL_EM}/?calculated_from=2024-01-01T00:00:00&calculated_to=2099-12-31T23:59:59",
-                   headers=HEADERS))
-check("filter: 非法时间格式 → 422",
-      requests.get(f"{URL_EM}/?calculated_from=bad-date", headers=HEADERS), 422)
-
-test_pagination_boundaries(f"{URL_EM}/")
-
-# DELETE
-test_delete_nonexistent(URL_EM)
-items = (data or {}).get("items", [])
-if items:
-    mid = items[0]["id"]
-    check(f"DELETE 已有记录（id={mid[:12]}…）→ 204",
-          requests.delete(f"{URL_EM}/{mid}", headers=HEADERS), 204)
-    check("DELETE 同一记录二次 → 404",
-          requests.delete(f"{URL_EM}/{mid}", headers=HEADERS), 404)
-else:
-    print("  - 表中无数据，跳过真实 DELETE 测试")
-
-test_batch_delete_boundaries(URL_EM)
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# Step 3: push_queue
-# ═══════════════════════════════════════════════════════════════════════
-section("Step 3: push_queue — GET list / DELETE / batch-delete")
+section("Step 2: push_queue — GET list / DELETE / batch-delete")
 
 URL_PQ = f"{BASE}/api/admin/push-queue"
 
@@ -230,9 +191,9 @@ test_batch_delete_boundaries(URL_PQ)
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Step 4: window_metrics
+# Step 3: window_metrics
 # ═══════════════════════════════════════════════════════════════════════
-section("Step 4: window_metrics — GET list / DELETE / batch-delete")
+section("Step 3: window_metrics — GET list / DELETE / batch-delete")
 
 URL_WM = f"{BASE}/api/admin/window-metrics"
 

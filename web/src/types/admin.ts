@@ -172,25 +172,6 @@ export interface AdminDiscussionState {
   push_cooldown_until: string | null
 }
 
-// ── 参与度指标 ────────────────────────────────────────────────────────
-export interface AdminEngagementMetric {
-  id: string
-  session_id: string
-  user_id: string
-  user_name: string | null
-  calculated_at: string
-  speaking_ratio: number | null
-  speaking_frequency: number | null
-  silence_duration_s: number | null
-  mattr_score: number | null
-  avg_sentence_length: number | null
-  response_rate: number | null
-  new_idea_rate: number | null
-  topic_cosine_similarity: number | null
-  semantic_cohesion: number | null
-  semantic_uniqueness: number | null
-}
-
 // ── 推送日志 ──────────────────────────────────────────────────────────
 export type PushChannel = 'web' | 'app' | 'glasses'
 export type DeliveryStatus = 'pending' | 'delivered' | 'failed'

@@ -224,11 +224,11 @@ test.describe.serial('Admin 讨论摘要与讨论状态页面', () => {
     await goToAdminPage(page, '/admin/discussion-states', '讨论状态')
 
     await formSelect(page, '状态类型').click()
-    await page.getByRole('option', { name: '低参与度' }).click()
+    await page.getByRole('option', { name: '个人思路停滞' }).click()
     await page.getByRole('button', { name: '查询' }).click()
-    const lowParticipationRow = page.getByRole('row').filter({ hasText: '低参与度' }).first()
+    const lowParticipationRow = page.getByRole('row').filter({ hasText: '个人思路停滞' }).first()
     await expect(lowParticipationRow).toBeVisible()
-    await expect(page.locator('.el-tag').filter({ hasText: '低参与度' })).toBeVisible()
+    await expect(page.locator('.el-tag').filter({ hasText: '个人思路停滞' })).toBeVisible()
 
     await lowParticipationRow.getByRole('button', { name: '查看指标' }).click()
     await expect(page.getByRole('dialog')).toContainText('"speaking_ratio": 0.12')

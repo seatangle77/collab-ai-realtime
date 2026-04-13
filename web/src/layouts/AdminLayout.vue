@@ -31,7 +31,6 @@ const menuGroups = computed<AdminMenuGroup[]>(() => [
     label: 'AI 分析',
     items: [
       { path: '/admin/discussion-states', label: '讨论状态' },
-      { path: '/admin/engagement-metrics', label: '参与度指标' },
       { path: '/admin/window-metrics', label: '窗口指标' },
       { path: '/admin/discussion-summaries', label: '讨论摘要' },
       { path: '/admin/info-gap-buttons', label: '信息缺口按钮' },

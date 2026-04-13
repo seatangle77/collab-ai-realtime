@@ -14,85 +14,7 @@ function formSelect(page: import('@playwright/test').Page, label: string) {
 }
 
 test.describe.serial('Admin 分析与指标页面', () => {
-  test('1. 参与度指标页支持详情弹窗、保留导出按钮、单删和批删', async ({ page }) => {
-    let metrics = [
-      {
-        id: 'em-1',
-        session_id: 'session-eng-1',
-        user_id: 'user-1',
-        user_name: '用户甲',
-        calculated_at: '2026-04-10T08:00:00Z',
-        speaking_ratio: 0.1234,
-        speaking_frequency: 0.2345,
-        silence_duration_s: 10.5,
-        mattr_score: 0.4567,
-        avg_sentence_length: 12.34,
-        response_rate: 0.5678,
-        new_idea_rate: 0.6789,
-        topic_cosine_similarity: 0.789,
-        semantic_cohesion: 0.5555,
-        semantic_uniqueness: 0.6666,
-      },
-      {
-        id: 'em-2',
-        session_id: 'session-eng-2',
-        user_id: 'user-2',
-        user_name: '用户乙',
-        calculated_at: '2026-04-10T09:00:00Z',
-        speaking_ratio: 0.2234,
-        speaking_frequency: 0.3345,
-        silence_duration_s: 20.5,
-        mattr_score: 0.5567,
-        avg_sentence_length: 10.34,
-        response_rate: 0.6678,
-        new_idea_rate: 0.7789,
-        topic_cosine_similarity: 0.889,
-        semantic_cohesion: 0.6555,
-        semantic_uniqueness: 0.7666,
-      },
-    ]
-
-    await loginAsAdmin(page)
-    await page.route('**/api/admin/engagement-metrics/**', async (route) => {
-      const url = route.request().url()
-      const method = route.request().method()
-      if (method === 'GET') {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(pageResponse(metrics)) })
-        return
-      }
-      if (method === 'DELETE') {
-        const id = new URL(url).pathname.split('/').pop() as string
-        metrics = metrics.filter((item) => item.id !== id)
-        await route.fulfill({ status: 204, body: '' })
-        return
-      }
-      if (method === 'POST' && url.includes('/batch-delete')) {
-        const payload = route.request().postDataJSON() as { ids: string[] }
-        metrics = metrics.filter((item) => !payload.ids.includes(item.id))
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ deleted: payload.ids.length }) })
-        return
-      }
-      await route.fallback()
-    })
-
-    await goToAdminPage(page, '/admin/engagement-metrics', '参与度指标')
-    await expect(page.getByRole('button', { name: /导出选中/ })).toBeVisible()
-    const engagementRow = page.getByRole('row').filter({ hasText: '用户甲' }).first()
-    await engagementRow.getByRole('button', { name: '查看详情' }).click()
-    const engagementDialog = page.getByRole('dialog', { name: '参与度指标详情' })
-    await expect(engagementDialog).toContainText('会话 ID')
-    await expect(engagementDialog).toContainText('0.2345')
-    await page.keyboard.press('Escape')
-    await engagementRow.getByRole('button', { name: '删除' }).click()
-    await page.getByRole('button', { name: '删除' }).last().click()
-    await expect(page.getByText('删除成功')).toBeVisible()
-    await page.locator('.el-table__body .el-checkbox').first().click()
-    await page.getByRole('button', { name: /批量删除/ }).click()
-    await page.getByRole('button', { name: '删除' }).last().click()
-    await expect(page.getByText('成功删除 1 条记录')).toBeVisible()
-  })
-
-  test('2. 窗口指标页显示 arg_density，支持布尔筛选、单删和批删', async ({ page }) => {
+  test('1. 窗口指标页显示 arg_density，支持布尔筛选、单删和批删', async ({ page }) => {
     let items = [
       {
         id: 'wm-1',
@@ -173,7 +95,7 @@ test.describe.serial('Admin 分析与指标页面', () => {
     await expect(page.getByText('成功删除 1 条记录')).toBeVisible()
   })
 
-  test('3. 信息缺口按钮页支持三态 status、has_clicked 筛选、点击时间展示、单删和批删', async ({ page }) => {
+  test('2. 信息缺口按钮页支持三态 status、has_clicked 筛选、点击时间展示、单删和批删', async ({ page }) => {
     let items = [
       {
         id: 'igb-1',

@@ -29,20 +29,11 @@ import { listInfoGapButtons } from '../../api/admin/info-gap-buttons'
 import { listDiscussionStates } from '../../api/admin/discussion-states'
 import { listWindowMetrics } from '../../api/admin/window-metrics'
 import { formatDateTimeToCST } from '../../utils/datetime'
+import { getDiscussionStateLabel } from '../../utils/discussion'
 
 const route = useRoute()
 const router = useRouter()
 const sessionId = route.params.id as string
-
-const STATE_TYPE_LABELS: Record<string, string> = {
-  low_participation: '低参与',
-  over_dominance: '过度主导',
-  disengaged: '参与不足',
-  deadlock: '讨论僵局',
-  topic_drift: '话题偏移',
-  low_depth: '深度不足',
-  homogeneous: '观点同质化',
-}
 
 interface TranscriptTimelineItem {
   kind: 'transcript'
@@ -199,8 +190,7 @@ function statusType(s: string | null | undefined) {
 }
 
 function stateTypeLabel(value: string | null | undefined): string {
-  if (!value) return '未知状态'
-  return STATE_TYPE_LABELS[value] ?? value
+  return getDiscussionStateLabel(value)
 }
 
 function summarizeMetrics(metrics: Record<string, unknown> | null | undefined): string[] {

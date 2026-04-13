@@ -114,11 +114,6 @@ const routes: RouteRecordRaw[] = [
         component: () => import('../views/admin/AdminDiscussionStatesPage.vue'),
       },
       {
-        path: 'engagement-metrics',
-        name: 'AdminEngagementMetrics',
-        component: () => import('../views/admin/AdminEngagementMetricsPage.vue'),
-      },
-      {
         path: 'push-logs',
         name: 'AdminPushLogs',
         component: () => import('../views/admin/AdminPushLogsPage.vue'),

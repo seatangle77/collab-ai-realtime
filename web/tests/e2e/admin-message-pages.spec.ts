@@ -141,7 +141,7 @@ test.describe.serial('Admin 文本与消息类页面', () => {
 
     await goToAdminPage(page, '/admin/push-queue', '推送队列')
     await expect(page.locator('.el-tag').filter({ hasText: '待发送' })).toBeVisible()
-    await expect(page.locator('.el-tag').filter({ hasText: '低参与度' })).toBeVisible()
+    await expect(page.locator('.el-tag').filter({ hasText: '个人思路停滞' })).toBeVisible()
     const pushQueueRow = page.getByRole('row').filter({ hasText: '推送队列会话' }).first()
     await pushQueueRow.getByRole('button', { name: '查看全文' }).click()
     const pushQueueDialog = page.getByRole('dialog', { name: /推送队列会话 - 推送内容/ })
