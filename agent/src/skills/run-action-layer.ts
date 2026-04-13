@@ -172,7 +172,7 @@ export async function runActionLayer(params: {
     }
   }
 
-  const batchTargets = buildBatchTargetsForAI(selectedTargets);
+  const batchTargets = buildBatchTargetsForAI(selectedTargets, transcripts);
 
   logger.info(`进入 batch AI 的目标数量=${batchTargets.length}`, { sessionId });
 
@@ -223,7 +223,10 @@ export async function runActionLayer(params: {
   logger.info(`最终真正落库推送的数量=${persistedCount}`, { sessionId });
 }
 
-function buildBatchTargetsForAI(candidates: SelectedTarget[]): PreparedBatchTarget[] {
+function buildBatchTargetsForAI(
+  candidates: SelectedTarget[],
+  transcripts: Transcript[],
+): PreparedBatchTarget[] {
   return candidates.map(({ trigger, aiTargetUserId, recipientUserIds }) => {
     const metrics = trigger.triggerMetrics;
     const challengeType = toChallengeType(trigger.type);
@@ -232,7 +235,7 @@ function buildBatchTargetsForAI(candidates: SelectedTarget[]): PreparedBatchTarg
       target: {
         user_id: aiTargetUserId,
         challenge_type: challengeType,
-        evidence: buildEvidence(trigger.type, metrics),
+        evidence: buildEvidence(trigger, metrics, transcripts),
         diagnosis: buildDiagnosis(trigger.type, metrics),
         design_goal: buildDesignGoal(challengeType),
       },
@@ -257,10 +260,11 @@ function toChallengeType(triggerType: BatchSupportedTrigger): ChallengeType {
 }
 
 function buildEvidence(
-  triggerType: BatchSupportedTrigger,
+  trigger: Trigger & { type: BatchSupportedTrigger },
   metrics: Record<string, unknown>,
+  transcripts: Transcript[],
 ): Record<string, unknown> {
-  switch (triggerType) {
+  switch (trigger.type) {
     case 'group_silence':
       return {
         silence_s: (metrics.silence_s as number) ?? 0,
@@ -270,10 +274,22 @@ function buildEvidence(
         speaking_ratio: (metrics.speaking_ratio as number) ?? 0,
       };
     case 'shallow_discussion':
-      return sanitizeEvidence(metrics);
+      return {
+        ...sanitizeEvidence(metrics),
+        member_quotes: collectMemberQuotes(trigger.userId, transcripts),
+      };
     default:
-      throw new Error(`unsupported trigger type for evidence: ${triggerType}`);
+      throw new Error(`unsupported trigger type for evidence: ${trigger.type}`);
   }
+}
+
+function collectMemberQuotes(userId: string | undefined, transcripts: Transcript[]): string {
+  if (!userId) return '';
+
+  return transcripts
+    .filter((item) => item.user_id === userId && item.text?.trim())
+    .map((item) => `${item.user_id ?? '未知'}：${item.text?.trim() ?? ''}`)
+    .join('\n');
 }
 
 function buildDiagnosis(

@@ -229,6 +229,8 @@ export class SessionWorker {
       const summaryRow = await getLastSummary(this.sessionId);
       const summaryText = summaryRow?.content ?? '';
       const transcripts = await getTranscriptsInWindowPreferCache(this.sessionId, windowStart, windowEnd);
+      const summaryKeywords = extractSummaryKeywords(summaryText);
+      const focusedTranscripts = filterTranscriptsBySummaryFocus(transcripts, summaryKeywords);
 
       // Step4：行动层单独执行；摘要改由独立定时链负责。
       void runActionLayer({
@@ -237,7 +239,7 @@ export class SessionWorker {
         windowStart,
         memberIds,
         summaryText,
-        transcripts,
+        transcripts: focusedTranscripts,
         onGroupSilenceNotified: () => this.markGroupSilenceTriggered(Date.now()),
       }).catch((err) => {
         logger.error('action failed', {
@@ -323,4 +325,46 @@ export class SessionWorker {
   private markGroupSilenceTriggered(nowMs: number): void {
     this.lastGroupSilenceTriggerAt = nowMs;
   }
+}
+
+function extractSummaryKeywords(summaryText: string): string[] {
+  if (!summaryText.trim()) return [];
+
+  const structuralWords = new Set([
+    '当前讨论主题',
+    '已提出的主要观点',
+    '主要观点',
+    '各成员的主要立场',
+    '主要立场',
+    '当前讨论进展与焦点',
+    '讨论',
+    '成员',
+    '观点',
+    '焦点',
+    '主题',
+    '当前',
+  ]);
+
+  return Array.from(
+    new Set(
+      summaryText
+        .split(/[\s,，。；：:、!！?？()\[\]【】\-]+/)
+        .map((token) => token.trim())
+        .filter((token) => token.length >= 2 && !structuralWords.has(token)),
+    ),
+  ).slice(0, 12);
+}
+
+function filterTranscriptsBySummaryFocus(
+  transcripts: Awaited<ReturnType<typeof getTranscriptsInWindowPreferCache>>,
+  keywords: string[],
+) {
+  if (transcripts.length === 0 || keywords.length === 0) return transcripts;
+
+  const filtered = transcripts.filter((item) => {
+    const text = item.text?.trim() ?? '';
+    return text && keywords.some((keyword) => text.includes(keyword));
+  });
+
+  return filtered.length > 0 ? filtered : transcripts;
 }

@@ -88,6 +88,7 @@ _BATCH_SYSTEM_PROMPT = """你不是普通文案助手，而是一个“小组协
 通用原则：
 - 每条输出都必须服务于“推进协作讨论”，不是安慰、总结或评价。
 - 必须结合当前讨论摘要、最近发言、目标对象的 challenge_type、diagnosis、design_goal、evidence 来生成。
+- 生成内容必须围绕【当前讨论摘要】中的焦点主题展开，不能跳出当前讨论范围。
 - 不同对象的输出要有明显区分，不能只是换名字。
 - 要避免重复最近发言中已经说过的话。
 - 不要输出分析过程，不要解释为什么这样写。
@@ -126,15 +127,16 @@ _BATCH_USER_TEMPLATE = """以下是本轮小组讨论的上下文，请你为需
 
 请逐个处理 targets 中的对象，并遵循以下规则：
 1. 对每个 target 都生成一条结果。
-2. 如果 challenge_type 是 personal_stagnation，请给该成员一个“他还没提过”的新观点、新角度或新问题，帮助他重新接入讨论。
-3. 如果 challenge_type 是 group_stagnation，请给全组一个尚未覆盖的新讨论方向，帮助打破沉默。
-4. 如果 challenge_type 是 shallow_expression，请围绕该成员当前表达的薄弱点，生成一句追问，推动其继续展开理由、依据、例子或影响。
+2. 如果 challenge_type 是 personal_stagnation，请在当前摘要焦点内，给该成员一个“他还没深入过”的新观点、新角度或新问题，帮助他重新接入讨论。
+3. 如果 challenge_type 是 group_stagnation，请在当前摘要焦点内，给全组一个尚未充分展开的新讨论方向，帮助打破沉默。
+4. 如果 challenge_type 是 shallow_expression，请围绕该成员当前表达的薄弱点，生成一句追问，推动其继续展开理由、依据、例子或影响，并优先根据 evidence.member_quotes 中该成员的具体发言来追问。
 5. 如果 challenge_type 是 information_gap，请围绕 target 中的关键词或概念，给出一句简洁定义、解释或论据，帮助其修正理解偏差。
 6. analysis 字段写一句简短判断，说明为什么该对象当前需要这种干预。
 7. needs_prompt 字段必须明确为 true 或 false；如果为 false，则 content 置为空字符串。
 8. 输出必须简短、自然、可直接显示在智能眼镜或手机上。
 9. 不要重复“你可以”“建议你”“试着想想”这种空泛表达。
 10. 不要输出任何解释，只返回 JSON。
+11. 生成内容必须围绕【当前讨论摘要】中的焦点主题展开，不能跳出当前讨论范围。
 
 再次强调，只返回以下格式：
 {{
