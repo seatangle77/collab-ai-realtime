@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -98,6 +98,8 @@ const transcriptPageSize = ref(20)
 const transcriptLoading = ref(false)
 const selectedTranscripts = ref<AdminTranscript[]>([])
 const transcriptTableRef = ref<{ clearSelection: () => void } | null>(null)
+const timelineScrollEl = ref<HTMLElement | null>(null)
+const timelineShouldStickToBottom = ref(true)
 
 const editSessionVisible = ref(false)
 const editSessionFormRef = ref<FormInstance>()
@@ -141,6 +143,7 @@ const editTranscriptRules: FormRules<typeof editTranscriptForm> = {
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let elapsedTimer: ReturnType<typeof setInterval> | null = null
+const TIMELINE_BOTTOM_THRESHOLD_PX = 48
 
 function parseTime(value: string | null | undefined): number | null {
   if (!value) return null
@@ -174,6 +177,13 @@ function formatDuration(ms: number | null): string {
   const minutes = Math.floor((totalSeconds % 3600) / 60)
   const seconds = totalSeconds % 60
   return [hours, minutes, seconds].map((item) => String(item).padStart(2, '0')).join(':')
+}
+
+function formatTranscriptSpeakerLabel(transcript: AdminTranscript): string {
+  const uid = (transcript.speaker || transcript.user_id || '').trim()
+  const name = (transcript.speaker_name || '').trim()
+  if (name && uid) return `${name}（${uid}）`
+  return name || uid || '未标注说话人'
 }
 
 function statusLabel(s: string | null | undefined) {
@@ -245,6 +255,25 @@ const refreshText = computed(() => {
   return formatDisplayTime(lastRefreshedAt.value)
 })
 
+function dedupeTimelinePushLogs(items: AdminPushLog[]): AdminPushLog[] {
+  const seen = new Set<string>()
+  return items.filter((item) => {
+    const content = (item.push_content || '').trim()
+    if (!content) return false
+    const triggeredAt = parseTime(item.triggered_at)
+    const timeBucket = triggeredAt == null ? 'na' : String(Math.floor(triggeredAt / 1000))
+    const key = [
+      item.target_user_id || '',
+      item.target_user_name || '',
+      content,
+      timeBucket,
+    ].join('::')
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 const transcriptTimelineItems = computed<TimelineItem[]>(() => {
   const transcriptItems: TimelineItem[] = allTranscripts.value
     .map((item) => {
@@ -257,8 +286,7 @@ const transcriptTimelineItems = computed<TimelineItem[]>(() => {
       }
     })
 
-  const pushItems: TimelineItem[] = pushLogs.value
-    .filter((item) => item.push_content)
+  const pushItems: TimelineItem[] = dedupeTimelinePushLogs(pushLogs.value)
     .map((item) => {
       const sortAt = parseTime(item.triggered_at) ?? 0
       return {
@@ -343,6 +371,30 @@ const clickedKeywordIds = computed(() => new Set(
     .filter((button) => button.status === 'clicked')
     .map((button) => button.id),
 ))
+
+function isTimelineNearBottom(): boolean {
+  const el = timelineScrollEl.value
+  if (!el) return true
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= TIMELINE_BOTTOM_THRESHOLD_PX
+}
+
+function syncTimelineStickiness() {
+  timelineShouldStickToBottom.value = isTimelineNearBottom()
+}
+
+function scrollTimelineToBottom(force = false) {
+  nextTick(() => {
+    const el = timelineScrollEl.value
+    if (!el) return
+    if (!force && !timelineShouldStickToBottom.value) return
+    el.scrollTop = el.scrollHeight
+    timelineShouldStickToBottom.value = true
+  })
+}
+
+function handleTimelineScroll() {
+  syncTimelineStickiness()
+}
 
 async function fetchTranscriptsPage(p: number) {
   transcriptPage.value = p
@@ -469,6 +521,24 @@ watch(
   (status) => {
     if (status === 'ongoing') startPolling()
     else stopPolling()
+  },
+)
+
+watch(
+  () => transcriptTimelineItems.value.length,
+  (length, previousLength) => {
+    if (!length || activeTab.value !== 'timeline') return
+    if (previousLength === 0 || timelineShouldStickToBottom.value) {
+      scrollTimelineToBottom(previousLength === 0)
+    }
+  },
+)
+
+watch(
+  () => activeTab.value,
+  (tab) => {
+    if (tab !== 'timeline' || !transcriptTimelineItems.value.length) return
+    scrollTimelineToBottom()
   },
 )
 
@@ -689,7 +759,7 @@ onUnmounted(() => {
             <div class="admin-session-meta">
               <div class="admin-session-meta__item">
                 <span class="admin-session-meta__label">群组</span>
-                <span class="admin-session-meta__value">{{ session.group_name || session.group_id }}</span>
+                <span class="admin-session-meta__value">{{ session.group_name || '-' }}</span>
               </div>
               <div class="admin-session-meta__item">
                 <span class="admin-session-meta__label">群组 ID</span>
@@ -718,26 +788,26 @@ onUnmounted(() => {
             <div class="admin-session-panel__title">实时状态</div>
             <div class="admin-session-status__headline">
               <span class="admin-session-status__dot" :class="`is-${session.status || 'not_started'}`"></span>
-              <span>{{ statusLabel(session.status) }}</span>
-              <span class="admin-session-status__duration">时长 {{ sessionDurationText }}</span>
+              <span class="admin-session-status__text">{{ statusLabel(session.status) }}</span>
+              <span class="admin-session-status__duration">{{ sessionDurationText }}</span>
             </div>
 
             <div class="admin-session-status__stats">
               <div class="admin-session-stat">
                 <span class="admin-session-stat__label">转录</span>
-                <strong>{{ allTranscripts.length }}</strong>
+                <strong class="admin-session-stat__value">{{ allTranscripts.length }}</strong>
               </div>
               <div class="admin-session-stat">
                 <span class="admin-session-stat__label">AI 分析</span>
-                <strong>{{ analysisTimeline.length }}</strong>
+                <strong class="admin-session-stat__value">{{ analysisTimeline.length }}</strong>
               </div>
               <div class="admin-session-stat">
                 <span class="admin-session-stat__label">推送</span>
-                <strong>{{ pushLogs.length }}</strong>
+                <strong class="admin-session-stat__value">{{ pushLogs.length }}</strong>
               </div>
               <div class="admin-session-stat">
                 <span class="admin-session-stat__label">信息缺口</span>
-                <strong>{{ infoGapButtons.length }}</strong>
+                <strong class="admin-session-stat__value">{{ infoGapButtons.length }}</strong>
               </div>
             </div>
 
@@ -767,27 +837,34 @@ onUnmounted(() => {
 
             <div v-if="transcriptTimelineLoading" class="admin-session-detail-loading">正在整理实录...</div>
             <div v-else-if="!transcriptTimelineItems.length" class="admin-session-detail-empty">暂无讨论实录</div>
-            <div v-else class="timeline-stream">
-              <template v-for="item in transcriptTimelineItems" :key="item.key">
-                <div v-if="item.kind === 'transcript'" class="timeline-bubble timeline-bubble--transcript">
-                  <div class="timeline-bubble__meta">
-                    <span class="timeline-bubble__speaker">{{ item.transcript.speaker || '未标注说话人' }}</span>
-                    <span class="timeline-bubble__time">{{ formatDisplayTime(item.transcript.created_at) }}</span>
+            <div
+              v-else
+              ref="timelineScrollEl"
+              class="timeline-scroll-shell"
+              @scroll="handleTimelineScroll"
+            >
+              <div class="timeline-stream">
+                <template v-for="item in transcriptTimelineItems" :key="item.key">
+                  <div v-if="item.kind === 'transcript'" class="timeline-bubble timeline-bubble--transcript">
+                    <div class="timeline-bubble__meta">
+                      <span class="timeline-bubble__speaker">{{ formatTranscriptSpeakerLabel(item.transcript) }}</span>
+                      <span class="timeline-bubble__time">{{ formatDisplayTime(item.transcript.created_at) }}</span>
+                    </div>
+                    <div class="timeline-bubble__content">{{ item.transcript.text || '-' }}</div>
                   </div>
-                  <div class="timeline-bubble__content">{{ item.transcript.text || '-' }}</div>
-                </div>
 
-                <div v-else class="timeline-bubble timeline-bubble--push">
-                  <div class="timeline-bubble__meta">
-                    <span class="timeline-bubble__speaker">◈ AI 建议</span>
-                    <span class="timeline-bubble__time">{{ formatClock(item.push.triggered_at) }}</span>
-                    <span class="timeline-bubble__recipient">
-                      → 发给：{{ item.push.target_user_name || item.push.target_user_id }}
-                    </span>
+                  <div v-else class="timeline-bubble timeline-bubble--push">
+                    <div class="timeline-bubble__meta">
+                      <span class="timeline-bubble__speaker">◈ AI 建议</span>
+                      <span class="timeline-bubble__time">{{ formatClock(item.push.triggered_at) }}</span>
+                      <span class="timeline-bubble__recipient">
+                        → 发给：{{ item.push.target_user_name || item.push.target_user_id }}
+                      </span>
+                    </div>
+                    <div class="timeline-bubble__content">{{ item.push.push_content || '-' }}</div>
                   </div>
-                  <div class="timeline-bubble__content">{{ item.push.push_content || '-' }}</div>
-                </div>
-              </template>
+                </template>
+              </div>
             </div>
           </el-card>
         </el-tab-pane>
@@ -912,7 +989,7 @@ onUnmounted(() => {
                 <el-table-column type="selection" width="44" />
                 <el-table-column prop="transcript_id" label="ID" min-width="200" show-overflow-tooltip />
                 <el-table-column prop="speaker" label="说话人" min-width="120" show-overflow-tooltip>
-                  <template #default="{ row }">{{ row.speaker || '-' }}</template>
+                  <template #default="{ row }">{{ formatTranscriptSpeakerLabel(row) }}</template>
                 </el-table-column>
                 <el-table-column prop="text" label="内容" min-width="240" show-overflow-tooltip />
                 <el-table-column prop="start" label="开始" min-width="100" show-overflow-tooltip />
@@ -1079,13 +1156,13 @@ onUnmounted(() => {
 .admin-session-hero :deep(.el-card__body) {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 12px;
 }
 
 .admin-session-hero__header {
   display: flex;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px;
   align-items: flex-start;
 }
 
@@ -1098,14 +1175,14 @@ onUnmounted(() => {
 
 .admin-session-hero__title {
   margin: 0;
-  font-size: 24px;
+  font-size: 28px;
   line-height: 1.2;
   color: #111827;
 }
 
 .admin-session-hero__sub {
-  margin-top: 6px;
-  font-size: 13px;
+  margin-top: 4px;
+  font-size: 14px;
   color: #6b7280;
 }
 
@@ -1117,47 +1194,53 @@ onUnmounted(() => {
 
 .admin-session-hero__grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
-  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(250px, 320px);
+  gap: 12px;
 }
 
 .admin-session-panel {
   border: 1px solid #e5e7eb;
   border-radius: 14px;
-  padding: 16px;
+  padding: 10px;
   background: linear-gradient(180deg, #ffffff 0%, #fafafa 100%);
 }
 
 .admin-session-panel__title {
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 17px;
+  font-weight: 700;
   color: #111827;
-  margin-bottom: 14px;
+  margin-bottom: 8px;
 }
 
 .admin-session-meta {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 6px;
 }
 
 .admin-session-meta__item {
-  padding: 12px;
-  border-radius: 12px;
+  min-height: 54px;
+  padding: 6px 10px;
+  border-radius: 10px;
   background: #f9fafb;
   border: 1px solid #eef2f7;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  justify-content: center;
+  gap: 2px;
 }
 
 .admin-session-meta__label {
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 500;
   color: #6b7280;
+  line-height: 1.1;
 }
 
 .admin-session-meta__value {
   font-size: 14px;
+  font-weight: 600;
+  line-height: 1.15;
   color: #111827;
   word-break: break-word;
 }
@@ -1169,15 +1252,16 @@ onUnmounted(() => {
 .admin-session-status__headline {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px 10px;
   flex-wrap: wrap;
   font-size: 15px;
   color: #111827;
+  margin-bottom: 0;
 }
 
 .admin-session-status__dot {
-  width: 10px;
-  height: 10px;
+  width: 11px;
+  height: 11px;
   border-radius: 999px;
   background: #f59e0b;
   box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.14);
@@ -1193,40 +1277,55 @@ onUnmounted(() => {
   box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.14);
 }
 
+.admin-session-status__text {
+  font-size: 15px;
+  font-weight: 700;
+}
+
 .admin-session-status__duration {
-  font-weight: 600;
+  font-size: 16px;
+  font-weight: 700;
   color: #0f766e;
+  margin-left: auto;
 }
 
 .admin-session-status__stats {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  margin-top: 18px;
+  gap: 8px;
+  margin-top: 10px;
 }
 
 .admin-session-stat {
-  padding: 14px 12px;
-  border-radius: 12px;
+  min-height: 56px;
+  padding: 8px 10px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.92);
   border: 1px solid #fde68a;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 
 .admin-session-stat__label {
   color: #6b7280;
-  font-size: 13px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.admin-session-stat__value {
+  font-size: 16px;
+  line-height: 1;
+  color: #111827;
 }
 
 .admin-session-status__foot {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   flex-wrap: wrap;
-  margin-top: 18px;
+  margin-top: 10px;
   font-size: 12px;
   color: #6b7280;
 }
@@ -1263,6 +1362,13 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.timeline-scroll-shell {
+  max-height: min(70vh, 760px);
+  min-height: 360px;
+  overflow-y: auto;
+  padding-right: 6px;
 }
 
 .timeline-stream {
@@ -1435,8 +1541,18 @@ onUnmounted(() => {
     grid-template-columns: 1fr;
   }
 
+  .admin-session-status__duration {
+    margin-left: 0;
+  }
+
   .timeline-bubble {
     max-width: 100%;
+  }
+
+  .timeline-scroll-shell {
+    max-height: min(62vh, 560px);
+    min-height: 300px;
+    padding-right: 2px;
   }
 }
 </style>

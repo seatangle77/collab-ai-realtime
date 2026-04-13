@@ -60,6 +60,7 @@ export interface AdminTranscript {
   session_id: string
   user_id: string | null
   speaker: string | null
+  speaker_name?: string | null
   text: string | null
   start: string
   end: string
@@ -299,4 +300,3 @@ export interface AdminSessionTextMessage {
   content: string | null
   created_at: string | null
 }
-

@@ -1,9 +1,8 @@
 import { createLogger } from '../logger';
 import {
-  getPendingPushQueue,
+  claimPendingPushQueue,
   updatePushQueueStatus,
   writeDiscussionState,
-  writePushLog,
 } from '../db/queries';
 import { notifyPush } from '../http/nlp-client';
 import { runPushFilterChain } from './push/run-push-filter-chain';
@@ -26,15 +25,17 @@ export const pushDispatcherHooks = {
   },
 };
 
+const PUSH_CLAIM_BATCH_SIZE = 20;
+
 export async function runPushDispatcher(sessionId: string): Promise<void> {
-  const pendingItems = await getPendingPushQueue(sessionId);
+  const pendingItems = await claimPendingPushQueue(sessionId, PUSH_CLAIM_BATCH_SIZE);
   const reservedUsers = new Set<string>();
 
   if (pendingItems.length === 0) {
     return;
   }
 
-  logger.info(`push dispatcher pending=${pendingItems.length}`, { sessionId });
+  logger.info(`push dispatcher claimed=${pendingItems.length}`, { sessionId });
 
   for (const item of pendingItems) {
     try {
@@ -77,23 +78,13 @@ export async function runPushDispatcher(sessionId: string): Promise<void> {
       });
 
       const deliveredAt = new Date();
-      await writePushLog({
-        session_id: item.session_id,
-        state_id: stateId,
-        target_user_id: item.target_user_id,
-        push_content: item.push_content,
-        content_embedding: item.content_embedding,
-        push_channel: 'glasses',
-        delivery_status: 'delivered',
-        delivered_at: deliveredAt,
-      });
-
       await notifyPush(
         item.session_id,
         item.target_user_id,
         item.push_content,
         stateId,
         item.state_type,
+        item.id,
       );
 
       reservedUsers.add(item.target_user_id);

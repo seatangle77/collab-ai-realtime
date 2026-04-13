@@ -25,6 +25,7 @@ class PushNotifyIn(BaseModel):
     content: str
     state_id: str | None = None
     trigger_type: str = ""
+    queue_id: str | None = None
 
 
 class GroupNotifyIn(BaseModel):
@@ -65,6 +66,22 @@ async def push_notify(
         if state_row:
             analysis_window_start = state_row["window_start"]
             analysis_run_id = _build_reasoning_run_id(session_id, analysis_window_start)
+
+    if body.queue_id:
+        queue_result = await db.execute(
+            text(
+                """
+                SELECT status
+                FROM push_queue
+                WHERE id = :queue_id
+                  AND session_id = :session_id
+                """
+            ),
+            {"queue_id": body.queue_id, "session_id": session_id},
+        )
+        queue_row = queue_result.mappings().first()
+        if queue_row and queue_row["status"] in {"delivered", "skipped", "failed"}:
+            return {"id": None, "delivery_status": queue_row["status"], "ws_sent": False}
 
     log_id = "pl" + uuid.uuid4().hex[:8]
 

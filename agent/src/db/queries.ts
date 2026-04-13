@@ -63,7 +63,7 @@ export interface PushQueueRow {
   push_content: string;
   content_embedding: number[];
   analysis_window_start: Date;
-  status: 'pending' | 'delivered' | 'skipped' | 'failed';
+  status: 'pending' | 'processing' | 'delivered' | 'skipped' | 'failed';
   created_at: Date;
   delivered_at: Date | null;
 }
@@ -380,6 +380,43 @@ export async function getPendingPushQueue(sessionId: string): Promise<PushQueueR
   });
 }
 
+/** 原子地认领某 session 下待处理的 push_queue 项，避免并发 dispatcher 重复消费。 */
+export async function claimPendingPushQueue(
+  sessionId: string,
+  limit = 20,
+): Promise<PushQueueRow[]> {
+  const res = await pool.query<
+    Omit<PushQueueRow, 'content_embedding'> & { content_embedding_raw: string | null }
+  >(
+    `WITH picked AS (
+       SELECT id
+       FROM push_queue
+       WHERE session_id = $1
+         AND status = 'pending'
+       ORDER BY created_at ASC
+       LIMIT $2
+       FOR UPDATE SKIP LOCKED
+     )
+     UPDATE push_queue pq
+     SET status = 'processing'
+     FROM picked
+     WHERE pq.id = picked.id
+     RETURNING
+       pq.id, pq.session_id, pq.target_user_id, pq.state_type, pq.push_content,
+       array_to_json(pq.content_embedding)::text AS content_embedding_raw,
+       pq.analysis_window_start, pq.status, pq.created_at, pq.delivered_at`,
+    [sessionId, limit],
+  );
+
+  return res.rows.map((row) => {
+    const { content_embedding_raw, ...rest } = row;
+    return {
+      ...rest,
+      content_embedding: parsePgVector(content_embedding_raw),
+    };
+  });
+}
+
 export async function getRecentDeliveredEmbeddings(
   sessionId: string,
   userId: string,
@@ -429,7 +466,7 @@ export async function getStateTypeCountInWindow(
 /** 更新 push_queue 状态 */
 export async function updatePushQueueStatus(
   id: string,
-  status: 'delivered' | 'skipped' | 'failed',
+  status: 'processing' | 'delivered' | 'skipped' | 'failed',
   deliveredAt?: Date,
 ): Promise<void> {
   if (deliveredAt) {

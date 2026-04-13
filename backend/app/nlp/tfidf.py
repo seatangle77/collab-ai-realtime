@@ -9,32 +9,50 @@ from __future__ import annotations
 import re
 
 import jieba
+import jieba.posseg as pseg
 from sklearn.feature_extraction.text import TfidfVectorizer
 import numpy as np
 
 from .lexicon_loader import (
     get_reweight_config,
+    load_concept_whitelist,
     load_gap_exclude_words,
     load_highfreq_words,
     load_subjective_words,
 )
 from .segmenter import STOPWORDS
 
+CONCEPT_WHITELIST = load_concept_whitelist()
 GAP_EXCLUDE_WORDS = load_gap_exclude_words()
 SUBJECTIVE_WORDS = load_subjective_words()
 HIGHFREQ_WORDS = load_highfreq_words()
 REWEIGHT_CONFIG = get_reweight_config()
+CONCEPT_POS_PREFIXES: tuple[str, ...] = ("n", "vn")
+
+
+def _is_concept_pos(flag: str) -> bool:
+    return any(flag.startswith(prefix) for prefix in CONCEPT_POS_PREFIXES)
 
 
 def _tokenize(text: str) -> list[str]:
-    """jieba 分词 + 去停用词，供 TfidfVectorizer 使用"""
-    return [
-        t for t in jieba.lcut(text)
-        if t.strip()
-        and len(t) > 1
-        and t not in STOPWORDS
-        and t not in GAP_EXCLUDE_WORDS
-    ]
+    """jieba 分词 + 词性过滤 + 去停用词，供 TfidfVectorizer 使用"""
+    enable_pos_filter = bool(REWEIGHT_CONFIG["enable_pos_filter"])
+    tokens: list[str] = []
+
+    for pair in pseg.cut(text):
+        word = pair.word.strip()
+        flag = pair.flag or ""
+        if not word:
+            continue
+        if len(word) <= 1:
+            continue
+        if word in STOPWORDS or word in GAP_EXCLUDE_WORDS:
+            continue
+        if enable_pos_filter and not _is_concept_pos(flag):
+            continue
+        tokens.append(word)
+
+    return tokens
 
 
 def _split_sentences(text: str) -> list[str]:
@@ -58,12 +76,16 @@ def _apply_reweight(feature_names: list[str], raw_scores: np.ndarray) -> np.ndar
     """
     轻量重加权：
     - gap_exclude_words: 硬排除（分数置 0）
+    - concept_whitelist: 概念词温和增益，非概念词轻微抑制
     - NTUSD 主观词: 乘以 ntusd_weight
     - SUBTLEX 高频词: 乘以 subtlex_weight
     """
     scores = raw_scores.copy()
+    enable_concept_whitelist_reweight = bool(REWEIGHT_CONFIG["enable_concept_whitelist_reweight"])
     enable_ntusd_reweight = bool(REWEIGHT_CONFIG["enable_ntusd_reweight"])
     enable_subtlex_reweight = bool(REWEIGHT_CONFIG["enable_subtlex_reweight"])
+    concept_whitelist_weight = float(REWEIGHT_CONFIG["concept_whitelist_weight"])
+    non_concept_weight = float(REWEIGHT_CONFIG["non_concept_weight"])
     ntusd_weight = float(REWEIGHT_CONFIG["ntusd_weight"])
     subtlex_weight = float(REWEIGHT_CONFIG["subtlex_weight"])
 
@@ -71,6 +93,11 @@ def _apply_reweight(feature_names: list[str], raw_scores: np.ndarray) -> np.ndar
         if word in GAP_EXCLUDE_WORDS:
             scores[idx] = 0.0
             continue
+        if enable_concept_whitelist_reweight:
+            if word in CONCEPT_WHITELIST:
+                scores[idx] *= concept_whitelist_weight
+            else:
+                scores[idx] *= non_concept_weight
         if enable_ntusd_reweight and word in SUBJECTIVE_WORDS:
             scores[idx] *= ntusd_weight
         if enable_subtlex_reweight and word in HIGHFREQ_WORDS:

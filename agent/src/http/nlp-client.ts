@@ -206,6 +206,7 @@ export async function notifyPush(
   content: string,
   stateId?: string,
   triggerType?: string,
+  queueId?: string,
 ): Promise<void> {
   try {
     await client.post(`/api/internal/sessions/${sessionId}/push-notify`, {
@@ -213,6 +214,7 @@ export async function notifyPush(
       content,
       state_id: stateId ?? null,
       trigger_type: triggerType ?? '',
+      queue_id: queueId ?? null,
     });
   } catch (err) {
     logger.error('notify_push failed', { message: (err as Error).message });

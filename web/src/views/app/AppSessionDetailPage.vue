@@ -90,6 +90,73 @@ function parseMs(value: string | undefined | null): number | null {
 const currentSummary = ref('')
 const summaryVersion = ref(0)
 const pushLogs = ref<PushLogItem[]>([])
+const seenPushNotificationKeys = new Set<string>()
+const PUSH_LOGS_POLL_INTERVAL_MS = 5000
+
+function normalizePushLog(item: PushLogItem): PushLogItem | null {
+  if (!item.push_content) return null
+  if (currentUser.value?.id && item.target_user_id && item.target_user_id !== currentUser.value.id) {
+    return null
+  }
+  return item
+}
+
+function pushLogMergeKey(item: PushLogItem): string {
+  return [
+    item.target_user_id || '',
+    item.push_content || '',
+    item.triggered_at || '',
+  ].join('::')
+}
+
+function sortPushLogs(items: PushLogItem[]): PushLogItem[] {
+  return [...items].sort((a, b) => {
+    const timeDiff = (parseMs(b.triggered_at) ?? 0) - (parseMs(a.triggered_at) ?? 0)
+    if (timeDiff !== 0) return timeDiff
+    return pushLogMergeKey(a).localeCompare(pushLogMergeKey(b))
+  })
+}
+
+function mergePushLogs(existing: PushLogItem[], incoming: PushLogItem[]): { merged: PushLogItem[]; newItems: PushLogItem[] } {
+  const byKey = new Map<string, PushLogItem>()
+  const existingKeys = new Set(existing.map((item) => pushLogMergeKey(item)))
+
+  for (const item of existing) {
+    byKey.set(pushLogMergeKey(item), item)
+  }
+
+  const newItems: PushLogItem[] = []
+  for (const raw of incoming) {
+    const item = normalizePushLog(raw)
+    if (!item) continue
+    const key = pushLogMergeKey(item)
+    const previous = byKey.get(key)
+    if (!previous) {
+      byKey.set(key, item)
+      newItems.push(item)
+      continue
+    }
+    if (previous.id.startsWith('live-push-') && !item.id.startsWith('live-push-')) {
+      byKey.set(key, item)
+      continue
+    }
+    byKey.set(key, { ...previous, ...item })
+  }
+
+  return {
+    merged: sortPushLogs(Array.from(byKey.values())),
+    newItems: newItems.filter((item) => !existingKeys.has(pushLogMergeKey(item))),
+  }
+}
+
+function maybeNotifyNewPush(item: PushLogItem) {
+  const key = pushLogMergeKey(item)
+  if (seenPushNotificationKeys.has(key)) return
+  seenPushNotificationKeys.add(key)
+  if (item.push_content) {
+    showPushNotification(item.push_content, item.triggered_at)
+  }
+}
 
 async function fetchLatestSummary() {
   try {
@@ -105,18 +172,22 @@ async function fetchLatestSummary() {
   }
 }
 
-async function fetchPushLogs() {
+async function fetchPushLogs(options: { notifyNew?: boolean } = {}) {
   try {
     const data = await appHttp.get<PushLogItem[]>(
       `/api/sessions/${sessionId}/push-logs`,
     )
-    pushLogs.value = data.filter((item) => {
-      if (!item.push_content) return false
-      if (!currentUser.value?.id) return true
-      return !item.target_user_id || item.target_user_id === currentUser.value.id
-    })
+    const normalized = data
+      .map((item) => normalizePushLog(item))
+      .filter((item): item is PushLogItem => Boolean(item))
+    const { merged, newItems } = mergePushLogs(pushLogs.value, normalized)
+    pushLogs.value = merged
+    if (options.notifyNew) {
+      const latestNew = sortPushLogs(newItems)[0]
+      if (latestNew) maybeNotifyNewPush(latestNew)
+    }
   } catch {
-    pushLogs.value = []
+    // 静默失败，不覆盖已展示内容
   }
 }
 
@@ -139,16 +210,12 @@ function handleInfoGapButtonClicked(buttonId: string) {
 }
 
 function upsertPushEvent(push: PushLogItem) {
-  if (!push.push_content) return
-  if (currentUser.value?.id && push.target_user_id && push.target_user_id !== currentUser.value.id) {
-    return
-  }
-  const idx = pushLogs.value.findIndex((item) => item.id === push.id)
-  if (idx >= 0) {
-    pushLogs.value[idx] = push
-  } else {
-    pushLogs.value = [push, ...pushLogs.value]
-  }
+  const normalized = normalizePushLog(push)
+  if (!normalized) return
+  const { merged, newItems } = mergePushLogs(pushLogs.value, [normalized])
+  pushLogs.value = merged
+  const latestNew = sortPushLogs(newItems)[0]
+  if (latestNew) maybeNotifyNewPush(latestNew)
 }
 
 const wsStatusLabel = computed(() => {
@@ -174,6 +241,7 @@ let appStateListener: PluginListenerHandle | null = null
 let ws: WebSocket | null = null
 let pingTimer: ReturnType<typeof setInterval> | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+let pushLogsPollTimer: ReturnType<typeof setInterval> | null = null
 let unmounted = false
 /** 为 true 时不自动重连（页面卸载、主动关闭） */
 let wsIntentionalClose = false
@@ -303,6 +371,7 @@ async function handleLaunchSession() {
     // 3. 标记待录音，建立 WS（connected 后自动开始录音）
     pendingRecordingStart.value = true
     wsIntentionalClose = false
+    startPushLogsPolling()
     openWebSocket()
   } finally {
     launching.value = false
@@ -342,6 +411,7 @@ async function handleEnd() {
   }
   try {
     // 先停止录音、关闭 WS
+    clearPushLogsPollTimer()
     stopRecording()
     wsIntentionalClose = true
     ws?.close(1000, 'host_ended')
@@ -529,6 +599,7 @@ function handleWsMessage(event: MessageEvent<string>) {
     clearReconnectTimer()
     wsStatus.value = 'connected'
     void refetchTranscriptsAndMerge()
+    void fetchPushLogs()
     if (pendingRecordingStart.value) {
       pendingRecordingStart.value = false
       chunkSeq = 0
@@ -628,6 +699,7 @@ function handleWsMessage(event: MessageEvent<string>) {
     if (session.value) {
       session.value = { ...session.value, status: 'ended' }
     }
+    clearPushLogsPollTimer()
     stopRecording()
     wsIntentionalClose = true
     ws?.close(1000, 'session_ended')
@@ -667,7 +739,6 @@ function handleWsMessage(event: MessageEvent<string>) {
     }
     const isForCurrentUser = !d.target_user_id || !currentUser.value?.id || d.target_user_id === currentUser.value.id
     if (d.content && isForCurrentUser) {
-      showPushNotification(d.content, d.triggered_at)
       upsertPushEvent({
         id: `live-push-${d.triggered_at ?? Date.now()}-${d.content}`,
         session_id: sessionId,
@@ -951,6 +1022,21 @@ function clearReconnectTimer() {
   }
 }
 
+function clearPushLogsPollTimer() {
+  if (pushLogsPollTimer != null) {
+    clearInterval(pushLogsPollTimer)
+    pushLogsPollTimer = null
+  }
+}
+
+function startPushLogsPolling() {
+  clearPushLogsPollTimer()
+  if (session.value?.status !== 'ongoing') return
+  pushLogsPollTimer = setInterval(() => {
+    void fetchPushLogs({ notifyNew: true })
+  }, PUSH_LOGS_POLL_INTERVAL_MS)
+}
+
 function scheduleReconnect() {
   clearReconnectTimer()
   if (unmounted || wsIntentionalClose) return
@@ -977,6 +1063,7 @@ function scheduleReconnect() {
 function closeWsForUnmount() {
   wsIntentionalClose = true
   clearReconnectTimer()
+  clearPushLogsPollTimer()
   clearPingTimer()
   const current = ws
   ws = null
@@ -1027,6 +1114,7 @@ onMounted(async () => {
   unmounted = false
   wsIntentionalClose = false
   reconnectAttempt.value = 0
+  clearPushLogsPollTimer()
   attachTestMessageInjector()
   currentUser.value = loadCurrentUser()
   await loadData()
@@ -1036,6 +1124,7 @@ onMounted(async () => {
   // 仅会话已「进行中」时才自动连接 WS（如刷新页面场景）
   if (session.value?.status === 'ongoing') {
     openWebSocket()
+    startPushLogsPolling()
     void fetchInfoGapButtons()
     void fetchLatestSummary()
   } else if (session.value?.status === 'ended') {
@@ -1060,6 +1149,7 @@ onUnmounted(() => {
   unmounted = true
   stopRecording()
   closeWsForUnmount()
+  clearPushLogsPollTimer()
   wsStatus.value = 'disconnected'
 })
 </script>

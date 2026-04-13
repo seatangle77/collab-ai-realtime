@@ -29,6 +29,7 @@ class AdminTranscriptOut(BaseModel):
     session_id: str
     user_id: str | None = None
     speaker: str | None = None
+    speaker_name: str | None = None
     text: str | None = None
     start: Any
     end: Any
@@ -97,7 +98,7 @@ async def create_transcript(
                 (:tid, :session_id, :group_id, :user_id, :speaker, :text,
                  :start, :end, :duration, :confidence, :audio_url, NOW())
             RETURNING
-                transcript_id, group_id, session_id, user_id, speaker, text,
+                transcript_id, group_id, session_id, user_id, speaker, NULL AS speaker_name, text,
                 start, "end", duration, confidence, created_at,
                 audio_url, original_text, is_edited
             """
@@ -179,10 +180,17 @@ async def list_transcripts(
             text(
                 f"""
                 SELECT
-                    transcript_id, group_id, session_id, user_id, speaker, text,
-                    start, "end", duration, confidence, created_at,
-                    audio_url, original_text, is_edited
+                    t.transcript_id,
+                    t.group_id,
+                    t.session_id,
+                    t.user_id,
+                    t.speaker,
+                    u.name AS speaker_name,
+                    t.text,
+                    t.start, t."end", t.duration, t.confidence, t.created_at,
+                    t.audio_url, t.original_text, t.is_edited
                 FROM speech_transcripts t
+                LEFT JOIN users_info u ON u.id = COALESCE(t.user_id, t.speaker)
                 WHERE {where_sql}
                 ORDER BY start ASC
                 LIMIT :limit OFFSET :offset
@@ -220,7 +228,7 @@ async def update_transcript(
                 is_edited = true
             WHERE transcript_id = :tid
             RETURNING
-                transcript_id, group_id, session_id, user_id, speaker, text,
+                transcript_id, group_id, session_id, user_id, speaker, NULL AS speaker_name, text,
                 start, "end", duration, confidence, created_at,
                 audio_url, original_text, is_edited
             """

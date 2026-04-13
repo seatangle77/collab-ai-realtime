@@ -21,6 +21,10 @@ _STOPWORD_FILES: tuple[str, ...] = (
     "scu_stopwords.txt",
 )
 
+_CONCEPT_WHITELIST_FILES: tuple[str, ...] = (
+    "THUOCL_IT.txt",
+)
+
 
 def _read_word_list(path: Path) -> set[str]:
     words: set[str] = set()
@@ -32,6 +36,22 @@ def _read_word_list(path: Path) -> set[str]:
             if not line or line.startswith("#"):
                 continue
             words.add(line)
+    return words
+
+
+def _read_thuocl_word_list(path: Path) -> set[str]:
+    words: set[str] = set()
+    if not path.exists():
+        return words
+    with path.open("r", encoding="utf-8") as f:
+        for raw_line in f:
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            # THUOCL 格式通常为：词\t词频
+            word = line.split()[0].strip()
+            if word:
+                words.add(word)
     return words
 
 
@@ -76,6 +96,14 @@ def load_highfreq_words() -> set[str]:
     return _read_word_list(_LEXICONS_DIR / "subtlex_highfreq_words.txt")
 
 
+@lru_cache(maxsize=1)
+def load_concept_whitelist() -> set[str]:
+    words: set[str] = set()
+    for filename in _CONCEPT_WHITELIST_FILES:
+        words |= _read_thuocl_word_list(_LEXICONS_DIR / filename)
+    return words
+
+
 def _env_flag(name: str, default: bool) -> bool:
     raw = os.getenv(name)
     if raw is None:
@@ -96,15 +124,22 @@ def _env_float(name: str, default: float) -> float:
 def get_reweight_config() -> dict[str, float | bool]:
     """
     轻量重加权开关与参数：
+    - ENABLE_POS_FILTER: 是否启用词性过滤
     - ENABLE_NTUSD_REWEIGHT: 是否启用主观词降权
     - ENABLE_SUBTLEX_REWEIGHT: 是否启用高频泛词降权
+    - ENABLE_CONCEPT_WHITELIST_REWEIGHT: 是否启用概念词表加权
     - NTUSD_WEIGHT: 主观词乘子（默认 0.6）
     - SUBTLEX_WEIGHT: 高频词乘子（默认 0.5）
+    - CONCEPT_WHITELIST_WEIGHT: 概念词乘子（默认 1.35）
+    - NON_CONCEPT_WEIGHT: 非概念词乘子（默认 0.9）
     """
     return {
+        "enable_pos_filter": _env_flag("ENABLE_POS_FILTER", True),
         "enable_ntusd_reweight": _env_flag("ENABLE_NTUSD_REWEIGHT", True),
         "enable_subtlex_reweight": _env_flag("ENABLE_SUBTLEX_REWEIGHT", True),
+        "enable_concept_whitelist_reweight": _env_flag("ENABLE_CONCEPT_WHITELIST_REWEIGHT", True),
         "ntusd_weight": _env_float("NTUSD_WEIGHT", 0.6),
         "subtlex_weight": _env_float("SUBTLEX_WEIGHT", 0.5),
+        "concept_whitelist_weight": _env_float("CONCEPT_WHITELIST_WEIGHT", 1.35),
+        "non_concept_weight": _env_float("NON_CONCEPT_WEIGHT", 0.9),
     }
-

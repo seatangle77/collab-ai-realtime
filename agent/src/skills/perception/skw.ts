@@ -72,19 +72,26 @@ export async function computeSkw(
   for (const keyword of keywords) {
     scores[keyword] = {};
 
-    // 收集各成员该关键词的上下文句子（无上下文则用全文）
+    // 只保留实际提及该关键词的成员（无上下文则跳过，避免全文回退导致误报）
     const contextByUser: Record<string, string> = {};
     for (const uid of activeMembers) {
-      contextByUser[uid] =
-        member_keyword_contexts[uid]?.[keyword] || activeMemberTexts[uid];
+      const ctx = member_keyword_contexts[uid]?.[keyword];
+      if (ctx) contextByUser[uid] = ctx;
     }
 
-    // 批量 embed
-    const texts = activeMembers.map((uid) => contextByUser[uid]);
+    // 少于 2 位成员提及该关键词，跳过（无法形成有意义的语义差异）
+    if (Object.keys(contextByUser).length < 2) {
+      logger.info(`[跨成员语义相似度 Skw] 关键词「${keyword}」：提及人数不足 2，跳过`, { sessionId });
+      continue;
+    }
+
+    // 批量 embed（只处理有上下文的成员）
+    const keywordMembers = Object.keys(contextByUser);
+    const texts = keywordMembers.map((uid) => contextByUser[uid]);
     logger.info(`[跨成员语义相似度 Skw] 关键词「${keyword}」：向量化 ${texts.length} 位成员的上下文`, { sessionId });
     const embeddings = await embed(texts);
     const embeddingByUser: Record<string, number[]> = {};
-    activeMembers.forEach((uid, i) => {
+    keywordMembers.forEach((uid, i) => {
       embeddingByUser[uid] = embeddings[i];
     });
 
@@ -92,10 +99,10 @@ export async function computeSkw(
     const pairs: Array<{ vec_a: number[]; vec_b: number[] }> = [];
     const pairMeta: Array<{ userA: string; userB: string }> = [];
 
-    for (let i = 0; i < activeMembers.length; i++) {
-      for (let j = i + 1; j < activeMembers.length; j++) {
-        const userA = activeMembers[i];
-        const userB = activeMembers[j];
+    for (let i = 0; i < keywordMembers.length; i++) {
+      for (let j = i + 1; j < keywordMembers.length; j++) {
+        const userA = keywordMembers[i];
+        const userB = keywordMembers[j];
         pairs.push({ vec_a: embeddingByUser[userA], vec_b: embeddingByUser[userB] });
         pairMeta.push({ userA, userB });
       }

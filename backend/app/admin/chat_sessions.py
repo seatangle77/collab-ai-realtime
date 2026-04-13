@@ -224,9 +224,19 @@ async def get_chat_session_detail(
     result = await db.execute(
         text(
             """
-            SELECT id, group_id, session_title, created_at, last_updated, status, started_at, ended_at
-            FROM chat_sessions
-            WHERE id = :id
+            SELECT
+                cs.id,
+                cs.group_id,
+                g.name AS group_name,
+                cs.session_title,
+                cs.created_at,
+                cs.last_updated,
+                cs.status,
+                cs.started_at,
+                cs.ended_at
+            FROM chat_sessions cs
+            JOIN groups g ON g.id = cs.group_id
+            WHERE cs.id = :id
             """
         ),
         {"id": session_id},
