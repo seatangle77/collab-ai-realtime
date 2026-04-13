@@ -30,6 +30,7 @@ import { listDiscussionStates } from '../../api/admin/discussion-states'
 import { listWindowMetrics } from '../../api/admin/window-metrics'
 import { formatDateTimeToCST } from '../../utils/datetime'
 import { getDiscussionStateLabel } from '../../utils/discussion'
+import { dedupePushLogs, parsePushLogTime } from '../../utils/pushLogs'
 
 const route = useRoute()
 const router = useRouter()
@@ -63,6 +64,12 @@ interface AnalysisTimelineEntry {
   keywords: string[]
   clickedKeywords: string[]
   pushes: AdminPushLog[]
+  pushDetails: Array<{
+    id: string
+    recipient: string
+    content: string
+    triggeredAt: string | null
+  }>
   recipients: string[]
 }
 
@@ -137,9 +144,7 @@ let elapsedTimer: ReturnType<typeof setInterval> | null = null
 const TIMELINE_BOTTOM_THRESHOLD_PX = 48
 
 function parseTime(value: string | null | undefined): number | null {
-  if (!value) return null
-  const ts = new Date(value).getTime()
-  return Number.isNaN(ts) ? null : ts
+  return parsePushLogTime(value)
 }
 
 function formatDisplayTime(value: string | null | undefined): string {
@@ -246,22 +251,7 @@ const refreshText = computed(() => {
 })
 
 function dedupeTimelinePushLogs(items: AdminPushLog[]): AdminPushLog[] {
-  const seen = new Set<string>()
-  return items.filter((item) => {
-    const content = (item.push_content || '').trim()
-    if (!content) return false
-    const triggeredAt = parseTime(item.triggered_at)
-    const timeBucket = triggeredAt == null ? 'na' : String(Math.floor(triggeredAt / 1000))
-    const key = [
-      item.target_user_id || '',
-      item.target_user_name || '',
-      content,
-      timeBucket,
-    ].join('::')
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
+  return dedupePushLogs(items)
 }
 
 const transcriptTimelineItems = computed<TimelineItem[]>(() => {
@@ -308,6 +298,7 @@ const analysisTimeline = computed<AnalysisTimelineEntry[]>(() => {
         .filter((button) => button.status === 'clicked')
         .map((button) => button.keyword),
       pushes: [],
+      pushDetails: [],
       recipients: [],
     }
   })
@@ -321,7 +312,7 @@ const analysisTimeline = computed<AnalysisTimelineEntry[]>(() => {
       return Math.abs(currentTs - stateAt) < Math.abs(bestTs - stateAt) ? current : best
     }, null)
 
-    const relatedPushes = pushLogs.value.filter((push) => push.state_id === item.id)
+    const relatedPushes = dedupeTimelinePushLogs(pushLogs.value.filter((push) => push.state_id === item.id))
     const relatedKeywords = matchedSummary
       ? infoGapButtons.value.filter((button) => button.window_start === matchedSummary.window_start)
       : []
@@ -338,6 +329,14 @@ const analysisTimeline = computed<AnalysisTimelineEntry[]>(() => {
         .filter((button) => button.status === 'clicked')
         .map((button) => button.keyword),
       pushes: relatedPushes,
+      pushDetails: relatedPushes
+        .filter((push) => push.push_content)
+        .map((push) => ({
+          id: push.id,
+          recipient: push.target_user_name || push.target_user_id,
+          content: push.push_content || '',
+          triggeredAt: push.triggered_at,
+        })),
       recipients: Array.from(
         new Set(
           relatedPushes
@@ -361,6 +360,20 @@ const clickedKeywordIds = computed(() => new Set(
     .filter((button) => button.status === 'clicked')
     .map((button) => button.id),
 ))
+
+const sortedInfoGapButtons = computed(() => {
+  return [...infoGapButtons.value].sort((a, b) => {
+    const aClicked = a.status === 'clicked' ? 1 : 0
+    const bClicked = b.status === 'clicked' ? 1 : 0
+    if (aClicked !== bClicked) return bClicked - aClicked
+    const aTime = parseTime(a.created_at ?? a.window_start) ?? 0
+    const bTime = parseTime(b.created_at ?? b.window_start) ?? 0
+    return bTime - aTime
+  })
+})
+
+const clickedKeywordCount = computed(() => infoGapButtons.value.filter((button) => button.status === 'clicked').length)
+const pendingKeywordCount = computed(() => infoGapButtons.value.filter((button) => button.status !== 'clicked').length)
 
 function isTimelineNearBottom(): boolean {
   const el = timelineScrollEl.value
@@ -864,28 +877,7 @@ onUnmounted(() => {
             <el-card shadow="never">
               <template #header>
                 <div class="admin-tab-header">
-                  <div class="admin-tab-header__title">讨论摘要历史</div>
-                </div>
-              </template>
-              <div v-if="!discussionSummaries.length" class="admin-session-detail-empty">暂无摘要历史</div>
-              <div v-else class="analysis-timeline">
-                <div v-for="item in discussionSummaries" :key="item.id" class="analysis-card analysis-card--summary">
-                  <div class="analysis-card__head">
-                    <strong>v{{ item.version }}</strong>
-                    <span>{{ formatClock(item.created_at) }}</span>
-                  </div>
-                  <div class="analysis-card__window">
-                    覆盖窗口：{{ formatDisplayTime(item.window_start) }} - {{ formatDisplayTime(item.window_end) }}
-                  </div>
-                  <div class="analysis-card__body">{{ item.content }}</div>
-                </div>
-              </div>
-            </el-card>
-
-            <el-card shadow="never">
-              <template #header>
-                <div class="admin-tab-header">
-                  <div class="admin-tab-header__title">Agent 分析轮次时间线</div>
+                  <div class="admin-tab-header__title">Agent 分析时间线</div>
                 </div>
               </template>
               <div v-if="!analysisTimeline.length" class="admin-session-detail-empty">暂无分析记录</div>
@@ -913,6 +905,19 @@ onUnmounted(() => {
                       （{{ item.recipients.join('、') }}）
                     </template>
                   </div>
+                  <div v-if="item.pushDetails.length" class="analysis-card__push-list">
+                    <div
+                      v-for="push in item.pushDetails"
+                      :key="push.id"
+                      class="analysis-card__push-item"
+                    >
+                      <div class="analysis-card__push-head">
+                        <span>{{ push.recipient }}</span>
+                        <span>{{ formatClock(push.triggeredAt) }}</span>
+                      </div>
+                      <div class="analysis-card__push-content">{{ push.content }}</div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </el-card>
@@ -924,18 +929,46 @@ onUnmounted(() => {
                 </div>
               </template>
               <div v-if="!infoGapButtons.length" class="admin-session-detail-empty">暂无信息缺口关键词</div>
-              <div v-else class="keyword-cloud">
+              <div v-else class="keyword-panel">
+                <div class="keyword-overview">
+                  <div class="keyword-overview__item">
+                    <span class="keyword-overview__label">关键词总数</span>
+                    <strong>{{ infoGapButtons.length }}</strong>
+                  </div>
+                  <div class="keyword-overview__item is-clicked">
+                    <span class="keyword-overview__label">已点击</span>
+                    <strong>{{ clickedKeywordCount }}</strong>
+                  </div>
+                  <div class="keyword-overview__item">
+                    <span class="keyword-overview__label">待跟进</span>
+                    <strong>{{ pendingKeywordCount }}</strong>
+                  </div>
+                </div>
+
+                <div class="keyword-cloud">
                 <div
-                  v-for="item in infoGapButtons"
+                  v-for="item in sortedInfoGapButtons"
                   :key="item.id"
                   class="keyword-pill"
                   :class="{ 'is-clicked': clickedKeywordIds.has(item.id) }"
                 >
-                  <span>{{ item.keyword }}</span>
-                  <span class="keyword-pill__meta">
-                    {{ item.user_name || item.user_id }}
-                    <template v-if="clickedKeywordIds.has(item.id)"> · 已点击</template>
-                  </span>
+                  <div class="keyword-pill__head">
+                    <span class="keyword-pill__word">{{ item.keyword }}</span>
+                    <span
+                      class="keyword-pill__status"
+                      :class="{ 'is-clicked': clickedKeywordIds.has(item.id) }"
+                    >
+                      {{ clickedKeywordIds.has(item.id) ? '已点击' : '待跟进' }}
+                    </span>
+                  </div>
+                  <div class="keyword-pill__meta">
+                    面向成员：{{ item.user_name || item.user_id }}
+                  </div>
+                  <div class="keyword-pill__foot">
+                    <span>窗口起点：{{ formatClock(item.window_start) }}</span>
+                    <span v-if="item.created_at">记录于 {{ formatClock(item.created_at) }}</span>
+                  </div>
+                </div>
                 </div>
               </div>
             </el-card>
@@ -1464,31 +1497,160 @@ onUnmounted(() => {
   word-break: break-word;
 }
 
-.keyword-cloud {
+.analysis-card__push-list {
+  margin-top: 10px;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.analysis-card__push-item {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(251, 146, 60, 0.18);
+}
+
+.analysis-card__push-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.analysis-card__push-content {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #1f2937;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.keyword-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.keyword-overview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
 
+.keyword-overview__item {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  border: 1px solid #e2e8f0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.keyword-overview__item.is-clicked {
+  background: linear-gradient(180deg, #f0fdf4 0%, #dcfce7 100%);
+  border-color: #86efac;
+}
+
+.keyword-overview__label {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.keyword-overview__item strong {
+  font-size: 20px;
+  line-height: 1;
+  color: #0f172a;
+}
+
+.keyword-cloud {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
 .keyword-pill {
-  display: inline-flex;
+  display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 10px 12px;
-  border-radius: 999px;
-  background: #f3f4f6;
-  border: 1px solid #d1d5db;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at top right, rgba(251, 191, 36, 0.14), transparent 34%),
+    linear-gradient(180deg, #fffef7 0%, #fffaf0 100%);
+  border: 1px solid #f3e8c8;
   color: #111827;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.keyword-pill:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+  border-color: #f0c36a;
 }
 
 .keyword-pill.is-clicked {
+  background:
+    radial-gradient(circle at top right, rgba(34, 197, 94, 0.14), transparent 36%),
+    linear-gradient(180deg, #f7fff9 0%, #effcf3 100%);
+  border-color: #9ae6b4;
+}
+
+.keyword-pill__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.keyword-pill__word {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: #0f172a;
+  word-break: break-word;
+}
+
+.keyword-pill__status {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  font-size: 11px;
+  color: #c2410c;
+}
+
+.keyword-pill__status.is-clicked {
   background: #ecfdf5;
-  border-color: #6ee7b7;
+  border-color: #86efac;
+  color: #166534;
 }
 
 .keyword-pill__meta {
-  font-size: 11px;
-  color: #6b7280;
+  font-size: 13px;
+  color: #475569;
+}
+
+.keyword-pill__foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding-top: 2px;
+  font-size: 12px;
+  color: #64748b;
+  border-top: 1px dashed rgba(148, 163, 184, 0.45);
+}
+
+@media (max-width: 900px) {
+  .keyword-overview {
+    grid-template-columns: 1fr;
+  }
 }
 
 .admin-session-detail-transcripts-header {

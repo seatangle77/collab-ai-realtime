@@ -78,6 +78,7 @@ async function addPushLog(
   sessionId: string,
   targetUserId: string,
   content: string,
+  options: { triggeredAt?: string } = {},
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/api/admin/push-logs/`, {
     method: 'POST',
@@ -88,6 +89,7 @@ async function addPushLog(
       push_channel: 'web',
       delivery_status: 'delivered',
       push_content: content,
+      triggered_at: options.triggeredAt,
     }),
   })
   if (!res.ok) throw new Error(`添加 push log 失败: ${await res.text()}`)
@@ -402,6 +404,31 @@ test.describe('AdminChatSessionDetail - 新布局', () => {
     await expect(page.locator('.timeline-bubble--transcript')).toContainText('先聊一下成本')
     await expect(page.locator('.timeline-bubble--push')).toContainText('AI 建议')
     await expect(page.locator('.timeline-bubble--push')).toContainText('建议你主动提出风险与成本优先级')
+  })
+
+  test('F-3: 同秒重复 push log 在讨论实录中折叠为一条', async ({ page }) => {
+    const leader = await registerAndLogin('f3-leader')
+    const member = await registerAndLogin('f3-member')
+    const groupId = await createGroup(leader.accessToken, `Admin-SD-F3群-${Date.now()}`)
+    const joinRes = await fetch(`${API_BASE}/api/groups/${groupId}/join`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${member.accessToken}` },
+    })
+    if (!joinRes.ok) throw new Error(`加入群组失败: ${await joinRes.text()}`)
+    const sessionId = await createSession(leader.accessToken, groupId, `F3重复建议测试-${Date.now()}`)
+
+    await addPushLog(sessionId, member.userId, '后台折叠的重复建议', {
+      triggeredAt: '2026-02-01T08:00:10.123Z',
+    })
+    await addPushLog(sessionId, member.userId, '后台折叠的重复建议', {
+      triggeredAt: '2026-02-01T08:00:10.789Z',
+    })
+
+    await loginAsAdminAndGoToDetail(page, sessionId)
+    await page.getByRole('tab', { name: '讨论实录' }).click()
+
+    await expect(page.locator('.timeline-bubble--push')).toHaveCount(1)
+    await expect(page.locator('.timeline-bubble--push')).toContainText('后台折叠的重复建议')
   })
 })
 

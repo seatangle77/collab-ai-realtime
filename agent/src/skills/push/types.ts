@@ -4,6 +4,7 @@ import type { PushQueueRow } from '../../db/queries';
 
 export type FilterReasonCode =
   | 'same_round_dedup'    // 同轮已向该用户推送过
+  | 'recent_exact_content' // 短时间内已发送完全相同文案
   | 'content_similarity'  // 与近期推送内容相似度超阈值
   | 'vad_speaking'        // 当前有人正在说话，推送延迟
   | 'hook_skip';          // 外部 hook 决定跳过

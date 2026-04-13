@@ -430,7 +430,7 @@ export async function getRecentDeliveredEmbeddings(
      WHERE pl.session_id = $1
        AND pl.target_user_id = $2
        AND ds.state_type = $3
-       AND pl.push_channel = 'glasses'
+       AND pl.push_channel IN ('web', 'app', 'glasses')
        AND pl.delivery_status = 'delivered'
        AND pl.content_embedding IS NOT NULL
      ORDER BY pl.triggered_at DESC
@@ -441,6 +441,29 @@ export async function getRecentDeliveredEmbeddings(
   return res.rows.map((row) => ({
     content_embedding: parsePgVector(row.content_embedding_raw),
   }));
+}
+
+export async function hasRecentDeliveredPushWithExactContent(
+  sessionId: string,
+  userId: string,
+  pushContent: string,
+  windowMs: number,
+): Promise<boolean> {
+  const res = await pool.query<{ exists: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1
+       FROM push_logs pl
+       WHERE pl.session_id = $1
+         AND pl.target_user_id = $2
+         AND pl.push_content = $3
+         AND pl.push_channel IN ('web', 'app', 'glasses')
+         AND pl.delivery_status = 'delivered'
+         AND pl.triggered_at >= NOW() - ($4 * INTERVAL '1 millisecond')
+     ) AS exists`,
+    [sessionId, userId, pushContent, windowMs],
+  );
+
+  return Boolean(res.rows[0]?.exists);
 }
 
 export async function getStateTypeCountInWindow(

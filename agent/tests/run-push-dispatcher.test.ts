@@ -14,11 +14,13 @@ jest.mock('../src/logger', () => ({
 jest.mock('../src/db/queries');
 jest.mock('../src/http/nlp-client');
 
-const mockGetPendingPushQueue = queries.getPendingPushQueue as jest.MockedFunction<typeof queries.getPendingPushQueue>;
-const mockGetRecentDeliveredEmbeddings = queries.getRecentDeliveredEmbeddings as jest.MockedFunction<typeof queries.getRecentDeliveredEmbeddings>;
+const mockClaimPendingPushQueue = queries.claimPendingPushQueue as jest.MockedFunction<typeof queries.claimPendingPushQueue>;
+const mockHasRecentDeliveredPushWithExactContent =
+  queries.hasRecentDeliveredPushWithExactContent as jest.MockedFunction<typeof queries.hasRecentDeliveredPushWithExactContent>;
+const mockGetRecentDeliveredEmbeddings =
+  queries.getRecentDeliveredEmbeddings as jest.MockedFunction<typeof queries.getRecentDeliveredEmbeddings>;
 const mockUpdatePushQueueStatus = queries.updatePushQueueStatus as jest.MockedFunction<typeof queries.updatePushQueueStatus>;
 const mockWriteDiscussionState = queries.writeDiscussionState as jest.MockedFunction<typeof queries.writeDiscussionState>;
-const mockWritePushLog = queries.writePushLog as jest.MockedFunction<typeof queries.writePushLog>;
 const mockNotifyPush = nlpClient.notifyPush as jest.MockedFunction<typeof nlpClient.notifyPush>;
 
 const SESSION = 's_test';
@@ -38,26 +40,30 @@ const QUEUE_ITEM = {
 describe('runPushDispatcher', () => {
   beforeEach(() => {
     jest.resetAllMocks();
-    mockGetPendingPushQueue.mockResolvedValue([QUEUE_ITEM]);
+    mockClaimPendingPushQueue.mockResolvedValue([QUEUE_ITEM]);
+    mockHasRecentDeliveredPushWithExactContent.mockResolvedValue(false);
     mockGetRecentDeliveredEmbeddings.mockResolvedValue([]);
     mockWriteDiscussionState.mockResolvedValue('ds_1');
-    mockWritePushLog.mockResolvedValue(undefined);
     mockNotifyPush.mockResolvedValue(undefined);
     mockUpdatePushQueueStatus.mockResolvedValue(undefined);
   });
 
-  it('成功执行时写状态、写日志、通知并更新为 delivered', async () => {
+  it('成功执行时写状态、通知并更新为 delivered', async () => {
     jest.spyOn(dispatcher.pushDispatcherHooks, 'shouldSkipPushQueueItem').mockResolvedValue(false);
 
     await dispatcher.runPushDispatcher(SESSION);
 
+    expect(mockClaimPendingPushQueue).toHaveBeenCalledWith(SESSION, 20);
     expect(mockWriteDiscussionState).toHaveBeenCalledTimes(1);
-    expect(mockWritePushLog).toHaveBeenCalledTimes(1);
     expect(mockNotifyPush).toHaveBeenCalledTimes(1);
-    expect(mockWritePushLog).toHaveBeenCalledWith(expect.objectContaining({
-      content_embedding: [1, 0, 0],
-      delivery_status: 'delivered',
-    }));
+    expect(mockNotifyPush).toHaveBeenCalledWith(
+      SESSION,
+      'uA',
+      '请试着补充一个新的观点',
+      'ds_1',
+      'low_participation',
+      'pq_1',
+    );
     expect(mockUpdatePushQueueStatus).toHaveBeenCalledWith('pq_1', 'delivered', expect.any(Date));
   });
 
@@ -67,7 +73,6 @@ describe('runPushDispatcher', () => {
     await dispatcher.runPushDispatcher(SESSION);
 
     expect(mockWriteDiscussionState).not.toHaveBeenCalled();
-    expect(mockWritePushLog).not.toHaveBeenCalled();
     expect(mockNotifyPush).not.toHaveBeenCalled();
     expect(mockUpdatePushQueueStatus).toHaveBeenCalledWith('pq_1', 'skipped');
   });
@@ -81,6 +86,23 @@ describe('runPushDispatcher', () => {
     expect(mockUpdatePushQueueStatus).toHaveBeenCalledWith('pq_1', 'failed');
   });
 
+  it('最近短时间已发送相同文案时跳过', async () => {
+    jest.spyOn(dispatcher.pushDispatcherHooks, 'shouldSkipPushQueueItem').mockResolvedValue(false);
+    mockHasRecentDeliveredPushWithExactContent.mockResolvedValue(true);
+
+    await dispatcher.runPushDispatcher(SESSION);
+
+    expect(mockHasRecentDeliveredPushWithExactContent).toHaveBeenCalledWith(
+      SESSION,
+      'uA',
+      '请试着补充一个新的观点',
+      10 * 60 * 1000,
+    );
+    expect(mockWriteDiscussionState).not.toHaveBeenCalled();
+    expect(mockNotifyPush).not.toHaveBeenCalled();
+    expect(mockUpdatePushQueueStatus).toHaveBeenCalledWith('pq_1', 'skipped');
+  });
+
   it('与最近同类已推内容相似度达到阈值时跳过', async () => {
     jest.spyOn(dispatcher.pushDispatcherHooks, 'shouldSkipPushQueueItem').mockResolvedValue(false);
     mockGetRecentDeliveredEmbeddings.mockResolvedValue([
@@ -90,6 +112,12 @@ describe('runPushDispatcher', () => {
 
     await dispatcher.runPushDispatcher(SESSION);
 
+    expect(mockGetRecentDeliveredEmbeddings).toHaveBeenCalledWith(
+      SESSION,
+      'uA',
+      'low_participation',
+      2,
+    );
     expect(mockWriteDiscussionState).not.toHaveBeenCalled();
     expect(mockNotifyPush).not.toHaveBeenCalled();
     expect(mockUpdatePushQueueStatus).toHaveBeenCalledWith('pq_1', 'skipped');
@@ -97,7 +125,7 @@ describe('runPushDispatcher', () => {
 
   it('同一轮同用户第二条待推送直接跳过', async () => {
     jest.spyOn(dispatcher.pushDispatcherHooks, 'shouldSkipPushQueueItem').mockResolvedValue(false);
-    mockGetPendingPushQueue.mockResolvedValue([
+    mockClaimPendingPushQueue.mockResolvedValue([
       QUEUE_ITEM,
       {
         ...QUEUE_ITEM,

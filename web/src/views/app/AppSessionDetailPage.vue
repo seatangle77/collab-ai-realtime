@@ -24,6 +24,7 @@ import { extractErrorMessage } from '../../utils/error'
 import PushNotification from '../../components/PushNotification.vue'
 import InfoGapButtons, { type InfoGapButton } from '../../components/InfoGapButtons.vue'
 import { appHttp } from '../../api/appHttp'
+import { buildPushLogDedupeKey, parsePushLogTime, sortPushLogsByTriggeredAtDesc } from '../../utils/pushLogs'
 
 interface AppUser {
   id: string
@@ -80,12 +81,6 @@ function showPushNotification(content: string, _triggeredAt?: string | null) {
   requestAnimationFrame(() => { pushVisible.value = true })
 }
 
-function parseMs(value: string | undefined | null): number | null {
-  if (!value) return null
-  const ts = new Date(value).getTime()
-  return Number.isNaN(ts) ? null : ts
-}
-
 // ── 讨论摘要 ──────────────────────────────────────────────────────────────────
 const currentSummary = ref('')
 const summaryVersion = ref(0)
@@ -102,19 +97,11 @@ function normalizePushLog(item: PushLogItem): PushLogItem | null {
 }
 
 function pushLogMergeKey(item: PushLogItem): string {
-  return [
-    item.target_user_id || '',
-    item.push_content || '',
-    item.triggered_at || '',
-  ].join('::')
+  return buildPushLogDedupeKey(item) ?? item.id
 }
 
 function sortPushLogs(items: PushLogItem[]): PushLogItem[] {
-  return [...items].sort((a, b) => {
-    const timeDiff = (parseMs(b.triggered_at) ?? 0) - (parseMs(a.triggered_at) ?? 0)
-    if (timeDiff !== 0) return timeDiff
-    return pushLogMergeKey(a).localeCompare(pushLogMergeKey(b))
-  })
+  return sortPushLogsByTriggeredAtDesc(items)
 }
 
 function mergePushLogs(existing: PushLogItem[], incoming: PushLogItem[]): { merged: PushLogItem[]; newItems: PushLogItem[] } {
@@ -804,7 +791,7 @@ function speakerDisplayLabel(t: AppTranscript): string {
 }
 
 function pushDisplayTime(value: string | null | undefined): string {
-  const parsed = parseMs(value)
+  const parsed = parsePushLogTime(value)
   if (parsed == null) return ''
   return new Date(parsed).toLocaleTimeString('zh-CN', {
     hour: '2-digit',
@@ -885,15 +872,15 @@ interface LiveTranscriptSegment {
 }
 
 function transcriptSortTimestamp(item: AppTranscript): number {
-  const createdAt = parseMs(item.created_at)
+  const createdAt = parsePushLogTime(item.created_at)
   if (createdAt != null) return createdAt
-  const startTime = parseMs(String(item.start ?? ''))
+  const startTime = parsePushLogTime(String(item.start ?? ''))
   if (startTime != null) return startTime
   return 0
 }
 
 function pushSortTimestamp(item: PushLogItem): number {
-  return parseMs(item.triggered_at) ?? 0
+  return parsePushLogTime(item.triggered_at) ?? 0
 }
 
 function buildTranscriptItems(transcriptItems: AppTranscript[], pushItems: PushLogItem[]): TranscriptTimelineItem[] {

@@ -31,10 +31,10 @@ export function cosineSimilarity(a: number[], b: number[]): number {
 
 /**
  * 内容相似度过滤：与该用户最近 2 条已投递推送的语义相似度超过阈值时跳过，
- * 避免反复推送相同内容。
+ * 避免跨轮次、跨端重复推送近似内容。
  */
 export async function contentSimilarityFilter(ctx: FilterContext): Promise<FilterOutcome> {
-  const { sessionId, item } = ctx;
+  const { item } = ctx;
 
   const recentEmbeddings = await getRecentDeliveredEmbeddings(
     item.session_id,

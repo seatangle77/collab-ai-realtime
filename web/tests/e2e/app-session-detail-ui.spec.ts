@@ -69,7 +69,7 @@ async function installMockWs(page: Page) {
     const nativeSetTimeout = window.setTimeout.bind(window)
     ;(window as any).__wsAutoOpen = true
     window.setTimeout = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
-      const capped = typeof timeout === 'number' ? Math.min(timeout, 10) : timeout
+      const capped = typeof timeout === 'number' ? Math.min(timeout, 100) : timeout
       return nativeSetTimeout(handler, capped, ...args)
     }) as typeof window.setTimeout
 
@@ -272,6 +272,72 @@ test.describe('Step 6 - AppSessionDetail UI', () => {
     await expect(page.locator('.app-session-detail-ai-card').filter({ hasText: '这条是发给当前用户的' })).toBeVisible()
     await expect(page.locator('.app-session-detail-ai-card').filter({ hasText: '这条是广播建议' })).toBeVisible()
     await expect(page.locator('.app-session-detail-ai-card').filter({ hasText: '这条是发给别人的' })).toHaveCount(0)
+  })
+
+  test('history push logs dedupe same-second duplicate suggestions for current user', async ({ page }) => {
+    const session = buildSession('ongoing')
+    await mockSessionDetailApis(page, session, {
+      pushLogs: [
+        {
+          id: 'push-dup-1',
+          session_id: session.id,
+          target_user_id: currentUser.id,
+          push_content: '同一秒内重复的建议',
+          push_channel: 'web',
+          delivery_status: 'delivered',
+          triggered_at: '2026-02-01T08:00:10.123Z',
+        },
+        {
+          id: 'push-dup-2',
+          session_id: session.id,
+          target_user_id: currentUser.id,
+          push_content: '同一秒内重复的建议',
+          push_channel: 'web',
+          delivery_status: 'delivered',
+          triggered_at: '2026-02-01T08:00:10.789Z',
+        },
+      ],
+    })
+
+    await page.goto(`/app/sessions/${session.id}`)
+    await expect(page.locator('.app-session-detail-ai-card')).toHaveCount(1)
+    await expect(page.locator('.app-session-detail-ai-card')).toContainText('同一秒内重复的建议')
+  })
+
+  test('runtime push later merged with polled history still renders a single suggestion', async ({ page }) => {
+    const session = buildSession('ongoing')
+    let pushLogFetchCount = 0
+    await mockSessionDetailApis(page, session, { pushLogs: [] })
+    await page.unroute(`**/api/sessions/${session.id}/push-logs`)
+    await page.route(`**/api/sessions/${session.id}/push-logs`, async (route) => {
+      pushLogFetchCount += 1
+      const body = pushLogFetchCount >= 2
+        ? [
+            {
+              id: 'push-persisted-1',
+              session_id: session.id,
+              target_user_id: currentUser.id,
+              push_content: '实时与历史合并的建议',
+              push_channel: 'web',
+              delivery_status: 'delivered',
+              triggered_at: '2026-02-01T08:00:15.000Z',
+            },
+          ]
+        : []
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
+    })
+
+    await page.goto(`/app/sessions/${session.id}`)
+    await emitWs(page, {
+      type: 'push_notification',
+      data: {
+        content: '实时与历史合并的建议',
+        target_user_id: currentUser.id,
+        triggered_at: '2026-02-01T08:00:15.000Z',
+      },
+    })
+
+    await expect(page.locator('.app-session-detail-ai-card').filter({ hasText: '实时与历史合并的建议' })).toHaveCount(1)
   })
 
   test('WS reconnect and disconnect copy stays human-readable without technical jargon', async ({ page }) => {

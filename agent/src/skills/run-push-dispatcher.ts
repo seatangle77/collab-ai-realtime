@@ -7,6 +7,7 @@ import {
 import { notifyPush } from '../http/nlp-client';
 import { runPushFilterChain } from './push/run-push-filter-chain';
 import { sameRoundDedupFilter } from './push/filters/same-round-dedup';
+import { recentExactContentFilter } from './push/filters/recent-exact-content';
 import { contentSimilarityFilter } from './push/filters/content-similarity';
 import { vadCheckFilter } from './push/filters/vad-check';
 import type { PushFilter } from './push/types';
@@ -15,8 +16,9 @@ const logger = createLogger('push-dispatcher');
 
 const PUSH_FILTERS: PushFilter[] = [
   sameRoundDedupFilter,    // 1. 同轮去重（纯内存，最快）
-  contentSimilarityFilter, // 2. 内容相似度（DB 查询）
-  vadCheckFilter,          // 3. VAD 说话检测（HTTP，最慢）
+  recentExactContentFilter, // 2. 短时间完全相同文案去重（DB 查询）
+  contentSimilarityFilter,  // 3. 内容相似度（DB 查询）
+  vadCheckFilter,           // 4. VAD 说话检测（HTTP，最慢）
 ];
 
 export const pushDispatcherHooks = {
