@@ -25,9 +25,18 @@ export const config = {
     baseUrl: process.env.NLP_BASE_URL ?? 'http://localhost:8000',
     adminToken: requireEnv('ADMIN_API_KEY', ''),
   },
+  qwen: {
+    apiKey: process.env.QWEN_API_KEY?.trim() ?? '',
+    baseUrl: process.env.QWEN_BASE_URL?.trim() ?? '',
+    model: process.env.QWEN_MODEL?.trim() ?? '',
+  },
   agent: {
     shortIntervalMs: parseInt(process.env.SHORT_INTERVAL_MS ?? '30000', 10),
     longIntervalMs: parseInt(process.env.LONG_INTERVAL_MS ?? '120000', 10),
     sessionPollMs: parseInt(process.env.SESSION_POLL_MS ?? '15000', 10),
   },
 } as const;
+
+export function hasQwenConfig(): boolean {
+  return Boolean(config.qwen.apiKey && config.qwen.baseUrl && config.qwen.model);
+}

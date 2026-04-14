@@ -1,6 +1,7 @@
 import { createLogger } from '../logger';
 import {
   claimPendingPushQueue,
+  findDiscussionStateByQueuedPushId,
   updatePushQueueStatus,
   writeDiscussionState,
 } from '../db/queries';
@@ -71,7 +72,11 @@ export async function runPushDispatcher(sessionId: string): Promise<void> {
       }
 
       // outcome.action === 'proceed' → 执行推送
-      const stateId = await writeDiscussionState({
+      const existingState = await findDiscussionStateByQueuedPushId({
+        sessionId: item.session_id,
+        queueId: item.id,
+      });
+      const stateId = existingState?.id ?? await writeDiscussionState({
         session_id: item.session_id,
         state_type: item.state_type,
         target_user_id: item.target_user_id,

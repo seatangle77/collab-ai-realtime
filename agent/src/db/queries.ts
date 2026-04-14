@@ -68,6 +68,15 @@ export interface PushQueueRow {
   delivered_at: Date | null;
 }
 
+export interface DiscussionStateRow {
+  id: string;
+  session_id: string;
+  state_type: string;
+  target_user_id: string | null;
+  trigger_metrics: Record<string, unknown> | null;
+  window_start: Date | null;
+}
+
 // ── 工具函数 ──────────────────────────────────────────────────────────────────
 
 /**
@@ -299,6 +308,51 @@ export async function writeDiscussionState(row: {
     ],
   );
   return id;
+}
+
+export async function findDiscussionStateByQueuedPushId(params: {
+  sessionId: string;
+  queueId: string;
+}): Promise<DiscussionStateRow | null> {
+  const res = await pool.query<{
+    id: string;
+    session_id: string;
+    state_type: string;
+    target_user_id: string | null;
+    trigger_metrics: Record<string, unknown> | string | null;
+    window_start: Date | null;
+  }>(
+    `SELECT id, session_id, state_type, target_user_id, trigger_metrics, window_start
+     FROM discussion_states
+     WHERE session_id = $1
+       AND trigger_metrics ->> 'queued_push_id' = $2
+     ORDER BY triggered_at DESC
+     LIMIT 1`,
+    [params.sessionId, params.queueId],
+  );
+
+  const row = res.rows[0];
+  if (!row) return null;
+
+  let triggerMetrics: Record<string, unknown> | null = null;
+  if (typeof row.trigger_metrics === 'string') {
+    try {
+      triggerMetrics = JSON.parse(row.trigger_metrics) as Record<string, unknown>;
+    } catch {
+      triggerMetrics = null;
+    }
+  } else {
+    triggerMetrics = row.trigger_metrics;
+  }
+
+  return {
+    id: row.id,
+    session_id: row.session_id,
+    state_type: row.state_type,
+    target_user_id: row.target_user_id,
+    trigger_metrics: triggerMetrics,
+    window_start: row.window_start,
+  };
 }
 
 /** 写入 push_queue，返回生成的 id */

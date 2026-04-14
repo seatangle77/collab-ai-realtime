@@ -21,6 +21,8 @@ const mockGetRecentDeliveredEmbeddings =
   queries.getRecentDeliveredEmbeddings as jest.MockedFunction<typeof queries.getRecentDeliveredEmbeddings>;
 const mockUpdatePushQueueStatus = queries.updatePushQueueStatus as jest.MockedFunction<typeof queries.updatePushQueueStatus>;
 const mockWriteDiscussionState = queries.writeDiscussionState as jest.MockedFunction<typeof queries.writeDiscussionState>;
+const mockFindDiscussionStateByQueuedPushId =
+  queries.findDiscussionStateByQueuedPushId as jest.MockedFunction<typeof queries.findDiscussionStateByQueuedPushId>;
 const mockNotifyPush = nlpClient.notifyPush as jest.MockedFunction<typeof nlpClient.notifyPush>;
 
 const SESSION = 's_test';
@@ -43,6 +45,7 @@ describe('runPushDispatcher', () => {
     mockClaimPendingPushQueue.mockResolvedValue([QUEUE_ITEM]);
     mockHasRecentDeliveredPushWithExactContent.mockResolvedValue(false);
     mockGetRecentDeliveredEmbeddings.mockResolvedValue([]);
+    mockFindDiscussionStateByQueuedPushId.mockResolvedValue(null);
     mockWriteDiscussionState.mockResolvedValue('ds_1');
     mockNotifyPush.mockResolvedValue(undefined);
     mockUpdatePushQueueStatus.mockResolvedValue(undefined);
@@ -54,6 +57,10 @@ describe('runPushDispatcher', () => {
     await dispatcher.runPushDispatcher(SESSION);
 
     expect(mockClaimPendingPushQueue).toHaveBeenCalledWith(SESSION, 20);
+    expect(mockFindDiscussionStateByQueuedPushId).toHaveBeenCalledWith({
+      sessionId: SESSION,
+      queueId: 'pq_1',
+    });
     expect(mockWriteDiscussionState).toHaveBeenCalledTimes(1);
     expect(mockNotifyPush).toHaveBeenCalledTimes(1);
     expect(mockNotifyPush).toHaveBeenCalledWith(
@@ -65,6 +72,30 @@ describe('runPushDispatcher', () => {
       'pq_1',
     );
     expect(mockUpdatePushQueueStatus).toHaveBeenCalledWith('pq_1', 'delivered', expect.any(Date));
+  });
+
+  it('已存在 discussion_state 时复用已有 state_id', async () => {
+    jest.spyOn(dispatcher.pushDispatcherHooks, 'shouldSkipPushQueueItem').mockResolvedValue(false);
+    mockFindDiscussionStateByQueuedPushId.mockResolvedValue({
+      id: 'ds_existing',
+      session_id: SESSION,
+      state_type: 'low_participation',
+      target_user_id: 'uA',
+      trigger_metrics: { queued_push_id: 'pq_1' },
+      window_start: new Date('2024-01-01T10:00:00Z'),
+    });
+
+    await dispatcher.runPushDispatcher(SESSION);
+
+    expect(mockWriteDiscussionState).not.toHaveBeenCalled();
+    expect(mockNotifyPush).toHaveBeenCalledWith(
+      SESSION,
+      'uA',
+      '请试着补充一个新的观点',
+      'ds_existing',
+      'low_participation',
+      'pq_1',
+    );
   });
 
   it('规则命中时更新为 skipped 且不执行推送', async () => {

@@ -1,6 +1,7 @@
 import { runActionLayer } from '../src/skills/run-action-layer';
 import * as queries from '../src/db/queries';
 import * as nlpClient from '../src/http/nlp-client';
+import * as pushContentSkill from '../src/skills/generate-push-content';
 import type { Trigger } from '../src/skills/run-reasoning-layer';
 
 jest.mock('../src/logger', () => ({
@@ -14,8 +15,10 @@ jest.mock('../src/logger', () => ({
 
 jest.mock('../src/db/queries');
 jest.mock('../src/http/nlp-client');
+jest.mock('../src/skills/generate-push-content');
 
 const mockWritePushQueueItem = queries.writePushQueueItem as jest.MockedFunction<typeof queries.writePushQueueItem>;
+const mockWriteDiscussionState = queries.writeDiscussionState as jest.MockedFunction<typeof queries.writeDiscussionState>;
 const mockWriteInfoGapButton = queries.writeInfoGapButton as jest.MockedFunction<typeof queries.writeInfoGapButton>;
 const mockDismissPendingBeforeWindow = queries.dismissPendingInfoGapButtonsBeforeWindow as jest.MockedFunction<
   typeof queries.dismissPendingInfoGapButtonsBeforeWindow
@@ -27,13 +30,16 @@ const mockHasClickedRecent = queries.hasClickedInfoGapKeywordInRecentWindows as 
 const mockGetPendingCount = queries.getPendingInfoGapButtonCount as jest.MockedFunction<
   typeof queries.getPendingInfoGapButtonCount
 >;
-const mockGeneratePushBatchAnalysis = nlpClient.generatePushBatchAnalysis as jest.MockedFunction<
-  typeof nlpClient.generatePushBatchAnalysis
->;
 const mockAssessGap = nlpClient.assessGap as jest.MockedFunction<typeof nlpClient.assessGap>;
 const mockNotifyGroupSilence = nlpClient.notifyGroupSilence as jest.MockedFunction<typeof nlpClient.notifyGroupSilence>;
 const mockNotifyInfoGapButton = nlpClient.notifyInfoGapButton as jest.MockedFunction<typeof nlpClient.notifyInfoGapButton>;
 const mockEmbed = nlpClient.embed as jest.MockedFunction<typeof nlpClient.embed>;
+const mockGeneratePushContent = pushContentSkill.generatePushContent as jest.MockedFunction<
+  typeof pushContentSkill.generatePushContent
+>;
+const mockValidateStructuredAnchor = pushContentSkill.validateStructuredAnchor as jest.MockedFunction<
+  typeof pushContentSkill.validateStructuredAnchor
+>;
 
 const SESSION = 's_test';
 const MEMBERS = ['uA', 'uB', 'uC'];
@@ -80,6 +86,7 @@ describe('runActionLayer (new info-gap flow)', () => {
   beforeEach(() => {
     jest.resetAllMocks();
     mockWritePushQueueItem.mockResolvedValue('pq_mock');
+    mockWriteDiscussionState.mockResolvedValue('ds_mock');
     mockWriteInfoGapButton.mockResolvedValue('igb_mock');
     mockDismissPendingBeforeWindow.mockResolvedValue(0);
     mockHasPendingKeyword.mockResolvedValue(false);
@@ -89,15 +96,24 @@ describe('runActionLayer (new info-gap flow)', () => {
     mockNotifyGroupSilence.mockResolvedValue(true);
     mockNotifyInfoGapButton.mockResolvedValue(undefined);
     mockAssessGap.mockResolvedValue([]);
-    mockGeneratePushBatchAnalysis.mockResolvedValue([
+    mockGeneratePushContent.mockResolvedValue([
       {
-        user_id: 'uA',
-        challenge_type: 'personal_stagnation',
-        needs_prompt: true,
-        analysis: '分析结果',
+        targetUserId: 'uA',
+        triggerType: 'low_participation',
         content: '这是一条测试推送文案',
+        needsPrompt: true,
+        anchor: {
+          transcriptId: 't2',
+          speakerId: 'uC',
+          text: '我对MVP不太懂',
+        },
       },
     ]);
+    mockValidateStructuredAnchor.mockReturnValue({
+      transcriptId: 't2',
+      speakerId: 'uC',
+      text: '我对MVP不太懂',
+    });
   });
 
   it('无触发：不写队列、不写按钮', async () => {
@@ -115,17 +131,17 @@ describe('runActionLayer (new info-gap flow)', () => {
     await runActionLayer({ ...BASE_PARAMS, triggers });
 
     expect(mockNotifyGroupSilence).toHaveBeenCalledTimes(1);
-    expect(mockGeneratePushBatchAnalysis).not.toHaveBeenCalled();
+    expect(mockGeneratePushContent).not.toHaveBeenCalled();
     expect(mockWritePushQueueItem).not.toHaveBeenCalled();
   });
 
-  it('普通触发：batch 产出后写入 push_queue', async () => {
+  it('普通触发：新 skill 产出后写入 push_queue 和 discussion_states', async () => {
     await runActionLayer({
       ...BASE_PARAMS,
       triggers: [makeTrigger({})],
     });
 
-    expect(mockGeneratePushBatchAnalysis).toHaveBeenCalledTimes(1);
+    expect(mockGeneratePushContent).toHaveBeenCalledTimes(1);
     expect(mockWritePushQueueItem).toHaveBeenCalledTimes(1);
     expect(mockWritePushQueueItem).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -137,6 +153,35 @@ describe('runActionLayer (new info-gap flow)', () => {
         analysis_window_start: WINDOW_START,
       }),
     );
+    expect(mockWriteDiscussionState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session_id: SESSION,
+        state_type: 'low_participation',
+        target_user_id: 'uA',
+        window_start: WINDOW_START,
+        trigger_metrics: expect.objectContaining({
+          speaking_ratio: 0.08,
+          queued_push_id: 'pq_mock',
+          anchor: {
+            transcript_id: 't2',
+            speaker_id: 'uC',
+            text: '我对MVP不太懂',
+          },
+        }),
+      }),
+    );
+  });
+
+  it('anchor 校验失败时不应入队', async () => {
+    mockValidateStructuredAnchor.mockReturnValue(null);
+
+    await runActionLayer({
+      ...BASE_PARAMS,
+      triggers: [makeTrigger({})],
+    });
+
+    expect(mockWritePushQueueItem).not.toHaveBeenCalled();
+    expect(mockWriteDiscussionState).not.toHaveBeenCalled();
   });
 
   it('info_gap: assess 通过 + 频控通过时，写按钮并通知，且写入 llm 元数据', async () => {
