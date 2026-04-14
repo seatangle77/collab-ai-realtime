@@ -97,6 +97,18 @@ def load_highfreq_words() -> set[str]:
 
 
 @lru_cache(maxsize=1)
+def load_custom_words() -> set[str]:
+    """加载自定义专有词表，注入分词器防止被拆分。"""
+    return _read_word_list(_LEXICONS_DIR / "custom_words.txt")
+
+
+@lru_cache(maxsize=1)
+def load_candidate_words() -> set[str]:
+    """加载候选词表，用 dict_combine 软注入，不强制覆盖统计模型。"""
+    return _read_word_list(_LEXICONS_DIR / "candidate_words.txt")
+
+
+@lru_cache(maxsize=1)
 def load_concept_whitelist() -> set[str]:
     words: set[str] = set()
     for filename in _CONCEPT_WHITELIST_FILES:

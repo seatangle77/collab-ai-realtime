@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import re
 
-import jieba
-import jieba.posseg as pseg
 from sklearn.feature_extraction.text import TfidfVectorizer
 import numpy as np
 
@@ -20,7 +18,7 @@ from .lexicon_loader import (
     load_highfreq_words,
     load_subjective_words,
 )
-from .segmenter import STOPWORDS
+from .segmenter import STOPWORDS, get_pipeline
 
 CONCEPT_WHITELIST = load_concept_whitelist()
 GAP_EXCLUDE_WORDS = load_gap_exclude_words()
@@ -34,14 +32,31 @@ def _is_concept_pos(flag: str) -> bool:
     return any(flag.startswith(prefix) for prefix in CONCEPT_POS_PREFIXES)
 
 
+def _flatten_terms(terms: object) -> list[str]:
+    if not isinstance(terms, list) or not terms:
+        return []
+    first = terms[0]
+    if isinstance(first, str):
+        return [w for w in terms if isinstance(w, str)]
+    flat: list[str] = []
+    for sent in terms:
+        if isinstance(sent, list):
+            flat.extend([w for w in sent if isinstance(w, str)])
+    return flat
+
+
 def _tokenize(text: str) -> list[str]:
-    """jieba 分词 + 词性过滤 + 去停用词，供 TfidfVectorizer 使用"""
+    """HanLP 分词 + 词性过滤 + 去停用词，供 TfidfVectorizer 使用"""
     enable_pos_filter = bool(REWEIGHT_CONFIG["enable_pos_filter"])
     tokens: list[str] = []
 
-    for pair in pseg.cut(text):
-        word = pair.word.strip()
-        flag = pair.flag or ""
+    pipeline = get_pipeline()
+    result = pipeline(text, tasks=["tok/fine", "pos/pku"])
+    words = _flatten_terms(result["tok/fine"])
+    flags = _flatten_terms(result["pos/pku"])
+
+    for word, flag in zip(words, flags):
+        word = word.strip()
         if not word:
             continue
         if len(word) <= 1:

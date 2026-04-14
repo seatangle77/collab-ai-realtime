@@ -1,13 +1,21 @@
 """
 中文分词模块
-- 基于 jieba，去停用词
+- 基于 HanLP，去停用词
 - 一次调用同时返回 tokens / TTR / arg_density，上层无需二次计算
 """
 from __future__ import annotations
 
-import jieba
+from typing import Any
+import unicodedata
 
-from .lexicon_loader import load_external_stopwords, load_pystopwords
+import hanlp
+
+from .lexicon_loader import (
+    load_candidate_words,
+    load_custom_words,
+    load_external_stopwords,
+    load_pystopwords,
+)
 
 # ── 停用词表（语气词、助词、连接词等，不计入 TTR） ──────────────────────────
 BASE_STOPWORDS: set[str] = {
@@ -41,6 +49,41 @@ STOPWORDS: set[str] = (
     | ARG_WORDS
 )
 
+_pipeline: Any | None = None
+
+
+def _flatten_terms(terms: Any) -> list[str]:
+    """兼容 HanLP 可能返回的平铺或按句嵌套结构。"""
+    if not terms:
+        return []
+    first = terms[0]
+    if isinstance(first, str):
+        return [w for w in terms if isinstance(w, str) and w.strip()]
+    flat: list[str] = []
+    for sent in terms:
+        if isinstance(sent, list):
+            flat.extend([w for w in sent if isinstance(w, str) and w.strip()])
+    return flat
+
+
+def _is_punct_or_symbol(token: str) -> bool:
+    return bool(token) and all(unicodedata.category(ch)[0] in {"P", "S"} for ch in token)
+
+
+def get_pipeline() -> Any:
+    global _pipeline
+    if _pipeline is None:
+        _pipeline = hanlp.load(
+            hanlp.pretrained.mtl.CLOSE_TOK_POS_NER_SRL_DEP_SDP_CON_ELECTRA_SMALL_ZH
+        )
+        custom_words = load_custom_words()
+        if custom_words:
+            _pipeline["tok/fine"].dict_force = custom_words
+        candidate_words = load_candidate_words()
+        if candidate_words:
+            _pipeline["tok/fine"].dict_combine = candidate_words
+    return _pipeline
+
 
 def segment(text: str) -> dict:
     """
@@ -52,7 +95,16 @@ def segment(text: str) -> dict:
     - arg_density:  论证词密度 = 论证词出现次数 / 原始总词数
     """
     # 原始分词（保留所有词，含停用词）
-    tokens_raw = [t for t in jieba.lcut(text) if t.strip()]
+    result = get_pipeline()(text, tasks=["tok/fine"])
+    tokens_raw: list[str] = []
+    for term in _flatten_terms(result["tok/fine"]):
+        for piece in term.split():
+            piece = piece.strip()
+            if not piece:
+                continue
+            if _is_punct_or_symbol(piece):
+                continue
+            tokens_raw.append(piece)
     total_n = len(tokens_raw)  # 原始总词数，用于 arg_density 分母
 
     # 去停用词 + 去单字（单字噪音多，对语义贡献低）

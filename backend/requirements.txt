@@ -9,6 +9,7 @@ requests
 python-multipart
 bcrypt>=4.0.0
 websocket-client
+setuptools>=68,<81
 
 # 模块六：音频处理
 resemblyzer
@@ -19,7 +20,8 @@ soundfile
 
 # NLP 微服务
 sentence-transformers
-jieba
+hanlp>=2.1,<2.2
+transformers<5
 pystopwords
 scikit-learn
 openai

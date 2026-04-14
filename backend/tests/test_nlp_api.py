@@ -201,6 +201,35 @@ def test_segment_extreme_long_text() -> bool:
     return _log(ok, "segment：超长文本正常返回", {"status": resp.status_code})
 
 
+def test_segment_custom_words_dict_force() -> bool:
+    """custom_words(dict_force) 中的词应按整体分出"""
+    resp = requests.post(
+        f"{BASE_URL}/api/nlp/segment",
+        json={"text": "这款水光棒和胶原棒最近讨论很多"},
+        headers=ADMIN_HEADERS,
+    )
+    if resp.status_code != 200:
+        return _log(False, "segment custom_words 应返回 200", resp.text)
+    tokens = resp.json()["tokens"]
+    ok = "水光棒" in tokens and "胶原棒" in tokens
+    return _log(ok, "segment：custom_words(dict_force) 生效", {"tokens": tokens})
+
+
+def test_segment_candidate_words_dict_combine() -> bool:
+    """candidate_words(dict_combine) 候选词在常见语境下可被识别"""
+    resp = requests.post(
+        f"{BASE_URL}/api/nlp/segment",
+        json={"text": "最近团队有点内卷，大家都快破防了，也有人想躺平"},
+        headers=ADMIN_HEADERS,
+    )
+    if resp.status_code != 200:
+        return _log(False, "segment candidate_words 应返回 200", resp.text)
+    tokens = resp.json()["tokens"]
+    hits = {"内卷", "破防", "躺平"} & set(tokens)
+    ok = len(hits) >= 2
+    return _log(ok, "segment：candidate_words(dict_combine) 基本生效", {"tokens": tokens, "hits": sorted(hits)})
+
+
 # ══════════════════════════════════════════════════════════════════
 # /api/nlp/embed
 # ══════════════════════════════════════════════════════════════════
@@ -496,6 +525,26 @@ def test_tfidf_edge_member_with_empty_text() -> bool:
     return _log(ok, "tfidf：某成员文本为空，不报错", {"status": resp.status_code})
 
 
+def test_tfidf_with_custom_and_candidate_words() -> bool:
+    """tfidf 链路应能提取新词典中的词（至少命中一个）"""
+    member_texts = {
+        "u1": "我们最近一直在讨论水光棒的成分和效果",
+        "u2": "组里有点内卷，大家对产品经理的节奏有分歧",
+        "u3": "有人说自己快破防了，也有人想躺平",
+    }
+    resp = requests.post(
+        f"{BASE_URL}/api/nlp/tfidf",
+        json={"member_texts": member_texts, "top_n": 8},
+        headers=ADMIN_HEADERS,
+    )
+    if resp.status_code != 200:
+        return _log(False, "tfidf 新词典联动应返回 200", resp.text)
+    keywords = resp.json()["keywords"]
+    expected = {"水光棒", "内卷", "破防", "躺平", "产品经理"}
+    ok = len(expected & set(keywords)) >= 1
+    return _log(ok, "tfidf：新词典词项可进入关键词结果", {"keywords": keywords})
+
+
 # ══════════════════════════════════════════════════════════════════
 # /api/nlp/has_reasoning
 # ══════════════════════════════════════════════════════════════════
@@ -608,6 +657,8 @@ def main() -> int:
         ("segment 边界：全停用词",                        test_segment_edge_only_stopwords),
         ("segment 边界：全标点",                          test_segment_edge_only_punctuation),
         ("segment 极端：超长文本",                        test_segment_extreme_long_text),
+        ("segment：custom_words(dict_force) 生效",        test_segment_custom_words_dict_force),
+        ("segment：candidate_words(dict_combine) 生效",   test_segment_candidate_words_dict_combine),
 
         # ── embed ─────────────────────────────────────────────
         ("embed：单条文本，384 维",                       test_embed_single_text),
@@ -632,6 +683,7 @@ def main() -> int:
         ("tfidf：top_n 超过词汇量",                       test_tfidf_top_n_exceeds_vocab),
         ("tfidf 边界：空 member_texts",                   test_tfidf_edge_empty_member_texts),
         ("tfidf 边界：某成员文本为空",                    test_tfidf_edge_member_with_empty_text),
+        ("tfidf：custom/candidate 词典联动",              test_tfidf_with_custom_and_candidate_words),
 
         # ── has_reasoning ─────────────────────────────────────
         ("has_reasoning：规则层，两者均 True",            test_reasoning_rule_both_true),

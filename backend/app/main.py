@@ -26,6 +26,7 @@ from .admin.push_logs import router as admin_push_logs_router
 from .ws_sessions import router as ws_sessions_router
 from .nlp.router import router as nlp_router
 from .nlp import embedder as nlp_embedder
+from .nlp.segmenter import get_pipeline as get_nlp_pipeline
 from .settings import nlp_settings
 from .info_gap import router as info_gap_router
 from .discussion_summary import router as discussion_summary_router
@@ -132,3 +133,5 @@ async def _startup():
 
     # 预加载 NLP sentence-transformers 模型，避免第一个请求冷启动延迟
     nlp_embedder.load_model(nlp_settings.embed_model)
+    # 预加载 HanLP MTL 模型，避免第一个 NLP 请求冷启动
+    get_nlp_pipeline()
