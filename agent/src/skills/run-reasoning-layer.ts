@@ -165,26 +165,15 @@ function detectInfoGap(result: PipelineResult, memberIds: string[]): Trigger[] {
 
     if (pairs.length === 0) continue;
 
-    // 模糊地带：任意一对在 0.3~0.6 之间 → 不触发
-    const hasFuzzy = pairs.some((p) => p.score >= THRESHOLDS.SKW_GAP && p.score < THRESHOLDS.SKW_CLOSE);
-    if (hasFuzzy) continue;
-
-    // 有没有任意两人 < 0.3
-    const hasGap = pairs.some((p) => p.score < THRESHOLDS.SKW_GAP);
-    if (!hasGap) continue;
-
-    // 判断推给谁
-    const targetUsers = resolveInfoGapTargets(memberIds, pairs);
-    if (targetUsers.length === 0) continue;
-
     const minScore = Math.min(...pairs.map((p) => p.score));
-    logger.info(`[信息缺口] 关键词「${keyword}」skw_min=${minScore.toFixed(3)} → 推给 ${targetUsers.join(',')}`);
+    logger.info(`[信息缺口] 关键词「${keyword}」skw_min=${minScore.toFixed(3)} → 待LLM评估`, { member_count: memberIds.length });
 
     triggers.push({
       type: 'info_gap',
       keyword,
       skwScore: minScore,
-      targetUsers,
+      // 目标用户由 LLM 评估阶段决定，这里先透传全员
+      targetUsers: memberIds,
       triggerMetrics: {
         keyword,
         skw_scores: Object.fromEntries(pairs.map((p) => [`${p.a}_${p.b}`, p.score])),
@@ -193,46 +182,4 @@ function detectInfoGap(result: PipelineResult, memberIds: string[]): Trigger[] {
   }
 
   return triggers;
-}
-
-/** 根据 pair 分布决定信息缺口推给谁 */
-function resolveInfoGapTargets(
-  memberIds: string[],
-  pairs: Array<{ a: string; b: string; score: number }>,
-): string[] {
-  // 三人情形：找是否存在两人接近(>0.6)、第三人孤立(<0.3 with both)
-  if (memberIds.length === 3) {
-    const [u0, u1, u2] = memberIds;
-    const score = (a: string, b: string) =>
-      pairs.find((p) => (p.a === a && p.b === b) || (p.a === b && p.b === a))?.score ?? null;
-
-    const candidates: Array<{ isolated: string; close: [string, string] }> = [
-      { isolated: u2, close: [u0, u1] },
-      { isolated: u1, close: [u0, u2] },
-      { isolated: u0, close: [u1, u2] },
-    ];
-
-    for (const { isolated, close } of candidates) {
-      const closeScore  = score(close[0], close[1]);
-      const iso0        = score(isolated, close[0]);
-      const iso1        = score(isolated, close[1]);
-      if (
-        closeScore !== null && closeScore > THRESHOLDS.SKW_CLOSE &&
-        iso0 !== null && iso0 < THRESHOLDS.SKW_GAP &&
-        iso1 !== null && iso1 < THRESHOLDS.SKW_GAP
-      ) {
-        return [isolated];
-      }
-    }
-
-    // 三人两两均 < 0.3
-    const allGap = pairs.every((p) => p.score < THRESHOLDS.SKW_GAP);
-    if (allGap) return memberIds;
-  }
-
-  // 两人情形或其他：直接判断是否有 gap
-  const allGap = pairs.every((p) => p.score < THRESHOLDS.SKW_GAP);
-  if (allGap) return memberIds;
-
-  return [];
 }

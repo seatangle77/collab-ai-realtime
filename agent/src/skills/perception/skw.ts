@@ -1,5 +1,5 @@
 import { getTranscriptsInWindow, writeKeywordSkw, KeywordSkwRow } from '../../db/queries';
-import { tfidf, embed, similarity } from '../../http/nlp-client';
+import { tfidf, candidateRecall, embed, similarity } from '../../http/nlp-client';
 import { createLogger } from '../../logger';
 
 const logger = createLogger('skill:skw');
@@ -15,6 +15,18 @@ export interface SkwResult {
    * 用于后续 info_gain 消费
    */
   scores: Record<string, Record<string, Record<string, number>>>;
+}
+
+function splitSentences(text: string): string[] {
+  return text
+    .split(/[。！？.!?\n]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function findContext(text: string, keyword: string): string {
+  const hit = splitSentences(text).find((s) => s.includes(keyword));
+  return hit ?? '';
 }
 
 /**
@@ -56,10 +68,14 @@ export async function computeSkw(
     return { keywords: [], scores: {} };
   }
 
-  logger.info(`[关键词提取 TF-IDF] 正在提取 ${Object.keys(activeMemberTexts).length} 位活跃成员的关键词`, { sessionId });
-  const tfidfResult = await tfidf(activeMemberTexts, 5);
-  const { keywords, member_keyword_contexts } = tfidfResult;
-  logger.info(`[关键词提取 TF-IDF] 提取完成，关键词：${keywords.join('、') || '（无）'}`, { sessionId });
+  logger.info(`[关键词召回] 正在提取 ${Object.keys(activeMemberTexts).length} 位活跃成员的候选词`, { sessionId });
+  const [tfidfResult, recallResult] = await Promise.all([
+    tfidf(activeMemberTexts, 20),
+    candidateRecall(activeMemberTexts, 15),
+  ]);
+  const { member_keyword_contexts } = tfidfResult;
+  const keywords = recallResult.keywords ?? [];
+  logger.info(`[关键词召回] 提取完成，候选词：${keywords.join('、') || '（无）'}`, { sessionId });
 
   if (keywords.length === 0) {
     return { keywords: [], scores: {} };
@@ -75,7 +91,7 @@ export async function computeSkw(
     // 只保留实际提及该关键词的成员（无上下文则跳过，避免全文回退导致误报）
     const contextByUser: Record<string, string> = {};
     for (const uid of activeMembers) {
-      const ctx = member_keyword_contexts[uid]?.[keyword];
+      const ctx = member_keyword_contexts[uid]?.[keyword] || findContext(activeMemberTexts[uid], keyword);
       if (ctx) contextByUser[uid] = ctx;
     }
 

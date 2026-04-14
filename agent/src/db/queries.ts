@@ -519,17 +519,109 @@ export async function writeInfoGapButton(row: {
   keyword: string;
   skw_score: number;
   window_start: Date;
+  gap_type?: string | null;
+  confidence?: number | null;
+  llm_reason?: string | null;
 }): Promise<string | null> {
   const id = 'igb_' + nanoid(12);
   const res = await pool.query<{ id: string }>(
     `INSERT INTO info_gap_buttons
-       (id, session_id, user_id, keyword, skw_score, window_start, status, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, 'pending', NOW())
+       (id, session_id, user_id, keyword, skw_score, window_start, status, created_at,
+        gap_type, confidence, llm_reason)
+     VALUES ($1, $2, $3, $4, $5, $6, 'pending', NOW(), $7, $8, $9)
      ON CONFLICT DO NOTHING
      RETURNING id`,
-    [id, row.session_id, row.user_id, row.keyword, row.skw_score, toUtcString(row.window_start)],
+    [
+      id,
+      row.session_id,
+      row.user_id,
+      row.keyword,
+      row.skw_score,
+      toUtcString(row.window_start),
+      row.gap_type ?? null,
+      row.confidence ?? null,
+      row.llm_reason ?? null,
+    ],
   );
   return res.rows[0]?.id ?? null;
+}
+
+/** 将历史窗口遗留的 pending 按钮标记为 dismissed（视为过期）。 */
+export async function dismissPendingInfoGapButtonsBeforeWindow(
+  sessionId: string,
+  currentWindowStart: Date,
+): Promise<number> {
+  const res = await pool.query<{ id: string }>(
+    `UPDATE info_gap_buttons
+     SET status = 'dismissed'
+     WHERE session_id = $1
+       AND status = 'pending'
+       AND window_start < $2
+     RETURNING id`,
+    [sessionId, toUtcString(currentWindowStart)],
+  );
+  return res.rowCount ?? 0;
+}
+
+/** 是否已存在同 session+user+keyword 的 pending 按钮 */
+export async function hasPendingInfoGapKeyword(
+  sessionId: string,
+  userId: string,
+  keyword: string,
+): Promise<boolean> {
+  const res = await pool.query<{ exists: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1
+       FROM info_gap_buttons
+       WHERE session_id = $1
+         AND user_id = $2
+         AND keyword = $3
+         AND status = 'pending'
+     ) AS exists`,
+    [sessionId, userId, keyword],
+  );
+  return Boolean(res.rows[0]?.exists);
+}
+
+/** 统计当前 pending 按钮数量 */
+export async function getPendingInfoGapButtonCount(
+  sessionId: string,
+  userId: string,
+): Promise<number> {
+  const res = await pool.query<{ count: string }>(
+    `SELECT COUNT(*)::text AS count
+     FROM info_gap_buttons
+     WHERE session_id = $1
+       AND user_id = $2
+       AND status = 'pending'`,
+    [sessionId, userId],
+  );
+  return Number(res.rows[0]?.count ?? '0');
+}
+
+/** 最近 N 个分析窗口内，该词是否已被点击 */
+export async function hasClickedInfoGapKeywordInRecentWindows(
+  sessionId: string,
+  userId: string,
+  keyword: string,
+  currentWindowStart: Date,
+  recentWindowCount: number,
+  windowMs: number,
+): Promise<boolean> {
+  const since = new Date(currentWindowStart.getTime() - recentWindowCount * windowMs);
+  const res = await pool.query<{ exists: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1
+       FROM info_gap_buttons
+       WHERE session_id = $1
+         AND user_id = $2
+         AND keyword = $3
+         AND status = 'clicked'
+         AND window_start >= $4
+     ) AS exists`,
+    [sessionId, userId, keyword, toUtcString(since)],
+  );
+  return Boolean(res.rows[0]?.exists);
 }
 
 /** 读取最近一条摘要 */

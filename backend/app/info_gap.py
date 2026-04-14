@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -19,6 +18,7 @@ from .admin.deps import require_admin
 from .auth import get_current_user
 from .db import get_db
 from .jpush_client import send_push_to_registration_id
+from .nlp import push_content as nlp_push_content
 from .ws_manager import ws_manager
 from .ws_protocol import build_info_gap_button
 
@@ -174,22 +174,23 @@ async def click_info_gap_button(
 ) -> ClickResponse:
     """
     用户点击信息缺口关键词按钮。
-    - 校验按钮归属当前用户且状态为 pending
-    - 更新状态为 clicked，记录 clicked_at
-    - 通过 JPush 向用户设备发送提示推送（如 device_token 存在）
-    - TODO Week 3：触发 AI 分析生成推送内容
+    - 原子更新：pending -> clicked
+    - 组装摘要与最近发言，生成真实信息缺口提示文案
+    - 写 push_logs 并尝试 JPush 推送
     """
     await _assert_session_member(session_id, current_user["id"], db)
 
-    # 1. 校验按钮存在且属于当前用户
-    btn_result = await db.execute(
+    # 1) 原子更新：仅 pending 才能改为 clicked
+    update_result = await db.execute(
         text(
             """
-            SELECT id, keyword, status
-            FROM info_gap_buttons
-            WHERE id         = :button_id
+            UPDATE info_gap_buttons
+            SET status = 'clicked', clicked_at = NOW()
+            WHERE id = :button_id
               AND session_id = :session_id
-              AND user_id    = :user_id
+              AND user_id = :user_id
+              AND status = 'pending'
+            RETURNING id, keyword, skw_score
             """
         ),
         {
@@ -198,29 +199,90 @@ async def click_info_gap_button(
             "user_id": current_user["id"],
         },
     )
-    btn = btn_result.mappings().first()
+    btn = update_result.mappings().first()
     if not btn:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="按钮不存在")
-    if btn["status"] != "pending":
+        # 细分 404 / 409，避免接口语义丢失
+        exists_result = await db.execute(
+            text(
+                """
+                SELECT status
+                FROM info_gap_buttons
+                WHERE id = :button_id
+                  AND session_id = :session_id
+                  AND user_id = :user_id
+                """
+            ),
+            {
+                "button_id": body.button_id,
+                "session_id": session_id,
+                "user_id": current_user["id"],
+            },
+        )
+        exists_row = exists_result.mappings().first()
+        if not exists_row:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="按钮不存在")
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="按钮已被点击或已过期")
 
-    # 2. 更新按钮状态
-    # 这里避免把 Python datetime 传给 asyncpg，改用 DB NOW() 写入，
-    # 防止 timestamp/timestamptz 的 naive/aware 类型不一致导致 DataError。
-    await db.execute(
-        text(
-            """
-            UPDATE info_gap_buttons
-            SET status = 'clicked', clicked_at = NOW()
-            WHERE id = :button_id
-            """
-        ),
-        {"button_id": body.button_id},
-    )
     await db.commit()
 
-    # 3. 写一条 push_log 记录（push_channel = app，占位内容，Week 3 替换为 AI 生成文案）
-    push_content = f"你点击了关键词「{btn['keyword']}」，AI 正在分析..."
+    # 2) 组装上下文并生成真实推送文案
+    summary_result = await db.execute(
+        text(
+            """
+            SELECT content
+            FROM discussion_summaries
+            WHERE session_id = :session_id
+            ORDER BY version DESC, created_at DESC
+            LIMIT 1
+            """
+        ),
+        {"session_id": session_id},
+    )
+    summary_row = summary_result.mappings().first()
+    summary_text = str(summary_row["content"]).strip() if summary_row and summary_row.get("content") else ""
+
+    transcripts_result = await db.execute(
+        text(
+            """
+            SELECT
+              COALESCE(t.user_id, t.speaker, '未知') AS speaker_id,
+              t.text
+            FROM speech_transcripts t
+            WHERE t.session_id = :session_id
+              AND t.text IS NOT NULL
+              AND t.text != ''
+            ORDER BY t.start DESC
+            LIMIT 30
+            """
+        ),
+        {"session_id": session_id},
+    )
+    transcript_rows = list(reversed(transcripts_result.mappings().all()))
+    transcript_text = "\n".join(
+        f"{r.get('speaker_id', '未知')}：{str(r.get('text', '')).strip()}"
+        for r in transcript_rows
+        if str(r.get("text", "")).strip()
+    )
+
+    user_result = await db.execute(
+        text("SELECT name, device_token FROM users_info WHERE id = :user_id"),
+        {"user_id": current_user["id"]},
+    )
+    user_row = user_result.mappings().first() or {}
+    username = str(user_row.get("name") or "")
+    device_token = user_row.get("device_token")
+
+    generated_content = nlp_push_content.generate_push_content(
+        trigger_type="info_gap",
+        summary=summary_text,
+        transcripts=transcript_text,
+        username=username,
+        keyword=str(btn["keyword"]),
+        skw_score=float(btn.get("skw_score") or 0.0),
+    )
+    final_content = generated_content or f"关键词「{btn['keyword']}」可先从讨论语境里看定义和例子。"
+
+    # 3) 写 push_log 记录
     log_id = f"pl{uuid.uuid4().hex[:8]}"
     await db.execute(
         text(
@@ -237,25 +299,18 @@ async def click_info_gap_button(
             "id": log_id,
             "session_id": session_id,
             "user_id": current_user["id"],
-            "content": push_content,
+            "content": final_content,
         },
     )
     await db.commit()
 
-    # 4. JPush 推送（如果用户有 device_token）
-    token_result = await db.execute(
-        text("SELECT device_token FROM users_info WHERE id = :user_id"),
-        {"user_id": current_user["id"]},
-    )
-    token_row = token_result.mappings().first()
-    device_token = token_row["device_token"] if token_row else None
-
+    # 4) JPush 推送（如果用户有 device_token）
     if device_token:
         try:
             await asyncio.to_thread(
                 send_push_to_registration_id,
                 device_token,
-                push_content,
+                final_content,
                 "信息缺口提示",
             )
             await db.execute(

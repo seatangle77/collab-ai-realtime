@@ -109,6 +109,12 @@ def load_candidate_words() -> set[str]:
 
 
 @lru_cache(maxsize=1)
+def load_abstract_concepts() -> set[str]:
+    """加载抽象概念词表，用于候选召回和重加权豁免。"""
+    return _read_word_list(_LEXICONS_DIR / "abstract_concepts.txt")
+
+
+@lru_cache(maxsize=1)
 def load_concept_whitelist() -> set[str]:
     words: set[str] = set()
     for filename in _CONCEPT_WHITELIST_FILES:

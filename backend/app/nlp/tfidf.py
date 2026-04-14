@@ -12,6 +12,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 import numpy as np
 
 from .lexicon_loader import (
+    load_abstract_concepts,
     get_reweight_config,
     load_concept_whitelist,
     load_gap_exclude_words,
@@ -21,6 +22,7 @@ from .lexicon_loader import (
 from .segmenter import STOPWORDS, get_pipeline
 
 CONCEPT_WHITELIST = load_concept_whitelist()
+ABSTRACT_CONCEPTS = load_abstract_concepts()
 GAP_EXCLUDE_WORDS = load_gap_exclude_words()
 SUBJECTIVE_WORDS = load_subjective_words()
 HIGHFREQ_WORDS = load_highfreq_words()
@@ -115,7 +117,8 @@ def _apply_reweight(feature_names: list[str], raw_scores: np.ndarray) -> np.ndar
                 scores[idx] *= non_concept_weight
         if enable_ntusd_reweight and word in SUBJECTIVE_WORDS:
             scores[idx] *= ntusd_weight
-        if enable_subtlex_reweight and word in HIGHFREQ_WORDS:
+        # 抽象概念词不做 SUBTLEX 高频降权，避免被不必要压低
+        if enable_subtlex_reweight and word in HIGHFREQ_WORDS and word not in ABSTRACT_CONCEPTS:
             scores[idx] *= subtlex_weight
     return scores
 

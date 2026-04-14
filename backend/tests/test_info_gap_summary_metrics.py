@@ -158,6 +158,23 @@ def test_click_success():
     return _log(btn_id not in ids, "POST click 后按钮从 pending 列表消失")
 
 
+def test_click_double_submit_second_should_conflict():
+    user, token, session_id = _setup_ongoing_session("ClickDouble")
+    btn_id = _seed_button(session_id, user["id"])
+    r1 = requests.post(
+        f"{BASE_URL}/api/sessions/{session_id}/info-gap/click",
+        headers=_auth(token), json={"button_id": btn_id}
+    )
+    if r1.status_code != 200:
+        return _log(False, "POST click 第一次应成功", r1.text)
+
+    r2 = requests.post(
+        f"{BASE_URL}/api/sessions/{session_id}/info-gap/click",
+        headers=_auth(token), json={"button_id": btn_id}
+    )
+    return _log(r2.status_code == 409, "POST click 第二次应 409（原子幂等）", r2.text)
+
+
 def test_click_not_found():
     user, token, session_id = _setup_ongoing_session("ClickNF")
     r = requests.post(f"{BASE_URL}/api/sessions/{session_id}/info-gap/click",
@@ -335,6 +352,7 @@ def main():
     print("\n===== POST info-gap/click =====")
     results += [
         test_click_success(),
+        test_click_double_submit_second_should_conflict(),
         test_click_not_found(),
         test_click_already_clicked(),
         test_click_expired(),

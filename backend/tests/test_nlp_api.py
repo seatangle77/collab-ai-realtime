@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 NLP 微服务接口测试
-覆盖：/api/nlp/segment · /api/nlp/embed · /api/nlp/similarity · /api/nlp/tfidf · /api/nlp/has_reasoning
+覆盖：/api/nlp/segment · /api/nlp/embed · /api/nlp/similarity · /api/nlp/tfidf · /api/nlp/candidate_recall · /api/nlp/assess_gap · /api/nlp/has_reasoning
 
 运行前提：后端服务已在 127.0.0.1:8000 启动，且 NLP 模型已预加载。
 运行方式：python -m backend.tests.test_nlp_api
@@ -50,6 +50,8 @@ def test_auth_no_token() -> bool:
         ("POST", "/api/nlp/embed",         {"texts": ["测试"]}),
         ("POST", "/api/nlp/similarity",    {"pairs": []}),
         ("POST", "/api/nlp/tfidf",         {"member_texts": {"u": "测试"}}),
+        ("POST", "/api/nlp/candidate_recall", {"member_texts": {"u": "测试"}}),
+        ("POST", "/api/nlp/assess_gap", {"keywords": ["AI"], "member_texts": {"u": "测试"}}),
         ("POST", "/api/nlp/has_reasoning", {"text": "测试"}),
     ]
     results = []
@@ -66,6 +68,8 @@ def test_auth_wrong_token() -> bool:
         ("POST", "/api/nlp/embed",         {"texts": ["测试"]}),
         ("POST", "/api/nlp/similarity",    {"pairs": []}),
         ("POST", "/api/nlp/tfidf",         {"member_texts": {"u": "测试"}}),
+        ("POST", "/api/nlp/candidate_recall", {"member_texts": {"u": "测试"}}),
+        ("POST", "/api/nlp/assess_gap", {"keywords": ["AI"], "member_texts": {"u": "测试"}}),
         ("POST", "/api/nlp/has_reasoning", {"text": "测试"}),
     ]
     results = []
@@ -546,6 +550,54 @@ def test_tfidf_with_custom_and_candidate_words() -> bool:
 
 
 # ══════════════════════════════════════════════════════════════════
+# /api/nlp/candidate_recall
+# ══════════════════════════════════════════════════════════════════
+
+def test_candidate_recall_basic() -> bool:
+    resp = requests.post(
+        f"{BASE_URL}/api/nlp/candidate_recall",
+        json={
+            "member_texts": {
+                "u1": "我们讨论MVP和价值",
+                "u2": "MVP应该先验证路径",
+            },
+            "top_n": 10,
+        },
+        headers=ADMIN_HEADERS,
+    )
+    if resp.status_code != 200:
+        return _log(False, "candidate_recall 应返回 200", resp.text)
+    d = resp.json()
+    ok = isinstance(d.get("keywords"), list) and isinstance(d.get("sources"), dict)
+    return _log(ok, "candidate_recall：结构正确", d)
+
+
+# ══════════════════════════════════════════════════════════════════
+# /api/nlp/assess_gap
+# ══════════════════════════════════════════════════════════════════
+
+def test_assess_gap_basic() -> bool:
+    resp = requests.post(
+        f"{BASE_URL}/api/nlp/assess_gap",
+        json={
+            "keywords": ["MVP"],
+            "summary": "讨论产品迭代节奏",
+            "member_texts": {
+                "u1": "MVP用于快速验证",
+                "u2": "我不理解MVP",
+            },
+            "skw_scores": {"MVP": 0.2},
+        },
+        headers=ADMIN_HEADERS,
+    )
+    if resp.status_code != 200:
+        return _log(False, "assess_gap 应返回 200", resp.text)
+    d = resp.json()
+    ok = isinstance(d.get("items"), list)
+    return _log(ok, "assess_gap：结构正确", d)
+
+
+# ══════════════════════════════════════════════════════════════════
 # /api/nlp/has_reasoning
 # ══════════════════════════════════════════════════════════════════
 
@@ -684,6 +736,8 @@ def main() -> int:
         ("tfidf 边界：空 member_texts",                   test_tfidf_edge_empty_member_texts),
         ("tfidf 边界：某成员文本为空",                    test_tfidf_edge_member_with_empty_text),
         ("tfidf：custom/candidate 词典联动",              test_tfidf_with_custom_and_candidate_words),
+        ("candidate_recall：基础结构",                    test_candidate_recall_basic),
+        ("assess_gap：基础结构",                          test_assess_gap_basic),
 
         # ── has_reasoning ─────────────────────────────────────
         ("has_reasoning：规则层，两者均 True",            test_reasoning_rule_both_true),

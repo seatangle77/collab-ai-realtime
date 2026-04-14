@@ -27,6 +27,11 @@ export interface TfidfResult {
   member_keyword_contexts: Record<string, Record<string, string>>;
 }
 
+export interface CandidateRecallResult {
+  keywords: string[];
+  sources: Record<string, string>;
+}
+
 export interface ReasoningResult {
   has_reasoning: boolean;
   has_evidence: boolean;
@@ -82,6 +87,23 @@ export interface BatchAnalysisItem {
 
 export interface BatchGeneratePushAnalysisResult {
   items: BatchAnalysisItem[];
+}
+
+export interface AssessGapParams {
+  keywords: string[];
+  summary: string;
+  member_texts: Record<string, string>;
+  skw_scores: Record<string, number>;
+}
+
+export interface AssessGapItem {
+  keyword: string;
+  needs_prompt: boolean;
+  target_user_id: string;
+  gap_type: string;
+  confidence: number;
+  reason: string;
+  skw_score: number;
 }
 
 export interface TranscriptItem {
@@ -160,6 +182,23 @@ export async function tfidf(
   }
 }
 
+/** 候选词召回（TF-IDF + 抽象概念 + 名词短语 + 英文缩写） */
+export async function candidateRecall(
+  memberTexts: Record<string, string>,
+  topN = 15,
+): Promise<CandidateRecallResult> {
+  try {
+    const res = await client.post<CandidateRecallResult>('/api/nlp/candidate_recall', {
+      member_texts: memberTexts,
+      top_n: topN,
+    });
+    return res.data;
+  } catch (err) {
+    logger.error('candidate_recall failed', { message: (err as Error).message });
+    return { keywords: [], sources: {} };
+  }
+}
+
 /** 判断文本是否含论证结构 */
 export async function hasReasoning(text: string): Promise<ReasoningResult> {
   try {
@@ -195,6 +234,21 @@ export async function generatePushBatchAnalysis(
     return res.data.items ?? [];
   } catch (err) {
     logger.error('generate_push_batch failed', { message: (err as Error).message });
+    return [];
+  }
+}
+
+/** 信息缺口评估（Rubric） */
+export async function assessGap(params: AssessGapParams): Promise<AssessGapItem[]> {
+  try {
+    const res = await client.post<{ items: AssessGapItem[] }>(
+      '/api/nlp/assess_gap',
+      params,
+      { timeout: 45_000 },
+    );
+    return res.data.items ?? [];
+  } catch (err) {
+    logger.error('assess_gap failed', { message: (err as Error).message });
     return [];
   }
 }

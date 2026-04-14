@@ -113,7 +113,7 @@ describe('阐述浅薄', () => {
 // ── ④ 信息缺口 ───────────────────────────────────────────────────────────────
 
 describe('信息缺口', () => {
-  it('两人接近(>0.6)，第三人孤立(<0.3 with both) → targetUsers = [孤立成员]', () => {
+  it('存在关键词 skw pair 时，会生成 info_gap 触发并交给 LLM 后续评估目标用户', () => {
     const result = baseResult({
       keywords: ['资源'],
       skwScores: {
@@ -127,11 +127,12 @@ describe('信息缺口', () => {
     const triggers = runReasoningLayer(result, MEMBERS);
     const ig = triggers.filter((t) => t.type === 'info_gap');
     expect(ig).toHaveLength(1);
-    expect(ig[0].targetUsers).toEqual(['uC']);
+    expect(ig[0].targetUsers).toEqual(MEMBERS);
     expect(ig[0].keyword).toBe('资源');
+    expect(ig[0].skwScore).toBeCloseTo(0.2);
   });
 
-  it('三人两两均 < 0.3 → targetUsers = 全组', () => {
+  it('三人两两均 < 0.3 也会触发，最小 skw 会透传', () => {
     const result = baseResult({
       keywords: ['概念'],
       skwScores: {
@@ -146,9 +147,10 @@ describe('信息缺口', () => {
     const ig = triggers.filter((t) => t.type === 'info_gap');
     expect(ig).toHaveLength(1);
     expect(ig[0].targetUsers).toEqual(MEMBERS);
+    expect(ig[0].skwScore).toBeCloseTo(0.18);
   });
 
-  it('有 pair 落在模糊地带(0.3~0.6) → 不触发', () => {
+  it('有 pair 落在旧模糊区间也仍会触发（由 LLM 最终裁决）', () => {
     const result = baseResult({
       keywords: ['信息'],
       skwScores: {
@@ -160,10 +162,10 @@ describe('信息缺口', () => {
       },
     });
     const triggers = runReasoningLayer(result, MEMBERS);
-    expect(triggers.filter((t) => t.type === 'info_gap')).toHaveLength(0);
+    expect(triggers.filter((t) => t.type === 'info_gap')).toHaveLength(1);
   });
 
-  it('所有 pair 均 > 0.6 → 不触发', () => {
+  it('所有 pair 均 > 0.6 也会进入 LLM 复核流程', () => {
     const result = baseResult({
       keywords: ['学习'],
       skwScores: {
@@ -175,7 +177,9 @@ describe('信息缺口', () => {
       },
     });
     const triggers = runReasoningLayer(result, MEMBERS);
-    expect(triggers.filter((t) => t.type === 'info_gap')).toHaveLength(0);
+    const ig = triggers.filter((t) => t.type === 'info_gap');
+    expect(ig).toHaveLength(1);
+    expect(ig[0].skwScore).toBeCloseTo(0.7);
   });
 });
 

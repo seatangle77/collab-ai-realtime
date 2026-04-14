@@ -229,8 +229,6 @@ export class SessionWorker {
       const summaryRow = await getLastSummary(this.sessionId);
       const summaryText = summaryRow?.content ?? '';
       const transcripts = await getTranscriptsInWindowPreferCache(this.sessionId, windowStart, windowEnd);
-      const summaryKeywords = extractSummaryKeywords(summaryText);
-      const focusedTranscripts = filterTranscriptsBySummaryFocus(transcripts, summaryKeywords);
 
       // Step4：行动层单独执行；摘要改由独立定时链负责。
       void runActionLayer({
@@ -239,7 +237,7 @@ export class SessionWorker {
         windowStart,
         memberIds,
         summaryText,
-        transcripts: focusedTranscripts,
+        transcripts,
         onGroupSilenceNotified: () => this.markGroupSilenceTriggered(Date.now()),
       }).catch((err) => {
         logger.error('action failed', {

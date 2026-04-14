@@ -2,7 +2,7 @@
 NLP 微服务路由
 - 前缀：/api/nlp
 - 鉴权：X-Admin-Token（复用现有 require_admin）
-- 7 个接口：segment / embed / similarity / tfidf / has_reasoning / generate_push / generate_summary
+- 接口：segment / embed / similarity / tfidf / candidate_recall / has_reasoning / generate_push / generate_push_batch / assess_gap / generate_summary
 """
 from __future__ import annotations
 
@@ -12,7 +12,17 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from ..admin.deps import require_admin
-from . import embedder, similarity, segmenter, tfidf, reasoning, push_content, summary
+from . import (
+    embedder,
+    similarity,
+    segmenter,
+    tfidf,
+    reasoning,
+    push_content,
+    summary,
+    candidate_recall,
+    gap_assessor,
+)
 
 router = APIRouter(prefix="/api/nlp", tags=["nlp"])
 
@@ -99,6 +109,23 @@ def extract_tfidf(req: TfidfRequest, _: bool = Depends(require_admin)):
 
 # ── 5. has_reasoning ─────────────────────────────────────────────────────────
 
+class CandidateRecallRequest(BaseModel):
+    member_texts: dict[str, str]
+    top_n: int = Field(default=15, ge=1, le=30)
+
+
+class CandidateRecallResponse(BaseModel):
+    keywords: list[str]
+    sources: dict[str, str]
+
+
+@router.post("/candidate_recall", response_model=CandidateRecallResponse)
+def recall_candidates(req: CandidateRecallRequest, _: bool = Depends(require_admin)):
+    return candidate_recall.recall_candidates(req.member_texts, req.top_n)
+
+
+# ── 6. has_reasoning ─────────────────────────────────────────────────────────
+
 class ReasoningRequest(BaseModel):
     text: str
 
@@ -114,7 +141,7 @@ def check_reasoning(req: ReasoningRequest, _: bool = Depends(require_admin)):
     return reasoning.has_reasoning(req.text)
 
 
-# ── 6. generate_push ──────────────────────────────────────────────────────────
+# ── 7. generate_push ──────────────────────────────────────────────────────────
 
 class GeneratePushRequest(BaseModel):
     trigger_type: str                          # group_silence / low_participation / shallow_discussion / info_gap
@@ -148,7 +175,7 @@ def generate_push(req: GeneratePushRequest, _: bool = Depends(require_admin)):
     return {"content": content}
 
 
-# ── 7. generate_push_batch ────────────────────────────────────────────────────
+# ── 8. generate_push_batch ────────────────────────────────────────────────────
 
 class BatchMemberInput(BaseModel):
     user_id: str
@@ -194,7 +221,41 @@ def generate_push_batch(req: GeneratePushBatchRequest, _: bool = Depends(require
     return {"items": items}
 
 
-# ── 8. generate_summary ───────────────────────────────────────────────────────
+# ── 9. assess_gap ─────────────────────────────────────────────────────────────
+
+class AssessGapRequest(BaseModel):
+    keywords: list[str] = Field(default_factory=list)
+    summary: str = ""
+    member_texts: dict[str, str] = Field(default_factory=dict)
+    skw_scores: dict[str, float] = Field(default_factory=dict)
+
+
+class GapAssessItem(BaseModel):
+    keyword: str
+    needs_prompt: bool
+    target_user_id: str
+    gap_type: str
+    confidence: float
+    reason: str
+    skw_score: float
+
+
+class AssessGapResponse(BaseModel):
+    items: list[GapAssessItem]
+
+
+@router.post("/assess_gap", response_model=AssessGapResponse)
+def assess_gap(req: AssessGapRequest, _: bool = Depends(require_admin)):
+    items = gap_assessor.assess_gap(
+        keywords=req.keywords,
+        summary=req.summary,
+        member_texts=req.member_texts,
+        skw_scores=req.skw_scores,
+    )
+    return {"items": items}
+
+
+# ── 10. generate_summary ──────────────────────────────────────────────────────
 
 class TranscriptItem(BaseModel):
     user_id: str

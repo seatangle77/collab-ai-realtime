@@ -12,6 +12,7 @@ const mockWriteKeywordSkw = queries.writeKeywordSkw as jest.MockedFunction<
   typeof queries.writeKeywordSkw
 >;
 const mockTfidf = nlp.tfidf as jest.MockedFunction<typeof nlp.tfidf>;
+const mockCandidateRecall = nlp.candidateRecall as jest.MockedFunction<typeof nlp.candidateRecall>;
 const mockEmbed = nlp.embed as jest.MockedFunction<typeof nlp.embed>;
 const mockSimilarity = nlp.similarity as jest.MockedFunction<typeof nlp.similarity>;
 
@@ -33,6 +34,7 @@ describe('computeSkw', () => {
     expect(keywords).toEqual([]);
     expect(scores).toEqual({});
     expect(mockTfidf).not.toHaveBeenCalled();
+    expect(mockCandidateRecall).not.toHaveBeenCalled();
   });
 
   it('无人发言：返回空结果', async () => {
@@ -49,9 +51,13 @@ describe('computeSkw', () => {
     mockTfidf.mockResolvedValue({
       keywords: ['人工智能', '机器学习'],
       member_keyword_contexts: {
-        u1: { '人工智能': '人工智能技术很重要', '机器学习': '' },
-        u2: { '人工智能': '', '机器学习': '机器学习是核心' },
+        u1: { '人工智能': '人工智能技术很重要', '机器学习': '机器学习是核心' },
+        u2: { '人工智能': '人工智能应用很广', '机器学习': '机器学习是核心' },
       },
+    });
+    mockCandidateRecall.mockResolvedValue({
+      keywords: ['人工智能'],
+      sources: { '人工智能': 'tfidf' },
     });
     mockEmbed.mockResolvedValue([[1, 0], [0.8, 0.2]]);
     mockSimilarity.mockResolvedValue([0.75]);
@@ -74,6 +80,7 @@ describe('computeSkw', () => {
       makeTranscript('u2', '嗯'),
     ]);
     mockTfidf.mockResolvedValue({ keywords: [], member_keyword_contexts: {} });
+    mockCandidateRecall.mockResolvedValue({ keywords: [], sources: {} });
     const { keywords } = await computeSkw(SESSION, WIN_START, WIN_END, MEMBERS);
     expect(keywords).toEqual([]);
     expect(mockWriteKeywordSkw).not.toHaveBeenCalled();
@@ -94,6 +101,7 @@ describe('computeSkw', () => {
         u3: { '技术': '深度学习技术' },
       },
     });
+    mockCandidateRecall.mockResolvedValue({ keywords: ['技术'], sources: { 技术: 'tfidf' } });
     mockEmbed.mockResolvedValue([[1, 0], [0.8, 0.2], [0.6, 0.4]]);
     mockSimilarity.mockResolvedValue([0.9, 0.7, 0.5]); // 3 pairs
     mockWriteKeywordSkw.mockResolvedValue(undefined);
@@ -112,6 +120,7 @@ describe('computeSkw', () => {
       keywords: ['话题'],
       member_keyword_contexts: { u1: { '话题': '话题A' }, u2: { '话题': '话题B' } },
     });
+    mockCandidateRecall.mockResolvedValue({ keywords: ['话题'], sources: { 话题: 'tfidf' } });
     mockEmbed.mockResolvedValue([[1, 0], [0.5, 0.5]]);
     mockSimilarity.mockResolvedValue([0.65]);
     mockWriteKeywordSkw.mockResolvedValue(undefined);
@@ -126,5 +135,6 @@ describe('computeSkw', () => {
     const { keywords } = await computeSkw(SESSION, WIN_START, WIN_END, MEMBERS);
     expect(keywords).toEqual([]);
     expect(mockTfidf).not.toHaveBeenCalled();
+    expect(mockCandidateRecall).not.toHaveBeenCalled();
   });
 });
