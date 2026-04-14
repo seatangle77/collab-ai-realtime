@@ -69,6 +69,9 @@ class SessionWebSocketManager:
             self.session_connections.get(session_id, set()).discard(ws)
             return False
 
+    def get_online_user_ids(self, session_id: str) -> list[str]:
+        return list(self._user_connections.get(session_id, {}).keys())
+
     async def close_session_connections(self, session_id: str, *, code: int, reason: str) -> None:
         conns = self.session_connections.get(session_id)
         if not conns:

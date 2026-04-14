@@ -243,6 +243,26 @@ def scenario_order_desc() -> bool:
     })
 
 
+# ─────────────────────────────────────────────────
+# 12. group-notify 无在线连接时不应 500
+# ─────────────────────────────────────────────────
+
+def scenario_group_notify_no_online_connections() -> bool:
+    _, _, _, session_id = _setup_session("GroupNotify")
+
+    r = requests.post(
+        f"{BASE_URL}/api/internal/sessions/{session_id}/group-notify",
+        headers=ADMIN_HEADERS,
+        json={"content": "测试群发"},
+    )
+    if r.status_code != 201:
+        return _log(False, "POST /internal/sessions/:id/group-notify 应返回 201", {"status": r.status_code, "body": r.text})
+
+    payload = r.json()
+    ok = payload.get("delivery_status") == "failed" and payload.get("online_connections") == 0
+    return _log(ok, "group-notify 在无人在线时返回 failed 且不抛 500", payload)
+
+
 def run_all() -> bool:
     print("=== 开始 Push Logs 用户端接口测试 ===")
     ok = True
@@ -257,6 +277,7 @@ def run_all() -> bool:
     ok &= scenario_invalid_channel()
     ok &= scenario_invalid_delivery_status()
     ok &= scenario_order_desc()
+    ok &= scenario_group_notify_no_online_connections()
     print("\n=== Push Logs 用户端测试结果: {} ===".format("全部通过 ✅" if ok else "有失败 ❌"))
     return ok
 

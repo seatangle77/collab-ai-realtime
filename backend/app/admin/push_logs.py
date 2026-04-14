@@ -35,7 +35,7 @@ class AdminPushLogOut(BaseModel):
     session_title: str | None = None
     state_id: str | None = None
     state_type: str | None = None
-    target_user_id: str
+    target_user_id: str | None = None
     target_user_name: str | None = None
     push_content: str | None = None
     push_channel: str

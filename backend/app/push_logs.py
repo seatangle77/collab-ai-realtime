@@ -145,53 +145,67 @@ async def group_notify(
 ) -> dict[str, Any]:
     """
     Agent 触发群组通知：
-    1. 写入 push_logs（target_user_id='ALL'）
-    2. 向会话内在线成员广播 group_notification
-    3. 更新 delivery_status
+    1. 找到会话内在线用户
+    2. 对每个在线用户写入一条 push_logs（真实 target_user_id）
+    3. 广播 group_notification，并批量更新 delivery_status
     """
-    log_id = "pl" + uuid.uuid4().hex[:8]
+    # 连接管理里可能存在脏 user_id（None/空串），先过滤，避免触发表约束。
+    online_user_ids = [
+        uid for uid in ws_manager.get_online_user_ids(session_id)
+        if isinstance(uid, str) and uid.strip()
+    ]
+    if not online_user_ids:
+        return {
+            "id": None,
+            "delivery_status": "failed",
+            "online_connections": 0,
+        }
 
-    insert_result = await db.execute(
-        text(
-            """
-            INSERT INTO push_logs (id, session_id, state_id, target_user_id, push_content, push_channel, delivery_status, triggered_at)
-            VALUES (:id, :session_id, NULL, 'ALL', :content, 'web', 'pending', NOW())
-            RETURNING triggered_at
-            """
-        ),
-        {
-            "id": log_id,
-            "session_id": session_id,
-            "content": body.content,
-        },
-    )
-    inserted_row = insert_result.mappings().one()
+    inserted_logs: list[dict[str, Any]] = []
+    for uid in online_user_ids:
+        log_id = "pl" + uuid.uuid4().hex[:8]
+        insert_result = await db.execute(
+            text(
+                """
+                INSERT INTO push_logs (id, session_id, state_id, target_user_id, push_content, push_channel, delivery_status, triggered_at)
+                VALUES (:id, :session_id, NULL, :target_user_id, :content, 'web', 'pending', NOW())
+                RETURNING id, triggered_at
+                """
+            ),
+            {
+                "id": log_id,
+                "session_id": session_id,
+                "target_user_id": uid,
+                "content": body.content,
+            },
+        )
+        inserted_logs.append(dict(insert_result.mappings().one()))
     await db.commit()
 
-    active_conn_count = len(ws_manager.session_connections.get(session_id, set()))
-    if active_conn_count > 0:
-        await ws_manager.broadcast_to_session(
-            session_id,
-            build_group_notification(
-                body.content,
-                inserted_row["triggered_at"].isoformat() if inserted_row["triggered_at"] else None,
-            ),
-        )
+    await ws_manager.broadcast_to_session(
+        session_id,
+        build_group_notification(
+            body.content,
+            inserted_logs[0]["triggered_at"].isoformat() if inserted_logs[0]["triggered_at"] else None,
+        ),
+    )
 
+    active_conn_count = len(online_user_ids)
     delivered = active_conn_count > 0
     new_status = "delivered" if delivered else "failed"
-    await db.execute(
-        text(
-            "UPDATE push_logs SET delivery_status = :s, delivered_at = NOW() WHERE id = :id"
-            if delivered else
-            "UPDATE push_logs SET delivery_status = :s WHERE id = :id"
-        ),
-        {"s": new_status, "id": log_id},
-    )
+    for row in inserted_logs:
+        await db.execute(
+            text(
+                "UPDATE push_logs SET delivery_status = :s, delivered_at = NOW() WHERE id = :id"
+                if delivered else
+                "UPDATE push_logs SET delivery_status = :s WHERE id = :id"
+            ),
+            {"s": new_status, "id": row["id"]},
+        )
     await db.commit()
 
     return {
-        "id": log_id,
+        "id": inserted_logs[0]["id"],
         "delivery_status": new_status,
         "online_connections": active_conn_count,
     }

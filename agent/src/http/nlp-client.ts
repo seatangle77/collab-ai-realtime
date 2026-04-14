@@ -221,7 +221,7 @@ export async function notifyPush(
   }
 }
 
-/** 发送群组沉默广播（target_user_id='ALL'） */
+/** 发送群组沉默广播 */
 export async function notifyGroupSilence(
   sessionId: string,
   content: string,
