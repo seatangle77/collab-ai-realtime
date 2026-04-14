@@ -4,9 +4,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 
 from .config_voice import VOICE_AUDIO_BASE_DIR
-from .db import DBNotConfiguredError, ping_db
+from .db import DBNotConfiguredError, get_sessionmaker, ping_db
 from .routes import router as db_router
 from .auth import router as auth_router
 from .groups import router as groups_router
@@ -34,7 +35,7 @@ from .admin.window_metrics import router as admin_window_metrics_router
 from .admin.discussion_summaries import router as admin_discussion_summaries_router
 from .admin.info_gap_buttons import router as admin_info_gap_buttons_router
 from .admin.keyword_skw import router as admin_keyword_skw_router
-from .admin.session_text_messages import router as admin_session_text_messages_router
+from .admin.speech_transcripts import router as admin_speech_transcripts_router
 from .admin.test_seed import router as test_seed_router
 from .vad import router as vad_router
 
@@ -81,7 +82,7 @@ app.include_router(admin_window_metrics_router)
 app.include_router(admin_discussion_summaries_router)
 app.include_router(admin_info_gap_buttons_router)
 app.include_router(admin_keyword_skw_router)
-app.include_router(admin_session_text_messages_router)
+app.include_router(admin_speech_transcripts_router)
 app.include_router(ws_sessions_router)
 app.include_router(nlp_router)
 app.include_router(info_gap_router)
@@ -114,5 +115,20 @@ async def _startup():
     # 避免未配置 DB_PASSWORD 时无法启动服务；需要验证连通性请访问 /db/ping
     if os.getenv("DB_PASSWORD"):
         await ping_db()
+
+    # 进程重启后，内存态 WS 连接会清空；把历史残留计数统一归零，避免 agent 误判活跃会话。
+    session_factory = get_sessionmaker()
+    async with session_factory() as db:
+        await db.execute(
+            text(
+                """
+                UPDATE chat_sessions
+                SET active_ws_count = 0
+                WHERE status = 'ongoing'
+                """
+            )
+        )
+        await db.commit()
+
     # 预加载 NLP sentence-transformers 模型，避免第一个请求冷启动延迟
     nlp_embedder.load_model(nlp_settings.embed_model)

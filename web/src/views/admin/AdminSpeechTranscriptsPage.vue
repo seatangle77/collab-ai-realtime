@@ -1,62 +1,66 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import type { AdminSessionTextMessage } from '../../types/admin'
+import type { AdminSpeechTranscript } from '../../types/admin'
 import {
-  listSessionTextMessages,
-  deleteSessionTextMessage,
-  batchDeleteSessionTextMessages,
-} from '../../api/admin/session-text-messages'
+  listSpeechTranscripts,
+  deleteSpeechTranscript,
+  batchDeleteSpeechTranscripts,
+} from '../../api/admin/speech-transcripts'
 import { formatDateTimeToCST } from '../../utils/datetime'
 
 const loading = ref(false)
-const rows = ref<AdminSessionTextMessage[]>([])
+const rows = ref<AdminSpeechTranscript[]>([])
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
 const tableRef = ref<{ clearSelection: () => void } | null>(null)
-const selectedRows = ref<AdminSessionTextMessage[]>([])
-const contentDialogVisible = ref(false)
-const contentDialogTitle = ref('')
-const contentDialogValue = ref('')
+const selectedRows = ref<AdminSpeechTranscript[]>([])
+const textDialogVisible = ref(false)
+const textDialogTitle = ref('')
+const textDialogValue = ref('')
 
 const filters = reactive({
   session_id: '',
   group_id: '',
-  user_id: '',
-  sender_name: '',
-  content: '',
+  speaker: '',
+  text: '',
   createdRange: [] as Date[],
 })
 
-function truncateContent(content: string | null, maxLength = 50) {
-  if (!content) return '-'
-  if (content.length <= maxLength) return content
-  return `${content.slice(0, maxLength)}...`
+function truncateText(text: string | null, maxLength = 80) {
+  if (!text) return '-'
+  if (text.length <= maxLength) return text
+  return `${text.slice(0, maxLength)}...`
 }
 
-function resolveDisplayName(row: AdminSessionTextMessage) {
-  return row.user_name || row.sender_name || row.user_id || '-'
+function openTextDialog(row: AdminSpeechTranscript) {
+  textDialogTitle.value = `${row.speaker || row.speaker_user_id || '-'} - 转写文本`
+  textDialogValue.value = row.text || ''
+  textDialogVisible.value = true
 }
 
-function handleViewContent(row: AdminSessionTextMessage) {
-  contentDialogTitle.value = `${resolveDisplayName(row)} - 消息内容`
-  contentDialogValue.value = row.content || ''
-  contentDialogVisible.value = true
+function formatConfidence(value: number | null) {
+  if (value == null) return '-'
+  return value.toFixed(3)
+}
+
+function formatDuration(value: number | null) {
+  if (value == null) return '-'
+  return `${value.toFixed(2)}s`
 }
 
 async function fetchData() {
   loading.value = true
   try {
     const [from, to] = filters.createdRange.length === 2 ? filters.createdRange : [undefined, undefined]
-    const res = await listSessionTextMessages({
+    const res = await listSpeechTranscripts({
       page: page.value,
       page_size: pageSize.value,
       session_id: filters.session_id || undefined,
       group_id: filters.group_id || undefined,
-      user_id: filters.user_id || undefined,
-      sender_name: filters.sender_name || undefined,
-      content: filters.content || undefined,
+      speaker: filters.speaker || undefined,
+      text: filters.text || undefined,
       created_from: from ? from.toISOString() : undefined,
       created_to: to ? to.toISOString() : undefined,
     })
@@ -65,7 +69,7 @@ async function fetchData() {
     page.value = res.meta.page
     pageSize.value = res.meta.page_size
   } catch (e: any) {
-    ElMessage.error(e?.message || '加载文字消息失败')
+    ElMessage.error(e?.message || '加载语音转写失败')
   } finally {
     loading.value = false
   }
@@ -75,20 +79,19 @@ function handleSearch() { page.value = 1; fetchData() }
 function handleReset() {
   filters.session_id = ''
   filters.group_id = ''
-  filters.user_id = ''
-  filters.sender_name = ''
-  filters.content = ''
+  filters.speaker = ''
+  filters.text = ''
   filters.createdRange = []
   page.value = 1
   fetchData()
 }
 function handlePageChange(p: number) { page.value = p; fetchData() }
 function handlePageSizeChange(s: number) { pageSize.value = s; page.value = 1; fetchData() }
-function handleSelectionChange(r: AdminSessionTextMessage[]) { selectedRows.value = r }
+function handleSelectionChange(r: AdminSpeechTranscript[]) { selectedRows.value = r }
 
-async function handleDelete(row: AdminSessionTextMessage) {
+async function handleDelete(row: AdminSpeechTranscript) {
   try {
-    await ElMessageBox.confirm('确认删除该文字消息记录吗？', '删除确认', {
+    await ElMessageBox.confirm('确认删除该转写记录吗？', '删除确认', {
       type: 'warning',
       confirmButtonText: '删除',
       cancelButtonText: '取消',
@@ -97,7 +100,7 @@ async function handleDelete(row: AdminSessionTextMessage) {
     return
   }
   try {
-    await deleteSessionTextMessage(row.id)
+    await deleteSpeechTranscript(row.transcript_id)
     ElMessage.success('删除成功')
     if (rows.value.length === 1 && page.value > 1) page.value -= 1
     fetchData()
@@ -118,8 +121,8 @@ async function handleBatchDelete() {
     return
   }
   try {
-    const ids = selectedRows.value.map((row) => row.id)
-    const res = await batchDeleteSessionTextMessages(ids)
+    const ids = selectedRows.value.map((row) => row.transcript_id)
+    const res = await batchDeleteSpeechTranscripts(ids)
     ElMessage.success(`成功删除 ${res.deleted} 条记录`)
     tableRef.value?.clearSelection?.()
     if (rows.value.length === selectedRows.value.length && page.value > 1) page.value -= 1
@@ -135,7 +138,7 @@ onMounted(() => { fetchData() })
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h2 class="page-title">文字消息</h2>
+      <h2 class="page-title">语音转写</h2>
     </div>
 
     <el-card shadow="never">
@@ -152,28 +155,23 @@ onMounted(() => { fetchData() })
             </el-form-item>
           </el-col>
           <el-col :span="6">
-            <el-form-item label="用户 ID">
-              <el-input v-model="filters.user_id" placeholder="精确匹配" clearable />
+            <el-form-item label="说话人">
+              <el-input v-model="filters.speaker" placeholder="模糊匹配" clearable />
             </el-form-item>
           </el-col>
           <el-col :span="6">
-            <el-form-item label="发送者">
-              <el-input v-model="filters.sender_name" placeholder="模糊匹配" clearable />
+            <el-form-item label="文本关键词">
+              <el-input v-model="filters.text" placeholder="模糊匹配" clearable />
             </el-form-item>
           </el-col>
         </el-row>
         <el-row :gutter="12">
-          <el-col :span="8">
-            <el-form-item label="内容关键词">
-              <el-input v-model="filters.content" placeholder="模糊匹配" clearable />
-            </el-form-item>
-          </el-col>
           <el-col :span="10">
             <el-form-item label="创建时间">
               <el-date-picker v-model="filters.createdRange" type="datetimerange" range-separator="至" start-placeholder="开始" end-placeholder="结束" style="width: 100%" />
             </el-form-item>
           </el-col>
-          <el-col :span="6">
+          <el-col :span="14">
             <el-form-item label=" ">
               <el-button type="primary" @click="handleSearch">查询</el-button>
               <el-button @click="handleReset">重置</el-button>
@@ -191,18 +189,22 @@ onMounted(() => { fetchData() })
       </div>
       <el-table ref="tableRef" :data="rows" v-loading="loading" border style="width: 100%" @selection-change="handleSelectionChange">
         <el-table-column type="selection" width="48" />
-        <el-table-column prop="group_id" label="群组 ID" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="session_id" label="会话 ID" min-width="180" show-overflow-tooltip />
-        <el-table-column label="发送者" min-width="140" show-overflow-tooltip>
-          <template #default="{ row }">{{ resolveDisplayName(row) }}</template>
-        </el-table-column>
-        <el-table-column label="内容" min-width="260">
+        <el-table-column prop="group_id" label="群组 ID" min-width="160" show-overflow-tooltip />
+        <el-table-column prop="session_id" label="会话 ID" min-width="160" show-overflow-tooltip />
+        <el-table-column prop="speaker" label="说话人" min-width="140" show-overflow-tooltip />
+        <el-table-column label="转写文本" min-width="320">
           <template #default="{ row }">
-            <div class="content-cell">
-              <span class="content-preview">{{ truncateContent(row.content) }}</span>
-              <el-button type="primary" link size="small" @click="handleViewContent(row)">查看全文</el-button>
+            <div class="text-cell">
+              <span class="text-preview">{{ truncateText(row.text) }}</span>
+              <el-button type="primary" link size="small" @click="openTextDialog(row)">查看全文</el-button>
             </div>
           </template>
+        </el-table-column>
+        <el-table-column label="时长" min-width="100" align="right">
+          <template #default="{ row }">{{ formatDuration(row.duration) }}</template>
+        </el-table-column>
+        <el-table-column label="置信度" min-width="100" align="right">
+          <template #default="{ row }">{{ formatConfidence(row.confidence) }}</template>
         </el-table-column>
         <el-table-column label="创建时间" min-width="180" show-overflow-tooltip>
           <template #default="{ row }">{{ formatDateTimeToCST(row.created_at) }}</template>
@@ -218,8 +220,8 @@ onMounted(() => { fetchData() })
       </div>
     </el-card>
 
-    <el-dialog v-model="contentDialogVisible" :title="contentDialogTitle" width="720px">
-      <el-input :model-value="contentDialogValue" type="textarea" :rows="12" readonly />
+    <el-dialog v-model="textDialogVisible" :title="textDialogTitle" width="720px">
+      <el-input :model-value="textDialogValue" type="textarea" :rows="12" readonly />
     </el-dialog>
   </div>
 </template>
@@ -230,8 +232,8 @@ onMounted(() => { fetchData() })
 .page-title { margin: 0; font-size: 18px; font-weight: 600; }
 .toolbar { margin-bottom: 8px; }
 .pagination { display: flex; justify-content: flex-end; margin-top: 12px; }
-.content-cell { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.content-preview {
+.text-cell { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.text-preview {
   flex: 1;
   min-width: 0;
   overflow: hidden;

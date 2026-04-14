@@ -270,14 +270,22 @@ export interface AdminKeywordSkw {
   created_at: string | null
 }
 
-// ── 文字消息 ──────────────────────────────────────────────────────────
-export interface AdminSessionTextMessage {
-  id: string
+// ── 语音转写（后台列表）──────────────────────────────────────────────
+export interface AdminSpeechTranscript {
+  transcript_id: string
   group_id: string
   session_id: string
   user_id: string | null
-  user_name: string | null
-  sender_name: string | null
-  content: string | null
+  speaker: string | null
+  text: string | null
+  start: string | null
+  end: string | null
+  duration: number | null
   created_at: string | null
+  audio_url: string | null
+  confidence: number | null
+  speaker_confidence: number | null
+  speaker_user_id: string | null
+  original_text: string | null
+  is_edited: boolean
 }

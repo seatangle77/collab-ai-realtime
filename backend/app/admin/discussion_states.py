@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
@@ -249,11 +250,18 @@ async def delete_discussion_state(
     state_id: str,
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    result = await db.execute(
-        text("DELETE FROM discussion_states WHERE id = :id RETURNING id"),
-        {"id": state_id},
-    )
-    await db.commit()
+    try:
+        result = await db.execute(
+            text("DELETE FROM discussion_states WHERE id = :id RETURNING id"),
+            {"id": state_id},
+        )
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="该讨论状态已被推送日志引用，无法删除",
+        ) from None
     if not result.first():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="讨论状态记录不存在")
 
@@ -263,10 +271,17 @@ async def batch_delete_discussion_states(
     payload: BatchDeleteRequest,
     db: AsyncSession = Depends(get_db),
 ) -> BatchDeleteResponse:
-    result = await db.execute(
-        text("DELETE FROM discussion_states WHERE id = ANY(:ids) RETURNING id"),
-        {"ids": payload.ids},
-    )
-    await db.commit()
+    try:
+        result = await db.execute(
+            text("DELETE FROM discussion_states WHERE id = ANY(:ids) RETURNING id"),
+            {"ids": payload.ids},
+        )
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="批量删除包含被推送日志引用的讨论状态，请先处理关联推送日志",
+        ) from None
     deleted = len(result.fetchall())
     return BatchDeleteResponse(deleted=deleted)

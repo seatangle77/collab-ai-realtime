@@ -83,6 +83,18 @@ def test_delete_nonexistent(url: str, fake_id: str = "nonexistent_id_xyz") -> No
           requests.delete(f"{url}/{fake_id}", headers=HEADERS), 404)
 
 
+def create_temp_discussion_state(session_id: str) -> str | None:
+    r = requests.post(
+        f"{BASE}/api/admin/discussion-states/",
+        headers=HEADERS,
+        json={"session_id": session_id, "state_type": "low_participation"},
+    )
+    if r.status_code != 201:
+        print(f"  - 创建临时 discussion_state 失败，跳过真实 DELETE 测试: {r.status_code} {r.text[:120]}")
+        return None
+    return r.json().get("id")
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # Step 1: discussion_states
 # ═══════════════════════════════════════════════════════════════════════
@@ -128,13 +140,34 @@ test_pagination_boundaries(f"{URL_DS}/")
 # DELETE
 test_delete_nonexistent(URL_DS)
 items = (data or {}).get("items", [])
+sid_deleted: str | None = None
 if items:
-    sid = items[0]["id"]
-    check(f"DELETE 已有记录（id={sid[:12]}…）→ 204",
-          requests.delete(f"{URL_DS}/{sid}", headers=HEADERS), 204)
+    # 历史数据可能被 push_logs 外键引用，优先尝试找到可删除记录
+    for it in items[:20]:
+        sid_try = it["id"]
+        r = requests.delete(f"{URL_DS}/{sid_try}", headers=HEADERS)
+        if r.status_code == 204:
+            sid_deleted = sid_try
+            print(f"  ✓ [204] DELETE 已有记录（id={sid_try[:12]}…）→ 204")
+            break
+        if r.status_code == 409:
+            print(f"  - [409] 记录被 push_logs 引用，跳过（id={sid_try[:12]}…）")
+            continue
+        check(f"DELETE 已有记录（id={sid_try[:12]}…）→ 204", r, 204)
+        break
+
+if sid_deleted is None and items:
+    # 若现有记录都不可删，创建一条临时记录再删，确保接口行为被覆盖
+    temp_sid = create_temp_discussion_state(items[0]["session_id"])
+    if temp_sid:
+        sid_deleted = temp_sid
+        check(f"DELETE 临时记录（id={sid_deleted[:12]}…）→ 204",
+              requests.delete(f"{URL_DS}/{sid_deleted}", headers=HEADERS), 204)
+
+if sid_deleted:
     check("DELETE 同一记录二次 → 404",
-          requests.delete(f"{URL_DS}/{sid}", headers=HEADERS), 404)
-else:
+          requests.delete(f"{URL_DS}/{sid_deleted}", headers=HEADERS), 404)
+elif not items:
     print("  - 表中无数据，跳过真实 DELETE 测试")
 
 # batch-delete
@@ -429,52 +462,50 @@ test_batch_delete_boundaries(URL_KS)
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Step 8: session_text_messages
+# Step 8: speech_transcripts
 # ═══════════════════════════════════════════════════════════════════════
-section("Step 8: session_text_messages — GET list / DELETE / batch-delete")
+section("Step 8: speech_transcripts — GET list / DELETE / batch-delete")
 
-URL_STM = f"{BASE}/api/admin/session-text-messages"
+URL_ST = f"{BASE}/api/admin/speech-transcripts"
 
-data = check("GET list（全量）", requests.get(f"{URL_STM}/", headers=HEADERS))
+data = check("GET list（全量）", requests.get(f"{URL_ST}/", headers=HEADERS))
 
 # 查询条件
 check("filter: session_id 精确",
-      requests.get(f"{URL_STM}/?session_id=s_fake", headers=HEADERS))
+      requests.get(f"{URL_ST}/?session_id=s_fake", headers=HEADERS))
 check("filter: group_id 精确",
-      requests.get(f"{URL_STM}/?group_id=g_fake", headers=HEADERS))
-check("filter: user_id 精确",
-      requests.get(f"{URL_STM}/?user_id=u_fake", headers=HEADERS))
-check("filter: sender_name 模糊",
-      requests.get(f"{URL_STM}/?sender_name=张", headers=HEADERS))
-check("filter: content 模糊",
-      requests.get(f"{URL_STM}/?content=你好", headers=HEADERS))
-check("filter: content 含 SQL 特殊字符（%）",
-      requests.get(f"{URL_STM}/?content=%25", headers=HEADERS))
-check("filter: content 含下划线（_，ILIKE 通配符）",
-      requests.get(f"{URL_STM}/?content=_test_", headers=HEADERS))
+      requests.get(f"{URL_ST}/?group_id=g_fake", headers=HEADERS))
+check("filter: speaker 模糊",
+      requests.get(f"{URL_ST}/?speaker=张", headers=HEADERS))
+check("filter: text 模糊",
+      requests.get(f"{URL_ST}/?text=你好", headers=HEADERS))
+check("filter: text 含 SQL 特殊字符（%）",
+      requests.get(f"{URL_ST}/?text=%25", headers=HEADERS))
+check("filter: text 含下划线（_，ILIKE 通配符）",
+      requests.get(f"{URL_ST}/?text=_test_", headers=HEADERS))
 check("filter: created_from + created_to",
-      requests.get(f"{URL_STM}/?created_from=2024-01-01T00:00:00&created_to=2099-12-31T23:59:59",
+      requests.get(f"{URL_ST}/?created_from=2024-01-01T00:00:00&created_to=2099-12-31T23:59:59",
                    headers=HEADERS))
 check("filter: 非法时间格式 → 422",
-      requests.get(f"{URL_STM}/?created_from=bad-date", headers=HEADERS), 422)
-check("filter: 多条件组合（session + user + content）",
-      requests.get(f"{URL_STM}/?session_id=s_fake&user_id=u_fake&content=hello", headers=HEADERS))
+      requests.get(f"{URL_ST}/?created_from=bad-date", headers=HEADERS), 422)
+check("filter: 多条件组合（session + speaker + text）",
+      requests.get(f"{URL_ST}/?session_id=s_fake&speaker=user_1&text=hello", headers=HEADERS))
 
-test_pagination_boundaries(f"{URL_STM}/")
+test_pagination_boundaries(f"{URL_ST}/")
 
 # DELETE
-test_delete_nonexistent(URL_STM)
+test_delete_nonexistent(URL_ST, fake_id="tr_nonexistent_id_xyz")
 items = (data or {}).get("items", [])
 if items:
-    mid = items[0]["id"]
-    check(f"DELETE 已有记录（id={mid[:12]}…）→ 204",
-          requests.delete(f"{URL_STM}/{mid}", headers=HEADERS), 204)
+    tid = items[0]["transcript_id"]
+    check(f"DELETE 已有记录（transcript_id={tid[:12]}…）→ 204",
+          requests.delete(f"{URL_ST}/{tid}", headers=HEADERS), 204)
     check("DELETE 同一记录二次 → 404",
-          requests.delete(f"{URL_STM}/{mid}", headers=HEADERS), 404)
+          requests.delete(f"{URL_ST}/{tid}", headers=HEADERS), 404)
 else:
     print("  - 表中无数据，跳过真实 DELETE 测试")
 
-test_batch_delete_boundaries(URL_STM)
+test_batch_delete_boundaries(URL_ST)
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -491,7 +522,7 @@ for url in [
     f"{BASE}/api/admin/discussion-summaries/",
     f"{BASE}/api/admin/info-gap-buttons/",
     f"{BASE}/api/admin/keyword-skw/",
-    f"{BASE}/api/admin/session-text-messages/",
+    f"{BASE}/api/admin/speech-transcripts/",
 ]:
     path = url.replace(BASE, "")
     check(f"无 Token {path} → 403",

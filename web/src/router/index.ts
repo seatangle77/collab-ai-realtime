@@ -144,9 +144,9 @@ const routes: RouteRecordRaw[] = [
         component: () => import('../views/admin/AdminKeywordSkwPage.vue'),
       },
       {
-        path: 'session-text-messages',
-        name: 'AdminSessionTextMessages',
-        component: () => import('../views/admin/AdminSessionTextMessagesPage.vue'),
+        path: 'speech-transcripts',
+        name: 'AdminSpeechTranscripts',
+        component: () => import('../views/admin/AdminSpeechTranscriptsPage.vue'),
       },
       {
         path: 'voice-profiles',

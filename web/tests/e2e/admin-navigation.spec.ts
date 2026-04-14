@@ -10,7 +10,7 @@ const GROUPS = [
       { label: '成员关系', path: '/admin/memberships', heading: '成员关系管理' },
       { label: '会话管理', path: '/admin/chat-sessions', heading: '会话管理' },
       { label: '声纹管理', path: '/admin/voice-profiles', heading: '声纹管理' },
-      { label: '文字消息', path: '/admin/session-text-messages', heading: '文字消息' },
+      { label: '语音转写', path: '/admin/speech-transcripts', heading: '语音转写' },
     ],
   },
   {

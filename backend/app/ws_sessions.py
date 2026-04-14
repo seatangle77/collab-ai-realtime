@@ -97,7 +97,7 @@ async def _auto_end_session(session_id: str) -> None:
             text(
                 """
                 UPDATE chat_sessions
-                SET status = 'ended', ended_at = NOW(), last_updated = NOW()
+                SET status = 'ended', ended_at = NOW(), last_updated = NOW(), active_ws_count = 0
                 WHERE id = :id AND status != 'ended'
                 """
             ),
@@ -105,6 +105,41 @@ async def _auto_end_session(session_id: str) -> None:
         )
         await db.commit()
     _logger.info("会话心跳超时，已自动结束 session_id=%s", session_id)
+
+
+async def _increment_active_ws_count(session_id: str) -> bool:
+    """仅对 ongoing 会话计数 +1，返回本次是否成功计数。"""
+    session_factory = get_sessionmaker()
+    async with session_factory() as db:
+        result = await db.execute(
+            text(
+                """
+                UPDATE chat_sessions
+                SET active_ws_count = active_ws_count + 1
+                WHERE id = :id
+                  AND status = 'ongoing'
+                """
+            ),
+            {"id": session_id},
+        )
+        await db.commit()
+        return (result.rowcount or 0) > 0
+
+
+async def _decrement_active_ws_count(session_id: str) -> None:
+    session_factory = get_sessionmaker()
+    async with session_factory() as db:
+        await db.execute(
+            text(
+                """
+                UPDATE chat_sessions
+                SET active_ws_count = GREATEST(active_ws_count - 1, 0)
+                WHERE id = :id
+                """
+            ),
+            {"id": session_id},
+        )
+        await db.commit()
 
 
 async def _get_session_member_ids(session_id: str) -> list[str]:
@@ -177,7 +212,9 @@ async def ws_session_endpoint(
         except JWTError:
             pass  # token 无效，降级为非发起者
 
+    counted_active_ws = False
     await ws_manager.connect_session(session_id, websocket, user_id=user_id)
+    counted_active_ws = await _increment_active_ws_count(session_id)
     try:
         await websocket.send_json(build_connected(session_id))
 
@@ -292,4 +329,6 @@ async def ws_session_endpoint(
             pass
     finally:
         await ws_manager.disconnect_session(session_id, websocket)
+        if counted_active_ws:
+            await _decrement_active_ws_count(session_id)
         await destroy_audio_service(session_id)
