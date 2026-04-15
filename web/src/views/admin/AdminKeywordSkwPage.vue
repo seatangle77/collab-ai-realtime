@@ -202,7 +202,14 @@ onMounted(() => { fetchData() })
           <template #default="{ row }">{{ row.user_a_name || row.user_a_id }}</template>
         </el-table-column>
         <el-table-column label="用户 B" min-width="140" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.user_b_name || row.user_b_id }}</template>
+          <template #default="{ row }">{{ row.user_b_name || row.user_b_id || '—' }}</template>
+        </el-table-column>
+        <el-table-column label="状态" min-width="120">
+          <template #default="{ row }">
+            <el-tag v-if="row.skw_status === 'computed'" type="success" size="small">已计算</el-tag>
+            <el-tag v-else-if="row.skw_status === 'single_mention'" type="warning" size="small">单人提及</el-tag>
+            <span v-else>—</span>
+          </template>
         </el-table-column>
         <el-table-column label="SKW 分数" min-width="100">
           <template #default="{ row }">

@@ -30,11 +30,13 @@ class AdminKeywordSkwOut(BaseModel):
     session_id: str
     window_start: Any
     keyword: str
-    user_a_id: str
+    user_a_id: str | None = None
     user_a_name: str | None = None
-    user_b_id: str
+    user_b_id: str | None = None
     user_b_name: str | None = None
-    skw_score: float
+    skw_score: float | None = None
+    mention_count: int | None = None
+    skw_status: str | None = None
     created_at: Any = None
 
 
@@ -94,7 +96,8 @@ async def list_keyword_skw(
             f"""
             SELECT
                 ks.id, ks.session_id, ks.window_start, ks.keyword,
-                ks.user_a_id, ks.user_b_id, ks.skw_score, ks.created_at,
+                ks.user_a_id, ks.user_b_id, ks.skw_score,
+                ks.mention_count, ks.skw_status, ks.created_at,
                 ua.name AS user_a_name,
                 ub.name AS user_b_name
             FROM keyword_skw ks

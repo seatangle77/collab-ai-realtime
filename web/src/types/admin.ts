@@ -262,11 +262,13 @@ export interface AdminKeywordSkw {
   session_id: string
   window_start: string
   keyword: string
-  user_a_id: string
+  user_a_id: string | null
   user_a_name: string | null
-  user_b_id: string
+  user_b_id: string | null
   user_b_name: string | null
-  skw_score: number
+  skw_score: number | null
+  mention_count: number | null
+  skw_status: string | null
   created_at: string | null
 }
 
