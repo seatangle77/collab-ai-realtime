@@ -163,6 +163,86 @@ def test_generate_push_structured_forbidden_without_admin_token() -> None:
     assert resp.status_code == 403
 
 
+def test_generate_push_structured_ok_for_shallow_discussion(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.nlp.structured_push_content.generate_structured_push_content",
+        lambda **kwargs: {
+            "needs_prompt": False,
+            "anchor": None,
+            "content": "",
+        },
+    )
+    client = _make_client()
+
+    resp = client.post(
+        "/api/nlp/generate_push_structured",
+        headers=ADMIN_HEADERS,
+        json={
+            "trigger_type": "shallow_discussion",
+            "summary": "讨论摘要",
+            "transcripts": [
+                {
+                    "transcript_id": "t1",
+                    "user_id": "uA",
+                    "text": "我觉得这个方案挺好",
+                }
+            ],
+            "user_id": "uA",
+            "trigger_metrics": {"ttr": 0.2, "arg_density": 0.01},
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"needs_prompt": False, "anchor": None, "content": ""}
+
+
+def test_generate_push_structured_422_when_user_id_missing() -> None:
+    client = _make_client()
+
+    resp = client.post(
+        "/api/nlp/generate_push_structured",
+        headers=ADMIN_HEADERS,
+        json={
+            "trigger_type": "low_participation",
+            "transcripts": [],
+        },
+    )
+
+    assert resp.status_code == 422
+
+
+def test_generate_push_structured_422_when_trigger_type_invalid() -> None:
+    client = _make_client()
+
+    resp = client.post(
+        "/api/nlp/generate_push_structured",
+        headers=ADMIN_HEADERS,
+        json={
+            "trigger_type": "group_silence",
+            "transcripts": [],
+            "user_id": "u1",
+        },
+    )
+
+    assert resp.status_code == 422
+
+
+def test_generate_push_structured_422_when_transcripts_has_wrong_shape() -> None:
+    client = _make_client()
+
+    resp = client.post(
+        "/api/nlp/generate_push_structured",
+        headers=ADMIN_HEADERS,
+        json={
+            "trigger_type": "low_participation",
+            "transcripts": [{"user_id": "u1", "text": "hello"}],
+            "user_id": "u1",
+        },
+    )
+
+    assert resp.status_code == 422
+
+
 def test_candidate_recall_ok(monkeypatch) -> None:
     monkeypatch.setattr(
         "app.nlp.candidate_recall.recall_candidates",

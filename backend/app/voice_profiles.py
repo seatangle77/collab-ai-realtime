@@ -58,6 +58,11 @@ ALLOWED_AUDIO_CONTENT_TYPE_PREFIXES: tuple[str, ...] = (
     "audio/ogg",
     "audio/mpeg",
     "audio/wav",
+    "audio/mp4",
+    "audio/x-m4a",
+    "audio/aac",
+    "audio/flac",
+    "audio/x-wav",
 )
 
 
@@ -370,10 +375,16 @@ async def upload_my_voice_sample(
     ext = ".webm"
     if file.content_type == "audio/mpeg":
         ext = ".mp3"
-    elif file.content_type == "audio/wav":
+    elif file.content_type in {"audio/wav", "audio/x-wav"}:
         ext = ".wav"
     elif file.content_type == "audio/ogg":
         ext = ".ogg"
+    elif file.content_type in {"audio/mp4", "audio/x-m4a"}:
+        ext = ".m4a"
+    elif file.content_type == "audio/aac":
+        ext = ".aac"
+    elif file.content_type == "audio/flac":
+        ext = ".flac"
 
     filename = f"{uuid.uuid4().hex}{ext}"
 
@@ -390,5 +401,3 @@ async def upload_my_voice_sample(
 
     public_url = f"{VOICE_AUDIO_PUBLIC_BASE_URL}/{user_id}/{filename}"
     return UploadAudioResponse(url=public_url)
-
-

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete, Microphone } from '@element-plus/icons-vue'
 import AppEmptyState from '../../components/AppEmptyState.vue'
@@ -17,7 +17,7 @@ const savingSamples = ref(false)
 const generating = ref(false)
 const isRecording = ref(false)
 const isUploading = ref(false)
-const activeRecordTab = ref<'record' | 'url'>('record')
+const activeRecordTab = ref<'record' | 'url' | 'file'>('record')
 
 const profile = ref<VoiceProfileOut | null>(null)
 const editableUrls = ref<string[]>([])
@@ -25,8 +25,12 @@ const newUrlInput = ref('')
 const recordedChunks = ref<BlobPart[]>([])
 const recordingDuration = ref(0)
 const previewUrl = ref<string | null>(null)
+const selectedFile = ref<File | null>(null)
+const selectedFilePreviewUrl = ref<string | null>(null)
+const fileInputRef = ref<HTMLInputElement | null>(null)
 const mediaRecorder = ref<MediaRecorder | null>(null)
 let recordingTimer: number | undefined
+const MAX_UPLOAD_FILE_SIZE = 50 * 1024 * 1024
 
 const hasEmbedding = computed(() => !!profile.value?.voice_embedding)
 const currentStep = computed(() => (hasEmbedding.value ? 2 : 1))
@@ -165,11 +169,56 @@ function resetRecording() {
   }
 }
 
-function handleTabChange(tab: 'record' | 'url') {
+function resetSelectedFile() {
+  selectedFile.value = null
+  if (selectedFilePreviewUrl.value) {
+    URL.revokeObjectURL(selectedFilePreviewUrl.value)
+    selectedFilePreviewUrl.value = null
+  }
+  if (fileInputRef.value) {
+    fileInputRef.value.value = ''
+  }
+}
+
+function handleTabChange(tab: 'record' | 'url' | 'file') {
   if (tab !== activeRecordTab.value) {
-    resetRecording()
+    if (activeRecordTab.value === 'record') {
+      resetRecording()
+    }
+    if (activeRecordTab.value === 'file') {
+      resetSelectedFile()
+    }
     activeRecordTab.value = tab
   }
+}
+
+function formatFileSize(size: number): string {
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function handleOpenFilePicker() {
+  fileInputRef.value?.click()
+}
+
+function setSelectedFile(file: File | null) {
+  resetSelectedFile()
+  if (!file) return
+  selectedFile.value = file
+  selectedFilePreviewUrl.value = URL.createObjectURL(file)
+}
+
+function handleFileSelected(event: Event) {
+  const input = event.target as HTMLInputElement | null
+  const file = input?.files?.[0] || null
+  setSelectedFile(file)
+}
+
+function handleFileDrop(event: DragEvent) {
+  event.preventDefault()
+  const file = event.dataTransfer?.files?.[0] || null
+  setSelectedFile(file)
 }
 
 async function handleUploadRecordedSample() {
@@ -200,13 +249,43 @@ async function handleUploadRecordedSample() {
   }
 }
 
+async function handleUploadFileSample() {
+  if (!selectedFile.value) {
+    ElMessage.warning('请先选择一个音频文件')
+    return
+  }
+  if (editableUrls.value.length >= 5) {
+    ElMessage.warning('已达到最多 5 条样本')
+    return
+  }
+  if (selectedFile.value.size > MAX_UPLOAD_FILE_SIZE) {
+    ElMessage.warning('文件不能超过 50MB')
+    return
+  }
+
+  isUploading.value = true
+  try {
+    const { url } = await uploadMyVoiceSample(selectedFile.value)
+    editableUrls.value = [...editableUrls.value, url]
+    await handleSaveSamples()
+    ElMessage.success('文件已上传并添加到样本列表')
+    resetSelectedFile()
+  } catch (err: unknown) {
+    console.error(err)
+    ElMessage.error((err as Error)?.message || '上传文件失败')
+  } finally {
+    isUploading.value = false
+  }
+}
+
 async function handleGenerateEmbedding() {
   if (!profile.value) return
+  const hadEmbedding = hasEmbedding.value
   if (!editableUrls.value.length) {
     ElMessage.warning('请先添加样本 URL 后再生成声纹')
     return
   }
-  if (hasEmbedding.value) {
+  if (hadEmbedding) {
     try {
       await ElMessageBox.confirm(
         '将根据当前样本列表重新生成声纹，可能会覆盖之前的结果，确定继续吗？',
@@ -222,7 +301,7 @@ async function handleGenerateEmbedding() {
   try {
     const updated = await generateMyEmbedding()
     profile.value = updated
-    ElMessage.success(hasEmbedding.value ? '声纹已重新生成' : '声纹已生成')
+    ElMessage.success(hadEmbedding ? '声纹已重新生成' : '声纹已生成')
   } catch (err: unknown) {
     console.error(err)
     ElMessage.error((err as Error)?.message || '生成声纹失败')
@@ -233,6 +312,11 @@ async function handleGenerateEmbedding() {
 
 onMounted(() => {
   void fetchProfile()
+})
+
+onBeforeUnmount(() => {
+  resetRecording()
+  resetSelectedFile()
 })
 </script>
 
@@ -272,6 +356,14 @@ onMounted(() => {
               @click="handleTabChange('url')"
             >
               粘贴 URL
+            </button>
+            <button
+              type="button"
+              class="record-tab"
+              :class="{ active: activeRecordTab === 'file' }"
+              @click="handleTabChange('file')"
+            >
+              上传文件
             </button>
           </div>
 
@@ -336,6 +428,53 @@ onMounted(() => {
                 @keyup.enter.prevent="handleAddUrl"
               />
               <el-button type="primary" size="default" @click="handleAddUrl">添加</el-button>
+            </div>
+          </div>
+
+          <!-- Tab: 上传文件 -->
+          <div v-if="activeRecordTab === 'file'" class="tab-panel tab-panel--file">
+            <input
+              ref="fileInputRef"
+              type="file"
+              accept="audio/*"
+              class="file-input"
+              @change="handleFileSelected"
+            />
+            <button
+              type="button"
+              class="file-drop-area"
+              :disabled="editableUrls.length >= 5"
+              @click="handleOpenFilePicker"
+              @dragover.prevent
+              @drop="handleFileDrop"
+            >
+              <span class="file-drop-area__title">点击选择音频文件</span>
+              <span class="file-drop-area__hint">支持拖拽上传，建议单个文件不超过 50MB</span>
+            </button>
+
+            <div v-if="selectedFile" class="file-info">
+              <span class="file-info__name">{{ selectedFile.name }}</span>
+              <span class="file-info__meta">{{ formatFileSize(selectedFile.size) }}</span>
+            </div>
+
+            <audio
+              v-if="selectedFilePreviewUrl"
+              :src="selectedFilePreviewUrl"
+              controls
+              class="preview-audio"
+            />
+
+            <div v-if="selectedFile" class="preview-actions">
+              <el-button size="default" @click="resetSelectedFile">重新选择</el-button>
+              <el-button
+                type="primary"
+                size="default"
+                :loading="isUploading"
+                :disabled="editableUrls.length >= 5"
+                @click="handleUploadFileSample"
+              >
+                上传此文件
+              </el-button>
             </div>
           </div>
         </div>
@@ -688,6 +827,81 @@ onMounted(() => {
   gap: 12px;
   min-height: 44px;
   width: 100%;
+}
+
+.tab-panel--file {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.file-input {
+  display: none;
+}
+
+.file-drop-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 132px;
+  padding: 20px;
+  border: 1px dashed var(--app-border-strong);
+  border-radius: var(--app-radius-md);
+  background: var(--app-bg-page);
+  color: var(--app-text-secondary);
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    background-color 0.18s ease,
+    color 0.18s ease;
+}
+
+.file-drop-area:hover:not(:disabled) {
+  border-color: var(--app-primary);
+  background: color-mix(in srgb, var(--app-primary) 6%, var(--app-bg-page));
+  color: var(--app-text-primary);
+}
+
+.file-drop-area:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.file-drop-area__title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.file-drop-area__hint {
+  font-size: 13px;
+}
+
+.file-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: var(--app-radius-md);
+  background: var(--app-bg-page);
+  color: var(--app-text-secondary);
+}
+
+.file-info__name {
+  min-width: 0;
+  flex: 1;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--app-text-primary);
+  word-break: break-all;
+}
+
+.file-info__meta {
+  flex-shrink: 0;
+  font-size: 13px;
 }
 
 .url-add-row {
