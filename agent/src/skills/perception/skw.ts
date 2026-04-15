@@ -95,9 +95,34 @@ export async function computeSkw(
       if (ctx) contextByUser[uid] = ctx;
     }
 
-    // 少于 2 位成员提及该关键词，跳过（无法形成有意义的语义差异）
-    if (Object.keys(contextByUser).length < 2) {
-      logger.info(`[跨成员语义相似度 Skw] 关键词「${keyword}」：提及人数不足 2，跳过`, { sessionId });
+    const mentionCount = Object.keys(contextByUser).length;
+
+    // 完全没人提及，跳过
+    if (mentionCount === 0) {
+      continue;
+    }
+
+    // 仅 1 人提及：对"提及者 vs 每个未提及者"打默认低分 0.1，写入 skwRows，不做 embed
+    if (mentionCount === 1) {
+      logger.info(`[跨成员语义相似度 Skw] 关键词「${keyword}」：提及人数不足 2，写入默认分`, { sessionId });
+      const mentioner = Object.keys(contextByUser)[0];
+      const nonMentioners = activeMembers.filter((uid) => uid !== mentioner);
+      for (const other of nonMentioners) {
+        scores[keyword][mentioner] = scores[keyword][mentioner] ?? {};
+        scores[keyword][other] = scores[keyword][other] ?? {};
+        scores[keyword][mentioner][other] = 0.1;
+        scores[keyword][other][mentioner] = 0.1;
+        skwRows.push({
+          session_id: sessionId,
+          window_start: windowStart,
+          keyword,
+          user_a_id: mentioner,
+          user_b_id: other,
+          skw_score: 0.1,
+          mention_count: mentionCount,
+          skw_status: 'single_mention',
+        });
+      }
       continue;
     }
 
@@ -143,6 +168,8 @@ export async function computeSkw(
         user_a_id: userA,
         user_b_id: userB,
         skw_score: score,
+        mention_count: keywordMembers.length,
+        skw_status: 'computed',
       });
     });
   }

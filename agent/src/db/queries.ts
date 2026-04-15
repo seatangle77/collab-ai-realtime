@@ -46,9 +46,11 @@ export interface KeywordSkwRow {
   session_id: string;
   window_start: Date;
   keyword: string;
-  user_a_id: string;
-  user_b_id: string;
-  skw_score: number;
+  user_a_id?: string;
+  user_b_id?: string;
+  skw_score?: number;
+  mention_count?: number;
+  skw_status?: string;
 }
 
 export interface HistoricalKeyword {
@@ -715,23 +717,26 @@ export async function writeKeywordSkw(rows: KeywordSkwRow[]): Promise<void> {
 
   const values: unknown[] = [];
   const placeholders = rows.map((row, i) => {
-    const base = i * 7;
+    const base = i * 9;
     values.push(
       'skw_' + nanoid(12),
       row.session_id,
       toUtcString(row.window_start),
       row.keyword,
-      row.user_a_id,
-      row.user_b_id,
-      row.skw_score,
+      row.user_a_id ?? null,
+      row.user_b_id ?? null,
+      row.skw_score ?? null,
+      row.mention_count ?? null,
+      row.skw_status ?? null,
     );
-    return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, NOW())`;
+    return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, NOW())`;
   });
 
   await pool.query(
     `INSERT INTO keyword_skw
-       (id, session_id, window_start, keyword, user_a_id, user_b_id, skw_score, created_at)
-     VALUES ${placeholders.join(', ')}`,
+       (id, session_id, window_start, keyword, user_a_id, user_b_id, skw_score, mention_count, skw_status, created_at)
+     VALUES ${placeholders.join(', ')}
+     ON CONFLICT DO NOTHING`,
     values,
   );
 }
