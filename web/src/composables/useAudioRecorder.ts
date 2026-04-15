@@ -12,10 +12,16 @@ export type ChunkCallback = (blob: Blob, mimeType: string) => void
 
 export function useAudioRecorder() {
   const isRecording = ref(false)
+  const recordingSource = ref<'microphone' | 'file' | null>(null)
 
   // ── 浏览器模式 ───────────────────────────────────────────────
   let mediaRecorder: MediaRecorder | null = null
   let mediaStream: MediaStream | null = null
+  let injectedAudioContext: AudioContext | null = null
+  let injectedAudioElement: HTMLAudioElement | null = null
+  let injectedObjectUrl: string | null = null
+  let injectedSourceNode: MediaElementAudioSourceNode | null = null
+  let injectedDestinationNode: MediaStreamAudioDestinationNode | null = null
 
   // ── App 模式 ─────────────────────────────────────────────────
   let nativeChunkTimer: ReturnType<typeof setInterval> | null = null
@@ -43,12 +49,16 @@ export function useAudioRecorder() {
 
   // ── 浏览器模式实现 ────────────────────────────────────────────
 
-  async function startBrowser(): Promise<void> {
-    if (!navigator.mediaDevices?.getUserMedia) {
-      throw new Error('当前浏览器不支持录音')
+  function getBrowserRecorderOptions(): MediaRecorderOptions | undefined {
+    if (typeof MediaRecorder === 'undefined') return undefined
+    if (MediaRecorder.isTypeSupported('audio/webm')) {
+      return { mimeType: 'audio/webm' }
     }
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
+    return undefined
+  }
+
+  function bindBrowserRecorder(stream: MediaStream): MediaRecorder {
+    const recorder = new MediaRecorder(stream, getBrowserRecorderOptions())
     mediaStream = stream
     mediaRecorder = recorder
 
@@ -56,7 +66,90 @@ export function useAudioRecorder() {
       if (!event.data || event.data.size === 0) return
       chunkCallback?.(event.data, event.data.type || 'audio/webm')
     }
+
+    recorder.onstop = () => {
+      cleanupInjectedAudio()
+    }
+
+    return recorder
+  }
+
+  async function startBrowser(): Promise<void> {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error('当前浏览器不支持录音')
+    }
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    const recorder = bindBrowserRecorder(stream)
     recorder.start(BROWSER_CHUNK_INTERVAL_MS)
+  }
+
+  function cleanupInjectedAudio(): void {
+    if (injectedAudioElement) {
+      injectedAudioElement.pause()
+      injectedAudioElement.src = ''
+      injectedAudioElement.onended = null
+      injectedAudioElement.onerror = null
+      injectedAudioElement = null
+    }
+    injectedSourceNode?.disconnect()
+    injectedDestinationNode?.disconnect()
+    injectedSourceNode = null
+    injectedDestinationNode = null
+    if (injectedObjectUrl) {
+      URL.revokeObjectURL(injectedObjectUrl)
+      injectedObjectUrl = null
+    }
+    if (injectedAudioContext) {
+      void injectedAudioContext.close()
+      injectedAudioContext = null
+    }
+  }
+
+  async function startBrowserInjectedFile(file: File): Promise<void> {
+    if (typeof window === 'undefined' || typeof AudioContext === 'undefined') {
+      throw new Error('当前环境不支持文件注入录音')
+    }
+
+    cleanupInjectedAudio()
+
+    const audioContext = new AudioContext()
+    const destination = audioContext.createMediaStreamDestination()
+    const audio = new Audio()
+    const objectUrl = URL.createObjectURL(file)
+
+    audio.src = objectUrl
+    audio.preload = 'auto'
+    audio.crossOrigin = 'anonymous'
+
+    const sourceNode = audioContext.createMediaElementSource(audio)
+    sourceNode.connect(destination)
+
+    injectedAudioContext = audioContext
+    injectedAudioElement = audio
+    injectedObjectUrl = objectUrl
+    injectedSourceNode = sourceNode
+    injectedDestinationNode = destination
+
+    const recorder = bindBrowserRecorder(destination.stream)
+    audio.onended = () => {
+      void stopRecording().catch(() => {
+        // Ignore auto-stop cleanup failures.
+      })
+    }
+    audio.onerror = () => {
+      void stopRecording().catch(() => {
+        // Ignore auto-stop cleanup failures.
+      })
+    }
+
+    try {
+      recorder.start(BROWSER_CHUNK_INTERVAL_MS)
+      await audioContext.resume()
+      await audio.play()
+    } catch (error) {
+      stopBrowser()
+      throw error instanceof Error ? error : new Error('文件注入启动失败')
+    }
   }
 
   function stopBrowser(): void {
@@ -68,6 +161,7 @@ export function useAudioRecorder() {
       mediaStream.getTracks().forEach((t) => t.stop())
       mediaStream = null
     }
+    cleanupInjectedAudio()
   }
 
   // ── App 模式实现 ──────────────────────────────────────────────
@@ -151,6 +245,17 @@ export function useAudioRecorder() {
       await startBrowser()
     }
     isRecording.value = true
+    recordingSource.value = 'microphone'
+  }
+
+  async function startFileInjection(file: File): Promise<void> {
+    if (isRecording.value) return
+    if (Capacitor.isNativePlatform()) {
+      throw new Error('原生端暂不支持文件注入模式')
+    }
+    await startBrowserInjectedFile(file)
+    isRecording.value = true
+    recordingSource.value = 'file'
   }
 
   async function stopRecording(): Promise<void> {
@@ -161,12 +266,15 @@ export function useAudioRecorder() {
       stopBrowser()
     }
     isRecording.value = false
+    recordingSource.value = null
   }
 
   return {
     isRecording,
+    recordingSource,
     onChunk,
     startRecording,
+    startFileInjection,
     stopRecording,
   }
 }

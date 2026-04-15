@@ -52,8 +52,19 @@ const error = ref('')
 const wsStatus = ref<'connecting' | 'connected' | 'reconnecting' | 'disconnected'>('disconnected')
 const reconnectAttempt = ref(0)
 const pendingRecordingStart = ref(false)
-const { isRecording, onChunk, startRecording, stopRecording } = useAudioRecorder()
+const {
+  isRecording,
+  recordingSource,
+  onChunk,
+  startRecording,
+  startFileInjection,
+  stopRecording,
+} = useAudioRecorder()
 const transcriptsListEl = ref<HTMLElement | null>(null)
+const debugAudioEnabled = ref(false)
+const debugFileInputEl = ref<HTMLInputElement | null>(null)
+const debugInjecting = ref(false)
+const debugInjectedFileName = ref('')
 
 interface PushLogItem {
   id: string
@@ -247,10 +258,38 @@ const canStart = computed(() => session.value?.status === 'not_started' && !laun
 const canCancel = computed(() => session.value?.status === 'not_started')
 const canEnd = computed(() => session.value?.status === 'ongoing')
 const canStartRecording = computed(() => {
-  return isHost.value && session.value?.status === 'ongoing' && wsStatus.value === 'connected' && !isRecording.value
+  return isHost.value
+    && session.value?.status === 'ongoing'
+    && wsStatus.value === 'connected'
+    && !isRecording.value
+    && !debugInjecting.value
 })
 const canStopRecording = computed(() => {
   return isHost.value && session.value?.status === 'ongoing' && isRecording.value
+})
+const canUseFileInjection = computed(() => {
+  return debugAudioEnabled.value
+    && session.value?.status === 'ongoing'
+    && wsStatus.value === 'connected'
+    && !isRecording.value
+    && !debugInjecting.value
+    && !Capacitor.isNativePlatform()
+})
+const recorderMetaText = computed(() => {
+  if (debugInjecting.value) {
+    return debugInjectedFileName.value
+      ? `正在准备注入 ${debugInjectedFileName.value}，完成后会沿用正式录音链路发送。`
+      : '正在准备文件注入，完成后会沿用正式录音链路发送。'
+  }
+  if (recordingSource.value === 'file') {
+    return debugInjectedFileName.value
+      ? `文件注入中：${debugInjectedFileName.value}，音频会沿用正式录音链路实时发送到会话连接。`
+      : '文件注入中，音频会沿用正式录音链路实时发送到会话连接。'
+  }
+  if (isRecording.value) {
+    return '录音中，音频会实时发送到会话连接。'
+  }
+  return '连接成功后可开始录音并实时发送音频。'
 })
 const summaryExpanded = ref(false)
 const hasSummary = computed(() => !!currentSummary.value)
@@ -399,7 +438,8 @@ async function handleEnd() {
   try {
     // 先停止录音、关闭 WS
     clearPushLogsPollTimer()
-    stopRecording()
+    await stopRecording()
+    resetDebugInjectionState()
     wsIntentionalClose = true
     ws?.close(1000, 'host_ended')
     // 再通知后端
@@ -426,8 +466,50 @@ async function handleStopRecording() {
   if (!canStopRecording.value) return
   try {
     await stopRecording()
+    resetDebugInjectionState()
   } catch (err) {
     ElMessage.error(extractErrorMessage(err))
+  }
+}
+
+function openDebugFilePicker() {
+  if (!canUseFileInjection.value) return
+  debugFileInputEl.value?.click()
+}
+
+function resetDebugInjectionState() {
+  debugInjecting.value = false
+  debugInjectedFileName.value = ''
+}
+
+async function handleDebugFileSelected(event: Event) {
+  const input = event.target as HTMLInputElement | null
+  const file = input?.files?.[0]
+  if (!file) {
+    resetDebugInjectionState()
+    return
+  }
+  if (file.type && !file.type.startsWith('audio/')) {
+    resetDebugInjectionState()
+    ElMessage.error('请选择音频文件进行注入')
+    if (input) {
+      input.value = ''
+    }
+    return
+  }
+  chunkSeq = 0
+  debugInjecting.value = true
+  debugInjectedFileName.value = file.name
+  try {
+    await startFileInjection(file)
+  } catch (err) {
+    resetDebugInjectionState()
+    ElMessage.error(extractErrorMessage(err))
+  } finally {
+    debugInjecting.value = false
+    if (input) {
+      input.value = ''
+    }
   }
 }
 
@@ -687,7 +769,9 @@ function handleWsMessage(event: MessageEvent<string>) {
       session.value = { ...session.value, status: 'ended' }
     }
     clearPushLogsPollTimer()
-    stopRecording()
+    void stopRecording().finally(() => {
+      resetDebugInjectionState()
+    })
     wsIntentionalClose = true
     ws?.close(1000, 'session_ended')
     void loadTranscripts()
@@ -969,6 +1053,12 @@ watch(
   },
 )
 
+watch(isRecording, (active) => {
+  if (!active && recordingSource.value == null && (debugInjecting.value || debugInjectedFileName.value)) {
+    resetDebugInjectionState()
+  }
+})
+
 watch(
   () => session.value?.status,
   (status) => {
@@ -1103,6 +1193,7 @@ onMounted(async () => {
   reconnectAttempt.value = 0
   clearPushLogsPollTimer()
   attachTestMessageInjector()
+  debugAudioEnabled.value = localStorage.getItem('debug_audio') === '1'
   currentUser.value = loadCurrentUser()
   await loadData()
   await Promise.allSettled([
@@ -1134,7 +1225,9 @@ onUnmounted(() => {
   appStateListener = null
   detachTestMessageInjector()
   unmounted = true
-  stopRecording()
+  void stopRecording().finally(() => {
+    resetDebugInjectionState()
+  })
   closeWsForUnmount()
   clearPushLogsPollTimer()
   wsStatus.value = 'disconnected'
@@ -1280,29 +1373,47 @@ onUnmounted(() => {
           v-if="isHost && session.status === 'ongoing'"
           class="app-session-detail-recorder-bar"
         >
-          <button
-            v-if="!isRecording"
-            type="button"
-            class="app-session-detail-primary-btn app-session-detail-icon-btn"
-            :disabled="!canStartRecording"
-            data-testid="record-start"
-            @click="handleStartRecording"
-          >
-            <span class="app-session-detail-btn-icon" aria-hidden="true">●</span>
-            开始录音
-          </button>
-          <button
-            v-else
-            type="button"
-            class="app-session-detail-danger-btn app-session-detail-icon-btn"
-            data-testid="record-stop"
-            @click="handleStopRecording"
-          >
-            <span class="app-session-detail-btn-icon" aria-hidden="true">■</span>
-            停止录音
-          </button>
+          <div class="app-session-detail-recorder-actions">
+            <button
+              v-if="!isRecording"
+              type="button"
+              class="app-session-detail-primary-btn app-session-detail-icon-btn"
+              :disabled="!canStartRecording"
+              data-testid="record-start"
+              @click="handleStartRecording"
+            >
+              <span class="app-session-detail-btn-icon" aria-hidden="true">●</span>
+              开始录音
+            </button>
+            <button
+              v-else
+              type="button"
+              class="app-session-detail-danger-btn app-session-detail-icon-btn"
+              data-testid="record-stop"
+              @click="handleStopRecording"
+            >
+              <span class="app-session-detail-btn-icon" aria-hidden="true">■</span>
+              停止录音
+            </button>
+            <button
+              v-if="debugAudioEnabled"
+              type="button"
+              class="app-session-detail-secondary-btn app-session-detail-debug-btn"
+              :disabled="!canUseFileInjection"
+              @click="openDebugFilePicker"
+            >
+              文件注入
+            </button>
+            <input
+              ref="debugFileInputEl"
+              class="app-session-detail-debug-input"
+              type="file"
+              accept="audio/*"
+              @change="handleDebugFileSelected"
+            >
+          </div>
           <span class="app-session-detail-recorder-meta">
-            {{ isRecording ? '录音中，音频会实时发送到会话连接。' : '连接成功后可开始录音并实时发送音频。' }}
+            {{ recorderMetaText }}
           </span>
         </div>
         <div
@@ -1622,6 +1733,11 @@ onUnmounted(() => {
   background: var(--app-bg-page);
 }
 
+.app-session-detail-secondary-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .app-session-detail-danger-btn {
   border-radius: var(--app-radius-pill);
   border: 1px solid rgba(248, 113, 113, 0.5);
@@ -1773,6 +1889,21 @@ onUnmounted(() => {
   gap: 8px;
   flex-wrap: wrap;
   margin-bottom: 12px;
+}
+
+.app-session-detail-recorder-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.app-session-detail-debug-btn {
+  padding-inline: 12px;
+}
+
+.app-session-detail-debug-input {
+  display: none;
 }
 
 .app-session-detail-recorder-meta {
