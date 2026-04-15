@@ -1,0 +1,308 @@
+from __future__ import annotations
+
+import json
+import logging
+from typing import Any, Literal
+
+from openai import OpenAI
+
+from ..settings import nlp_settings
+
+logger = logging.getLogger(__name__)
+
+MAX_CONTENT_LENGTH = 30
+PERSONAL_STAGNATION = "low_participation"
+SHALLOW_DISCUSSION = "shallow_discussion"
+
+SYSTEM_PROMPT = """你是一个小组讨论协作引导助手。
+
+硬性规则：
+1. 不要把讨论改写成知识问答、购买建议、泛化推荐或价值排序。生成的问题必须是对已有发言的续接，而不是话题扩展。
+2. content 必须能被视为对 anchor 的直接追问：要求理由、条件、例子、边界，或对某个已出现观点表态；不能脱离 anchor 单独成立。
+3. anchor 必须是【发言记录】里的原话，不能改写，不能合并多句，必须同时返回说话人 ID。
+4. 只返回 JSON，不要输出任何解释。"""
+
+
+def _get_client() -> OpenAI:
+    return OpenAI(
+        api_key=nlp_settings.qwen_api_key,
+        base_url=nlp_settings.qwen_base_url,
+    )
+
+
+def _format_transcript_line(transcript: dict[str, Any]) -> str:
+    speaker_id = str(transcript.get("user_id") or "unknown")
+    transcript_id = str(transcript.get("transcript_id") or "").strip()
+    text = str(transcript.get("text") or "").strip()
+    return f"{speaker_id} | {transcript_id} | {text}"
+
+
+def _transcript_text_for_prompt(transcripts: list[dict[str, Any]]) -> str:
+    return "\n".join(
+        _format_transcript_line(item)
+        for item in transcripts
+        if str(item.get("text") or "").strip()
+    )
+
+
+def _get_cond_flags(metrics: dict[str, Any]) -> dict[str, bool]:
+    cond_a = isinstance(metrics.get("srep"), (int, float)) and isinstance(metrics.get("info_gain"), (int, float))
+    cond_b = isinstance(metrics.get("ttr"), (int, float))
+    cond_c = (
+        isinstance(metrics.get("arg_density"), (int, float))
+        or isinstance(metrics.get("has_reasoning"), bool)
+        or isinstance(metrics.get("has_evidence"), bool)
+    )
+    return {"cond_a": cond_a, "cond_b": cond_b, "cond_c": cond_c}
+
+
+def _format_percent(value: Any) -> str:
+    if not isinstance(value, (int, float)):
+        return "0"
+    return str(round(float(value) * 1000) / 10)
+
+
+def _number_or_zero(value: Any, digits: int = 3) -> str:
+    if not isinstance(value, (int, float)):
+        return "0"
+    return f"{float(value):.{digits}f}"
+
+
+def _build_shallow_prompt(
+    user_id: str,
+    trigger_metrics: dict[str, Any],
+    transcripts: list[dict[str, Any]],
+    summary_text: str,
+) -> str | None:
+    target_quotes = "\n".join(
+        _format_transcript_line(item)
+        for item in transcripts
+        if str(item.get("user_id") or "") == user_id and str(item.get("text") or "").strip()
+    )
+    if not target_quotes:
+        return None
+
+    flags = _get_cond_flags(trigger_metrics)
+    issue_labels: list[str] = []
+    instruction_parts: list[str] = []
+
+    if flags["cond_a"]:
+        issue_labels.append("判断重复")
+        instruction_parts.append("可以追问这个判断的前提是什么，或者在什么情况下不成立。")
+    if flags["cond_b"]:
+        issue_labels.append("表达模糊")
+        instruction_parts.append("也可以追问这句话具体指的是什么情况。")
+    if flags["cond_c"]:
+        issue_labels.append("缺乏论证")
+        instruction_parts.append("也可以追问这个判断的依据是什么，或者能否举一个例子支持它。")
+
+    if not issue_labels:
+        return None
+
+    diagnosis_parts: list[str] = []
+    if flags["cond_a"]:
+        diagnosis_parts.append(
+            f"Srep={_number_or_zero(trigger_metrics.get('srep'))}（超过0.65）且信息增益={_number_or_zero(trigger_metrics.get('info_gain'))}（低于0.3）"
+        )
+    if flags["cond_b"]:
+        diagnosis_parts.append(f"TTR={_number_or_zero(trigger_metrics.get('ttr'))}（低于0.4）")
+    if flags["cond_c"]:
+        diagnosis_parts.append(f"论证词密度={_number_or_zero(trigger_metrics.get('arg_density'))}（低于0.02）")
+
+    diagnosis_text = f"该成员同时存在{'、'.join(f'“{label}”' for label in issue_labels)}等问题。{'，'.join(diagnosis_parts)}。"
+    task_instruction = (
+        "请从【目标成员发言】里选一句最能体现这些问题的话，优先选最近的判断句。"
+        + "".join(instruction_parts)
+        + "只能围绕他说过的那句话续接，不能引入新话题。"
+    )
+
+    return "\n".join(
+        [
+            "【当前摘要】",
+            summary_text,
+            "",
+            "【最近发言（全体，按时间顺序，格式：speaker_id | transcript_id | 原话）】",
+            _transcript_text_for_prompt(transcripts),
+            "",
+            "【检测结论】",
+            diagnosis_text,
+            "",
+            "【目标成员发言】",
+            target_quotes,
+            "",
+            "【你的任务】",
+            task_instruction,
+            "",
+            "返回格式（严格 JSON）：",
+            "{",
+            '  "needs_prompt": true/false,',
+            '  "anchor": {',
+            '    "transcript_id": "原话对应的 transcript id",',
+            '    "speaker_id": "说话人 user_id",',
+            '    "text": "原话原文"',
+            "  },",
+            f'  "content": "生成的建议，不超过{MAX_CONTENT_LENGTH}字"',
+            "}",
+        ]
+    )
+
+
+def _build_personal_stagnation_prompt(
+    user_id: str,
+    trigger_metrics: dict[str, Any],
+    transcripts: list[dict[str, Any]],
+    summary_text: str,
+    candidate_points: list[dict[str, str]],
+) -> str:
+    diagnosis_text = f"该成员过去120秒发言占比 {_format_percent(trigger_metrics.get('speaking_ratio'))}%，低于15%，参与明显减少。"
+    task_instruction = (
+        f"以下是其他成员说过但 {user_id or '该成员'} 没有回应的发言（候选追问点）。"
+        f"请从候选点中选一条，问 {user_id or '该成员'} 对这个观点怎么看或是否同意。"
+        "anchor 必须来自候选追问点里的某一条，不能自己另找角度。"
+        "如果候选点都不适合追问，返回 needs_prompt: false。"
+    )
+    formatted_candidates = "\n".join(
+        f"{item.get('speaker_id', '')} | {item.get('transcript_id', '')} | {item.get('text', '')}"
+        for item in candidate_points
+    )
+
+    return "\n".join(
+        [
+            "【当前摘要】",
+            summary_text,
+            "",
+            "【最近发言（全体，按时间顺序，格式：speaker_id | transcript_id | 原话）】",
+            _transcript_text_for_prompt(transcripts),
+            "",
+            "【检测结论】",
+            diagnosis_text,
+            "",
+            "【候选追问点】",
+            formatted_candidates,
+            "",
+            "【你的任务】",
+            task_instruction,
+            "",
+            "返回格式（严格 JSON）：",
+            "{",
+            '  "needs_prompt": true/false,',
+            '  "anchor": {',
+            '    "transcript_id": "原话对应的 transcript id",',
+            '    "speaker_id": "说话人 user_id",',
+            '    "text": "原话原文"',
+            "  },",
+            f'  "content": "生成的建议，不超过{MAX_CONTENT_LENGTH}字"',
+            "}",
+        ]
+    )
+
+
+def _normalize_anchor(value: Any) -> dict[str, str] | None:
+    if not isinstance(value, dict):
+        return None
+
+    transcript_id = str(value.get("transcript_id") or "").strip()
+    speaker_id = str(value.get("speaker_id") or "").strip()
+    text = str(value.get("text") or "").strip()
+    if not transcript_id or not speaker_id or not text:
+        return None
+    return {
+        "transcript_id": transcript_id,
+        "speaker_id": speaker_id,
+        "text": text,
+    }
+
+
+def _parse_json_object(text: str) -> dict[str, Any] | None:
+    try:
+        data = json.loads(text)
+        return data if isinstance(data, dict) else None
+    except Exception:
+        match_start = text.find("{")
+        match_end = text.rfind("}")
+        if match_start < 0 or match_end < match_start:
+            return None
+        try:
+            data = json.loads(text[match_start:match_end + 1])
+            return data if isinstance(data, dict) else None
+        except Exception:
+            return None
+
+
+def _call_model(prompt: str) -> dict[str, Any]:
+    if not nlp_settings.qwen_api_key:
+        return {"needs_prompt": False, "anchor": None, "content": ""}
+
+    try:
+        client = _get_client()
+        response = client.chat.completions.create(
+            model=nlp_settings.reasoning_model,
+            max_tokens=300,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+        )
+        raw = response.choices[0].message.content or ""
+        parsed = _parse_json_object(raw.strip())
+        if not parsed:
+            return {"needs_prompt": False, "anchor": None, "content": ""}
+
+        needs_prompt = parsed.get("needs_prompt") is True
+        anchor = _normalize_anchor(parsed.get("anchor"))
+        content = str(parsed.get("content") or "").strip()
+
+        if not needs_prompt:
+            return {"needs_prompt": False, "anchor": None, "content": ""}
+        if not anchor or not content or len(content) > MAX_CONTENT_LENGTH:
+            return {"needs_prompt": False, "anchor": None, "content": ""}
+        return {"needs_prompt": True, "anchor": anchor, "content": content}
+    except Exception as exc:
+        logger.warning("[NLP/structured-push] 调用失败: %s", exc)
+        return {"needs_prompt": False, "anchor": None, "content": ""}
+
+
+def generate_structured_push_content(
+    trigger_type: Literal["low_participation", "shallow_discussion"],
+    summary: str,
+    transcripts: list[dict[str, Any]],
+    user_id: str,
+    trigger_metrics: dict[str, Any] | None = None,
+    candidate_points: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    metrics = trigger_metrics or {}
+    points = candidate_points or []
+
+    if trigger_type == SHALLOW_DISCUSSION:
+        prompt = _build_shallow_prompt(
+            user_id=user_id,
+            trigger_metrics=metrics,
+            transcripts=transcripts,
+            summary_text=summary,
+        )
+        if not prompt:
+            return {"needs_prompt": False, "anchor": None, "content": ""}
+        logger.info("[NLP/structured-push] input: trigger=%s user=%s transcripts=%d", trigger_type, user_id, len(transcripts))
+        return _call_model(prompt)
+
+    if trigger_type == PERSONAL_STAGNATION:
+        if not points:
+            return {"needs_prompt": False, "anchor": None, "content": ""}
+        prompt = _build_personal_stagnation_prompt(
+            user_id=user_id,
+            trigger_metrics=metrics,
+            transcripts=transcripts,
+            summary_text=summary,
+            candidate_points=points,
+        )
+        logger.info(
+            "[NLP/structured-push] input: trigger=%s user=%s transcripts=%d candidate_points=%d",
+            trigger_type,
+            user_id,
+            len(transcripts),
+            len(points),
+        )
+        return _call_model(prompt)
+
+    return {"needs_prompt": False, "anchor": None, "content": ""}

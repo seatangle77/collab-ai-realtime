@@ -65,6 +65,7 @@ const debugAudioEnabled = ref(false)
 const debugFileInputEl = ref<HTMLInputElement | null>(null)
 const debugInjecting = ref(false)
 const debugInjectedFileName = ref('')
+const selectedInjectionFile = ref<File | null>(null)
 
 interface PushLogItem {
   id: string
@@ -271,9 +272,11 @@ const canUseFileInjection = computed(() => {
   return debugAudioEnabled.value
     && session.value?.status === 'ongoing'
     && wsStatus.value === 'connected'
-    && !isRecording.value
     && !debugInjecting.value
     && !Capacitor.isNativePlatform()
+})
+const canSelectInjectionFile = computed(() => {
+  return debugAudioEnabled.value && !debugInjecting.value && !Capacitor.isNativePlatform()
 })
 const recorderMetaText = computed(() => {
   if (debugInjecting.value) {
@@ -288,6 +291,9 @@ const recorderMetaText = computed(() => {
   }
   if (isRecording.value) {
     return '录音中，音频会实时发送到会话连接。'
+  }
+  if (selectedInjectionFile.value) {
+    return `已选择测试音频：${selectedInjectionFile.value.name}，发起后会自动注入。`
   }
   return '连接成功后可开始录音并实时发送音频。'
 })
@@ -360,28 +366,30 @@ async function handleLaunchSession() {
   launching.value = true
 
   try {
-    // 1. 先检查麦克风权限（失败直接终止，无需回滚后端状态）
-    // Native(Android)：使用 VoiceRecorder 权限 API，避免 getUserMedia 占住麦克风导致 MICROPHONE_BEING_USED
-    // Browser：使用 getUserMedia 检查权限
-    if (Capacitor.isNativePlatform()) {
-      try {
-        const { VoiceRecorder } = await import('capacitor-voice-recorder')
-        const perm = await VoiceRecorder.hasAudioRecordingPermission()
-        if (!perm.value) {
-          const req = await VoiceRecorder.requestAudioRecordingPermission()
-          if (!req.value) throw new Error('denied')
+    if (!selectedInjectionFile.value) {
+      // 1. 先检查麦克风权限（失败直接终止，无需回滚后端状态）
+      // Native(Android)：使用 VoiceRecorder 权限 API，避免 getUserMedia 占住麦克风导致 MICROPHONE_BEING_USED
+      // Browser：使用 getUserMedia 检查权限
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const { VoiceRecorder } = await import('capacitor-voice-recorder')
+          const perm = await VoiceRecorder.hasAudioRecordingPermission()
+          if (!perm.value) {
+            const req = await VoiceRecorder.requestAudioRecordingPermission()
+            if (!req.value) throw new Error('denied')
+          }
+        } catch {
+          ElMessage.error('需要麦克风权限才能发起会话')
+          return
         }
-      } catch {
-        ElMessage.error('需要麦克风权限才能发起会话')
-        return
-      }
-    } else {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-        stream.getTracks().forEach((t) => t.stop())
-      } catch {
-        ElMessage.error('需要麦克风权限才能发起会话')
-        return
+      } else {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+          stream.getTracks().forEach((t) => t.stop())
+        } catch {
+          ElMessage.error('需要麦克风权限才能发起会话')
+          return
+        }
       }
     }
 
@@ -472,8 +480,17 @@ async function handleStopRecording() {
   }
 }
 
-function openDebugFilePicker() {
-  if (!canUseFileInjection.value) return
+async function openDebugFilePicker() {
+  if (!canSelectInjectionFile.value) return
+  if (session.value?.status === 'ongoing' && isRecording.value) {
+    try {
+      await stopRecording()
+      resetDebugInjectionState()
+    } catch (err) {
+      ElMessage.error(extractErrorMessage(err))
+      return
+    }
+  }
   debugFileInputEl.value?.click()
 }
 
@@ -486,7 +503,6 @@ async function handleDebugFileSelected(event: Event) {
   const input = event.target as HTMLInputElement | null
   const file = input?.files?.[0]
   if (!file) {
-    resetDebugInjectionState()
     return
   }
   if (file.type && !file.type.startsWith('audio/')) {
@@ -497,19 +513,27 @@ async function handleDebugFileSelected(event: Event) {
     }
     return
   }
-  chunkSeq = 0
-  debugInjecting.value = true
   debugInjectedFileName.value = file.name
-  try {
-    await startFileInjection(file)
-  } catch (err) {
-    resetDebugInjectionState()
-    ElMessage.error(extractErrorMessage(err))
-  } finally {
-    debugInjecting.value = false
-    if (input) {
-      input.value = ''
+  selectedInjectionFile.value = file
+  if (session.value?.status === 'ongoing') {
+    chunkSeq = 0
+    debugInjecting.value = true
+    try {
+      await startFileInjection(file)
+    } catch (err) {
+      resetDebugInjectionState()
+      ElMessage.error(extractErrorMessage(err))
+    } finally {
+      debugInjecting.value = false
+      if (input) {
+        input.value = ''
+      }
     }
+    return
+  }
+  ElMessage.success(`已选择测试音频：${file.name}`)
+  if (input) {
+    input.value = ''
   }
 }
 
@@ -672,9 +696,22 @@ function handleWsMessage(event: MessageEvent<string>) {
     if (pendingRecordingStart.value) {
       pendingRecordingStart.value = false
       chunkSeq = 0
-      startRecording().catch((err) => {
-        ElMessage.error(extractErrorMessage(err))
-      })
+      if (selectedInjectionFile.value) {
+        debugInjecting.value = true
+        debugInjectedFileName.value = selectedInjectionFile.value.name
+        startFileInjection(selectedInjectionFile.value)
+          .catch((err) => {
+            resetDebugInjectionState()
+            ElMessage.error(extractErrorMessage(err))
+          })
+          .finally(() => {
+            debugInjecting.value = false
+          })
+      } else {
+        startRecording().catch((err) => {
+          ElMessage.error(extractErrorMessage(err))
+        })
+      }
     }
     return
   }
@@ -1193,7 +1230,7 @@ onMounted(async () => {
   reconnectAttempt.value = 0
   clearPushLogsPollTimer()
   attachTestMessageInjector()
-  debugAudioEnabled.value = localStorage.getItem('debug_audio') === '1'
+  debugAudioEnabled.value = true
   currentUser.value = loadCurrentUser()
   await loadData()
   await Promise.allSettled([
@@ -1273,6 +1310,15 @@ onUnmounted(() => {
                 <span class="app-session-detail-btn-icon" aria-hidden="true">▶</span>
                 发起
               </button>
+              <button
+                v-if="debugAudioEnabled"
+                type="button"
+                class="app-session-detail-secondary-btn app-session-detail-debug-btn"
+                :disabled="!canSelectInjectionFile"
+                @click="openDebugFilePicker"
+              >
+                {{ selectedInjectionFile ? '更换测试音频' : '选择测试音频' }}
+              </button>
               <el-dropdown trigger="click" @command="handleSessionAction">
                 <button
                   type="button"
@@ -1303,6 +1349,15 @@ onUnmounted(() => {
                 <span class="app-session-detail-btn-icon" aria-hidden="true">⏹</span>
                 结束
               </button>
+              <button
+                v-if="debugAudioEnabled"
+                type="button"
+                class="app-session-detail-secondary-btn app-session-detail-debug-btn"
+                :disabled="!canUseFileInjection"
+                @click="openDebugFilePicker"
+              >
+                {{ selectedInjectionFile ? '更换测试音频' : '文件注入' }}
+              </button>
               <el-dropdown trigger="click" @command="handleSessionAction">
                 <button
                   type="button"
@@ -1331,6 +1386,13 @@ onUnmounted(() => {
             </button>
           </template>
         </div>
+        <input
+          ref="debugFileInputEl"
+          class="app-session-detail-debug-input"
+          type="file"
+          accept="audio/*"
+          @change="handleDebugFileSelected"
+        >
       </div>
 
       <div v-if="hasSummary" class="app-session-summary-panel" :data-expanded="summaryExpanded">
@@ -1395,22 +1457,6 @@ onUnmounted(() => {
               <span class="app-session-detail-btn-icon" aria-hidden="true">■</span>
               停止录音
             </button>
-            <button
-              v-if="debugAudioEnabled"
-              type="button"
-              class="app-session-detail-secondary-btn app-session-detail-debug-btn"
-              :disabled="!canUseFileInjection"
-              @click="openDebugFilePicker"
-            >
-              文件注入
-            </button>
-            <input
-              ref="debugFileInputEl"
-              class="app-session-detail-debug-input"
-              type="file"
-              accept="audio/*"
-              @change="handleDebugFileSelected"
-            >
           </div>
           <span class="app-session-detail-recorder-meta">
             {{ recorderMetaText }}

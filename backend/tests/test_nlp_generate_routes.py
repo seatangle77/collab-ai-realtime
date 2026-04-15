@@ -103,6 +103,66 @@ def test_generate_summary_422_when_transcripts_is_wrong_type() -> None:
     assert resp.status_code == 422
 
 
+def test_generate_push_structured_ok(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.nlp.structured_push_content.generate_structured_push_content",
+        lambda **kwargs: {
+            "needs_prompt": True,
+            "anchor": {
+                "transcript_id": "t1",
+                "speaker_id": "uB",
+                "text": "我们先明确范围",
+            },
+            "content": "你同不同意先收窄范围？",
+        },
+    )
+    client = _make_client()
+
+    resp = client.post(
+        "/api/nlp/generate_push_structured",
+        headers=ADMIN_HEADERS,
+        json={
+            "trigger_type": "low_participation",
+            "summary": "讨论摘要",
+            "transcripts": [
+                {
+                    "transcript_id": "t1",
+                    "user_id": "uB",
+                    "text": "我们先明确范围",
+                }
+            ],
+            "user_id": "uA",
+            "trigger_metrics": {"speaking_ratio": 0.08},
+            "candidate_points": [
+                {
+                    "transcript_id": "t1",
+                    "speaker_id": "uB",
+                    "text": "我们先明确范围",
+                }
+            ],
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["needs_prompt"] is True
+    assert resp.json()["anchor"]["transcript_id"] == "t1"
+
+
+def test_generate_push_structured_forbidden_without_admin_token() -> None:
+    client = _make_client()
+
+    resp = client.post(
+        "/api/nlp/generate_push_structured",
+        json={
+            "trigger_type": "shallow_discussion",
+            "transcripts": [],
+            "user_id": "u1",
+        },
+    )
+
+    assert resp.status_code == 403
+
+
 def test_candidate_recall_ok(monkeypatch) -> None:
     monkeypatch.setattr(
         "app.nlp.candidate_recall.recall_candidates",

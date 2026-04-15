@@ -22,6 +22,7 @@ from . import (
     summary,
     candidate_recall,
     gap_assessor,
+    structured_push_content,
 )
 
 router = APIRouter(prefix="/api/nlp", tags=["nlp"])
@@ -278,3 +279,54 @@ def generate_summary_route(req: GenerateSummaryRequest, _: bool = Depends(requir
         prev_summary=req.prev_summary,
     )
     return {"summary": result}
+
+
+# ── 11. generate_push_structured ─────────────────────────────────────────────
+
+StructuredPushTriggerType = Literal["low_participation", "shallow_discussion"]
+
+
+class StructuredTranscriptItem(BaseModel):
+    transcript_id: str
+    user_id: str
+    text: str
+
+
+class StructuredCandidatePoint(BaseModel):
+    transcript_id: str
+    speaker_id: str
+    text: str
+
+
+class GenerateStructuredPushRequest(BaseModel):
+    trigger_type: StructuredPushTriggerType
+    summary: str = ""
+    transcripts: list[StructuredTranscriptItem] = Field(default_factory=list)
+    user_id: str
+    trigger_metrics: dict[str, Any] = Field(default_factory=dict)
+    candidate_points: list[StructuredCandidatePoint] = Field(default_factory=list)
+
+
+class StructuredAnchorOut(BaseModel):
+    transcript_id: str
+    speaker_id: str
+    text: str
+
+
+class GenerateStructuredPushResponse(BaseModel):
+    needs_prompt: bool
+    anchor: StructuredAnchorOut | None = None
+    content: str
+
+
+@router.post("/generate_push_structured", response_model=GenerateStructuredPushResponse)
+def generate_push_structured(req: GenerateStructuredPushRequest, _: bool = Depends(require_admin)):
+    result = structured_push_content.generate_structured_push_content(
+        trigger_type=req.trigger_type,
+        summary=req.summary,
+        transcripts=[t.model_dump() for t in req.transcripts],
+        user_id=req.user_id,
+        trigger_metrics=req.trigger_metrics,
+        candidate_points=[p.model_dump() for p in req.candidate_points],
+    )
+    return result

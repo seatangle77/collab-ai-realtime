@@ -89,6 +89,37 @@ export interface BatchGeneratePushAnalysisResult {
   items: BatchAnalysisItem[];
 }
 
+export interface StructuredPushTranscript {
+  transcript_id: string;
+  user_id: string;
+  text: string;
+}
+
+export interface StructuredPushCandidatePoint {
+  transcript_id: string;
+  speaker_id: string;
+  text: string;
+}
+
+export interface GenerateStructuredPushParams {
+  trigger_type: 'low_participation' | 'shallow_discussion';
+  summary: string;
+  transcripts: StructuredPushTranscript[];
+  user_id: string;
+  trigger_metrics?: Record<string, unknown>;
+  candidate_points?: StructuredPushCandidatePoint[];
+}
+
+export interface GenerateStructuredPushResult {
+  needs_prompt: boolean;
+  anchor: {
+    transcript_id: string;
+    speaker_id: string;
+    text: string;
+  } | null;
+  content: string;
+}
+
 export interface AssessGapParams {
   keywords: string[];
   summary: string;
@@ -235,6 +266,23 @@ export async function generatePushBatchAnalysis(
   } catch (err) {
     logger.error('generate_push_batch failed', { message: (err as Error).message });
     return [];
+  }
+}
+
+/** 生成带 anchor 的结构化推送内容 */
+export async function generateStructuredPush(
+  params: GenerateStructuredPushParams,
+): Promise<GenerateStructuredPushResult> {
+  try {
+    const res = await client.post<GenerateStructuredPushResult>(
+      '/api/nlp/generate_push_structured',
+      params,
+      { timeout: 45_000 },
+    );
+    return res.data;
+  } catch (err) {
+    logger.error('generate_push_structured failed', { message: (err as Error).message });
+    return { needs_prompt: false, anchor: null, content: '' };
   }
 }
 
