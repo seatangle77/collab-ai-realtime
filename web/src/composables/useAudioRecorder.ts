@@ -123,6 +123,7 @@ export function useAudioRecorder() {
 
     const sourceNode = audioContext.createMediaElementSource(audio)
     sourceNode.connect(destination)
+    sourceNode.connect(audioContext.destination)
 
     injectedAudioContext = audioContext
     injectedAudioElement = audio
