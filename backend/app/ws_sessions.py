@@ -33,7 +33,9 @@ from .ws_protocol import (
 router = APIRouter(tags=["ws-sessions"])
 MAX_AUDIO_B64_LENGTH = 1_500_000
 HEARTBEAT_TIMEOUT = 30  # 秒：发起者超过此时间无 ping 则自动结束会话
+CLEANUP_GRACE_SECONDS = 60  # 所有人断线后等待多少秒再兜底清理
 _logger = logging.getLogger(__name__)
+_cleanup_tasks: dict[str, asyncio.Task] = {}
 
 
 def _parse_envelope(raw: str) -> tuple[str | None, dict[str, Any] | None, dict[str, Any] | None]:
@@ -104,7 +106,47 @@ async def _auto_end_session(session_id: str) -> None:
             {"id": session_id},
         )
         await db.commit()
+    await destroy_audio_service(session_id)
     _logger.info("会话心跳超时，已自动结束 session_id=%s", session_id)
+
+
+def _cancel_cleanup_task(session_id: str) -> None:
+    task = _cleanup_tasks.pop(session_id, None)
+    if task is not None and not task.done():
+        task.cancel()
+
+
+async def _schedule_cleanup_if_empty(session_id: str) -> None:
+    _cancel_cleanup_task(session_id)
+    task = asyncio.create_task(_delayed_cleanup(session_id))
+    _cleanup_tasks[session_id] = task
+
+
+async def _delayed_cleanup(session_id: str) -> None:
+    try:
+        await asyncio.sleep(CLEANUP_GRACE_SECONDS)
+        _cleanup_tasks.pop(session_id, None)
+
+        session_factory = get_sessionmaker()
+        async with session_factory() as db:
+            result = await db.execute(
+                text("SELECT active_ws_count, status FROM chat_sessions WHERE id = :id"),
+                {"id": session_id},
+            )
+            row = result.mappings().first()
+
+        if not row:
+            return
+        if row["status"] != "ongoing":
+            return
+        if (row["active_ws_count"] or 0) > 0:
+            return
+
+        _logger.warning("会话无人重连超时，执行兜底清理 session_id=%s", session_id)
+        await destroy_audio_service(session_id)
+        await _auto_end_session(session_id)
+    except asyncio.CancelledError:
+        raise
 
 
 async def _increment_active_ws_count(session_id: str) -> bool:
@@ -215,6 +257,8 @@ async def ws_session_endpoint(
     counted_active_ws = False
     await ws_manager.connect_session(session_id, websocket, user_id=user_id)
     counted_active_ws = await _increment_active_ws_count(session_id)
+    if counted_active_ws:
+        _cancel_cleanup_task(session_id)
     try:
         await websocket.send_json(build_connected(session_id))
 
@@ -331,4 +375,4 @@ async def ws_session_endpoint(
         await ws_manager.disconnect_session(session_id, websocket)
         if counted_active_ws:
             await _decrement_active_ws_count(session_id)
-        await destroy_audio_service(session_id)
+            await _schedule_cleanup_if_empty(session_id)

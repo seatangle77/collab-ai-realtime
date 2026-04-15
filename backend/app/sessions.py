@@ -6,6 +6,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from jose import JWTError, jwt
+from .audio.audio_service import destroy_audio_service
 from .auth import JWT_SECRET_KEY, JWT_ALGORITHM
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -587,6 +588,7 @@ async def end_session(
         ),
     )
     await ws_manager.close_session_connections(session_id, code=1000, reason="host_ended")
+    await destroy_audio_service(session_id)
     return ChatSessionOut.model_validate(dict(row))
 
 
@@ -650,4 +652,5 @@ async def end_session_beacon(
         ),
     )
     await ws_manager.close_session_connections(session_id, code=1000, reason="host_ended")
+    await destroy_audio_service(session_id)
     return {"ok": True}

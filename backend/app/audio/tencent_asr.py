@@ -224,6 +224,7 @@ class TencentASR:
         try:
             self._build_recognizer()
             self.recognizer.start()
+            self._retry_count = 0
             logger.info("[TencentASR] session=%s 重连成功", self.session_id)
         except Exception as e:
             logger.error("[TencentASR] session=%s 重连失败: %s", self.session_id, e)
