@@ -6,6 +6,7 @@
  *   F. 录音与音频发送（38-40）
  *   G. 转写展示（41-43）
  *   H. 异常场景（44-46）
+ *   I. 文件注入（47-55）
  *
  * 运行前提：
  *   1. 后端已启动（port 8000）
@@ -129,6 +130,13 @@ async function injectFakeMicrophone(page: Page): Promise<void> {
 
 async function setupFakeMediaRecorder(page: Page): Promise<void> {
   await page.addInitScript(() => {
+    ;(window as any).__mediaRecorderState = {
+      createdCount: 0,
+      startCount: 0,
+      stopCount: 0,
+      chunkCount: 0,
+    }
+
     // @ts-expect-error override in test environment
     window.navigator.mediaDevices = window.navigator.mediaDevices || ({} as MediaDevices)
     // @ts-expect-error test polyfill
@@ -151,15 +159,24 @@ async function setupFakeMediaRecorder(page: Page): Promise<void> {
       ondataavailable: ((event: BlobEvent) => void) | null = null
       onstop: (() => void) | null = null
       timer: number | null = null
+      state: 'inactive' | 'recording' = 'inactive'
+
+      static isTypeSupported(mimeType: string) {
+        return mimeType === 'audio/webm'
+      }
 
       constructor(stream: MediaStream) {
         this.stream = stream
+        ;(window as any).__mediaRecorderState.createdCount += 1
       }
 
       start(timeslice?: number) {
+        this.state = 'recording'
+        ;(window as any).__mediaRecorderState.startCount += 1
         const emitChunk = () => {
           const blob = new Blob(['fake-audio'], { type: 'audio/webm' })
           const event = { data: blob } as BlobEvent
+          ;(window as any).__mediaRecorderState.chunkCount += 1
           this.ondataavailable?.(event)
         }
 
@@ -174,12 +191,191 @@ async function setupFakeMediaRecorder(page: Page): Promise<void> {
           window.clearInterval(this.timer)
           this.timer = null
         }
+        this.state = 'inactive'
+        ;(window as any).__mediaRecorderState.stopCount += 1
         this.onstop?.()
       }
     }
 
     // @ts-expect-error assign polyfill
     window.MediaRecorder = FakeMediaRecorder as any
+  })
+}
+
+async function setupFakeAudioContextWithSpy(
+  page: Page,
+  options: {
+    initialState?: 'running' | 'suspended'
+    playbackBehavior?: 'normal' | 'ended' | 'error'
+    playbackDelayMs?: number
+  } = {},
+): Promise<void> {
+  await page.addInitScript((config) => {
+    const audioState = {
+      createdContexts: 0,
+      closedContexts: 0,
+      resumeCalls: 0,
+      playCalls: 0,
+      sourceDisconnectCalls: 0,
+      destinationDisconnectCalls: 0,
+      connectCalls: [] as string[],
+      events: [] as string[],
+      lastContextState: null as string | null,
+    }
+
+    ;(window as any).__audioTestState = audioState
+    ;(window as any).__connectCalls = audioState.connectCalls
+
+    const initialState = config?.initialState ?? 'running'
+    const playbackBehavior = config?.playbackBehavior ?? 'normal'
+    const playbackDelayMs = config?.playbackDelayMs ?? 50
+
+    class FakeAudioContext {
+      state: 'running' | 'suspended' | 'closed'
+      destination: { __kind: 'speakerDestination' }
+
+      constructor() {
+        this.state = initialState
+        this.destination = { __kind: 'speakerDestination' }
+        audioState.createdContexts += 1
+        audioState.lastContextState = this.state
+      }
+
+      createMediaStreamDestination() {
+        return {
+          __kind: 'mediaStreamDestination',
+          stream: {
+            getTracks() {
+              return [
+                {
+                  stop() {
+                    // no-op for tests
+                  },
+                },
+              ]
+            },
+          } as unknown as MediaStream,
+          disconnect() {
+            audioState.destinationDisconnectCalls += 1
+          },
+        }
+      }
+
+      createMediaElementSource(_audio: HTMLAudioElement) {
+        const ctx = this
+        return {
+          connect(target: { __kind?: string }) {
+            const label = target === ctx.destination
+              ? 'speakerDestination'
+              : target?.__kind === 'mediaStreamDestination'
+                ? 'mediaStreamDestination'
+                : 'unknown'
+            audioState.connectCalls.push(label)
+          },
+          disconnect() {
+            audioState.sourceDisconnectCalls += 1
+          },
+        }
+      }
+
+      async resume() {
+        audioState.resumeCalls += 1
+        audioState.events.push('resume')
+        this.state = 'running'
+        audioState.lastContextState = this.state
+      }
+
+      async close() {
+        audioState.closedContexts += 1
+        audioState.events.push('close')
+        this.state = 'closed'
+        audioState.lastContextState = this.state
+      }
+    }
+
+    Object.defineProperty(window, 'AudioContext', {
+      configurable: true,
+      writable: true,
+      value: FakeAudioContext,
+    })
+    ;(window as any).webkitAudioContext = FakeAudioContext
+
+    const playImpl = function(this: HTMLMediaElement) {
+      audioState.playCalls += 1
+      audioState.events.push('play')
+      if (playbackBehavior === 'ended') {
+        window.setTimeout(() => {
+          this.onended?.(new Event('ended'))
+        }, playbackDelayMs)
+      }
+      if (playbackBehavior === 'error') {
+        window.setTimeout(() => {
+          this.onerror?.(new Event('error'))
+        }, playbackDelayMs)
+      }
+      return Promise.resolve()
+    }
+
+    const pauseImpl = function() {
+      audioState.events.push('pause')
+    }
+
+    Object.defineProperty(HTMLMediaElement.prototype, 'play', {
+      configurable: true,
+      writable: true,
+      value: playImpl,
+    })
+    Object.defineProperty(HTMLMediaElement.prototype, 'pause', {
+      configurable: true,
+      writable: true,
+      value: pauseImpl,
+    })
+  }, options)
+}
+
+function captureWsMessages(page: Page): string[] {
+  const wsMessages: string[] = []
+  page.on('websocket', ws => {
+    ws.on('framesent', frame => {
+      if (frame.payload) wsMessages.push(String(frame.payload))
+    })
+  })
+  return wsMessages
+}
+
+function countAudioChunkMessages(messages: string[]): number {
+  return messages.filter((message) => {
+    try {
+      return JSON.parse(message)?.type === 'audio_chunk'
+    } catch {
+      return false
+    }
+  }).length
+}
+
+async function waitForSessionReady(page: Page, sessionId: string, user: TestUser): Promise<void> {
+  await loginViaUI(page, user)
+  await page.goto(`/app/sessions/${sessionId}`)
+  const recordBtn = page.getByTestId('record-start')
+  await recordBtn.waitFor({ state: 'visible' })
+  await expect(recordBtn).toBeEnabled({ timeout: 20000 })
+}
+
+async function pickInjectionAudioFile(
+  page: Page,
+  file: { name: string; mimeType: string; buffer?: Buffer } = {
+    name: 'injected-test.wav',
+    mimeType: 'audio/wav',
+    buffer: Buffer.from('RIFFfakeWAVEdata'),
+  },
+): Promise<void> {
+  const fileChooserPromise = page.waitForEvent('filechooser')
+  await page.getByRole('button', { name: /文件注入|选择测试音频|更换测试音频/i }).click()
+  const fileChooser = await fileChooserPromise
+  await fileChooser.setFiles({
+    name: file.name,
+    mimeType: file.mimeType,
+    buffer: file.buffer ?? Buffer.from('RIFFfakeWAVEdata'),
   })
 }
 
@@ -198,10 +394,11 @@ test.describe('E. WS 连接与状态', () => {
     await loginViaUI(page, user)
     await page.goto(`/app/sessions/${sessionId}`)
 
-    // 等待 WS connected 状态出现（具体 class 根据实际前端调整）
-    await expect(
-      page.locator('.app-session-detail-ws-status, [data-testid="ws-status"]')
-    ).toContainText(/已连接|connected/i, { timeout: 10000 })
+    // connected 时 ws-status 会被隐藏，开始录音按钮可点击是更稳定的已连接信号
+    const recordBtn = page.getByTestId('record-start')
+    await recordBtn.waitFor({ state: 'visible' })
+    await expect(recordBtn).toBeEnabled({ timeout: 20000 })
+    await expect(page.locator('[data-testid="ws-status"]')).toBeHidden()
   })
 
   test('E-36: WS 收到 transcript 消息 → 转写列表实时出现新条目', async ({ page }) => {
@@ -213,10 +410,9 @@ test.describe('E. WS 连接与状态', () => {
     await loginViaUI(page, user)
     await page.goto(`/app/sessions/${sessionId}`)
 
-    // 等 WS 真正连上再注入，确保 broadcast 能到达
-    await expect(
-      page.locator('.app-session-detail-ws-status, [data-testid="ws-status"]')
-    ).toContainText(/已连接|connected/i, { timeout: 15000 })
+    const recordBtn = page.getByTestId('record-start')
+    await recordBtn.waitFor({ state: 'visible' })
+    await expect(recordBtn).toBeEnabled({ timeout: 20000 })
 
     // 通过 admin API 注入 transcript，触发 WS 广播
     await addTranscriptAdmin(sessionId, groupId, '测试说话人', 'E36 实时转写测试文本')
@@ -237,10 +433,9 @@ test.describe('E. WS 连接与状态', () => {
     await page.goto(`/app/sessions/${sessionId}`)
     await page.waitForTimeout(1000)
 
-    // 等 WS 连上再注入，确保 broadcast 能到达
-    await expect(
-      page.locator('.app-session-detail-ws-status, [data-testid="ws-status"]')
-    ).toContainText(/已连接|connected/i, { timeout: 15000 })
+    const recordBtn = page.getByTestId('record-start')
+    await recordBtn.waitFor({ state: 'visible' })
+    await expect(recordBtn).toBeEnabled({ timeout: 20000 })
 
     await addTranscriptAdmin(sessionId, groupId, '说话人A', 'E37第一句')
     await page.waitForTimeout(300)
@@ -488,5 +683,241 @@ test.describe('H. 异常场景', () => {
     await expect(
       page.locator('.app-session-detail-transcript-text, [data-testid="transcript-text"]').first()
     ).toContainText('H46 历史转写不丢失', { timeout: 8000 })
+  })
+})
+
+// ════════════════════════════════════════════════════════════════
+// I. 文件注入
+// ════════════════════════════════════════════════════════════════
+
+test.describe('I. 文件注入', () => {
+
+  test('I-47: 正常注入 → MediaRecorder 仍正常发送 chunk（回归验证）', async ({ page }) => {
+    const user      = await registerAndLogin('i47')
+    const groupId   = await createGroup(user.token)
+    const sessionId = await createSession(user.token, groupId)
+    await startSession(user.token, sessionId)
+
+    await setupFakeMediaRecorder(page)
+    await setupFakeAudioContextWithSpy(page)
+    const wsMessages = captureWsMessages(page)
+
+    await waitForSessionReady(page, sessionId, user)
+    await pickInjectionAudioFile(page)
+
+    await expect.poll(() => countAudioChunkMessages(wsMessages), { timeout: 10000 }).toBeGreaterThan(0)
+  })
+
+  test('I-48: 正常注入 → AudioContext.destination 被连接（播放链路建立）', async ({ page }) => {
+    const user      = await registerAndLogin('i48')
+    const groupId   = await createGroup(user.token)
+    const sessionId = await createSession(user.token, groupId)
+    await startSession(user.token, sessionId)
+
+    await setupFakeMediaRecorder(page)
+    await setupFakeAudioContextWithSpy(page)
+
+    await waitForSessionReady(page, sessionId, user)
+    await pickInjectionAudioFile(page)
+
+    await expect.poll(async () => {
+      return page.evaluate(() => (window as any).__connectCalls as string[])
+    }, { timeout: 10000 }).toEqual(['mediaStreamDestination', 'speakerDestination'])
+  })
+
+  test('I-49: 注入时已在录音 → 注入被拒绝，不建立第二个 AudioContext', async ({ page }) => {
+    await setupFakeMediaRecorder(page)
+    await setupFakeAudioContextWithSpy(page)
+    await page.goto('/app/login')
+
+    const result = await page.evaluate(async () => {
+      const mod = await import('/src/composables/useAudioRecorder.ts')
+      const recorder = mod.useAudioRecorder()
+      const chunkTypes: string[] = []
+      recorder.onChunk((_blob, mimeType) => {
+        chunkTypes.push(mimeType)
+      })
+
+      await recorder.startRecording()
+      await recorder.startFileInjection(new File(['fake-audio'], 'busy.wav', { type: 'audio/wav' }))
+
+      return {
+        isRecording: recorder.isRecording.value,
+        recordingSource: recorder.recordingSource.value,
+        chunkTypes,
+        createdContexts: (window as any).__audioTestState.createdContexts,
+        connectCalls: (window as any).__connectCalls,
+      }
+    })
+
+    expect(result.isRecording).toBeTruthy()
+    expect(result.recordingSource).toBe('microphone')
+    expect(result.chunkTypes).toContain('audio/webm')
+    expect(result.createdContexts).toBe(0)
+    expect(result.connectCalls).toEqual([])
+  })
+
+  test('I-50: 注入文件播放结束 → audio.onended 触发，录制自动停止，AudioContext 被关闭', async ({ page }) => {
+    const user      = await registerAndLogin('i50')
+    const groupId   = await createGroup(user.token)
+    const sessionId = await createSession(user.token, groupId)
+    await startSession(user.token, sessionId)
+
+    await setupFakeMediaRecorder(page)
+    await setupFakeAudioContextWithSpy(page, { playbackBehavior: 'ended', playbackDelayMs: 30 })
+    const wsMessages = captureWsMessages(page)
+
+    await waitForSessionReady(page, sessionId, user)
+    await pickInjectionAudioFile(page, {
+      name: 'short.wav',
+      mimeType: 'audio/wav',
+      buffer: Buffer.from('tiny'),
+    })
+
+    await expect.poll(async () => {
+      return page.evaluate(() => (window as any).__audioTestState.closedContexts as number)
+    }, { timeout: 10000 }).toBeGreaterThan(0)
+
+    const chunkCountAfterEnd = countAudioChunkMessages(wsMessages)
+    await page.waitForTimeout(1200)
+
+    expect(countAudioChunkMessages(wsMessages)).toBe(chunkCountAfterEnd)
+    await expect(page.getByRole('button', { name: /录音|开始录音|record/i })).toBeVisible()
+  })
+
+  test('I-51: 注入文件播放出错 → audio.onerror 触发，录制停止，页面不崩溃', async ({ page }) => {
+    const user      = await registerAndLogin('i51')
+    const groupId   = await createGroup(user.token)
+    const sessionId = await createSession(user.token, groupId)
+    await startSession(user.token, sessionId)
+
+    await setupFakeMediaRecorder(page)
+    await setupFakeAudioContextWithSpy(page, { playbackBehavior: 'error', playbackDelayMs: 30 })
+    const wsMessages = captureWsMessages(page)
+
+    await waitForSessionReady(page, sessionId, user)
+    await pickInjectionAudioFile(page, {
+      name: 'broken.webm',
+      mimeType: 'audio/webm',
+      buffer: Buffer.from('garbage'),
+    })
+
+    await expect.poll(async () => {
+      return page.evaluate(() => (window as any).__audioTestState.closedContexts as number)
+    }, { timeout: 10000 }).toBeGreaterThan(0)
+
+    const chunkCountAfterError = countAudioChunkMessages(wsMessages)
+    await page.waitForTimeout(1200)
+
+    expect(countAudioChunkMessages(wsMessages)).toBe(chunkCountAfterError)
+    await expect(page.locator('.app-session-detail-title, [data-testid="session-title"]')).toBeVisible()
+  })
+
+  test('I-52: cleanup 后 sourceNode 全部断开，无内存泄漏', async ({ page }) => {
+    await setupFakeMediaRecorder(page)
+    await setupFakeAudioContextWithSpy(page)
+    await page.goto('/app/login')
+
+    const result = await page.evaluate(async () => {
+      const mod = await import('/src/composables/useAudioRecorder.ts')
+      const recorder = mod.useAudioRecorder()
+
+      await recorder.startFileInjection(new File(['fake-audio'], 'cleanup.wav', { type: 'audio/wav' }))
+      await recorder.stopRecording()
+
+      const state = (window as any).__audioTestState
+      return {
+        closedContexts: state.closedContexts,
+        destinationDisconnectCalls: state.destinationDisconnectCalls,
+        isRecording: recorder.isRecording.value,
+        lastContextState: state.lastContextState,
+        recordingSource: recorder.recordingSource.value,
+        sourceDisconnectCalls: state.sourceDisconnectCalls,
+      }
+    })
+
+    expect(result).toEqual({
+      closedContexts: 1,
+      destinationDisconnectCalls: 1,
+      isRecording: false,
+      lastContextState: 'closed',
+      recordingSource: null,
+      sourceDisconnectCalls: 1,
+    })
+  })
+
+  test('I-53: AudioContext 被浏览器 suspend → resume() 后播放正常进行', async ({ page }) => {
+    const user      = await registerAndLogin('i53')
+    const groupId   = await createGroup(user.token)
+    const sessionId = await createSession(user.token, groupId)
+    await startSession(user.token, sessionId)
+
+    await setupFakeMediaRecorder(page)
+    await setupFakeAudioContextWithSpy(page, { initialState: 'suspended' })
+
+    await waitForSessionReady(page, sessionId, user)
+    await pickInjectionAudioFile(page)
+
+    await expect.poll(async () => {
+      return page.evaluate(() => (window as any).__audioTestState)
+    }, { timeout: 10000 }).toMatchObject({
+      resumeCalls: 1,
+      playCalls: 1,
+      lastContextState: 'running',
+    })
+
+    const events = await page.evaluate(() => (window as any).__audioTestState.events as string[])
+    expect(events.indexOf('resume')).toBeGreaterThanOrEqual(0)
+    expect(events.indexOf('play')).toBeGreaterThan(events.indexOf('resume'))
+  })
+
+  test('I-54: 原生平台（Capacitor）调用 startFileInjection → 抛出明确错误，不进入浏览器分支', async ({ page }) => {
+    await page.addInitScript(() => {
+      ;(window as any).CapacitorCustomPlatform = { name: 'android' }
+    })
+    await setupFakeMediaRecorder(page)
+    await setupFakeAudioContextWithSpy(page)
+    await page.goto('/app/login')
+
+    const result = await page.evaluate(async () => {
+      const mod = await import('/src/composables/useAudioRecorder.ts')
+      const recorder = mod.useAudioRecorder()
+      try {
+        await recorder.startFileInjection(new File(['fake-audio'], 'native.wav', { type: 'audio/wav' }))
+        return { error: null, createdContexts: (window as any).__audioTestState.createdContexts }
+      } catch (error) {
+        return {
+          error: error instanceof Error ? error.message : String(error),
+          createdContexts: (window as any).__audioTestState.createdContexts,
+        }
+      }
+    })
+
+    expect(result.error).toBe('原生端暂不支持文件注入模式')
+    expect(result.createdContexts).toBe(0)
+  })
+
+  test('I-55: AudioContext 不存在（老浏览器）→ 抛出明确错误', async ({ page }) => {
+    await setupFakeMediaRecorder(page)
+    await page.addInitScript(() => {
+      // @ts-expect-error test-only override
+      delete window.AudioContext
+      // @ts-expect-error test-only override
+      delete (window as any).webkitAudioContext
+    })
+    await page.goto('/app/login')
+
+    const result = await page.evaluate(async () => {
+      const mod = await import('/src/composables/useAudioRecorder.ts')
+      const recorder = mod.useAudioRecorder()
+      try {
+        await recorder.startFileInjection(new File(['fake-audio'], 'legacy.wav', { type: 'audio/wav' }))
+        return { error: null }
+      } catch (error) {
+        return { error: error instanceof Error ? error.message : String(error) }
+      }
+    })
+
+    expect(result.error).toBe('当前环境不支持文件注入录音')
   })
 })
