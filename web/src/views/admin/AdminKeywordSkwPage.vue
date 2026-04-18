@@ -171,19 +171,17 @@ onMounted(() => { fetchData() })
               <el-input-number v-model="filters.skw_score_max" :precision="4" :step="0.0001" style="width: 100%" />
             </el-form-item>
           </el-col>
-          <el-col :span="10">
+          <el-col :span="14">
             <el-form-item label="窗口开始时间">
               <el-date-picker v-model="filters.windowStartRange" type="datetimerange" range-separator="至" start-placeholder="开始" end-placeholder="结束" style="width: 100%" />
             </el-form-item>
           </el-col>
-          <el-col :span="4">
-            <el-form-item label=" ">
-              <el-button type="primary" @click="handleSearch">查询</el-button>
-              <el-button @click="handleReset">重置</el-button>
-            </el-form-item>
-          </el-col>
         </el-row>
       </el-form>
+      <div style="text-align: right; margin-top: 8px;">
+        <el-button type="primary" @click="handleSearch">查询</el-button>
+        <el-button @click="handleReset">重置</el-button>
+      </div>
     </el-card>
 
     <el-card shadow="never">
