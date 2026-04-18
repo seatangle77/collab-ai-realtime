@@ -62,6 +62,21 @@ test.describe.serial('Admin 导航菜单重构', () => {
     }
   })
 
+  test('4. 点击 toggle 按钮可收起侧边栏', async ({ page }) => {
+    const toggleBtn = page.locator('.admin-header button').first()
+    await expect(page.locator('.admin-menu .el-menu-item').first()).toBeVisible()
+    await toggleBtn.click()
+    await expect(page.locator('.el-aside')).toHaveCSS('width', '0px')
+  })
+
+  test('5. 再次点击 toggle 按钮可展开侧边栏', async ({ page }) => {
+    const toggleBtn = page.locator('.admin-header button').first()
+    await toggleBtn.click()
+    await toggleBtn.click()
+    await expect(page.locator('.el-aside')).toHaveCSS('width', '220px')
+    await expect(page.locator('.admin-menu .el-menu-item').first()).toBeVisible()
+  })
+
   test('3. 刷新后当前菜单项保持高亮', async ({ page }) => {
     await page.goto('/admin/discussion-rules')
     await expect(page.getByRole('heading', { name: '讨论规则配置' })).toBeVisible()

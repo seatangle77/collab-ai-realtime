@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { Fold, Expand } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -52,6 +53,7 @@ const menuGroups = computed<AdminMenuGroup[]>(() => [
   },
 ])
 
+const collapsed = ref(false)
 const activePath = computed(() => route.path)
 
 function go(path: string) {
@@ -63,7 +65,7 @@ function go(path: string) {
 
 <template>
   <el-container class="admin-layout">
-    <el-aside width="220px" class="admin-sidebar">
+    <el-aside :width="collapsed ? '0px' : '220px'" class="admin-sidebar" style="overflow: hidden; transition: width 0.2s;">
       <div class="admin-logo">Collab AI Admin</div>
       <el-menu
         :default-active="activePath"
@@ -90,6 +92,7 @@ function go(path: string) {
     </el-aside>
     <el-container>
       <el-header class="admin-header">
+        <el-button :icon="collapsed ? Expand : Fold" circle size="small" @click="collapsed = !collapsed" />
         <h1 class="admin-header-title">管理后台</h1>
       </el-header>
       <el-main class="admin-content">
@@ -137,6 +140,7 @@ function go(path: string) {
 .admin-header {
   display: flex;
   align-items: center;
+  gap: 12px;
   padding: 0 20px;
   background: #ffffff;
   border-bottom: 1px solid #e5e7eb;
