@@ -31,10 +31,12 @@ def _get_client() -> OpenAI:
 
 
 def _format_transcript_line(transcript: dict[str, Any]) -> str:
+    speaker_name = str(transcript.get("speaker_name") or "").strip()
     speaker_id = str(transcript.get("user_id") or "unknown")
+    display = speaker_name if speaker_name else speaker_id
     transcript_id = str(transcript.get("transcript_id") or "").strip()
     text = str(transcript.get("text") or "").strip()
-    return f"{speaker_id} | {transcript_id} | {text}"
+    return f"{display} | {transcript_id} | {text}"
 
 
 def _transcript_text_for_prompt(transcripts: list[dict[str, Any]]) -> str:
@@ -154,10 +156,14 @@ def _build_personal_stagnation_prompt(
     summary_text: str,
     candidate_points: list[dict[str, str]],
 ) -> str:
+    target_display = next(
+        (str(t.get("speaker_name") or "").strip() for t in transcripts if str(t.get("user_id") or "") == user_id and str(t.get("speaker_name") or "").strip()),
+        user_id or "该成员",
+    )
     diagnosis_text = f"该成员过去120秒发言占比 {_format_percent(trigger_metrics.get('speaking_ratio'))}%，低于15%，参与明显减少。"
     task_instruction = (
-        f"以下是其他成员说过但 {user_id or '该成员'} 没有回应的发言（候选追问点）。"
-        f"请从候选点中选一条，问 {user_id or '该成员'} 对这个观点怎么看或是否同意。"
+        f"以下是其他成员说过但 {target_display} 没有回应的发言（候选追问点）。"
+        f"请从候选点中选一条，问 {target_display} 对这个观点怎么看或是否同意。"
         "anchor 必须来自候选追问点里的某一条，不能自己另找角度。"
         "如果候选点都不适合追问，返回 needs_prompt: false。"
     )

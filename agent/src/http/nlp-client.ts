@@ -92,6 +92,7 @@ export interface BatchGeneratePushAnalysisResult {
 export interface StructuredPushTranscript {
   transcript_id: string;
   user_id: string;
+  speaker_name?: string;
   text: string;
 }
 

@@ -150,6 +150,7 @@ async function generateStructured(
       .map((item) => ({
         transcript_id: item.transcript_id,
         user_id: item.user_id!,
+        speaker_name: item.speaker_name ?? undefined,
         text: item.text!.trim(),
       })),
     user_id: userId,
