@@ -2,7 +2,7 @@ import type { Transcript } from '../db/queries';
 import { generateStructuredPush } from '../http/nlp-client';
 import type { Trigger } from './run-reasoning-layer';
 
-const GROUP_SILENCE_FIXED_CONTENT = '小组已沉默超过30秒，大家可以继续讨论～';
+const GROUP_SILENCE_FALLBACK_CONTENT = '先聊聊你们各自最关心的是哪个方面？';
 const PERSONAL_STAGNATION_WINDOW_MS = 12_000;
 const PERSONAL_STAGNATION_MIN_TEXT_LENGTH = 8;
 const PERSONAL_STAGNATION_MAX_CANDIDATES = 3;
@@ -132,7 +132,7 @@ function normalizeAnchor(value: unknown): StructuredAnchor | null {
 }
 
 async function generateStructured(
-  triggerType: 'low_participation' | 'shallow_discussion',
+  triggerType: 'low_participation' | 'shallow_discussion' | 'group_silence',
   params: {
     summaryText: string;
     transcripts: Transcript[];
@@ -179,11 +179,26 @@ async function generateStructured(
   };
 }
 
-function buildGroupSilenceItems(trigger: Trigger): GeneratedPushItem[] {
+async function buildGroupSilenceItems(
+  trigger: Trigger,
+  transcripts: Transcript[],
+  summaryText: string,
+): Promise<GeneratedPushItem[]> {
+  const generated = await generateStructured('group_silence', {
+    summaryText,
+    transcripts,
+    userId: '',
+    triggerMetrics: trigger.triggerMetrics,
+  });
+
+  const content = generated.needsPrompt && generated.content
+    ? generated.content
+    : GROUP_SILENCE_FALLBACK_CONTENT;
+
   return trigger.targetUsers.map((targetUserId) => ({
     targetUserId,
     triggerType: trigger.type,
-    content: GROUP_SILENCE_FIXED_CONTENT,
+    content,
     needsPrompt: true,
     anchor: null,
   }));
@@ -243,7 +258,7 @@ export async function generatePushContent(
 
   for (const trigger of triggers.filter(isSupportedTrigger)) {
     if (trigger.type === 'group_silence') {
-      results.push(...buildGroupSilenceItems(trigger));
+      results.push(...await buildGroupSilenceItems(trigger, transcripts, summaryText));
       continue;
     }
 

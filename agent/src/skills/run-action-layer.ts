@@ -24,7 +24,6 @@ import {
 } from './generate-push-content';
 
 const logger = createLogger('action-layer');
-const GROUP_SILENCE_FIXED_CONTENT = '小组已沉默超过30秒，大家可以继续讨论～';
 const INFO_GAP_CONFIDENCE_THRESHOLD = 0.7;
 const INFO_GAP_MAX_PENDING = 3;
 const INFO_GAP_RECENT_CLICKED_WINDOWS = 3;
@@ -188,9 +187,18 @@ export async function runActionLayer(params: {
 
   const groupSilenceTriggers = triggers.filter((t) => t.type === 'group_silence');
   if (groupSilenceTriggers.length > 0) {
-    const sent = await notifyGroupSilence(sessionId, GROUP_SILENCE_FIXED_CONTENT);
+    const generatedItems = await generatePushContent({
+      sessionId,
+      triggers: groupSilenceTriggers,
+      transcripts,
+      summaryText,
+      memberIds,
+    });
+    const silenceItem = generatedItems.find((item) => item.triggerType === 'group_silence');
+    const content = silenceItem?.content?.trim() || '先聊聊你们各自最关心的是哪个方面？';
+    const sent = await notifyGroupSilence(sessionId, content);
     if (sent) {
-      logger.info('group_silence 直接广播成功', { sessionId });
+      logger.info(`group_silence 广播成功，内容="${content}"`, { sessionId });
       onGroupSilenceNotified?.();
     } else {
       logger.warn('group_silence 广播失败', { sessionId });

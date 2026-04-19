@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 MAX_CONTENT_LENGTH = 30
 PERSONAL_STAGNATION = "low_participation"
 SHALLOW_DISCUSSION = "shallow_discussion"
+GROUP_SILENCE = "group_silence"
 
 SYSTEM_PROMPT = """你是一个小组讨论协作引导助手。
 
@@ -68,6 +69,46 @@ def _number_or_zero(value: Any, digits: int = 3) -> str:
     if not isinstance(value, (int, float)):
         return "0"
     return f"{float(value):.{digits}f}"
+
+
+def _build_group_silence_prompt(
+    silence_s: int,
+    transcripts: list[dict[str, Any]],
+    summary_text: str,
+) -> str:
+    transcript_text = _transcript_text_for_prompt(transcripts)
+    has_content = bool(transcript_text.strip()) or bool(summary_text.strip())
+
+    if not has_content:
+        return ""
+
+    return "\n".join(
+        [
+            f"【背景】小组已沉默 {silence_s} 秒。",
+            "",
+            "【当前摘要】",
+            summary_text or "（暂无摘要）",
+            "",
+            "【最近发言（按时间顺序，格式：说话人 | transcript_id | 原话）】",
+            transcript_text or "（暂无发言记录）",
+            "",
+            "【你的任务】",
+            "请判断沉默最可能的原因，然后生成一条提示语帮助大家重新投入讨论。判断依据：",
+            "- 如果最近有人抛出了观点或问题但没人回应 → 把这个观点点出来，邀请大家回应",
+            "- 如果大家观点趋于一致、讨论失去张力 → 提出一个反向视角或追问",
+            "- 如果话题已经说得差不多、不知道往哪走 → 基于摘要提出一个新的子问题",
+            "- 如果发言很少、讨论还没真正开始 → 给一个具体低门槛的起始问题",
+            "",
+            "要求：①60字以内；②结尾必须是一个具体问题；③语气自然，像在场的人说话；④必须结合实际讨论内容；⑤不要提及"沉默"或"继续讨论"这类字眼。",
+            "",
+            "返回格式（严格 JSON）：",
+            "{",
+            '  "needs_prompt": true,',
+            '  "anchor": null,',
+            f'  "content": "生成的提示语，不超过{MAX_CONTENT_LENGTH}字"',
+            "}",
+        ]
+    )
 
 
 def _build_shallow_prompt(
@@ -235,7 +276,7 @@ def _parse_json_object(text: str) -> dict[str, Any] | None:
             return None
 
 
-def _call_model(prompt: str) -> dict[str, Any]:
+def _call_model(prompt: str, require_anchor: bool = True) -> dict[str, Any]:
     if not nlp_settings.qwen_api_key:
         return {"needs_prompt": False, "anchor": None, "content": ""}
 
@@ -256,21 +297,27 @@ def _call_model(prompt: str) -> dict[str, Any]:
             return {"needs_prompt": False, "anchor": None, "content": ""}
 
         needs_prompt = parsed.get("needs_prompt") is True
-        anchor = _normalize_anchor(parsed.get("anchor"))
         content = str(parsed.get("content") or "").strip()
 
         if not needs_prompt:
             return {"needs_prompt": False, "anchor": None, "content": ""}
-        if not anchor or not content or len(content) > MAX_CONTENT_LENGTH:
+        if not content or len(content) > MAX_CONTENT_LENGTH:
             return {"needs_prompt": False, "anchor": None, "content": ""}
-        return {"needs_prompt": True, "anchor": anchor, "content": content}
+
+        if require_anchor:
+            anchor = _normalize_anchor(parsed.get("anchor"))
+            if not anchor:
+                return {"needs_prompt": False, "anchor": None, "content": ""}
+            return {"needs_prompt": True, "anchor": anchor, "content": content}
+
+        return {"needs_prompt": True, "anchor": None, "content": content}
     except Exception as exc:
         logger.warning("[NLP/structured-push] 调用失败: %s", exc)
         return {"needs_prompt": False, "anchor": None, "content": ""}
 
 
 def generate_structured_push_content(
-    trigger_type: Literal["low_participation", "shallow_discussion"],
+    trigger_type: Literal["low_participation", "shallow_discussion", "group_silence"],
     summary: str,
     transcripts: list[dict[str, Any]],
     user_id: str,
@@ -279,6 +326,21 @@ def generate_structured_push_content(
 ) -> dict[str, Any]:
     metrics = trigger_metrics or {}
     points = candidate_points or []
+
+    if trigger_type == GROUP_SILENCE:
+        silence_s = int(metrics.get("silence_s") or 30)
+        prompt = _build_group_silence_prompt(
+            silence_s=silence_s,
+            transcripts=transcripts,
+            summary_text=summary,
+        )
+        if not prompt:
+            return {"needs_prompt": True, "anchor": None, "content": "先聊聊你们各自最关心的是哪个方面？"}
+        logger.info("[NLP/structured-push] input: trigger=%s silence_s=%d transcripts=%d", trigger_type, silence_s, len(transcripts))
+        result = _call_model(prompt, require_anchor=False)
+        if not result["needs_prompt"] or not result["content"]:
+            return {"needs_prompt": True, "anchor": None, "content": "先聊聊你们各自最关心的是哪个方面？"}
+        return result
 
     if trigger_type == SHALLOW_DISCUSSION:
         prompt = _build_shallow_prompt(

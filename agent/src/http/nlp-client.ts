@@ -103,7 +103,7 @@ export interface StructuredPushCandidatePoint {
 }
 
 export interface GenerateStructuredPushParams {
-  trigger_type: 'low_participation' | 'shallow_discussion';
+  trigger_type: 'low_participation' | 'shallow_discussion' | 'group_silence';
   summary: string;
   transcripts: StructuredPushTranscript[];
   user_id: string;

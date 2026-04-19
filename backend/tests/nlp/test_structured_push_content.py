@@ -321,3 +321,84 @@ def test_generate_structured_push_content_returns_empty_when_model_raises(
     )
 
     assert result == {"needs_prompt": False, "anchor": None, "content": ""}
+
+
+# ── group_silence ─────────────────────────────────────────────────────────────
+
+def test_group_silence_returns_llm_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mock_content = '{"needs_prompt": true, "anchor": null, "content": "刚才提到成本控制，有人觉得有被忽视的角度吗？"}'
+    monkeypatch.setattr(structured_push_content.nlp_settings, "qwen_api_key", "test-key", raising=False)
+    monkeypatch.setattr(structured_push_content, "_get_client", lambda: _FakeClient(mock_content))
+
+    result = structured_push_content.generate_structured_push_content(
+        trigger_type="group_silence",
+        summary="小组在讨论成本控制方案",
+        transcripts=[
+            {"transcript_id": "t1", "user_id": "uA", "speaker_name": "Alice", "text": "成本控制很重要"},
+            {"transcript_id": "t2", "user_id": "uB", "speaker_name": "Bob", "text": "我觉得可以从采购入手"},
+        ],
+        user_id="",
+        trigger_metrics={"silence_s": 35},
+    )
+
+    assert result["needs_prompt"] is True
+    assert result["anchor"] is None
+    assert result["content"] == "刚才提到成本控制，有人觉得有被忽视的角度吗？"
+
+
+def test_group_silence_returns_fallback_when_no_transcripts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(structured_push_content.nlp_settings, "qwen_api_key", "test-key", raising=False)
+
+    result = structured_push_content.generate_structured_push_content(
+        trigger_type="group_silence",
+        summary="",
+        transcripts=[],
+        user_id="",
+        trigger_metrics={"silence_s": 30},
+    )
+
+    assert result["needs_prompt"] is True
+    assert result["anchor"] is None
+    assert result["content"] == "先聊聊你们各自最关心的是哪个方面？"
+
+
+def test_group_silence_returns_fallback_when_model_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(structured_push_content.nlp_settings, "qwen_api_key", "test-key", raising=False)
+    monkeypatch.setattr(structured_push_content, "_get_client", lambda: _BoomClient())
+
+    result = structured_push_content.generate_structured_push_content(
+        trigger_type="group_silence",
+        summary="讨论产品方向",
+        transcripts=[{"transcript_id": "t1", "user_id": "uA", "text": "我有个想法"}],
+        user_id="",
+        trigger_metrics={"silence_s": 32},
+    )
+
+    assert result["needs_prompt"] is True
+    assert result["anchor"] is None
+    assert result["content"] == "先聊聊你们各自最关心的是哪个方面？"
+
+
+def test_group_silence_anchor_is_always_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 即使模型错误地返回了 anchor，group_silence 也应该忽略它
+    mock_content = '{"needs_prompt": true, "anchor": {"transcript_id": "t1", "speaker_id": "uA", "text": "我有个想法"}, "content": "这个想法背后的逻辑是什么？"}'
+    monkeypatch.setattr(structured_push_content.nlp_settings, "qwen_api_key", "test-key", raising=False)
+    monkeypatch.setattr(structured_push_content, "_get_client", lambda: _FakeClient(mock_content))
+
+    result = structured_push_content.generate_structured_push_content(
+        trigger_type="group_silence",
+        summary="讨论产品方向",
+        transcripts=[{"transcript_id": "t1", "user_id": "uA", "text": "我有个想法"}],
+        user_id="",
+        trigger_metrics={"silence_s": 31},
+    )
+
+    assert result["anchor"] is None
