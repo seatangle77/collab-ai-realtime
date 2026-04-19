@@ -8,6 +8,7 @@ import {
   batchDeleteSpeechTranscripts,
 } from '../../api/admin/speech-transcripts'
 import { formatDateTimeToCST } from '../../utils/datetime'
+import { exportRowsToCsv } from '../../utils/csv'
 
 const loading = ref(false)
 const rows = ref<AdminSpeechTranscript[]>([])
@@ -88,6 +89,29 @@ function handleReset() {
 function handlePageChange(p: number) { page.value = p; fetchData() }
 function handlePageSizeChange(s: number) { pageSize.value = s; page.value = 1; fetchData() }
 function handleSelectionChange(r: AdminSpeechTranscript[]) { selectedRows.value = r }
+
+function handleExportCsv() {
+  if (selectedRows.value.length === 0) {
+    ElMessage.warning('请先选择要导出的转写记录')
+    return
+  }
+
+  const ts = Date.now()
+  exportRowsToCsv<AdminSpeechTranscript>({
+    filename: `语音转写-选中导出-${ts}.csv`,
+    rows: selectedRows.value,
+    columns: [
+      { key: 'transcript_id', title: '转写 ID' },
+      { key: 'group_id', title: '群组 ID' },
+      { key: 'session_id', title: '会话 ID' },
+      { key: 'speaker', title: '说话人', format: (row) => row.speaker || row.speaker_user_id || row.user_id || '' },
+      { key: 'text', title: '转写文本', format: (row) => row.text || '' },
+      { key: 'duration', title: '时长', format: (row) => formatDuration(row.duration) },
+      { key: 'confidence', title: '置信度', format: (row) => formatConfidence(row.confidence) },
+      { key: 'created_at', title: '创建时间', format: (row) => formatDateTimeToCST(row.created_at) },
+    ],
+  })
+}
 
 async function handleDelete(row: AdminSpeechTranscript) {
   try {
@@ -183,6 +207,9 @@ onMounted(() => { fetchData() })
 
     <el-card shadow="never">
       <div class="toolbar">
+        <el-button type="primary" :disabled="selectedRows.length === 0" @click="handleExportCsv">
+          {{ selectedRows.length > 0 ? `导出选中 (${selectedRows.length})` : '导出选中' }}
+        </el-button>
         <el-button type="danger" :disabled="selectedRows.length === 0" @click="handleBatchDelete">
           {{ selectedRows.length > 0 ? `批量删除 (${selectedRows.length})` : '批量删除' }}
         </el-button>
@@ -230,7 +257,7 @@ onMounted(() => { fetchData() })
 .page-container { display: flex; flex-direction: column; gap: 16px; }
 .page-header { display: flex; align-items: center; justify-content: space-between; }
 .page-title { margin: 0; font-size: 18px; font-weight: 600; }
-.toolbar { margin-bottom: 8px; }
+.toolbar { display: flex; gap: 8px; margin-bottom: 8px; }
 .pagination { display: flex; justify-content: flex-end; margin-top: 12px; }
 .text-cell { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .text-preview {

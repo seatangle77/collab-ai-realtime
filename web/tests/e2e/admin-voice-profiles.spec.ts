@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import { test, expect } from '@playwright/test'
 
 // 本文件内用例包含多次真实接口造数，适当放宽超时时间
@@ -114,6 +115,48 @@ type VoiceProfileFixture = {
   hasEmbedding: boolean
 }
 
+function buildSilentWavBuffer(durationMs = 300, sampleRate = 16_000): Buffer {
+  const channels = 1
+  const bitsPerSample = 16
+  const bytesPerSample = bitsPerSample / 8
+  const numSamples = Math.max(1, Math.floor(sampleRate * durationMs / 1000))
+  const dataSize = numSamples * channels * bytesPerSample
+  const buffer = Buffer.alloc(44 + dataSize)
+
+  buffer.write('RIFF', 0)
+  buffer.writeUInt32LE(36 + dataSize, 4)
+  buffer.write('WAVE', 8)
+  buffer.write('fmt ', 12)
+  buffer.writeUInt32LE(16, 16)
+  buffer.writeUInt16LE(1, 20)
+  buffer.writeUInt16LE(channels, 22)
+  buffer.writeUInt32LE(sampleRate, 24)
+  buffer.writeUInt32LE(sampleRate * channels * bytesPerSample, 28)
+  buffer.writeUInt16LE(channels * bytesPerSample, 32)
+  buffer.writeUInt16LE(bitsPerSample, 34)
+  buffer.write('data', 36)
+  buffer.writeUInt32LE(dataSize, 40)
+
+  return buffer
+}
+
+async function uploadVoiceSample(token: string, label: string, index: number): Promise<string> {
+  const formData = new FormData()
+  const audioBlob = new Blob([buildSilentWavBuffer()], { type: 'audio/wav' })
+  formData.append('file', audioBlob, `e2e-${label}-${index}.wav`)
+
+  const uploadRes = await fetch(`${API_BASE}/api/voice-profile/me/upload-audio`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData,
+  })
+  if (!uploadRes.ok) throw new Error(`upload-audio failed: ${uploadRes.status} ${await uploadRes.text()}`)
+
+  const data = (await uploadRes.json()) as { url: string }
+  if (!data.url) throw new Error('upload-audio returned empty url')
+  return data.url
+}
+
 /** 通过 App 端注册用户并创建声纹配置（可选样本与声纹） */
 async function createVoiceProfileViaAppApi(options: {
   label: string
@@ -155,7 +198,10 @@ async function createVoiceProfileViaAppApi(options: {
 
   let finalSampleCount = 0
   if (sampleCount > 0) {
-    const urls = Array.from({ length: sampleCount }, (_, i) => `https://example.com/e2e-${label}-${i}.wav`)
+    const urls: string[] = []
+    for (let i = 0; i < sampleCount; i += 1) {
+      urls.push(await uploadVoiceSample(token, label, i))
+    }
     const putRes = await fetch(`${API_BASE}/api/voice-profile/me/samples`, {
       method: 'PUT',
       headers: {
@@ -544,6 +590,48 @@ test.describe.serial('Admin 声纹管理 - 主流程', () => {
     await expect(row).toBeVisible()
     await selectVoiceProfileTableRow(row)
     await expectBatchDeleteButtonEnabled(batchBtn)
+  })
+
+  test('23.1 列表：导出选中按钮初始禁用', async ({ page }) => {
+    const exportBtn = page.getByRole('button', { name: '导出选中' })
+    await expect(exportBtn).toBeDisabled()
+  })
+
+  test('23.2 列表：选中两行后可导出 CSV 且只包含选中数据', async ({ page, browserName }) => {
+    test.skip(browserName === 'webkit', '下载在部分浏览器环境下不稳定，这里主测 Chromium/Firefox')
+
+    const exportBtn = page.getByRole('button', { name: '导出选中' })
+    const row1 = getVoiceProfileRowByUserId(page, shared.withSamples.userId)
+    const row2 = getVoiceProfileRowByUserId(page, shared.withEmbedding.userId)
+
+    await expect(row1).toBeVisible()
+    await expect(row2).toBeVisible()
+    await selectVoiceProfileTableRow(row1)
+    await selectVoiceProfileTableRow(row2)
+
+    await expect.poll(async () => exportBtn.isEnabled(), { timeout: 20000 }).toBeTruthy()
+    await expect(exportBtn).toHaveText(/导出选中\s*[（(]2[）)]/)
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      exportBtn.click(),
+    ])
+
+    const downloadPath = await download.path()
+    expect(downloadPath).not.toBeNull()
+    const csvText = fs.readFileSync(downloadPath as string, 'utf-8')
+
+    expect(csvText).toContain('用户')
+    expect(csvText).toContain('用户 ID')
+    expect(csvText).toContain('邮箱')
+    expect(csvText).toContain('当前小组名称')
+    expect(csvText).toContain('样本数量')
+    expect(csvText).toContain('声纹状态')
+    expect(csvText).toContain('创建时间')
+
+    expect(csvText).toContain(shared.withSamples.userId)
+    expect(csvText).toContain(shared.withEmbedding.userId)
+    expect(csvText).not.toContain(shared.noSamples.userId)
   })
 
   test('24. 列表：取消批量删除不应删除数据', async ({ page }) => {

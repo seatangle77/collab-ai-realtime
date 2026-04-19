@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import { test, expect } from '@playwright/test'
 import { loginAsAdmin, goToAdminPage, toTruncatedText } from './admin-helpers'
 
@@ -196,5 +197,120 @@ test.describe.serial('Admin 语音转写页面', () => {
     await page.getByRole('button', { name: /批量删除/ }).click()
     await page.getByRole('button', { name: '删除' }).last().click()
     await expect(page.getByText('ids 不能为空')).toBeVisible()
+  })
+
+  test('3. 导出选中 - 未选时按钮禁用', async ({ page }) => {
+    await loginAsAdmin(page)
+    await page.route('**/api/admin/speech-transcripts/**', async (route) => {
+      if (route.request().method() === 'GET') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(pageResponse([])) })
+        return
+      }
+      await route.fallback()
+    })
+
+    await goToAdminPage(page, '/admin/speech-transcripts', '语音转写')
+    await expect(page.getByRole('button', { name: '导出选中' })).toBeDisabled()
+  })
+
+  test('4. 导出选中 - 选中两条转写导出 CSV 且包含完整文本', async ({ page, browserName }) => {
+    test.skip(browserName === 'webkit', '下载在部分浏览器环境下不稳定，这里主测 Chromium/Firefox')
+
+    const longText1 = '第一段完整转写文本-'.repeat(8)
+    const longText2 = '第二段完整转写文本-'.repeat(6)
+    const longText3 = '第三段不应被导出的文本-'.repeat(6)
+    const transcripts: SpeechTranscript[] = [
+      {
+        transcript_id: 'tr-export-1',
+        group_id: 'group-export',
+        session_id: 'session-export',
+        user_id: 'u-export-1',
+        speaker: '导出甲',
+        text: longText1,
+        start: '2026-04-14T10:00:00Z',
+        end: '2026-04-14T10:00:12Z',
+        duration: 12.34,
+        created_at: '2026-04-14T10:00:12Z',
+        audio_url: null,
+        confidence: 0.923,
+        speaker_confidence: 0.811,
+        speaker_user_id: 'u-export-1',
+        original_text: null,
+        is_edited: false,
+      },
+      {
+        transcript_id: 'tr-export-2',
+        group_id: 'group-export',
+        session_id: 'session-export',
+        user_id: 'u-export-2',
+        speaker: '导出乙',
+        text: longText2,
+        start: '2026-04-14T10:01:00Z',
+        end: '2026-04-14T10:01:09Z',
+        duration: 9.0,
+        created_at: '2026-04-14T10:01:09Z',
+        audio_url: null,
+        confidence: 0.777,
+        speaker_confidence: 0.701,
+        speaker_user_id: 'u-export-2',
+        original_text: null,
+        is_edited: false,
+      },
+      {
+        transcript_id: 'tr-export-3',
+        group_id: 'group-export',
+        session_id: 'session-export',
+        user_id: 'u-export-3',
+        speaker: '导出丙',
+        text: longText3,
+        start: '2026-04-14T10:02:00Z',
+        end: '2026-04-14T10:02:05Z',
+        duration: 5.0,
+        created_at: '2026-04-14T10:02:05Z',
+        audio_url: null,
+        confidence: 0.666,
+        speaker_confidence: 0.655,
+        speaker_user_id: 'u-export-3',
+        original_text: null,
+        is_edited: false,
+      },
+    ]
+
+    await loginAsAdmin(page)
+    await page.route('**/api/admin/speech-transcripts/**', async (route) => {
+      if (route.request().method() === 'GET') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(pageResponse(transcripts)) })
+        return
+      }
+      await route.fallback()
+    })
+
+    await goToAdminPage(page, '/admin/speech-transcripts', '语音转写')
+
+    const checkboxes = page.locator('.el-table__body .el-checkbox')
+    await checkboxes.nth(0).click()
+    await checkboxes.nth(1).click()
+
+    const exportBtn = page.getByRole('button', { name: /导出选中/ })
+    await expect(exportBtn).toBeEnabled()
+    await expect(exportBtn).toHaveText(/导出选中\s*[（(]2[）)]/)
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      exportBtn.click(),
+    ])
+
+    const downloadPath = await download.path()
+    expect(downloadPath).not.toBeNull()
+    const csvText = fs.readFileSync(downloadPath as string, 'utf-8')
+
+    expect(csvText).toContain('转写 ID')
+    expect(csvText).toContain('群组 ID')
+    expect(csvText).toContain('会话 ID')
+    expect(csvText).toContain('说话人')
+    expect(csvText).toContain('转写文本')
+    expect(csvText).toContain(longText1)
+    expect(csvText).toContain(longText2)
+    expect(csvText).not.toContain(longText3)
   })
 })

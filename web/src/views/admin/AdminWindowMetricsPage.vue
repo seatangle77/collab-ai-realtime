@@ -8,6 +8,7 @@ import {
   batchDeleteWindowMetrics,
 } from '../../api/admin/window-metrics'
 import { formatDateTimeToCST } from '../../utils/datetime'
+import { exportRowsToCsv } from '../../utils/csv'
 
 const loading = ref(false)
 const rows = ref<AdminWindowMetric[]>([])
@@ -68,6 +69,36 @@ function handleReset() {
 function handlePageChange(p: number) { page.value = p; fetchData() }
 function handlePageSizeChange(s: number) { pageSize.value = s; page.value = 1; fetchData() }
 function handleSelectionChange(r: AdminWindowMetric[]) { selectedRows.value = r }
+
+function handleExportCsv() {
+  if (selectedRows.value.length === 0) {
+    ElMessage.warning('请先选择要导出的记录')
+    return
+  }
+
+  const ts = Date.now()
+  exportRowsToCsv<AdminWindowMetric>({
+    filename: `窗口指标-选中导出-${ts}.csv`,
+    rows: selectedRows.value,
+    columns: [
+      { key: 'id', title: 'ID' },
+      { key: 'session_id', title: '会话 ID' },
+      { key: 'user_id', title: '用户 ID' },
+      { key: 'user_name', title: '用户', format: (row) => row.user_name || row.user_id },
+      { key: 'window_start', title: '窗口开始', format: (row) => formatDateTimeToCST(row.window_start) },
+      { key: 'window_end', title: '窗口结束', format: (row) => formatDateTimeToCST(row.window_end) },
+      { key: 'speaking_ratio', title: '发言比例', format: (row) => formatMetric(row.speaking_ratio, 4) },
+      { key: 'silence_s', title: '静默(s)', format: (row) => formatMetric(row.silence_s, 2) },
+      { key: 'ttr', title: 'TTR', format: (row) => formatMetric(row.ttr, 4) },
+      { key: 'arg_density', title: '论点密度', format: (row) => formatMetric(row.arg_density, 4) },
+      { key: 'srep', title: 'SREP', format: (row) => formatMetric(row.srep, 4) },
+      { key: 'info_gain', title: '信息增益', format: (row) => formatMetric(row.info_gain, 4) },
+      { key: 'has_reasoning', title: '有推理', format: (row) => row.has_reasoning ? '是' : '否' },
+      { key: 'has_evidence', title: '有证据', format: (row) => row.has_evidence ? '是' : '否' },
+      { key: 'created_at', title: '创建时间', format: (row) => formatDateTimeToCST(row.created_at) },
+    ],
+  })
+}
 
 async function handleDelete(row: AdminWindowMetric) {
   try {
@@ -173,6 +204,9 @@ onMounted(() => { fetchData() })
 
     <el-card shadow="never">
       <div class="toolbar">
+        <el-button type="primary" :disabled="selectedRows.length === 0" @click="handleExportCsv">
+          {{ selectedRows.length > 0 ? `导出选中 (${selectedRows.length})` : '导出选中' }}
+        </el-button>
         <el-button type="danger" :disabled="selectedRows.length === 0" @click="handleBatchDelete">
           {{ selectedRows.length > 0 ? `批量删除 (${selectedRows.length})` : '批量删除' }}
         </el-button>
@@ -233,6 +267,6 @@ onMounted(() => { fetchData() })
 .page-container { display: flex; flex-direction: column; gap: 16px; }
 .page-header { display: flex; align-items: center; justify-content: space-between; }
 .page-title { margin: 0; font-size: 18px; font-weight: 600; }
-.toolbar { margin-bottom: 8px; }
+.toolbar { display: flex; gap: 8px; margin-bottom: 8px; }
 .pagination { display: flex; justify-content: flex-end; margin-top: 12px; }
 </style>

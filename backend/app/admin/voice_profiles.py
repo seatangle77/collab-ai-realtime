@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 from typing import Any, Mapping
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 import shutil
 
@@ -13,9 +14,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config_voice import VOICE_AUDIO_BASE_DIR, VOICE_AUDIO_PUBLIC_BASE_URL
 from ..db import get_db
-from ..voice_profiles import ALLOWED_AUDIO_CONTENT_TYPE_PREFIXES, VoiceProfileOut, _row_to_profile
+from ..voice_profiles import (
+    ALLOWED_AUDIO_CONTENT_TYPE_PREFIXES,
+    VoiceProfileOut,
+    _generate_embedding,
+    _row_to_profile,
+    _url_to_local_path,
+)
 from .deps import require_admin
 from .schemas import BatchDeleteRequest, BatchDeleteResponse, Page, PageMeta
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(
@@ -301,10 +310,23 @@ async def admin_generate_embedding(
             detail="该声纹配置尚无任何语音样本，无法生成声纹",
         )
 
-    placeholder_embedding: Mapping[str, Any] = {
-        "generated_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
-        "note": "placeholder_embedding, replace with real voice embedding later",
-    }
+    audio_paths = [_url_to_local_path(url) for url in profile.sample_audio_urls]
+
+    loop = asyncio.get_event_loop()
+    try:
+        embedding: list[float] = await loop.run_in_executor(
+            None, _generate_embedding, audio_paths
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error("[AdminVoiceProfile] embedding 生成失败 profile_id=%s: %s", profile.id, e)
+        await db.execute(
+            text("UPDATE user_voice_profiles SET embedding_status='failed' WHERE id=:id"),
+            {"id": profile.id},
+        )
+        await db.commit()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="声纹生成失败，请重试")
 
     result2 = await db.execute(
         text(
@@ -320,7 +342,7 @@ async def admin_generate_embedding(
         ),
         {
             "id": profile.id,
-            "voice_embedding": json.dumps(placeholder_embedding),
+            "voice_embedding": json.dumps(embedding),
         },
     )
     row2 = result2.mappings().first()
@@ -403,5 +425,4 @@ async def admin_upload_audio_sample(
 
     public_url = f"{VOICE_AUDIO_PUBLIC_BASE_URL}/{profile.user_id}/{filename}"
     return AdminUploadAudioResponse(url=public_url)
-
 

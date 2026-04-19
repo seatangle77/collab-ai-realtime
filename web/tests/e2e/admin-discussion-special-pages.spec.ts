@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import { test, expect } from '@playwright/test'
 import { loginAsAdmin, goToAdminPage, toTruncatedText } from './admin-helpers'
 
@@ -125,6 +126,77 @@ test.describe.serial('Admin 讨论摘要与讨论状态页面', () => {
     await page.getByRole('button', { name: /批量删除/ }).click()
     await page.getByRole('button', { name: '删除' }).last().click()
     await expect(page.getByText('成功删除 1 条记录')).toBeVisible()
+  })
+
+  test('1.1 讨论摘要页导出选中：未选时禁用，选中两条后可导出 CSV', async ({ page, browserName }) => {
+    test.skip(browserName === 'webkit', '下载在部分浏览器环境下不稳定，这里主测 Chromium/Firefox')
+
+    const summaries = [
+      {
+        id: 'ds-export-1',
+        session_id: 'session-summary-export',
+        session_title: '导出摘要会话一',
+        version: 1,
+        content: '第一条完整摘要内容，用于验证导出不会截断。'.repeat(4),
+        window_start: '2026-04-10T08:00:00Z',
+        window_end: '2026-04-10T08:10:00Z',
+        created_at: '2026-04-10T08:11:00Z',
+      },
+      {
+        id: 'ds-export-2',
+        session_id: 'session-summary-export',
+        session_title: '导出摘要会话二',
+        version: 2,
+        content: '第二条完整摘要内容，用于验证导出只包含选中项。'.repeat(4),
+        window_start: '2026-04-10T09:00:00Z',
+        window_end: '2026-04-10T09:10:00Z',
+        created_at: '2026-04-10T09:11:00Z',
+      },
+      {
+        id: 'ds-export-3',
+        session_id: 'session-summary-export',
+        session_title: '导出摘要会话三',
+        version: 3,
+        content: '第三条摘要内容不应导出。'.repeat(4),
+        window_start: '2026-04-10T10:00:00Z',
+        window_end: '2026-04-10T10:10:00Z',
+        created_at: '2026-04-10T10:11:00Z',
+      },
+    ]
+
+    await loginAsAdmin(page)
+    await page.route('**/api/admin/discussion-summaries/**', async (route) => {
+      if (route.request().method() === 'GET') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(pageResponse(summaries)) })
+        return
+      }
+      await route.fallback()
+    })
+
+    await goToAdminPage(page, '/admin/discussion-summaries', '讨论摘要')
+
+    const exportBtn = page.getByRole('button', { name: '导出选中' })
+    await expect(exportBtn).toBeDisabled()
+
+    const checkboxes = page.locator('.el-table__body .el-checkbox')
+    await checkboxes.nth(0).click()
+    await checkboxes.nth(1).click()
+
+    await expect(exportBtn).toBeEnabled()
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      exportBtn.click(),
+    ])
+    const csvText = fs.readFileSync((await download.path()) as string, 'utf-8')
+
+    expect(csvText).toContain('会话标题')
+    expect(csvText).toContain('版本')
+    expect(csvText).toContain('摘要内容')
+    expect(csvText).toContain('导出摘要会话一')
+    expect(csvText).toContain('导出摘要会话二')
+    expect(csvText).not.toContain('导出摘要会话三')
+    expect(csvText).toContain(summaries[0].content)
   })
 
   test('2. 讨论摘要页空内容保存被前端拦截', async ({ page }) => {

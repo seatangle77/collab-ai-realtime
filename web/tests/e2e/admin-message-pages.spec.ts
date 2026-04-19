@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import { test, expect } from '@playwright/test'
 import { loginAsAdmin, goToAdminPage, toTruncatedText, expectTextLooksFormattedDate } from './admin-helpers'
 
@@ -152,6 +153,88 @@ test.describe.serial('Admin 文本与消息类页面', () => {
     await page.getByRole('button', { name: /批量删除/ }).click()
     await page.getByRole('button', { name: '删除' }).last().click()
     await expect(page.getByText('成功删除 1 条记录')).toBeVisible()
+  })
+
+  test('2.1 推送队列页导出选中：未选时禁用，选中两条后可导出 CSV', async ({ page, browserName }) => {
+    test.skip(browserName === 'webkit', '下载在部分浏览器环境下不稳定，这里主测 Chromium/Firefox')
+
+    const queue = [
+      {
+        id: 'pq-export-1',
+        session_id: 'session-queue-export',
+        session_title: '推送队列导出会话一',
+        target_user_id: 'user-1',
+        target_user_name: '用户甲',
+        state_type: 'low_participation',
+        push_content: '第一条待发送推送内容，用来验证导出不会截断。'.repeat(4),
+        analysis_window_start: '2026-04-10T10:00:00Z',
+        status: 'pending',
+        created_at: '2026-04-10T10:01:00Z',
+        delivered_at: null,
+      },
+      {
+        id: 'pq-export-2',
+        session_id: 'session-queue-export',
+        session_title: '推送队列导出会话二',
+        target_user_id: 'user-2',
+        target_user_name: '用户乙',
+        state_type: 'deadlock',
+        push_content: '第二条已送达推送内容，用来验证仅导出选中项。'.repeat(4),
+        analysis_window_start: '2026-04-10T11:00:00Z',
+        status: 'delivered',
+        created_at: '2026-04-10T11:01:00Z',
+        delivered_at: '2026-04-10T11:02:00Z',
+      },
+      {
+        id: 'pq-export-3',
+        session_id: 'session-queue-export',
+        session_title: '推送队列导出会话三',
+        target_user_id: 'user-3',
+        target_user_name: '用户丙',
+        state_type: 'topic_drift',
+        push_content: '第三条内容不应导出。'.repeat(4),
+        analysis_window_start: '2026-04-10T12:00:00Z',
+        status: 'pending',
+        created_at: '2026-04-10T12:01:00Z',
+        delivered_at: null,
+      },
+    ]
+
+    await loginAsAdmin(page)
+    await page.route('**/api/admin/push-queue/**', async (route) => {
+      if (route.request().method() === 'GET') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(pageResponse(queue)) })
+        return
+      }
+      await route.fallback()
+    })
+
+    await goToAdminPage(page, '/admin/push-queue', '推送队列')
+
+    const exportBtn = page.getByRole('button', { name: '导出选中' })
+    await expect(exportBtn).toBeDisabled()
+
+    const checkboxes = page.locator('.el-table__body .el-checkbox')
+    await checkboxes.nth(0).click()
+    await checkboxes.nth(1).click()
+
+    await expect(exportBtn).toBeEnabled()
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      exportBtn.click(),
+    ])
+    const csvText = fs.readFileSync((await download.path()) as string, 'utf-8')
+
+    expect(csvText).toContain('会话')
+    expect(csvText).toContain('目标用户')
+    expect(csvText).toContain('状态类型')
+    expect(csvText).toContain('推送内容')
+    expect(csvText).toContain('队列状态')
+    expect(csvText).toContain('推送队列导出会话一')
+    expect(csvText).toContain('推送队列导出会话二')
+    expect(csvText).not.toContain('推送队列导出会话三')
+    expect(csvText).toContain(queue[0].push_content)
   })
 
 })

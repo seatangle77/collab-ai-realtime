@@ -5,6 +5,7 @@ import type { AdminPushQueue, DiscussionStateType, PushQueueStatus } from '../..
 import { listPushQueue, deletePushQueueItem, batchDeletePushQueue } from '../../api/admin/push-queue'
 import { formatDateTimeToCST } from '../../utils/datetime'
 import { DISCUSSION_STATE_LABELS, DISCUSSION_STATE_TAGS } from '../../utils/discussion'
+import { exportRowsToCsv } from '../../utils/csv'
 
 const STATUS_LABELS: Record<PushQueueStatus, string> = {
   pending: '待发送',
@@ -79,6 +80,32 @@ function handleReset() {
 function handlePageChange(p: number) { page.value = p; fetchData() }
 function handlePageSizeChange(s: number) { pageSize.value = s; page.value = 1; fetchData() }
 function handleSelectionChange(r: AdminPushQueue[]) { selectedRows.value = r }
+
+function handleExportCsv() {
+  if (selectedRows.value.length === 0) {
+    ElMessage.warning('请先选择要导出的记录')
+    return
+  }
+
+  const ts = Date.now()
+  exportRowsToCsv<AdminPushQueue>({
+    filename: `推送队列-选中导出-${ts}.csv`,
+    rows: selectedRows.value,
+    columns: [
+      { key: 'id', title: 'ID' },
+      { key: 'session_id', title: '会话 ID' },
+      { key: 'session_title', title: '会话', format: (row) => row.session_title || row.session_id },
+      { key: 'target_user_id', title: '目标用户 ID' },
+      { key: 'target_user_name', title: '目标用户', format: (row) => row.target_user_name || row.target_user_id },
+      { key: 'state_type', title: '状态类型', format: (row) => DISCUSSION_STATE_LABELS[row.state_type] || row.state_type },
+      { key: 'push_content', title: '推送内容', format: (row) => row.push_content || '' },
+      { key: 'status', title: '队列状态', format: (row) => STATUS_LABELS[row.status] || row.status },
+      { key: 'analysis_window_start', title: '分析窗口开始', format: (row) => formatDateTimeToCST(row.analysis_window_start) },
+      { key: 'created_at', title: '创建时间', format: (row) => formatDateTimeToCST(row.created_at) },
+      { key: 'delivered_at', title: '送达时间', format: (row) => formatDateTimeToCST(row.delivered_at) },
+    ],
+  })
+}
 
 async function handleDelete(row: AdminPushQueue) {
   try {
@@ -182,6 +209,9 @@ onMounted(() => { fetchData() })
 
     <el-card shadow="never">
       <div class="toolbar">
+        <el-button type="primary" :disabled="selectedRows.length === 0" @click="handleExportCsv">
+          {{ selectedRows.length > 0 ? `导出选中 (${selectedRows.length})` : '导出选中' }}
+        </el-button>
         <el-button type="danger" :disabled="selectedRows.length === 0" @click="handleBatchDelete">
           {{ selectedRows.length > 0 ? `批量删除 (${selectedRows.length})` : '批量删除' }}
         </el-button>
@@ -246,7 +276,7 @@ onMounted(() => { fetchData() })
 .page-container { display: flex; flex-direction: column; gap: 16px; }
 .page-header { display: flex; align-items: center; justify-content: space-between; }
 .page-title { margin: 0; font-size: 18px; font-weight: 600; }
-.toolbar { margin-bottom: 8px; }
+.toolbar { display: flex; gap: 8px; margin-bottom: 8px; }
 .pagination { display: flex; justify-content: flex-end; margin-top: 12px; }
 .content-cell { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .content-preview {

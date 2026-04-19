@@ -6,6 +6,7 @@ import { batchDeleteAdminVoiceProfiles, listAdminVoiceProfiles } from '../../api
 import { formatDateTimeToCST } from '../../utils/datetime'
 import type { PageMeta } from '../../types/admin'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { exportRowsToCsv } from '../../utils/csv'
 
 interface Filters {
   user_id: string
@@ -117,6 +118,34 @@ function handleSelectionChange(rows: AdminVoiceProfileSummary[]) {
   selectedRows.value = rows
 }
 
+function handleExportSelectedCsv() {
+  if (selectedRows.value.length === 0) {
+    ElMessage.warning('请先选择要导出的声纹记录')
+    return
+  }
+
+  const ts = Date.now()
+  exportRowsToCsv<AdminVoiceProfileSummary>({
+    filename: `声纹管理-选中导出-${ts}.csv`,
+    rows: selectedRows.value,
+    columns: [
+      { key: 'id', title: 'ID' },
+      {
+        key: 'user_name',
+        title: '用户',
+        format: (row) => row.user_name || row.user_email || row.user_id,
+      },
+      { key: 'user_id', title: '用户 ID' },
+      { key: 'user_email', title: '邮箱', format: (row) => row.user_email || '' },
+      { key: 'primary_group_id', title: '当前小组 ID', format: (row) => row.primary_group_id || '' },
+      { key: 'primary_group_name', title: '当前小组名称', format: (row) => row.primary_group_name || '' },
+      { key: 'sample_count', title: '样本数量' },
+      { key: 'has_embedding', title: '声纹状态', format: (row) => row.has_embedding ? '已生成' : '未生成' },
+      { key: 'created_at', title: '创建时间', format: (row) => formatDateTimeToCST(row.created_at) },
+    ],
+  })
+}
+
 async function handleBatchDelete() {
   const ids = selectedRows.value.map((r) => r.id)
   if (!ids.length) return
@@ -205,6 +234,13 @@ onMounted(() => {
 
     <el-card class="admin-voice-profiles-table" shadow="never">
       <div class="admin-voice-profiles-actions">
+        <el-button
+          type="primary"
+          :disabled="!selectedRows.length"
+          @click="handleExportSelectedCsv"
+        >
+          {{ selectedRows.length > 0 ? `导出选中 (${selectedRows.length})` : '导出选中' }}
+        </el-button>
         <el-button
           type="danger"
           :disabled="!selectedRows.length || batchDeleting"
@@ -342,4 +378,3 @@ onMounted(() => {
   font-size: 12px;
 }
 </style>
-
