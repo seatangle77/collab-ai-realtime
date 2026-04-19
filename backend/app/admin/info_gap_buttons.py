@@ -43,7 +43,7 @@ class AdminInfoGapButtonOut(BaseModel):
 @router.get("/", response_model=Page[AdminInfoGapButtonOut])
 async def list_info_gap_buttons(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=200),
     session_id: str | None = None,
     user_id: str | None = None,
     keyword: str | None = None,

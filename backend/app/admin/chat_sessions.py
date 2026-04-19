@@ -60,7 +60,7 @@ class AdminChatSessionCreate(BaseModel):
 )
 async def list_chat_sessions(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=200),
     group_id: str | None = None,
     status_param: str | None = Query(
         default=None,

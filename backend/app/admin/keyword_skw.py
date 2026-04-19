@@ -43,7 +43,7 @@ class AdminKeywordSkwOut(BaseModel):
 @router.get("/", response_model=Page[AdminKeywordSkwOut])
 async def list_keyword_skw(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=200),
     session_id: str | None = None,
     keyword: str | None = None,
     user_a_id: str | None = None,

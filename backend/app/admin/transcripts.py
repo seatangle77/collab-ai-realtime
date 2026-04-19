@@ -138,7 +138,7 @@ async def create_transcript(
 )
 async def list_transcripts(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=200),
     session_id: str | None = None,
     group_id: str | None = None,
     speaker_user_id: str | None = None,

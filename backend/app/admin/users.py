@@ -295,7 +295,7 @@ async def create_user(
 @router.get("/", response_model=Page[AdminUserOut], dependencies=[Depends(require_admin)])
 async def list_users(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=200),
     email: str | None = None,
     name: str | None = None,
     user_id: str | None = Query(None, alias="id"),

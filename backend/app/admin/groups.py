@@ -47,7 +47,7 @@ class AdminGroupUpdate(BaseModel):
 )
 async def list_groups(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=200),
     name: str | None = None,
     is_active: bool | None = None,
     created_from: datetime | None = None,
@@ -249,4 +249,3 @@ async def batch_delete_groups(
         deleted += result.rowcount
     await db.commit()
     return BatchDeleteResponse(deleted=deleted)
-

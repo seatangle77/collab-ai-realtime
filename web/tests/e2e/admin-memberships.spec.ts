@@ -26,7 +26,7 @@ async function loginAsAdminAndGoToMemberships(page: import('@playwright/test').P
 
 async function registerAndLogin(label: string): Promise<{ userId: string; accessToken: string }> {
   const email = `e2e-membership-${label}-${Date.now()}@example.com`
-  const password = 'Pass123!'
+  const password = '1234'
 
   const regRes = await fetch(`${API_BASE}/api/auth/register`, {
     method: 'POST',

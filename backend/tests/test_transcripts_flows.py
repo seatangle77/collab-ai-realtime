@@ -306,9 +306,9 @@ def scenario_admin_list_pagination(ctx: dict) -> bool:
 
 def scenario_admin_list_page_size_over_limit(ctx: dict) -> bool:
     r = requests.get(f"{BASE_URL}/api/admin/transcripts/",
-                     params={"page_size": 101},
+                     params={"page_size": 201},
                      headers=ADMIN_HEADERS)
-    ok = _log(r.status_code == 422, "C8 page_size=101 超限 → 422", r.text)
+    ok = _log(r.status_code == 422, "C8 page_size=201 超限 → 422", r.text)
     return ok
 
 

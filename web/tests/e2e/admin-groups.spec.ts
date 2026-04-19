@@ -22,18 +22,25 @@ async function createGroupViaAppApi(): Promise<{
 }> {
   const email = `e2e-group-${Date.now()}@example.com`
   const groupName = `E2E群组${Date.now()}`
+  const password = '1234'
 
-  await fetch(`${API_BASE}/api/auth/register`, {
+  const registerRes = await fetch(`${API_BASE}/api/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: 'E2E Group User', email, password: 'Pass123' }),
+    body: JSON.stringify({ name: 'E2E Group User', email, password }),
   })
+  if (!registerRes.ok) {
+    throw new Error(`register failed: ${registerRes.status} ${await registerRes.text()}`)
+  }
 
   const loginRes = await fetch(`${API_BASE}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password: 'Pass123' }),
+    body: JSON.stringify({ email, password }),
   })
+  if (!loginRes.ok) {
+    throw new Error(`login failed: ${loginRes.status} ${await loginRes.text()}`)
+  }
   const loginData = await loginRes.json()
   const token = loginData.access_token
 
@@ -45,8 +52,14 @@ async function createGroupViaAppApi(): Promise<{
     },
     body: JSON.stringify({ name: groupName }),
   })
+  if (!groupRes.ok) {
+    throw new Error(`create group failed: ${groupRes.status} ${await groupRes.text()}`)
+  }
   const groupData = await groupRes.json()
   const group = groupData.group
+  if (!group?.id || !group?.name || !group?.created_at) {
+    throw new Error(`unexpected create group response: ${JSON.stringify(groupData)}`)
+  }
   return {
     groupId: group.id,
     groupName: group.name,

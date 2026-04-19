@@ -91,6 +91,16 @@ async function createSession(accessToken: string, groupId: string, title: string
   return data
 }
 
+async function startSession(accessToken: string, sessionId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/start`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  if (!res.ok) {
+    throw new Error(`start session failed: ${res.status} ${await res.text()}`)
+  }
+}
+
 async function endSession(accessToken: string, sessionId: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/end`, {
     method: 'POST',
@@ -127,7 +137,9 @@ async function setupChatSessionsFixture() {
   const s1 = await createSession(owner.accessToken, groupId, endedTitle)
   const s2 = await createSession(owner.accessToken, groupId, activeTitle)
 
+  await startSession(owner.accessToken, s1.id)
   await endSession(owner.accessToken, s1.id)
+  await startSession(owner.accessToken, s2.id)
 
   const sessions = await fetchAdminChatSessionsByGroup(groupId)
   const createdDates = sessions.map((s) => new Date(s.created_at)).filter((d) => !Number.isNaN(d.getTime()))

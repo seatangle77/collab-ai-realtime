@@ -182,7 +182,7 @@ async function handleBatchDelete() {
 onMounted(() => {
   const q = route.query
   if (q.page) page.value = Math.max(1, parseInt(String(q.page), 10) || 1)
-  if (q.page_size) pageSize.value = Math.max(1, Math.min(100, parseInt(String(q.page_size), 10) || 20))
+  if (q.page_size) pageSize.value = Math.max(1, Math.min(200, parseInt(String(q.page_size), 10) || 20))
   if (q.user_id) filters.user_id = String(q.user_id)
   if (q.has_samples === 'true' || q.has_samples === 'false') filters.has_samples = q.has_samples
   if (q.has_embedding === 'true' || q.has_embedding === 'false') filters.has_embedding = q.has_embedding
@@ -318,7 +318,7 @@ onMounted(() => {
           :current-page="page"
           :page-size="pageSize"
           :total="meta.total"
-          :page-sizes="[10, 20, 50, 100]"
+          :page-sizes="[10, 20, 50, 100, 150, 200]"
           layout="total, sizes, prev, pager, next, jumper"
           @current-change="handlePageChange"
           @size-change="handlePageSizeChange"

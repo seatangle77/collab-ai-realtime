@@ -237,4 +237,66 @@ test.describe.serial('Admin 文本与消息类页面', () => {
     expect(csvText).toContain(queue[0].push_content)
   })
 
+  test('2.2 推送队列页分页器支持 150 和 200 条/页', async ({ page }) => {
+    const queue = [
+      {
+        id: 'pq-page-size-1',
+        session_id: 'session-queue-page-size',
+        session_title: '分页会话一',
+        target_user_id: 'user-1',
+        target_user_name: '用户甲',
+        state_type: 'low_participation',
+        push_content: '分页内容一',
+        analysis_window_start: '2026-04-10T10:00:00Z',
+        status: 'pending',
+        created_at: '2026-04-10T10:01:00Z',
+        delivered_at: null,
+      },
+      {
+        id: 'pq-page-size-2',
+        session_id: 'session-queue-page-size',
+        session_title: '分页会话二',
+        target_user_id: 'user-2',
+        target_user_name: '用户乙',
+        state_type: 'deadlock',
+        push_content: '分页内容二',
+        analysis_window_start: '2026-04-10T11:00:00Z',
+        status: 'delivered',
+        created_at: '2026-04-10T11:01:00Z',
+        delivered_at: '2026-04-10T11:02:00Z',
+      },
+    ]
+    let lastRequestedPageSize = '20'
+
+    await loginAsAdmin(page)
+    await page.route('**/api/admin/push-queue/**', async (route) => {
+      if (route.request().method() === 'GET') {
+        const url = new URL(route.request().url())
+        lastRequestedPageSize = url.searchParams.get('page_size') || '20'
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(pageResponse(queue, 1, Number(lastRequestedPageSize))),
+        })
+        return
+      }
+      await route.fallback()
+    })
+
+    await goToAdminPage(page, '/admin/push-queue', '推送队列')
+
+    const sizeSelect = page.locator('.el-pagination .el-select').first()
+    await expect(sizeSelect).toBeVisible()
+    await sizeSelect.click()
+    await expect(page.getByRole('option', { name: '150' })).toBeVisible()
+    await expect(page.getByRole('option', { name: '200' })).toBeVisible()
+
+    await page.getByRole('option', { name: '150' }).click()
+    await expect.poll(() => lastRequestedPageSize).toBe('150')
+
+    await sizeSelect.click()
+    await page.getByRole('option', { name: '200' }).click()
+    await expect.poll(() => lastRequestedPageSize).toBe('200')
+  })
+
 })

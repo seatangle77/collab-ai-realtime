@@ -487,8 +487,14 @@ test.describe.serial('Admin 声纹管理 - 主流程', () => {
     const sizeSelect = pagination.locator('.el-select').first()
     if (!(await sizeSelect.isVisible())) return
     await sizeSelect.click()
-    await page.getByRole('option', { name: '10' }).click()
-    await expect(page).toHaveURL(/\?.*page_size=10/)
+    await expect(page.getByRole('option', { name: '150' })).toBeVisible()
+    await expect(page.getByRole('option', { name: '200' })).toBeVisible()
+    await page.getByRole('option', { name: '150' }).click()
+    await expect(page).toHaveURL(/\?.*page_size=150/)
+
+    await sizeSelect.click()
+    await page.getByRole('option', { name: '200' }).click()
+    await expect(page).toHaveURL(/\?.*page_size=200/)
   })
 
   test('17. 详情边界：添加空 URL 提示', async ({ page }) => {
@@ -759,7 +765,7 @@ test.describe.serial('Admin 声纹管理 - 主流程', () => {
       },
     )
 
-    // 页面分页器仅支持 [10,20,50,100]，使用 2 会在挂载时被组件归一并触发额外请求，导致断言不稳定
+    // 页面分页器当前支持 [10,20,50,100,150,200]；这里仍使用 10，让第 2 页在 mock 数据下稳定只有 1 条
     await page.goto('/admin/voice-profiles?page=2&page_size=10')
     await expect(page.locator(ADMIN_VOICE_PROFILE_TABLE_BODY_ROW)).toHaveCount(1)
 

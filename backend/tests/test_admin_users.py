@@ -196,8 +196,8 @@ def scenario_admin_list_pagination(ctx: Dict[str, Any]) -> bool:
                "admin 分页 page_size=1 场景")
     # page_size 超限
     r = requests.get(f"{BASE_URL}/api/admin/users",
-                     params={"page_size": 101}, headers=ADMIN_HEADERS)
-    ok &= _log(r.status_code == 422, "admin page_size 超过 100 应返回 422 场景", {"status": r.status_code})
+                     params={"page_size": 201}, headers=ADMIN_HEADERS)
+    ok &= _log(r.status_code == 422, "admin page_size 超过 200 应返回 422 场景", {"status": r.status_code})
     return ok
 
 

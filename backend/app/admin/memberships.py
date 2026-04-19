@@ -53,7 +53,7 @@ class AdminMembershipCreate(BaseModel):
 )
 async def list_memberships(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=200),
     group_id: str | None = None,
     user_id: str | None = None,
     status_filter: str | None = Query(
@@ -424,4 +424,3 @@ async def batch_delete_memberships(
         deleted += result.rowcount
     await db.commit()
     return BatchDeleteResponse(deleted=deleted)
-

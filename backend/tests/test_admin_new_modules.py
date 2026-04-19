@@ -48,16 +48,16 @@ def test_pagination_boundaries(url: str) -> None:
     """page/page_size 边界和非法值"""
     check("page=1 page_size=1（最小合法分页）",
           requests.get(f"{url}?page=1&page_size=1", headers=HEADERS))
-    check("page_size=100（最大合法）",
-          requests.get(f"{url}?page_size=100", headers=HEADERS))
+    check("page_size=200（最大合法）",
+          requests.get(f"{url}?page_size=200", headers=HEADERS))
     check("page=999999（超大页码，应返回空 items）",
           requests.get(f"{url}?page=999999", headers=HEADERS))
     check("page=0 → 422",
           requests.get(f"{url}?page=0", headers=HEADERS), 422)
     check("page_size=0 → 422",
           requests.get(f"{url}?page_size=0", headers=HEADERS), 422)
-    check("page_size=101 → 422",
-          requests.get(f"{url}?page_size=101", headers=HEADERS), 422)
+    check("page_size=201 → 422",
+          requests.get(f"{url}?page_size=201", headers=HEADERS), 422)
 
 
 def test_batch_delete_boundaries(url: str) -> None:

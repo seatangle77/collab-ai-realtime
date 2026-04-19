@@ -49,7 +49,7 @@ class AdminVoiceProfileSummary(BaseModel):
 @router.get("/", response_model=Page[AdminVoiceProfileSummary])
 async def list_voice_profiles(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=200),
     user_id: str | None = None,
     has_samples: bool | None = None,
     has_embedding: bool | None = None,
@@ -425,4 +425,3 @@ async def admin_upload_audio_sample(
 
     public_url = f"{VOICE_AUDIO_PUBLIC_BASE_URL}/{profile.user_id}/{filename}"
     return AdminUploadAudioResponse(url=public_url)
-

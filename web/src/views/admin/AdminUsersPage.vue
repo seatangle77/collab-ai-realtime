@@ -530,7 +530,7 @@ onMounted(() => {
           v-model:current-page="page"
           v-model:page-size="pageSize"
           :total="total"
-          :page-sizes="[10, 20, 50, 100]"
+          :page-sizes="[10, 20, 50, 100, 150, 200]"
           layout="total, sizes, prev, pager, next, jumper"
           @current-change="handlePageChange"
           @size-change="handlePageSizeChange"
@@ -654,4 +654,3 @@ onMounted(() => {
   font-size: 12px;
 }
 </style>
-

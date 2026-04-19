@@ -163,8 +163,8 @@ def run() -> None:
         422,
     )
     _check(
-        "GET page_size=101 -> 422",
-        requests.get(f"{BASE_URL}/api/admin/speech-transcripts/?page_size=101", headers=ADMIN_HEADERS),
+        "GET page_size=201 -> 422",
+        requests.get(f"{BASE_URL}/api/admin/speech-transcripts/?page_size=201", headers=ADMIN_HEADERS),
         422,
     )
     _check(

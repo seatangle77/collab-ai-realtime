@@ -247,9 +247,9 @@ def scenario_ds_filter_time_range() -> bool:
 
 def scenario_ds_page_size_over_limit() -> bool:
     r = requests.get(f"{BASE_URL}/api/admin/discussion-states/",
-                     headers=ADMIN_HEADERS, params={"page_size": 101})
+                     headers=ADMIN_HEADERS, params={"page_size": 201})
     ok = r.status_code == 422
-    return _log(ok, "DS page_size=101 超限返回 422", {"status": r.status_code})
+    return _log(ok, "DS page_size=201 超限返回 422", {"status": r.status_code})
 
 
 # ──────────────────────────────

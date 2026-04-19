@@ -46,7 +46,7 @@ class AdminWindowMetricOut(BaseModel):
 @router.get("/", response_model=Page[AdminWindowMetricOut])
 async def list_window_metrics(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=200),
     session_id: str | None = None,
     user_id: str | None = None,
     window_start_from: datetime | None = None,

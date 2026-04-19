@@ -147,7 +147,7 @@ async def create_discussion_state(
 @router.get("/", response_model=Page[AdminDiscussionStateOut])
 async def list_discussion_states(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=200),
     session_id: str | None = None,
     state_type: str | None = None,
     target_user_id: str | None = None,
