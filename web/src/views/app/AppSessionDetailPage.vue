@@ -205,8 +205,9 @@ async function fetchInfoGapButtons() {
   }
 }
 
-function handleInfoGapButtonClicked(buttonId: string) {
+function handleInfoGapButtonClicked(buttonId: string, content: string, _keyword: string) {
   infoGapButtons.value = infoGapButtons.value.filter((b) => b.id !== buttonId)
+  if (content) showPushNotification(content)
 }
 
 function upsertPushEvent(push: PushLogItem) {
@@ -1009,13 +1010,15 @@ function buildTranscriptItems(transcriptItems: AppTranscript[], pushItems: PushL
       item,
       order: index,
     })),
-    ...pushItems.map((item, index) => ({
-      type: 'push' as const,
-      key: item.id || `push-${index}`,
-      at: pushSortTimestamp(item),
-      item,
-      order: index,
-    })),
+    ...pushItems
+      .filter((item) => item.push_channel !== 'info_gap')
+      .map((item, index) => ({
+        type: 'push' as const,
+        key: item.id || `push-${index}`,
+        at: pushSortTimestamp(item),
+        item,
+        order: index,
+      })),
   ].sort((a, b) => {
     if (a.at !== b.at) return a.at - b.at
     if (a.type !== b.type) return a.type === 'transcript' ? -1 : 1

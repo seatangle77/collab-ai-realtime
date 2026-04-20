@@ -16,7 +16,7 @@ from .ws_protocol import build_group_notification, build_push_notification
 
 router = APIRouter(prefix="/api", tags=["push-logs"])
 
-VALID_PUSH_CHANNELS = {"web", "app", "glasses"}
+VALID_PUSH_CHANNELS = {"web", "app", "glasses", "info_gap"}
 VALID_DELIVERY_STATUSES = {"pending", "delivered", "failed"}
 
 

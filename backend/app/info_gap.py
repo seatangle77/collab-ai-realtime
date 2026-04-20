@@ -43,6 +43,8 @@ class ClickRequest(BaseModel):
 
 class ClickResponse(BaseModel):
     success: bool
+    content: str = ""
+    keyword: str = ""
 
 
 # ── 工具函数 ──────────────────────────────────────────────────────────────────
@@ -292,7 +294,7 @@ async def click_info_gap_button(
                push_channel, delivery_status, triggered_at)
             VALUES
               (:id, :session_id, :user_id, :content,
-               'app', 'pending', NOW())
+               'info_gap', 'pending', NOW())
             """
         ),
         {
@@ -324,4 +326,4 @@ async def click_info_gap_button(
             # 推送失败不影响接口返回，日志由 jpush_client 内部记录
             pass
 
-    return ClickResponse(success=True)
+    return ClickResponse(success=True, content=final_content, keyword=str(btn["keyword"]))

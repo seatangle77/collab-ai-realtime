@@ -12,7 +12,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'buttonClicked', buttonId: string): void
+  (e: 'buttonClicked', buttonId: string, content: string, keyword: string): void
 }>()
 
 const isExpanded = ref(false)
@@ -32,7 +32,13 @@ function toggleExpanded() {
     </div>
 
     <div class="ai-sheet__preview" @click="toggleExpanded">
-      <span class="ai-sheet__preview-icon" aria-hidden="true">◈</span>
+      <span v-if="hasSummary" class="ai-sheet__preview-badge ai-sheet__preview-badge--summary">
+        <span aria-hidden="true">◈</span> 讨论摘要
+      </span>
+      <span v-if="hasSummary && buttons.length > 0" class="ai-sheet__preview-sep" aria-hidden="true">·</span>
+      <span v-if="buttons.length > 0" class="ai-sheet__preview-badge ai-sheet__preview-badge--gap">
+        <span aria-hidden="true">💡</span> 信息缺口
+      </span>
       <span v-if="buttons.length > 0" class="ai-sheet__preview-keywords">
         <span
           v-for="btn in previewKeywords"
@@ -41,7 +47,6 @@ function toggleExpanded() {
         >{{ btn.keyword }}</span>
         <span v-if="buttons.length > 3" class="ai-sheet__preview-more">+{{ buttons.length - 3 }}</span>
       </span>
-      <span v-else-if="hasSummary" class="ai-sheet__preview-summary-hint">查看讨论摘要</span>
       <span class="ai-sheet__preview-chevron" aria-hidden="true">{{ isExpanded ? '▾' : '▴' }}</span>
     </div>
 
@@ -55,15 +60,19 @@ function toggleExpanded() {
         <p class="ai-sheet__summary-content">{{ summary }}</p>
       </div>
 
+      <template v-if="hasSummary && sessionOngoing && buttons.length > 0">
+        <div class="ai-sheet__divider" aria-hidden="true" />
+      </template>
+
       <div v-if="sessionOngoing && buttons.length > 0" class="ai-sheet__gap-section">
         <div class="ai-sheet__section-head">
-          <span class="ai-sheet__section-icon" aria-hidden="true">💡</span>
-          <span class="ai-sheet__section-label">AI 建议关注</span>
+          <span class="ai-sheet__section-icon ai-sheet__section-icon--gap" aria-hidden="true">💡</span>
+          <span class="ai-sheet__section-label ai-sheet__section-label--gap">信息缺口</span>
         </div>
         <InfoGapButtons
           :session-id="sessionId"
           :buttons="buttons"
-          @clicked="(id) => emit('buttonClicked', id)"
+          @clicked="(id, content, kw) => emit('buttonClicked', id, content, kw)"
         />
       </div>
     </div>
@@ -109,9 +118,26 @@ function toggleExpanded() {
   min-height: 32px;
 }
 
-.ai-sheet__preview-icon {
-  font-size: 13px;
+.ai-sheet__preview-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.ai-sheet__preview-badge--summary {
   color: var(--app-color-ai, #6495ed);
+}
+
+.ai-sheet__preview-badge--gap {
+  color: #d97706;
+}
+
+.ai-sheet__preview-sep {
+  font-size: 12px;
+  color: var(--app-text-muted, #9ca3af);
   flex-shrink: 0;
 }
 
@@ -125,9 +151,9 @@ function toggleExpanded() {
 
 .ai-sheet__preview-pill {
   font-size: 12px;
-  color: var(--app-color-ai, #6495ed);
-  background: rgba(100, 149, 237, 0.1);
-  border: 1px solid rgba(100, 149, 237, 0.3);
+  color: #d97706;
+  background: rgba(217, 119, 6, 0.08);
+  border: 1px solid rgba(217, 119, 6, 0.25);
   border-radius: 10px;
   padding: 2px 8px;
   white-space: nowrap;
@@ -154,11 +180,26 @@ function toggleExpanded() {
 .ai-sheet__body {
   max-height: 55vh;
   overflow-y: auto;
-  padding: 4px 14px 16px;
+  padding: 4px 0 16px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 0;
   border-top: 1px solid var(--app-border, #e5e7eb);
+}
+
+.ai-sheet__summary-section {
+  padding: 12px 14px;
+  background: var(--app-bg-subtle, #f9fafb);
+}
+
+.ai-sheet__gap-section {
+  padding: 12px 14px;
+}
+
+.ai-sheet__divider {
+  height: 1px;
+  background: var(--app-border, #e5e7eb);
+  margin: 0;
 }
 
 .ai-sheet__section-head {
@@ -171,6 +212,14 @@ function toggleExpanded() {
 .ai-sheet__section-icon {
   font-size: 13px;
   color: var(--app-color-ai, #6495ed);
+}
+
+.ai-sheet__section-icon--gap {
+  color: unset;
+}
+
+.ai-sheet__section-label--gap {
+  color: #d97706;
 }
 
 .ai-sheet__section-label {
@@ -201,9 +250,9 @@ function toggleExpanded() {
 .ai-sheet__gap-section :deep(.info-gap-btn) {
   padding: 8px 14px;
   border-radius: var(--app-radius-pill, 20px);
-  border: 1px solid var(--app-color-ai-border, rgba(100, 149, 237, 0.4));
-  background: var(--app-color-ai-soft, rgba(100, 149, 237, 0.08));
-  color: var(--app-color-ai, #6495ed);
+  border: 1px solid rgba(217, 119, 6, 0.35);
+  background: rgba(217, 119, 6, 0.07);
+  color: #d97706;
   font-size: var(--app-font-size-body, 14px);
 }
 </style>

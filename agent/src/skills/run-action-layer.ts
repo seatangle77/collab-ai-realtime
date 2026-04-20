@@ -1,20 +1,12 @@
 import { createLogger } from '../logger';
-import { config } from '../config';
 import {
   writePushQueueItem,
   writeDiscussionState,
-  writeInfoGapButton,
   dismissPendingInfoGapButtonsBeforeWindow,
-  hasPendingInfoGapKeyword,
-  hasClickedInfoGapKeywordInRecentWindows,
-  getPendingInfoGapButtonCount,
 } from '../db/queries';
 import {
-  assessGap,
   embed,
   notifyGroupSilence,
-  notifyInfoGapButton,
-  type AssessGapItem,
 } from '../http/nlp-client';
 import type { Trigger } from './run-reasoning-layer';
 import type { Transcript } from '../db/queries';
@@ -25,9 +17,6 @@ import {
 } from './generate-push-content';
 
 const logger = createLogger('action-layer');
-const INFO_GAP_CONFIDENCE_THRESHOLD = 0.7;
-const INFO_GAP_MAX_PENDING = 3;
-const INFO_GAP_RECENT_CLICKED_WINDOWS = 3;
 
 type DirectPushTriggerType = 'low_participation' | 'shallow_discussion';
 type DirectPushTrigger = Trigger & {
@@ -86,104 +75,6 @@ export async function runActionLayer(params: {
       logger.warn('[信息缺口] 按钮过期处理失败，继续后续流程', { sessionId, message: (err as Error).message });
     }
 
-    const keywordToScore = new Map<string, number>();
-    for (const trigger of infoGapTriggers) {
-      if (!trigger.keyword) continue;
-      const current = keywordToScore.get(trigger.keyword);
-      const score = trigger.skwScore ?? 0;
-      keywordToScore.set(trigger.keyword, current === undefined ? score : Math.min(current, score));
-    }
-    const candidateKeywords = Array.from(keywordToScore.keys());
-
-    if (candidateKeywords.length > 0) {
-      const memberTexts = buildMemberTextsForAssess(memberIds, transcripts);
-      const packed = packAssessContext(summaryText, memberTexts);
-      const assessItems = await assessGap({
-        keywords: candidateKeywords,
-        summary: packed.summary,
-        member_texts: packed.memberTexts,
-        skw_scores: Object.fromEntries(keywordToScore.entries()),
-      });
-
-      const actionable = assessItems.filter((item: AssessGapItem) =>
-        item.needs_prompt
-        && item.confidence >= INFO_GAP_CONFIDENCE_THRESHOLD
-        && item.target_user_id.trim().length > 0,
-      );
-
-      for (const item of actionable) {
-        const uid = item.target_user_id.trim();
-        if (!memberIds.includes(uid)) {
-          logger.info(`[信息缺口] 目标用户不在会话内，跳过 user=${uid} keyword=${item.keyword}`, { sessionId });
-          continue;
-        }
-
-        const keyword = item.keyword.trim();
-        if (!keyword) continue;
-
-        try {
-          const sameKeywordPending = await hasPendingInfoGapKeyword(sessionId, uid, keyword);
-          if (sameKeywordPending) {
-            logger.info(`[信息缺口] 同词 pending 已存在，跳过 user=${uid} keyword=${keyword}`, { sessionId });
-            continue;
-          }
-
-          const clickedRecently = await hasClickedInfoGapKeywordInRecentWindows(
-            sessionId,
-            uid,
-            keyword,
-            windowStart,
-            INFO_GAP_RECENT_CLICKED_WINDOWS,
-            config.agent.longIntervalMs,
-          );
-          if (clickedRecently) {
-            logger.info(`[信息缺口] 最近窗口已点击过该词，跳过 user=${uid} keyword=${keyword}`, { sessionId });
-            continue;
-          }
-
-          const pendingCount = await getPendingInfoGapButtonCount(sessionId, uid);
-          if (pendingCount >= INFO_GAP_MAX_PENDING) {
-            logger.info(`[信息缺口] pending 数已达上限，跳过 user=${uid} pending=${pendingCount}`, { sessionId });
-            continue;
-          }
-
-          const score = item.skw_score ?? keywordToScore.get(keyword) ?? 0;
-          const buttonId = await writeInfoGapButton({
-            session_id: sessionId,
-            user_id: uid,
-            keyword,
-            skw_score: score,
-            window_start: windowStart,
-            gap_type: item.gap_type,
-            confidence: item.confidence,
-            llm_reason: item.reason,
-          });
-          if (!buttonId) {
-            logger.info(`[信息缺口] 写按钮冲突或未插入 user=${uid} keyword=${keyword}`, { sessionId });
-            continue;
-          }
-
-          logger.info(
-            `[信息缺口] 写按钮成功 user=${uid} keyword=${keyword} confidence=${item.confidence.toFixed(2)} reason=${item.reason}`,
-            { sessionId },
-          );
-
-          await notifyInfoGapButton({
-            session_id: sessionId,
-            user_id: uid,
-            button_id: buttonId,
-            keyword,
-            skw_score: score,
-            window_start: windowStart.toISOString(),
-          });
-        } catch (err) {
-          logger.error(`[信息缺口] 按钮写入/通知失败 user=${uid} keyword=${keyword}`, {
-            sessionId,
-            message: (err as Error).message,
-          });
-        }
-      }
-    }
   }
 
   const groupSilenceTriggers = triggers.filter((t) => t.type === 'group_silence');
@@ -284,56 +175,6 @@ export async function runActionLayer(params: {
   }
 
   logger.info(`最终真正落库推送的数量=${persistedCount}`, { sessionId });
-}
-
-function approxTokenCount(text: string): number {
-  const cjkEstimate = Math.ceil(text.length / 2);
-  const latinEstimate = text.split(/\s+/).filter(Boolean).length;
-  return Math.max(cjkEstimate, latinEstimate);
-}
-
-function buildMemberTextsForAssess(
-  memberIds: string[],
-  transcripts: Transcript[],
-): Record<string, string[]> {
-  const linesByUser: Record<string, string[]> = {};
-  for (const uid of memberIds) linesByUser[uid] = [];
-
-  for (const t of transcripts) {
-    if (!t.user_id || !(t.user_id in linesByUser)) continue;
-    const line = (t.text ?? '').trim();
-    if (!line) continue;
-    linesByUser[t.user_id].push(line);
-  }
-
-  return linesByUser;
-}
-
-function packAssessContext(
-  summaryText: string,
-  linesByUser: Record<string, string[]>,
-): { summary: string; memberTexts: Record<string, string> } {
-  const summary = summaryText.slice(0, 500);
-  const buildWithPerUserLimit = (limit: number): Record<string, string> => {
-    const out: Record<string, string> = {};
-    for (const [uid, lines] of Object.entries(linesByUser)) {
-      const selected = lines.slice(-limit);
-      out[uid] = selected.join('\n');
-    }
-    return out;
-  };
-
-  let memberTexts = buildWithPerUserLimit(20);
-  let totalTokens = approxTokenCount(summary);
-  for (const text of Object.values(memberTexts)) {
-    totalTokens += approxTokenCount(text);
-  }
-
-  if (totalTokens > 3000) {
-    memberTexts = buildWithPerUserLimit(10);
-  }
-
-  return { summary, memberTexts };
 }
 
 async function persistPushDecision(params: {

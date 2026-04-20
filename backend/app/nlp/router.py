@@ -235,12 +235,13 @@ def generate_summary_route(req: GenerateSummaryRequest, _: bool = Depends(requir
 
 # ── 11. generate_push_structured ─────────────────────────────────────────────
 
-StructuredPushTriggerType = Literal["low_participation", "shallow_discussion"]
+StructuredPushTriggerType = Literal["low_participation", "shallow_discussion", "group_silence"]
 
 
 class StructuredTranscriptItem(BaseModel):
     transcript_id: str
     user_id: str
+    speaker_name: str | None = None
     text: str
 
 

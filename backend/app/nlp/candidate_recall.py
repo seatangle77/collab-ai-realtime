@@ -26,10 +26,15 @@ _USER_TEMPLATE = """\
 {member_sections}
 
 请完成以下两件事：
-1. 提取 8~12 个有实质意义的关键词或短语
-   - 必须是对话中真实出现的词
-   - 排除通用泛词：情况、场景、东西、地方、方式、活动、问题、内容、感觉、觉得、时候
-   - 优先提取：具体话题词、名词短语、有争议或差异的概念
+1. 提取 0~5 个对部分成员可能陌生的词，必须同时满足：
+   - 对话中真实出现的词
+   - 有一定理解门槛，属于以下类型之一：
+     · 专业术语或学科概念（某领域才懂的词）
+     · 缩写或简称（可能有人不知道全称）
+     · 新梗、网络用语、地域性说法
+     · 某成员反复提及但其他成员没有回应或跟进的概念
+   - 排除：日常口语、通用名词、全员都在使用的词（说明大家都懂）
+   - 没有符合条件的词时，返回空数组，不要凑数
 2. 对每个词判断成员间是否存在理解差异
    - needs_prompt=true：某成员对这个词的理解明显与他人不同，需要提示
    - target_user_id：需要收到提示的成员 ID，没有则填空字符串
@@ -39,16 +44,16 @@ _USER_TEMPLATE = """\
 {{
   "keywords": [
     {{
-      "word": "金钱观",
+      "word": "量化宽松",
       "needs_prompt": true,
       "target_user_id": "u_terry",
-      "reason": "Terry 只谈价格，Ally 在讨论价值观层面，存在理解差异"
+      "reason": "Terry 多次提及但其他人没有回应，可能不熟悉这个概念"
     }},
     {{
-      "word": "旅游搭子",
+      "word": "搭子",
       "needs_prompt": false,
       "target_user_id": "",
-      "reason": "三人理解一致，都在讨论找同行伙伴的问题"
+      "reason": "三人都在用这个词且语境一致"
     }}
   ]
 }}\
@@ -108,7 +113,7 @@ def recall_with_gap(member_texts: dict[str, str]) -> dict[str, Any]:
         client = _get_client()
         response = client.chat.completions.create(
             model=nlp_settings.reasoning_model,
-            max_tokens=1500,
+            max_tokens=600,
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},

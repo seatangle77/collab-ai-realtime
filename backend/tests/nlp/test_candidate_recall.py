@@ -1,57 +1,94 @@
 from __future__ import annotations
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from app.nlp import candidate_recall
 
 
-@pytest.fixture(autouse=True)
-def _mock_phrase_extractor(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(candidate_recall, "_extract_noun_phrases", lambda text: set())
+def test_recall_with_gap_empty_input() -> None:
+    result = candidate_recall.recall_with_gap({})
+    assert result == {"keywords": []}
 
 
-def test_recall_candidates_empty_input() -> None:
-    result = candidate_recall.recall_candidates({}, top_n=15)
-    assert result == {"keywords": [], "sources": {}}
+def test_recall_with_gap_single_member() -> None:
+    result = candidate_recall.recall_with_gap({"u1": "量化宽松很重要"})
+    assert result == {"keywords": []}
 
 
-def test_recall_candidates_priority_and_limit(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        candidate_recall,
-        "extract_tfidf",
-        lambda member_texts, top_n=20: {"keywords": ["框架", "机制", "价值"], "member_keyword_contexts": {}},
-    )
-    monkeypatch.setattr(candidate_recall, "ABSTRACT_CONCEPTS", {"价值", "效率", "共识"})
-    monkeypatch.setattr(candidate_recall, "_extract_noun_phrases", lambda text: {"用户体验", "资源配置"})
-
-    member_texts = {
-        "u1": "我们讨论AI MVP和创新价值，以及用户体验",
-        "u2": "我关心MVP推进效率和资源配置",
-        "u3": "MVP要先做共识",
-    }
-    result = candidate_recall.recall_candidates(member_texts, top_n=6)
-
-    assert result["keywords"] == ["框架", "机制", "价值", "MVP", "共识", "效率"]
-    assert result["sources"]["框架"] == "tfidf"
-    assert result["sources"]["MVP"] == "acronym"
-    assert result["sources"]["共识"] == "abstract"
+def test_recall_with_gap_no_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(candidate_recall.nlp_settings, "qwen_api_key", "")
+    result = candidate_recall.recall_with_gap({"u1": "量化宽松", "u2": "利率政策"})
+    assert result == {"keywords": []}
 
 
-def test_recall_candidates_acronym_must_appear_in_at_least_two_members(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        candidate_recall,
-        "extract_tfidf",
-        lambda member_texts, top_n=20: {"keywords": [], "member_keyword_contexts": {}},
-    )
-    monkeypatch.setattr(candidate_recall, "ABSTRACT_CONCEPTS", set())
+def test_recall_with_gap_normal(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(candidate_recall.nlp_settings, "qwen_api_key", "fake-key")
 
-    member_texts = {
-        "u1": "这个方向要看MVP和KPI，OK",
-        "u2": "我只提了MVP",
-        "u3": "只说了AI",
-    }
-    result = candidate_recall.recall_candidates(member_texts, top_n=10)
+    mock_response = MagicMock()
+    mock_response.choices[0].message.content = """{
+  "keywords": [
+    {"word": "量化宽松", "needs_prompt": true, "target_user_id": "u2", "reason": "u2 多次提及但 u1 没有回应"},
+    {"word": "缩表", "needs_prompt": false, "target_user_id": "", "reason": "两人理解一致"}
+  ]
+}"""
 
-    # MVP 在 u1/u2 至少 2 人出现，KPI 和 AI 仅 1 人出现；OK 属于噪音词
-    assert result["keywords"] == ["MVP"]
-    assert result["sources"]["MVP"] == "acronym"
+    with patch.object(candidate_recall, "_get_client") as mock_get_client:
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = mock_response
+        mock_get_client.return_value = mock_client
+
+        result = candidate_recall.recall_with_gap({"u1": "利率政策", "u2": "量化宽松和缩表"})
+
+    assert len(result["keywords"]) == 2
+    assert result["keywords"][0]["word"] == "量化宽松"
+    assert result["keywords"][0]["needs_prompt"] is True
+    assert result["keywords"][0]["target_user_id"] == "u2"
+    assert result["keywords"][1]["word"] == "缩表"
+    assert result["keywords"][1]["needs_prompt"] is False
+
+
+def test_recall_with_gap_empty_keywords(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(candidate_recall.nlp_settings, "qwen_api_key", "fake-key")
+
+    mock_response = MagicMock()
+    mock_response.choices[0].message.content = '{"keywords": []}'
+
+    with patch.object(candidate_recall, "_get_client") as mock_get_client:
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = mock_response
+        mock_get_client.return_value = mock_client
+
+        result = candidate_recall.recall_with_gap({"u1": "今天天气不错", "u2": "是的很好"})
+
+    assert result == {"keywords": []}
+
+
+def test_recall_with_gap_json_decode_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(candidate_recall.nlp_settings, "qwen_api_key", "fake-key")
+
+    mock_response = MagicMock()
+    mock_response.choices[0].message.content = "不是合法JSON内容"
+
+    with patch.object(candidate_recall, "_get_client") as mock_get_client:
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = mock_response
+        mock_get_client.return_value = mock_client
+
+        result = candidate_recall.recall_with_gap({"u1": "量化宽松", "u2": "利率政策"})
+
+    assert result == {"keywords": []}
+
+
+def test_recall_with_gap_api_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(candidate_recall.nlp_settings, "qwen_api_key", "fake-key")
+
+    with patch.object(candidate_recall, "_get_client") as mock_get_client:
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.side_effect = Exception("timeout")
+        mock_get_client.return_value = mock_client
+
+        result = candidate_recall.recall_with_gap({"u1": "量化宽松", "u2": "利率政策"})
+
+    assert result == {"keywords": []}

@@ -147,9 +147,15 @@ def test_click_success():
     btn_id = _seed_button(session_id, user["id"])
     r = requests.post(f"{BASE_URL}/api/sessions/{session_id}/info-gap/click",
                       headers=_auth(token), json={"button_id": btn_id})
-    ok = r.status_code == 200 and r.json().get("success") is True
-    if not ok:
+    if r.status_code != 200:
         return _log(False, "POST click 成功", r.text)
+    data = r.json()
+    if data.get("success") is not True:
+        return _log(False, "POST click 返回 success=true", r.text)
+    if not isinstance(data.get("content"), str):
+        return _log(False, "POST click 返回 content 字段（str）", r.text)
+    if not isinstance(data.get("keyword"), str):
+        return _log(False, "POST click 返回 keyword 字段（str）", r.text)
 
     # 验证再取一次 buttons 该按钮不出现（已 clicked）
     r2 = requests.get(f"{BASE_URL}/api/sessions/{session_id}/info-gap/buttons",

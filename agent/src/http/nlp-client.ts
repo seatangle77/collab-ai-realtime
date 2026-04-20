@@ -210,7 +210,7 @@ export async function keywordRecallWithGap(
   try {
     const res = await client.post<KeywordRecallWithGapResult>('/api/nlp/keyword_recall_with_gap', {
       member_texts: memberTexts,
-    });
+    }, { timeout: 60_000 });
     return res.data;
   } catch (err) {
     logger.error('keyword_recall_with_gap failed', { message: (err as Error).message });
