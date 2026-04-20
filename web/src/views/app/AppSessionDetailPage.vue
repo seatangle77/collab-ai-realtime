@@ -22,7 +22,7 @@ import {
 import { listMyGroups } from '../../api/appGroups'
 import { extractErrorMessage } from '../../utils/error'
 import PushNotification from '../../components/PushNotification.vue'
-import InfoGapButtons, { type InfoGapButton } from '../../components/InfoGapButtons.vue'
+import { type InfoGapButton } from '../../components/InfoGapButtons.vue'
 import AiInsightSheet from '../../components/AiInsightSheet.vue'
 import { appHttp } from '../../api/appHttp'
 import { buildPushLogDedupeKey, parsePushLogTime, sortPushLogsByTriggeredAtDesc } from '../../utils/pushLogs'
