@@ -1,19 +1,23 @@
-import { getTranscriptsInWindow, writeKeywordSkw, KeywordSkwRow } from '../../db/queries';
-import { tfidf, candidateRecall, embed, similarity } from '../../http/nlp-client';
+import {
+  getTranscriptsInWindow,
+  writeKeywordSkw,
+  updateKeywordSkwBatch,
+  deleteKeywordSkwByKeyword,
+  writeInfoGapButton,
+  hasPendingInfoGapKeyword,
+  hasClickedInfoGapKeywordInRecentWindows,
+} from '../../db/queries';
+import { keywordRecallWithGap, embed, similarity, notifyInfoGapButton } from '../../http/nlp-client';
 import { createLogger } from '../../logger';
+import { nanoid } from 'nanoid';
 
 const logger = createLogger('skill:skw');
 
+const WINDOW_MS = 2 * 60 * 1000;
+const RECENT_WINDOW_COUNT = 3;
+
 export interface SkwResult {
-  /**
-   * 全局关键词列表（来自 tfidf）
-   * keyword_skw 表已同步写入
-   */
   keywords: string[];
-  /**
-   * keyword → { userA_id → { userB_id → skw_score } }
-   * 用于后续 info_gain 消费
-   */
   scores: Record<string, Record<string, Record<string, number>>>;
 }
 
@@ -29,15 +33,6 @@ function findContext(text: string, keyword: string): string {
   return hit ?? '';
 }
 
-/**
- * Skw：关键词跨成员语义相似度
- *
- * 步骤：
- * 1. 用 /tfidf 提取全局 top-N 关键词 + 每位成员的上下文句子
- * 2. 对每个关键词，取每位成员的上下文句子做 embed
- * 3. 对所有成员 pair (a, b) 计算余弦相似度 → skw_score
- * 4. 写入 keyword_skw 表
- */
 export async function computeSkw(
   sessionId: string,
   windowStart: Date,
@@ -50,14 +45,12 @@ export async function computeSkw(
 
   const transcripts = await getTranscriptsInWindow(sessionId, windowStart, windowEnd);
 
-  // 聚合每位成员的发言文本
   const textByUser: Record<string, string[]> = {};
   for (const uid of memberIds) textByUser[uid] = [];
   for (const t of transcripts) {
     if (t.user_id && t.text && t.user_id in textByUser) textByUser[t.user_id].push(t.text);
   }
 
-  // 过滤掉无发言成员
   const activeMemberTexts: Record<string, string> = {};
   for (const uid of memberIds) {
     const combined = textByUser[uid].join(' ').trim();
@@ -68,113 +61,217 @@ export async function computeSkw(
     return { keywords: [], scores: {} };
   }
 
-  logger.info(`[关键词召回] 正在提取 ${Object.keys(activeMemberTexts).length} 位活跃成员的候选词`, { sessionId });
-  const [tfidfResult, recallResult] = await Promise.all([
-    tfidf(activeMemberTexts, 20),
-    candidateRecall(activeMemberTexts, 15),
-  ]);
-  const { member_keyword_contexts } = tfidfResult;
-  const keywords = recallResult.keywords ?? [];
-  logger.info(`[关键词召回] 提取完成，候选词：${keywords.join('、') || '（无）'}`, { sessionId });
+  // ── 阶段一：大模型召回 + 评估 ────────────────────────────────────────────────
 
-  if (keywords.length === 0) {
+  logger.info('[SKW] 调用大模型召回关键词', { sessionId });
+  const recallResult = await keywordRecallWithGap(activeMemberTexts);
+  const recallKeywords = recallResult.keywords ?? [];
+
+  if (recallKeywords.length === 0) {
+    logger.info('[SKW] 大模型未返回关键词，终止', { sessionId });
     return { keywords: [], scores: {} };
   }
 
+  // needs_prompt 信息暂存内存：word -> { needs_prompt, target_user_id, reason }
+  const needsPromptMap: Record<string, { needs_prompt: boolean; target_user_id: string; reason: string }> = {};
+  for (const item of recallKeywords) {
+    needsPromptMap[item.word] = {
+      needs_prompt: item.needs_prompt,
+      target_user_id: item.target_user_id,
+      reason: item.reason,
+    };
+  }
+
+  const words = recallKeywords.map((k) => k.word);
+  logger.info(`[SKW] 召回关键词：${words.join('、')}`, { sessionId });
+
+  // ── 阶段二：写入 keyword_skw 初始记录（pending）────────────────────────────
+
   const activeMembers = Object.keys(activeMemberTexts);
-  const skwRows: KeywordSkwRow[] = [];
+
+  // 生成所有 pair 组合，并记录每条记录的 id 供后续更新
+  // pendingIds: word -> [{ id, userA, userB }]
+  const pendingIds: Record<string, { id: string; userA: string; userB: string }[]> = {};
+
+  const initialRows = [];
+  for (const word of words) {
+    pendingIds[word] = [];
+    for (let i = 0; i < activeMembers.length; i++) {
+      for (let j = i + 1; j < activeMembers.length; j++) {
+        const id = 'skw_' + nanoid(12);
+        pendingIds[word].push({ id, userA: activeMembers[i], userB: activeMembers[j] });
+        initialRows.push({
+          id,
+          session_id: sessionId,
+          window_start: windowStart,
+          keyword: word,
+          user_a_id: activeMembers[i],
+          user_b_id: activeMembers[j],
+          skw_score: undefined,
+          mention_count: undefined,
+          skw_status: 'pending',
+        });
+      }
+    }
+  }
+
+  await writeKeywordSkw(initialRows);
+  logger.info(`[SKW] 写入初始记录 ${initialRows.length} 条`, { sessionId });
+
+  // ── 阶段三：SKW 分数计算，更新 keyword_skw ──────────────────────────────────
+
   const scores: SkwResult['scores'] = {};
+  // 记录每个词每个 user 最终的 skw_score（用于阶段四查分）
+  const skwScoreByWordUser: Record<string, Record<string, number>> = {};
 
-  for (const keyword of keywords) {
-    scores[keyword] = {};
+  for (const word of words) {
+    scores[word] = {};
+    skwScoreByWordUser[word] = {};
 
-    // 只保留实际提及该关键词的成员（无上下文则跳过，避免全文回退导致误报）
+    // 找到实际提及该词的成员及其上下文句子
     const contextByUser: Record<string, string> = {};
     for (const uid of activeMembers) {
-      const ctx = member_keyword_contexts[uid]?.[keyword] || findContext(activeMemberTexts[uid], keyword);
+      const ctx = findContext(activeMemberTexts[uid], word);
       if (ctx) contextByUser[uid] = ctx;
     }
 
     const mentionCount = Object.keys(contextByUser).length;
+    const pairs = pendingIds[word];
 
-    // 完全没人提及，跳过
+    // 0人提及：大模型幻觉，删除初始记录
     if (mentionCount === 0) {
+      logger.info(`[SKW] 关键词「${word}」无人提及（幻觉），删除记录`, { sessionId });
+      await deleteKeywordSkwByKeyword(sessionId, windowStart, word);
+      delete needsPromptMap[word];
       continue;
     }
 
-    // 仅 1 人提及：对"提及者 vs 每个未提及者"打默认低分 0.1，写入 skwRows，不做 embed
+    const updateRows: { id: string; skw_score: number; mention_count: number; skw_status: string }[] = [];
+
     if (mentionCount === 1) {
-      logger.info(`[跨成员语义相似度 Skw] 关键词「${keyword}」：提及人数不足 2，写入默认分`, { sessionId });
+      // 1人提及：全部更新为 single_mention
+      logger.info(`[SKW] 关键词「${word}」仅1人提及`, { sessionId });
       const mentioner = Object.keys(contextByUser)[0];
-      const nonMentioners = activeMembers.filter((uid) => uid !== mentioner);
-      for (const other of nonMentioners) {
-        scores[keyword][mentioner] = scores[keyword][mentioner] ?? {};
-        scores[keyword][other] = scores[keyword][other] ?? {};
-        scores[keyword][mentioner][other] = 0.1;
-        scores[keyword][other][mentioner] = 0.1;
-        skwRows.push({
-          session_id: sessionId,
-          window_start: windowStart,
-          keyword,
-          user_a_id: mentioner,
-          user_b_id: other,
-          skw_score: 0.1,
-          mention_count: mentionCount,
-          skw_status: 'single_mention',
-        });
+      for (const { id, userA, userB } of pairs) {
+        updateRows.push({ id, skw_score: 0.1, mention_count: 1, skw_status: 'single_mention' });
+        scores[word][userA] = scores[word][userA] ?? {};
+        scores[word][userB] = scores[word][userB] ?? {};
+        scores[word][userA][userB] = 0.1;
+        scores[word][userB][userA] = 0.1;
       }
-      continue;
-    }
+      skwScoreByWordUser[word][mentioner] = 0.1;
 
-    // 批量 embed（只处理有上下文的成员）
-    const keywordMembers = Object.keys(contextByUser);
-    const texts = keywordMembers.map((uid) => contextByUser[uid]);
-    logger.info(`[跨成员语义相似度 Skw] 关键词「${keyword}」：向量化 ${texts.length} 位成员的上下文`, { sessionId });
-    const embeddings = await embed(texts);
-    const embeddingByUser: Record<string, number[]> = {};
-    keywordMembers.forEach((uid, i) => {
-      embeddingByUser[uid] = embeddings[i];
-    });
+    } else {
+      // 2人或3人提及：对有上下文的成员做 embedding，计算余弦相似度
+      const mentioners = Object.keys(contextByUser);
+      const texts = mentioners.map((uid) => contextByUser[uid]);
+      logger.info(`[SKW] 关键词「${word}」${mentionCount}人提及，开始 embedding`, { sessionId });
 
-    // 所有 pair (a, b) 计算相似度
-    const pairs: Array<{ vec_a: number[]; vec_b: number[] }> = [];
-    const pairMeta: Array<{ userA: string; userB: string }> = [];
+      const embeddings = await embed(texts);
+      const embeddingByUser: Record<string, number[]> = {};
+      mentioners.forEach((uid, i) => { embeddingByUser[uid] = embeddings[i]; });
 
-    for (let i = 0; i < keywordMembers.length; i++) {
-      for (let j = i + 1; j < keywordMembers.length; j++) {
-        const userA = keywordMembers[i];
-        const userB = keywordMembers[j];
-        pairs.push({ vec_a: embeddingByUser[userA], vec_b: embeddingByUser[userB] });
-        pairMeta.push({ userA, userB });
+      // 计算所有提及者之间的相似度
+      const simPairs: { vec_a: number[]; vec_b: number[] }[] = [];
+      const simMeta: { userA: string; userB: string }[] = [];
+      for (let i = 0; i < mentioners.length; i++) {
+        for (let j = i + 1; j < mentioners.length; j++) {
+          simPairs.push({ vec_a: embeddingByUser[mentioners[i]], vec_b: embeddingByUser[mentioners[j]] });
+          simMeta.push({ userA: mentioners[i], userB: mentioners[j] });
+        }
       }
-    }
 
-    const simScores = await similarity(pairs);
-
-    simScores.forEach((score, idx) => {
-      const { userA, userB } = pairMeta[idx];
-      const level = score >= 0.85 ? '高度一致' : score >= 0.6 ? '部分重叠' : '差异显著';
-      logger.info(`[跨成员语义相似度 Skw] 关键词「${keyword}」${userA} vs ${userB}：相似度=${score.toFixed(3)}（${level}）`, { sessionId });
-
-      if (!scores[keyword][userA]) scores[keyword][userA] = {};
-      if (!scores[keyword][userB]) scores[keyword][userB] = {};
-      scores[keyword][userA][userB] = score;
-      scores[keyword][userB][userA] = score;
-
-      skwRows.push({
-        session_id: sessionId,
-        window_start: windowStart,
-        keyword,
-        user_a_id: userA,
-        user_b_id: userB,
-        skw_score: score,
-        mention_count: keywordMembers.length,
-        skw_status: 'computed',
+      const simScores = await similarity(simPairs);
+      const simMap: Record<string, Record<string, number>> = {};
+      simScores.forEach((score, idx) => {
+        const { userA, userB } = simMeta[idx];
+        simMap[userA] = simMap[userA] ?? {};
+        simMap[userB] = simMap[userB] ?? {};
+        simMap[userA][userB] = score;
+        simMap[userB][userA] = score;
+        scores[word][userA] = scores[word][userA] ?? {};
+        scores[word][userB] = scores[word][userB] ?? {};
+        scores[word][userA][userB] = score;
+        scores[word][userB][userA] = score;
+        logger.info(`[SKW] 「${word}」${userA} vs ${userB} 相似度=${score.toFixed(3)}`, { sessionId });
       });
-    });
+
+      // 按 pair 记录更新值
+      for (const { id, userA, userB } of pairs) {
+        const bothMentioned = userA in contextByUser && userB in contextByUser;
+        if (bothMentioned) {
+          const score = simMap[userA]?.[userB] ?? 0.1;
+          updateRows.push({ id, skw_score: score, mention_count: mentionCount, skw_status: 'computed' });
+        } else {
+          updateRows.push({ id, skw_score: 0.1, mention_count: mentionCount, skw_status: 'single_mention' });
+          scores[word][userA] = scores[word][userA] ?? {};
+          scores[word][userB] = scores[word][userB] ?? {};
+          scores[word][userA][userB] = 0.1;
+          scores[word][userB][userA] = 0.1;
+        }
+      }
+
+      for (const uid of mentioners) {
+        // 取该用户与其他所有人的平均分作为代表分
+        const peerScores = Object.values(simMap[uid] ?? {});
+        skwScoreByWordUser[word][uid] = peerScores.length > 0
+          ? peerScores.reduce((a, b) => a + b, 0) / peerScores.length
+          : 0.1;
+      }
+    }
+
+    await updateKeywordSkwBatch(updateRows);
   }
 
-  await writeKeywordSkw(skwRows);
+  // ── 阶段四：写入 info_gap_buttons，推送按钮 ──────────────────────────────────
 
-  return { keywords, scores };
+  for (const word of Object.keys(needsPromptMap)) {
+    const { needs_prompt, target_user_id, reason } = needsPromptMap[word];
+    if (!needs_prompt || !target_user_id) continue;
+
+    // 去重：已有 pending 按钮则跳过
+    const alreadyPending = await hasPendingInfoGapKeyword(sessionId, target_user_id, word);
+    if (alreadyPending) {
+      logger.info(`[SKW] 「${word}」用户 ${target_user_id} 已有 pending 按钮，跳过`, { sessionId });
+      continue;
+    }
+
+    // 近期已点击过则跳过
+    const recentlyClicked = await hasClickedInfoGapKeywordInRecentWindows(
+      sessionId, target_user_id, word, windowStart, RECENT_WINDOW_COUNT, WINDOW_MS,
+    );
+    if (recentlyClicked) {
+      logger.info(`[SKW] 「${word}」用户 ${target_user_id} 近期已点击，跳过`, { sessionId });
+      continue;
+    }
+
+    const skwScore = skwScoreByWordUser[word]?.[target_user_id] ?? 0.1;
+
+    const buttonId = await writeInfoGapButton({
+      session_id: sessionId,
+      user_id: target_user_id,
+      keyword: word,
+      skw_score: skwScore,
+      window_start: windowStart,
+      llm_reason: reason,
+    });
+
+    if (!buttonId) {
+      logger.info(`[SKW] 「${word}」writeInfoGapButton 未插入（ON CONFLICT），跳过`, { sessionId });
+      continue;
+    }
+
+    await notifyInfoGapButton({
+      session_id: sessionId,
+      user_id: target_user_id,
+      button_id: buttonId,
+      keyword: word,
+      skw_score: skwScore,
+      window_start: windowStart.toISOString(),
+    });
+
+    logger.info(`[SKW] 「${word}」按钮已推送给用户 ${target_user_id}`, { sessionId });
+  }
+
+  return { keywords: words, scores };
 }

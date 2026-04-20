@@ -711,6 +711,36 @@ export async function writeDiscussionSummary(row: {
   );
 }
 
+/** 批量更新 keyword_skw 的 skw_score / mention_count / skw_status */
+export async function updateKeywordSkwBatch(
+  rows: { id: string; skw_score: number; mention_count: number; skw_status: string }[],
+): Promise<void> {
+  if (rows.length === 0) return;
+  for (const row of rows) {
+    await pool.query(
+      `UPDATE keyword_skw
+       SET skw_score = $1, mention_count = $2, skw_status = $3
+       WHERE id = $4`,
+      [row.skw_score, row.mention_count, row.skw_status, row.id],
+    );
+  }
+}
+
+/** 删除指定窗口内某个关键词的所有 keyword_skw 记录（大模型幻觉词处理） */
+export async function deleteKeywordSkwByKeyword(
+  sessionId: string,
+  windowStart: Date,
+  keyword: string,
+): Promise<void> {
+  await pool.query(
+    `DELETE FROM keyword_skw
+     WHERE session_id = $1
+       AND window_start = $2
+       AND keyword = $3`,
+    [sessionId, toUtcString(windowStart), keyword],
+  );
+}
+
 /** 批量写入 keyword_skw */
 export async function writeKeywordSkw(rows: KeywordSkwRow[]): Promise<void> {
   if (rows.length === 0) return;

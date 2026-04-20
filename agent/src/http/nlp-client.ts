@@ -22,14 +22,15 @@ export interface SimilarityResult {
   scores: number[];
 }
 
-export interface TfidfResult {
-  keywords: string[];
-  member_keyword_contexts: Record<string, Record<string, string>>;
+export interface KeywordRecallItem {
+  word: string;
+  needs_prompt: boolean;
+  target_user_id: string;
+  reason: string;
 }
 
-export interface CandidateRecallResult {
-  keywords: string[];
-  sources: Record<string, string>;
+export interface KeywordRecallWithGapResult {
+  keywords: KeywordRecallItem[];
 }
 
 export interface ReasoningResult {
@@ -121,22 +122,6 @@ export interface GenerateStructuredPushResult {
   content: string;
 }
 
-export interface AssessGapParams {
-  keywords: string[];
-  summary: string;
-  member_texts: Record<string, string>;
-  skw_scores: Record<string, number>;
-}
-
-export interface AssessGapItem {
-  keyword: string;
-  needs_prompt: boolean;
-  target_user_id: string;
-  gap_type: string;
-  confidence: number;
-  reason: string;
-  skw_score: number;
-}
 
 export interface TranscriptItem {
   user_id: string;
@@ -197,37 +182,18 @@ export async function similarity(
   }
 }
 
-/** TF-IDF 关键词提取，memberTexts = { user_id: 发言文本 } */
-export async function tfidf(
+/** 关键词召回 + 信息缺口评估（一次大模型调用） */
+export async function keywordRecallWithGap(
   memberTexts: Record<string, string>,
-  topN = 5,
-): Promise<TfidfResult> {
+): Promise<KeywordRecallWithGapResult> {
   try {
-    const res = await client.post<TfidfResult>('/api/nlp/tfidf', {
+    const res = await client.post<KeywordRecallWithGapResult>('/api/nlp/keyword_recall_with_gap', {
       member_texts: memberTexts,
-      top_n: topN,
     });
     return res.data;
   } catch (err) {
-    logger.error('tfidf failed', { message: (err as Error).message });
-    throw err;
-  }
-}
-
-/** 候选词召回（TF-IDF + 抽象概念 + 名词短语 + 英文缩写） */
-export async function candidateRecall(
-  memberTexts: Record<string, string>,
-  topN = 15,
-): Promise<CandidateRecallResult> {
-  try {
-    const res = await client.post<CandidateRecallResult>('/api/nlp/candidate_recall', {
-      member_texts: memberTexts,
-      top_n: topN,
-    });
-    return res.data;
-  } catch (err) {
-    logger.error('candidate_recall failed', { message: (err as Error).message });
-    return { keywords: [], sources: {} };
+    logger.error('keyword_recall_with_gap failed', { message: (err as Error).message });
+    return { keywords: [] };
   }
 }
 
@@ -284,21 +250,6 @@ export async function generateStructuredPush(
   } catch (err) {
     logger.error('generate_push_structured failed', { message: (err as Error).message });
     return { needs_prompt: false, anchor: null, content: '' };
-  }
-}
-
-/** 信息缺口评估（Rubric） */
-export async function assessGap(params: AssessGapParams): Promise<AssessGapItem[]> {
-  try {
-    const res = await client.post<{ items: AssessGapItem[] }>(
-      '/api/nlp/assess_gap',
-      params,
-      { timeout: 45_000 },
-    );
-    return res.data.items ?? [];
-  } catch (err) {
-    logger.error('assess_gap failed', { message: (err as Error).message });
-    return [];
   }
 }
 

@@ -1,140 +1,138 @@
 """
-信息缺口候选召回
-- 中文为主：TF-IDF 关键词 + 抽象概念词 + 名词短语
-- 英文为辅：全大写缩写（2-5）
+关键词召回 + 信息缺口评估（合并为一次大模型调用）
+输入：各成员发言文本
+输出：关键词列表，每个词含 needs_prompt / target_user_id / reason
 """
 from __future__ import annotations
 
-import re
-from collections import defaultdict
+import json
+import logging
+from typing import Any
 
-from .lexicon_loader import (
-    load_abstract_concepts,
-    load_gap_exclude_words,
+from openai import OpenAI
+
+from ..settings import nlp_settings
+
+logger = logging.getLogger(__name__)
+
+_SYSTEM_PROMPT = (
+    "你是一个对话分析助手，负责从多人对话中提取关键词并判断成员间的理解差异。"
+    "严格按 JSON 返回，不输出任何解释文字和 markdown。"
 )
-from .segmenter import STOPWORDS, get_pipeline
-from .tfidf import extract_tfidf
 
-ABSTRACT_CONCEPTS = load_abstract_concepts()
-GAP_EXCLUDE_WORDS = load_gap_exclude_words()
-NOUN_POS_PREFIXES: tuple[str, ...] = ("n", "vn")
-# 不能用 \b（在中文相邻场景下容易漏匹配，如 "MVP和"）。
-# 用前后不是英文字母的约束，兼容中英文混排。
-UPPER_ACRONYM_RE = re.compile(r"(?<![A-Z])[A-Z]{2,5}(?![A-Z])")
-NOISE_ACRONYMS: set[str] = {"OK", "NO", "YES", "IT", "TO", "IN", "ON", "AT"}
+_USER_TEMPLATE = """\
+以下是多人对话，每位成员的发言单独列出：
 
+{member_sections}
 
-def _flatten_terms(terms: object) -> list[str]:
-    if not isinstance(terms, list) or not terms:
-        return []
-    first = terms[0]
-    if isinstance(first, str):
-        return [w for w in terms if isinstance(w, str)]
-    flat: list[str] = []
-    for sent in terms:
-        if isinstance(sent, list):
-            flat.extend([w for w in sent if isinstance(w, str)])
-    return flat
+请完成以下两件事：
+1. 提取 8~12 个有实质意义的关键词或短语
+   - 必须是对话中真实出现的词
+   - 排除通用泛词：情况、场景、东西、地方、方式、活动、问题、内容、感觉、觉得、时候
+   - 优先提取：具体话题词、名词短语、有争议或差异的概念
+2. 对每个词判断成员间是否存在理解差异
+   - needs_prompt=true：某成员对这个词的理解明显与他人不同，需要提示
+   - target_user_id：需要收到提示的成员 ID，没有则填空字符串
+   - reason：一句话说明判断理由
 
-
-def _is_noun(flag: str) -> bool:
-    return any(flag.startswith(prefix) for prefix in NOUN_POS_PREFIXES)
-
-
-def _contains_cjk(text: str) -> bool:
-    return bool(re.search(r"[\u4e00-\u9fff]", text))
-
-
-def _extract_noun_phrases(text: str) -> set[str]:
-    pipeline = get_pipeline()
-    result = pipeline(text, tasks=["tok/fine", "pos/pku"])
-    words = _flatten_terms(result["tok/fine"])
-    flags = _flatten_terms(result["pos/pku"])
-    if not words or not flags:
-        return set()
-
-    out: set[str] = set()
-    buf: list[str] = []
-    for word, flag in zip(words, flags):
-        token = word.strip()
-        if not token:
-            continue
-        if _is_noun(flag) and token not in STOPWORDS and token not in GAP_EXCLUDE_WORDS:
-            buf.append(token)
-            continue
-
-        if len(buf) >= 2:
-            phrase = "".join(buf[:4]).strip()
-            if 2 <= len(phrase) <= 16 and _contains_cjk(phrase):
-                out.add(phrase)
-        buf = []
-
-    if len(buf) >= 2:
-        phrase = "".join(buf[:4]).strip()
-        if 2 <= len(phrase) <= 16 and _contains_cjk(phrase):
-            out.add(phrase)
-    return out
+返回严格 JSON（不含任何其他内容）：
+{{
+  "keywords": [
+    {{
+      "word": "金钱观",
+      "needs_prompt": true,
+      "target_user_id": "u_terry",
+      "reason": "Terry 只谈价格，Ally 在讨论价值观层面，存在理解差异"
+    }},
+    {{
+      "word": "旅游搭子",
+      "needs_prompt": false,
+      "target_user_id": "",
+      "reason": "三人理解一致，都在讨论找同行伙伴的问题"
+    }}
+  ]
+}}\
+"""
 
 
-def recall_candidates(member_texts: dict[str, str], top_n: int = 15) -> dict:
-    """
-    返回候选词：
-    - keywords: 按优先级排序后的候选词
-    - sources: keyword -> source（tfidf / acronym / abstract / noun_phrase）
-    """
-    if not member_texts:
-        return {"keywords": [], "sources": {}}
+def _get_client() -> OpenAI:
+    return OpenAI(
+        api_key=nlp_settings.qwen_api_key,
+        base_url=nlp_settings.qwen_base_url,
+    )
 
-    texts = [v for v in member_texts.values() if isinstance(v, str) and v.strip()]
-    if not texts:
-        return {"keywords": [], "sources": {}}
 
-    tfidf_res = extract_tfidf(member_texts, top_n=min(20, max(top_n, 10)))
-    tfidf_keywords = tfidf_res.get("keywords", [])
-
-    acronym_members: dict[str, set[str]] = defaultdict(set)
-    noun_phrases: set[str] = set()
-    abstract_hits: set[str] = set()
-
+def _build_member_sections(member_texts: dict[str, str]) -> str:
+    parts: list[str] = []
     for uid, text in member_texts.items():
-        if not text:
-            continue
+        content = (text or "").strip() or "（无发言）"
+        parts.append(f"【成员 {uid} 发言】\n{content}")
+    return "\n\n".join(parts)
 
-        for hit in UPPER_ACRONYM_RE.findall(text):
-            if len(hit) < 2 or hit in NOISE_ACRONYMS:
-                continue
-            acronym_members[hit].add(uid)
 
-        noun_phrases |= _extract_noun_phrases(text)
-        for concept in ABSTRACT_CONCEPTS:
-            if concept in text:
-                abstract_hits.add(concept)
+def _normalize_item(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    word = str(raw.get("word", "")).strip()
+    if not word:
+        return None
+    return {
+        "word": word,
+        "needs_prompt": bool(raw.get("needs_prompt", False)),
+        "target_user_id": str(raw.get("target_user_id", "") or "").strip(),
+        "reason": str(raw.get("reason", "")).strip(),
+    }
 
-    acronyms = [w for w, members in acronym_members.items() if len(members) >= 2]
 
-    ordered: list[str] = []
-    sources: dict[str, str] = {}
+def recall_with_gap(member_texts: dict[str, str]) -> dict[str, Any]:
+    """
+    调用大模型，一次完成关键词召回和信息缺口评估。
 
-    def add_words(words: list[str] | set[str], source: str) -> None:
-        for w in words:
-            token = w.strip()
-            if not token:
-                continue
-            if token in GAP_EXCLUDE_WORDS:
-                continue
-            if token in ordered:
-                continue
-            ordered.append(token)
-            sources[token] = source
-            if len(ordered) >= top_n:
-                return
+    :param member_texts: {user_id: 发言文本}
+    :return: {"keywords": [{"word", "needs_prompt", "target_user_id", "reason"}]}
+    """
+    texts = {uid: t for uid, t in member_texts.items() if isinstance(t, str) and t.strip()}
+    if len(texts) < 2:
+        return {"keywords": []}
 
-    add_words(tfidf_keywords, "tfidf")
-    if len(ordered) < top_n:
-        add_words(acronyms, "acronym")
-    if len(ordered) < top_n:
-        add_words(sorted(abstract_hits), "abstract")
-    if len(ordered) < top_n:
-        add_words(sorted(noun_phrases), "noun_phrase")
+    if not nlp_settings.qwen_api_key:
+        logger.warning("[candidate_recall] qwen_api_key 未配置，跳过召回")
+        return {"keywords": []}
 
-    return {"keywords": ordered[:top_n], "sources": sources}
+    member_sections = _build_member_sections(texts)
+    prompt = _USER_TEMPLATE.format(member_sections=member_sections)
+
+    logger.info("[candidate_recall] 调用大模型，成员数=%d", len(texts))
+
+    try:
+        client = _get_client()
+        response = client.chat.completions.create(
+            model=nlp_settings.reasoning_model,
+            max_tokens=1500,
+            messages=[
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+        )
+        content = (response.choices[0].message.content or "").strip()
+        parsed = json.loads(content)
+        raw_keywords = parsed.get("keywords", [])
+        if not isinstance(raw_keywords, list):
+            logger.warning("[candidate_recall] 返回格式异常，keywords 不是列表")
+            return {"keywords": []}
+
+        keywords: list[dict[str, Any]] = []
+        for item in raw_keywords:
+            normalized = _normalize_item(item)
+            if normalized is not None:
+                keywords.append(normalized)
+
+        logger.info("[candidate_recall] 召回完成，关键词数=%d", len(keywords))
+        return {"keywords": keywords}
+
+    except json.JSONDecodeError as e:
+        logger.warning("[candidate_recall] JSON 解析失败: %s", e)
+        return {"keywords": []}
+    except Exception as e:
+        logger.warning("[candidate_recall] 调用失败: %s", e)
+        return {"keywords": []}

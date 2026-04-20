@@ -16,12 +16,10 @@ from . import (
     embedder,
     similarity,
     segmenter,
-    tfidf,
     reasoning,
     push_content,
     summary,
     candidate_recall,
-    gap_assessor,
     structured_push_content,
 )
 
@@ -91,38 +89,26 @@ def compute_similarity(req: SimilarityRequest, _: bool = Depends(require_admin))
     return {"scores": similarity.batch_similarity(pairs)}
 
 
-# ── 4. tfidf ─────────────────────────────────────────────────────────────────
+# ── 4. keyword_recall_with_gap ────────────────────────────────────────────────
 
-class TfidfRequest(BaseModel):
-    member_texts: dict[str, str]          # {user_id: 发言文本}
-    top_n: int = Field(default=5, ge=1, le=20)
-
-
-class TfidfResponse(BaseModel):
-    keywords: list[str]
-    member_keyword_contexts: dict[str, dict[str, str]]
+class KeywordRecallItem(BaseModel):
+    word: str
+    needs_prompt: bool
+    target_user_id: str
+    reason: str
 
 
-@router.post("/tfidf", response_model=TfidfResponse)
-def extract_tfidf(req: TfidfRequest, _: bool = Depends(require_admin)):
-    return tfidf.extract_tfidf(req.member_texts, req.top_n)
-
-
-# ── 5. has_reasoning ─────────────────────────────────────────────────────────
-
-class CandidateRecallRequest(BaseModel):
+class KeywordRecallWithGapRequest(BaseModel):
     member_texts: dict[str, str]
-    top_n: int = Field(default=15, ge=1, le=30)
 
 
-class CandidateRecallResponse(BaseModel):
-    keywords: list[str]
-    sources: dict[str, str]
+class KeywordRecallWithGapResponse(BaseModel):
+    keywords: list[KeywordRecallItem]
 
 
-@router.post("/candidate_recall", response_model=CandidateRecallResponse)
-def recall_candidates(req: CandidateRecallRequest, _: bool = Depends(require_admin)):
-    return candidate_recall.recall_candidates(req.member_texts, req.top_n)
+@router.post("/keyword_recall_with_gap", response_model=KeywordRecallWithGapResponse)
+def keyword_recall_with_gap(req: KeywordRecallWithGapRequest, _: bool = Depends(require_admin)):
+    return candidate_recall.recall_with_gap(req.member_texts)
 
 
 # ── 6. has_reasoning ─────────────────────────────────────────────────────────
@@ -222,41 +208,7 @@ def generate_push_batch(req: GeneratePushBatchRequest, _: bool = Depends(require
     return {"items": items}
 
 
-# ── 9. assess_gap ─────────────────────────────────────────────────────────────
-
-class AssessGapRequest(BaseModel):
-    keywords: list[str] = Field(default_factory=list)
-    summary: str = ""
-    member_texts: dict[str, str] = Field(default_factory=dict)
-    skw_scores: dict[str, float] = Field(default_factory=dict)
-
-
-class GapAssessItem(BaseModel):
-    keyword: str
-    needs_prompt: bool
-    target_user_id: str
-    gap_type: str
-    confidence: float
-    reason: str
-    skw_score: float
-
-
-class AssessGapResponse(BaseModel):
-    items: list[GapAssessItem]
-
-
-@router.post("/assess_gap", response_model=AssessGapResponse)
-def assess_gap(req: AssessGapRequest, _: bool = Depends(require_admin)):
-    items = gap_assessor.assess_gap(
-        keywords=req.keywords,
-        summary=req.summary,
-        member_texts=req.member_texts,
-        skw_scores=req.skw_scores,
-    )
-    return {"items": items}
-
-
-# ── 10. generate_summary ──────────────────────────────────────────────────────
+# ── 9. generate_summary ──────────────────────────────────────────────────────
 
 class TranscriptItem(BaseModel):
     user_id: str
