@@ -19,6 +19,11 @@ const isExpanded = ref(false)
 
 const previewKeywords = computed(() => props.buttons.slice(0, 3))
 const hasContent = computed(() => props.hasSummary || props.buttons.length > 0)
+const previewText = computed(() => {
+  if (props.hasSummary && props.buttons.length > 0) return '讨论摘要 · 相关概念'
+  if (props.hasSummary) return '讨论摘要'
+  return '相关概念'
+})
 
 function toggleExpanded() {
   isExpanded.value = !isExpanded.value
@@ -32,13 +37,7 @@ function toggleExpanded() {
     </div>
 
     <div class="ai-sheet__preview" @click="toggleExpanded">
-      <span v-if="hasSummary" class="ai-sheet__preview-badge ai-sheet__preview-badge--summary">
-        <span aria-hidden="true">◈</span> 讨论摘要
-      </span>
-      <span v-if="hasSummary && buttons.length > 0" class="ai-sheet__preview-sep" aria-hidden="true">·</span>
-      <span v-if="buttons.length > 0" class="ai-sheet__preview-badge ai-sheet__preview-badge--gap">
-        <span aria-hidden="true">💡</span> 信息缺口
-      </span>
+      <span class="ai-sheet__preview-title">{{ previewText }}</span>
       <span v-if="buttons.length > 0" class="ai-sheet__preview-keywords">
         <span
           v-for="btn in previewKeywords"
@@ -53,7 +52,6 @@ function toggleExpanded() {
     <div v-if="isExpanded" class="ai-sheet__body">
       <div v-if="hasSummary" class="ai-sheet__summary-section">
         <div class="ai-sheet__section-head">
-          <span class="ai-sheet__section-icon" aria-hidden="true">◈</span>
           <span class="ai-sheet__section-label">讨论摘要</span>
           <span class="ai-sheet__section-version">v{{ summaryVersion }}</span>
         </div>
@@ -66,8 +64,7 @@ function toggleExpanded() {
 
       <div v-if="sessionOngoing && buttons.length > 0" class="ai-sheet__gap-section">
         <div class="ai-sheet__section-head">
-          <span class="ai-sheet__section-icon ai-sheet__section-icon--gap" aria-hidden="true">💡</span>
-          <span class="ai-sheet__section-label ai-sheet__section-label--gap">信息缺口</span>
+          <span class="ai-sheet__section-label">相关概念</span>
         </div>
         <InfoGapButtons
           :session-id="sessionId"
@@ -112,32 +109,16 @@ function toggleExpanded() {
 .ai-sheet__preview {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 14px 10px;
+  gap: 8px;
+  padding: 2px 14px 10px;
   cursor: pointer;
-  min-height: 32px;
+  min-height: 36px;
 }
 
-.ai-sheet__preview-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 12px;
+.ai-sheet__preview-title {
+  font-size: 14px;
   font-weight: 600;
-  flex-shrink: 0;
-}
-
-.ai-sheet__preview-badge--summary {
-  color: var(--app-color-ai, #6495ed);
-}
-
-.ai-sheet__preview-badge--gap {
-  color: #d97706;
-}
-
-.ai-sheet__preview-sep {
-  font-size: 12px;
-  color: var(--app-text-muted, #9ca3af);
+  color: var(--app-text-primary, #111827);
   flex-shrink: 0;
 }
 
@@ -151,11 +132,11 @@ function toggleExpanded() {
 
 .ai-sheet__preview-pill {
   font-size: 12px;
-  color: #d97706;
-  background: rgba(217, 119, 6, 0.08);
-  border: 1px solid rgba(217, 119, 6, 0.25);
-  border-radius: 10px;
-  padding: 2px 8px;
+  color: #b45309;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.18);
+  border-radius: 999px;
+  padding: 3px 8px;
   white-space: nowrap;
 }
 
@@ -165,14 +146,8 @@ function toggleExpanded() {
   white-space: nowrap;
 }
 
-.ai-sheet__preview-summary-hint {
-  flex: 1;
-  font-size: 13px;
-  color: var(--app-text-secondary, #6b7280);
-}
-
 .ai-sheet__preview-chevron {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--app-text-muted, #9ca3af);
   flex-shrink: 0;
 }
@@ -188,12 +163,12 @@ function toggleExpanded() {
 }
 
 .ai-sheet__summary-section {
-  padding: 12px 14px;
+  padding: 14px;
   background: var(--app-bg-subtle, #f9fafb);
 }
 
 .ai-sheet__gap-section {
-  padding: 12px 14px;
+  padding: 14px;
 }
 
 .ai-sheet__divider {
@@ -206,37 +181,24 @@ function toggleExpanded() {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 8px;
-}
-
-.ai-sheet__section-icon {
-  font-size: 13px;
-  color: var(--app-color-ai, #6495ed);
-}
-
-.ai-sheet__section-icon--gap {
-  color: unset;
-}
-
-.ai-sheet__section-label--gap {
-  color: #d97706;
+  margin-bottom: 10px;
 }
 
 .ai-sheet__section-label {
-  font-size: var(--app-font-size-caption, 12px);
+  font-size: 15px;
   font-weight: 600;
   color: var(--app-text-primary, #111827);
 }
 
 .ai-sheet__section-version {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--app-text-muted, #9ca3af);
 }
 
 .ai-sheet__summary-content {
   margin: 0;
-  font-size: var(--app-font-size-body, 14px);
-  line-height: 1.6;
+  font-size: 14px;
+  line-height: 1.7;
   color: var(--app-text-primary, #111827);
   white-space: pre-wrap;
 }
@@ -245,14 +207,5 @@ function toggleExpanded() {
   padding: 0;
   gap: 10px;
   opacity: 1;
-}
-
-.ai-sheet__gap-section :deep(.info-gap-btn) {
-  padding: 8px 14px;
-  border-radius: var(--app-radius-pill, 20px);
-  border: 1px solid rgba(217, 119, 6, 0.35);
-  background: rgba(217, 119, 6, 0.07);
-  color: #d97706;
-  font-size: var(--app-font-size-body, 14px);
 }
 </style>

@@ -101,6 +101,14 @@ const pushLogs = ref<PushLogItem[]>([])
 const seenPushNotificationKeys = new Set<string>()
 const PUSH_LOGS_POLL_INTERVAL_MS = 5000
 
+function normalizeInfoGapButton(button: InfoGapButton): InfoGapButton {
+  return {
+    ...button,
+    explanation: button.explanation ?? '',
+    viewed: button.viewed ?? false,
+  }
+}
+
 function normalizePushLog(item: PushLogItem): PushLogItem | null {
   if (!item.push_content) return null
   if (currentUser.value?.id && item.target_user_id && item.target_user_id !== currentUser.value.id) {
@@ -191,7 +199,7 @@ async function fetchPushLogs(options: { notifyNew?: boolean } = {}) {
   }
 }
 
-// ── 信息缺口按钮 ──────────────────────────────────────────────────────────────
+// ── 相关概念 ──────────────────────────────────────────────────────────────────
 const infoGapButtons = ref<InfoGapButton[]>([])
 
 async function fetchInfoGapButtons() {
@@ -199,15 +207,22 @@ async function fetchInfoGapButtons() {
     const data = await appHttp.get<InfoGapButton[]>(
       `/api/sessions/${sessionId}/info-gap/buttons`,
     )
-    infoGapButtons.value = data
+    infoGapButtons.value = data.map((button) => normalizeInfoGapButton(button))
   } catch {
     // 静默失败，不影响主流程
   }
 }
 
-function handleInfoGapButtonClicked(buttonId: string, content: string, _keyword: string) {
-  infoGapButtons.value = infoGapButtons.value.filter((b) => b.id !== buttonId)
-  if (content) showPushNotification(content)
+function handleInfoGapButtonClicked(buttonId: string, content: string, keyword: string) {
+  infoGapButtons.value = infoGapButtons.value.map((button) => {
+    if (button.id !== buttonId) return button
+    return {
+      ...button,
+      explanation: content,
+      viewed: true,
+    }
+  })
+  if (content) showPushNotification(`已添加「${keyword}」的概念解释`)
 }
 
 function upsertPushEvent(push: PushLogItem) {
@@ -866,7 +881,9 @@ function handleWsMessage(event: MessageEvent<string>) {
     if (Array.isArray(d.buttons)) {
       // 合并去重（保留已点击的不再添加）
       const existingIds = new Set(infoGapButtons.value.map((b) => b.id))
-      const newBtns = d.buttons.filter((b) => !existingIds.has(b.id))
+      const newBtns = d.buttons
+        .map((button) => normalizeInfoGapButton(button))
+        .filter((b) => !existingIds.has(b.id))
       infoGapButtons.value = [...infoGapButtons.value, ...newBtns]
     }
     return
