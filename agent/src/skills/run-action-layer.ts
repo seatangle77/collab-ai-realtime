@@ -14,6 +14,7 @@ import {
   embed,
   notifyGroupSilence,
   notifyInfoGapButton,
+  type AssessGapItem,
 } from '../http/nlp-client';
 import type { Trigger } from './run-reasoning-layer';
 import type { Transcript } from '../db/queries';
@@ -104,7 +105,7 @@ export async function runActionLayer(params: {
         skw_scores: Object.fromEntries(keywordToScore.entries()),
       });
 
-      const actionable = assessItems.filter((item) =>
+      const actionable = assessItems.filter((item: AssessGapItem) =>
         item.needs_prompt
         && item.confidence >= INFO_GAP_CONFIDENCE_THRESHOLD
         && item.target_user_id.trim().length > 0,
