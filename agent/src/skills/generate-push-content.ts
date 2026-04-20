@@ -10,6 +10,7 @@ const PERSONAL_STAGNATION_MAX_CANDIDATES = 3;
 export interface StructuredAnchor {
   transcriptId: string;
   speakerId: string;
+  speakerName: string;
   text: string;
 }
 
@@ -32,6 +33,7 @@ export interface GeneratePushContentParams {
 interface CandidatePoint {
   transcriptId: string;
   speakerId: string;
+  speakerName: string;
   text: string;
 }
 
@@ -95,6 +97,7 @@ function selectUnansweredPoints(
     candidates.push({
       transcriptId: transcript.transcript_id,
       speakerId,
+      speakerName: transcript.speaker_name?.trim() ?? '',
       text,
     });
 
@@ -111,12 +114,14 @@ function normalizeAnchor(value: unknown): StructuredAnchor | null {
   const raw = value as Partial<{
     transcript_id: string;
     speaker_id: string;
+    speaker_name: string;
     text: string;
   }>;
 
   if (
     typeof raw.transcript_id !== 'string'
     || typeof raw.speaker_id !== 'string'
+    || typeof raw.speaker_name !== 'string'
     || typeof raw.text !== 'string'
   ) {
     return null;
@@ -124,11 +129,12 @@ function normalizeAnchor(value: unknown): StructuredAnchor | null {
 
   const transcriptId = raw.transcript_id.trim();
   const speakerId = raw.speaker_id.trim();
+  const speakerName = raw.speaker_name.trim();
   const text = raw.text.trim();
 
-  if (!transcriptId || !speakerId || !text) return null;
+  if (!transcriptId || !speakerId || !speakerName || !text) return null;
 
-  return { transcriptId, speakerId, text };
+  return { transcriptId, speakerId, speakerName, text };
 }
 
 async function generateStructured(
@@ -158,6 +164,7 @@ async function generateStructured(
     candidate_points: candidatePoints.map((item) => ({
       transcript_id: item.transcriptId,
       speaker_id: item.speakerId,
+      speaker_name: item.speakerName,
       text: item.text,
     })),
   });
@@ -221,6 +228,8 @@ export function isStructuredAnchor(value: unknown): value is StructuredAnchor {
     && anchor.transcriptId.trim().length > 0
     && typeof anchor.speakerId === 'string'
     && anchor.speakerId.trim().length > 0
+    && typeof anchor.speakerName === 'string'
+    && anchor.speakerName.trim().length > 0
     && typeof anchor.text === 'string'
     && anchor.text.trim().length > 0
   );
@@ -233,11 +242,16 @@ export function validateStructuredAnchor(params: {
 }): StructuredAnchor | null {
   const { anchor, transcripts, memberIds } = params;
   if (!anchor || !isStructuredAnchor(anchor)) return null;
-  if (!memberIds.includes(anchor.speakerId)) return null;
 
   const transcript = transcripts.find((item) => item.transcript_id === anchor.transcriptId);
   if (!transcript) return null;
+  if (!transcript.user_id) return null;
+  if (!memberIds.includes(transcript.user_id)) return null;
+
+  const speakerName = transcript.speaker_name?.trim() ?? '';
+  if (!speakerName) return null;
   if (transcript.user_id !== anchor.speakerId) return null;
+  if (speakerName !== anchor.speakerName) return null;
 
   const originalText = transcript.text?.trim() ?? '';
   if (!originalText) return null;
@@ -245,7 +259,8 @@ export function validateStructuredAnchor(params: {
 
   return {
     transcriptId: anchor.transcriptId,
-    speakerId: anchor.speakerId,
+    speakerId: transcript.user_id,
+    speakerName,
     text: anchor.text,
   };
 }

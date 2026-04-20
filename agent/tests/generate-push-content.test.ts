@@ -57,13 +57,14 @@ describe('generatePushContent', () => {
       anchor: {
         transcript_id: 't1',
         speaker_id: 'uB',
+        speaker_name: 'B',
         text: '我们先限定MVP范围',
       },
       content: '你认可先限定MVP范围吗？',
     });
   });
 
-  it('group_silence 直接返回固定文案且不调用后端', async () => {
+  it('group_silence 会调用后端并把生成内容分发给目标成员', async () => {
     const items = await generatePushContent(
       makeParams([
         {
@@ -78,19 +79,30 @@ describe('generatePushContent', () => {
       {
         targetUserId: 'uA',
         triggerType: 'group_silence',
-        content: '小组已沉默超过30秒，大家可以继续讨论～',
+        content: '你认可先限定MVP范围吗？',
         needsPrompt: true,
         anchor: null,
       },
       {
         targetUserId: 'uB',
         triggerType: 'group_silence',
-        content: '小组已沉默超过30秒，大家可以继续讨论～',
+        content: '你认可先限定MVP范围吗？',
         needsPrompt: true,
         anchor: null,
       },
     ]);
-    expect(mockGenerateStructuredPush).not.toHaveBeenCalled();
+    expect(mockGenerateStructuredPush).toHaveBeenCalledWith({
+      trigger_type: 'group_silence',
+      summary: '讨论围绕 MVP 范围收敛展开',
+      transcripts: [
+        { transcript_id: 't1', user_id: 'uB', speaker_name: 'B', text: '我们先限定MVP范围' },
+        { transcript_id: 't2', user_id: 'uA', speaker_name: 'A', text: '我还没想清楚' },
+        { transcript_id: 't3', user_id: 'uC', speaker_name: 'C', text: '不如先收窄功能边界' },
+      ],
+      user_id: '',
+      trigger_metrics: { silence_s: 35 },
+      candidate_points: [],
+    });
   });
 
   it('shallow_discussion 会把 transcript 和指标映射到后端接口', async () => {
@@ -125,6 +137,7 @@ describe('generatePushContent', () => {
       anchor: {
         transcriptId: 't1',
         speakerId: 'uB',
+        speakerName: 'B',
         text: '我们先限定MVP范围',
       },
     });
@@ -193,7 +206,7 @@ describe('generatePushContent', () => {
       user_id: 'uA',
       trigger_metrics: { speaking_ratio: 0.08 },
       candidate_points: [
-        { transcript_id: 't3', speaker_id: 'uC', text: '不如先收窄功能边界' },
+        { transcript_id: 't3', speaker_id: 'uC', speaker_name: 'C', text: '不如先收窄功能边界' },
       ],
     });
     expect(items[0]?.triggerType).toBe('low_participation');
@@ -273,6 +286,7 @@ describe('generatePushContent', () => {
       anchor: {
         transcript_id: '',
         speaker_id: 'uB',
+        speaker_name: 'B',
         text: '我们先限定MVP范围',
       },
       content: '你认可先限定MVP范围吗？',
@@ -302,6 +316,7 @@ describe('validateStructuredAnchor', () => {
       anchor: {
         transcriptId: 't1',
         speakerId: 'uB',
+        speakerName: 'B',
         text: '我们先限定MVP范围',
       },
       transcripts,
@@ -311,6 +326,7 @@ describe('validateStructuredAnchor', () => {
     expect(result).toEqual({
       transcriptId: 't1',
       speakerId: 'uB',
+      speakerName: 'B',
       text: '我们先限定MVP范围',
     });
   });
@@ -320,6 +336,22 @@ describe('validateStructuredAnchor', () => {
       anchor: {
         transcriptId: 't1',
         speakerId: 'uZ',
+        speakerName: 'B',
+        text: '我们先限定MVP范围',
+      },
+      transcripts,
+      memberIds: ['uA', 'uB', 'uC'],
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it('anchor 的 speaker_name 与 transcript 不一致时返回 null', () => {
+    const result = validateStructuredAnchor({
+      anchor: {
+        transcriptId: 't1',
+        speakerId: 'uB',
+        speakerName: '其他人',
         text: '我们先限定MVP范围',
       },
       transcripts,
@@ -334,6 +366,7 @@ describe('validateStructuredAnchor', () => {
       anchor: {
         transcriptId: 't1',
         speakerId: 'uB',
+        speakerName: 'B',
         text: '完全不同的话',
       },
       transcripts,

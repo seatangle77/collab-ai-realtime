@@ -215,6 +215,7 @@ async function persistPushDecision(params: {
         anchor: {
           transcript_id: anchor.transcriptId,
           speaker_id: anchor.speakerId,
+          speaker_name: anchor.speakerName,
           text: anchor.text,
         },
       },

@@ -105,6 +105,7 @@ describe('runActionLayer (new info-gap flow)', () => {
         anchor: {
           transcriptId: 't2',
           speakerId: 'uC',
+          speakerName: '成员C',
           text: '我对MVP不太懂',
         },
       },
@@ -112,6 +113,7 @@ describe('runActionLayer (new info-gap flow)', () => {
     mockValidateStructuredAnchor.mockReturnValue({
       transcriptId: 't2',
       speakerId: 'uC',
+      speakerName: '成员C',
       text: '我对MVP不太懂',
     });
   });
@@ -179,6 +181,7 @@ describe('runActionLayer (new info-gap flow)', () => {
           anchor: {
             transcript_id: 't2',
             speaker_id: 'uC',
+            speaker_name: '成员C',
             text: '我对MVP不太懂',
           },
         }),
@@ -198,7 +201,7 @@ describe('runActionLayer (new info-gap flow)', () => {
     expect(mockWriteDiscussionState).not.toHaveBeenCalled();
   });
 
-  it('info_gap: assess 通过 + 频控通过时，写按钮并通知，且写入 llm 元数据', async () => {
+  it('info_gap: 当前 action-layer 仅处理历史按钮过期，不做评估和写按钮', async () => {
     const infoGap: Trigger = {
       type: 'info_gap',
       keyword: 'MVP',
@@ -221,21 +224,13 @@ describe('runActionLayer (new info-gap flow)', () => {
     await runActionLayer({ ...BASE_PARAMS, triggers: [infoGap] });
 
     expect(mockDismissPendingBeforeWindow).toHaveBeenCalledTimes(1);
-    expect(mockAssessGap).toHaveBeenCalledTimes(1);
-    expect(mockWriteInfoGapButton).toHaveBeenCalledWith(
-      expect.objectContaining({
-        session_id: SESSION,
-        user_id: 'uC',
-        keyword: 'MVP',
-        gap_type: '缩写不懂',
-        confidence: 0.86,
-        llm_reason: '该成员明确表示不理解缩写',
-      }),
-    );
-    expect(mockNotifyInfoGapButton).toHaveBeenCalledTimes(1);
+    expect(mockAssessGap).not.toHaveBeenCalled();
+    expect(mockWriteInfoGapButton).not.toHaveBeenCalled();
+    expect(mockNotifyInfoGapButton).not.toHaveBeenCalled();
+    expect(mockGeneratePushContent).not.toHaveBeenCalled();
   });
 
-  it('info_gap: confidence 不足或无 target_user_id 时应跳过', async () => {
+  it('info_gap: 没有直接推送目标时应在按钮过期处理后结束', async () => {
     const infoGap: Trigger = {
       type: 'info_gap',
       keyword: 'MVP',
@@ -257,11 +252,14 @@ describe('runActionLayer (new info-gap flow)', () => {
 
     await runActionLayer({ ...BASE_PARAMS, triggers: [infoGap] });
 
+    expect(mockDismissPendingBeforeWindow).toHaveBeenCalledTimes(1);
+    expect(mockAssessGap).not.toHaveBeenCalled();
     expect(mockWriteInfoGapButton).not.toHaveBeenCalled();
     expect(mockNotifyInfoGapButton).not.toHaveBeenCalled();
+    expect(mockGeneratePushContent).not.toHaveBeenCalled();
   });
 
-  it('info_gap: 命中同词 pending / 最近点击 / pending 上限 任一规则时跳过', async () => {
+  it('info_gap: 频控相关 mock 不影响当前 action-layer 行为', async () => {
     const infoGap: Trigger = {
       type: 'info_gap',
       keyword: 'MVP',
@@ -283,6 +281,8 @@ describe('runActionLayer (new info-gap flow)', () => {
     mockHasPendingKeyword.mockResolvedValue(true);
 
     await runActionLayer({ ...BASE_PARAMS, triggers: [infoGap] });
+    expect(mockDismissPendingBeforeWindow).toHaveBeenCalledTimes(1);
+    expect(mockAssessGap).not.toHaveBeenCalled();
     expect(mockWriteInfoGapButton).not.toHaveBeenCalled();
 
     mockHasPendingKeyword.mockResolvedValue(false);
@@ -294,5 +294,7 @@ describe('runActionLayer (new info-gap flow)', () => {
     mockGetPendingCount.mockResolvedValue(3);
     await runActionLayer({ ...BASE_PARAMS, triggers: [infoGap] });
     expect(mockWriteInfoGapButton).not.toHaveBeenCalled();
+    expect(mockNotifyInfoGapButton).not.toHaveBeenCalled();
+    expect(mockGeneratePushContent).not.toHaveBeenCalled();
   });
 });

@@ -121,6 +121,7 @@ export interface StructuredPushTranscript {
 export interface StructuredPushCandidatePoint {
   transcript_id: string;
   speaker_id: string;
+  speaker_name?: string;
   text: string;
 }
 
@@ -138,6 +139,7 @@ export interface GenerateStructuredPushResult {
   anchor: {
     transcript_id: string;
     speaker_id: string;
+    speaker_name: string;
     text: string;
   } | null;
   content: string;

@@ -64,6 +64,7 @@ def test_generate_structured_push_content_parses_anchor_and_content(
   "anchor": {
     "transcript_id": "t2",
     "speaker_id": "uB",
+    "speaker_name": "小李",
     "text": "我们先限定MVP范围"
   },
   "content": "你认可先限定MVP范围吗？"
@@ -76,18 +77,19 @@ def test_generate_structured_push_content_parses_anchor_and_content(
         trigger_type=trigger_type,
         summary="讨论MVP定义和执行边界",
         transcripts=[
-            {"transcript_id": "t1", "user_id": "uA", "text": "我还没想清楚"},
-            {"transcript_id": "t2", "user_id": "uB", "text": "我们先限定MVP范围"},
+            {"transcript_id": "t1", "user_id": "uA", "speaker_name": "小王", "text": "我还没想清楚"},
+            {"transcript_id": "t2", "user_id": "uB", "speaker_name": "小李", "text": "我们先限定MVP范围"},
         ],
         user_id="uA",
         trigger_metrics={"speaking_ratio": 0.08, "ttr": 0.2},
         candidate_points=[
-            {"transcript_id": "t2", "speaker_id": "uB", "text": "我们先限定MVP范围"},
+            {"transcript_id": "t2", "speaker_id": "uB", "speaker_name": "小李", "text": "我们先限定MVP范围"},
         ],
     )
 
     assert result["needs_prompt"] is True
     assert result["anchor"]["transcript_id"] == "t2"
+    assert result["anchor"]["speaker_name"] == "小李"
     assert result["content"] == "你认可先限定MVP范围吗？"
 
 
@@ -101,6 +103,7 @@ def test_generate_structured_push_content_extracts_json_from_wrapped_text(
   "anchor": {
     "transcript_id": "t2",
     "speaker_id": "uB",
+    "speaker_name": "小李",
     "text": "我们先限定MVP范围"
   },
   "content": "你认可先限定MVP范围吗？"
@@ -113,12 +116,12 @@ def test_generate_structured_push_content_extracts_json_from_wrapped_text(
         trigger_type="low_participation",
         summary="讨论MVP定义和执行边界",
         transcripts=[
-            {"transcript_id": "t2", "user_id": "uB", "text": "我们先限定MVP范围"},
+            {"transcript_id": "t2", "user_id": "uB", "speaker_name": "小李", "text": "我们先限定MVP范围"},
         ],
         user_id="uA",
         trigger_metrics={"speaking_ratio": 0.08},
         candidate_points=[
-            {"transcript_id": "t2", "speaker_id": "uB", "text": "我们先限定MVP范围"},
+            {"transcript_id": "t2", "speaker_id": "uB", "speaker_name": "小李", "text": "我们先限定MVP范围"},
         ],
     )
 
@@ -134,10 +137,10 @@ def test_generate_structured_push_content_returns_empty_without_qwen(
     result = structured_push_content.generate_structured_push_content(
         trigger_type="low_participation",
         summary="讨论MVP定义和执行边界",
-        transcripts=[{"transcript_id": "t2", "user_id": "uB", "text": "我们先限定MVP范围"}],
+        transcripts=[{"transcript_id": "t2", "user_id": "uB", "speaker_name": "小李", "text": "我们先限定MVP范围"}],
         user_id="uA",
         trigger_metrics={"speaking_ratio": 0.08},
-        candidate_points=[{"transcript_id": "t2", "speaker_id": "uB", "text": "我们先限定MVP范围"}],
+        candidate_points=[{"transcript_id": "t2", "speaker_id": "uB", "speaker_name": "小李", "text": "我们先限定MVP范围"}],
     )
 
     assert result == {"needs_prompt": False, "anchor": None, "content": ""}
@@ -156,7 +159,7 @@ def test_generate_structured_push_content_returns_empty_when_low_participation_h
     result = structured_push_content.generate_structured_push_content(
         trigger_type="low_participation",
         summary="讨论MVP定义和执行边界",
-        transcripts=[{"transcript_id": "t2", "user_id": "uB", "text": "我们先限定MVP范围"}],
+        transcripts=[{"transcript_id": "t2", "user_id": "uB", "speaker_name": "小李", "text": "我们先限定MVP范围"}],
         user_id="uA",
         trigger_metrics={"speaking_ratio": 0.08},
         candidate_points=[],
@@ -178,7 +181,7 @@ def test_generate_structured_push_content_returns_empty_when_shallow_discussion_
     result = structured_push_content.generate_structured_push_content(
         trigger_type="shallow_discussion",
         summary="讨论MVP定义和执行边界",
-        transcripts=[{"transcript_id": "t2", "user_id": "uB", "text": "我们先限定MVP范围"}],
+        transcripts=[{"transcript_id": "t2", "user_id": "uB", "speaker_name": "小李", "text": "我们先限定MVP范围"}],
         user_id="uA",
         trigger_metrics={"ttr": 0.2},
     )
@@ -199,7 +202,7 @@ def test_generate_structured_push_content_returns_empty_when_shallow_discussion_
     result = structured_push_content.generate_structured_push_content(
         trigger_type="shallow_discussion",
         summary="讨论MVP定义和执行边界",
-        transcripts=[{"transcript_id": "t2", "user_id": "uA", "text": "我们先限定MVP范围"}],
+        transcripts=[{"transcript_id": "t2", "user_id": "uA", "speaker_name": "小王", "text": "我们先限定MVP范围"}],
         user_id="uA",
         trigger_metrics={"description": "没有结构化指标"},
     )
@@ -216,10 +219,10 @@ def test_generate_structured_push_content_returns_empty_when_model_returns_inval
     result = structured_push_content.generate_structured_push_content(
         trigger_type="low_participation",
         summary="讨论MVP定义和执行边界",
-        transcripts=[{"transcript_id": "t2", "user_id": "uB", "text": "我们先限定MVP范围"}],
+        transcripts=[{"transcript_id": "t2", "user_id": "uB", "speaker_name": "小李", "text": "我们先限定MVP范围"}],
         user_id="uA",
         trigger_metrics={"speaking_ratio": 0.08},
-        candidate_points=[{"transcript_id": "t2", "speaker_id": "uB", "text": "我们先限定MVP范围"}],
+        candidate_points=[{"transcript_id": "t2", "speaker_id": "uB", "speaker_name": "小李", "text": "我们先限定MVP范围"}],
     )
 
     assert result == {"needs_prompt": False, "anchor": None, "content": ""}
@@ -238,10 +241,10 @@ def test_generate_structured_push_content_returns_empty_when_model_says_no_promp
     result = structured_push_content.generate_structured_push_content(
         trigger_type="low_participation",
         summary="讨论MVP定义和执行边界",
-        transcripts=[{"transcript_id": "t2", "user_id": "uB", "text": "我们先限定MVP范围"}],
+        transcripts=[{"transcript_id": "t2", "user_id": "uB", "speaker_name": "小李", "text": "我们先限定MVP范围"}],
         user_id="uA",
         trigger_metrics={"speaking_ratio": 0.08},
-        candidate_points=[{"transcript_id": "t2", "speaker_id": "uB", "text": "我们先限定MVP范围"}],
+        candidate_points=[{"transcript_id": "t2", "speaker_id": "uB", "speaker_name": "小李", "text": "我们先限定MVP范围"}],
     )
 
     assert result == {"needs_prompt": False, "anchor": None, "content": ""}
@@ -256,6 +259,7 @@ def test_generate_structured_push_content_returns_empty_when_anchor_is_incomplet
   "anchor": {
     "transcript_id": "",
     "speaker_id": "uB",
+    "speaker_name": "小李",
     "text": "我们先限定MVP范围"
   },
   "content": "你认可先限定MVP范围吗？"
@@ -267,10 +271,10 @@ def test_generate_structured_push_content_returns_empty_when_anchor_is_incomplet
     result = structured_push_content.generate_structured_push_content(
         trigger_type="low_participation",
         summary="讨论MVP定义和执行边界",
-        transcripts=[{"transcript_id": "t2", "user_id": "uB", "text": "我们先限定MVP范围"}],
+        transcripts=[{"transcript_id": "t2", "user_id": "uB", "speaker_name": "小李", "text": "我们先限定MVP范围"}],
         user_id="uA",
         trigger_metrics={"speaking_ratio": 0.08},
-        candidate_points=[{"transcript_id": "t2", "speaker_id": "uB", "text": "我们先限定MVP范围"}],
+        candidate_points=[{"transcript_id": "t2", "speaker_id": "uB", "speaker_name": "小李", "text": "我们先限定MVP范围"}],
     )
 
     assert result == {"needs_prompt": False, "anchor": None, "content": ""}
@@ -285,6 +289,7 @@ def test_generate_structured_push_content_returns_empty_when_content_too_long(
   "anchor": {
     "transcript_id": "t2",
     "speaker_id": "uB",
+    "speaker_name": "小李",
     "text": "我们先限定MVP范围"
   },
   "content": "这是一条明显超过三十个字的测试文案，用来验证长度上限保护是否仍然有效"
@@ -296,10 +301,10 @@ def test_generate_structured_push_content_returns_empty_when_content_too_long(
     result = structured_push_content.generate_structured_push_content(
         trigger_type="low_participation",
         summary="讨论MVP定义和执行边界",
-        transcripts=[{"transcript_id": "t2", "user_id": "uB", "text": "我们先限定MVP范围"}],
+        transcripts=[{"transcript_id": "t2", "user_id": "uB", "speaker_name": "小李", "text": "我们先限定MVP范围"}],
         user_id="uA",
         trigger_metrics={"speaking_ratio": 0.08},
-        candidate_points=[{"transcript_id": "t2", "speaker_id": "uB", "text": "我们先限定MVP范围"}],
+        candidate_points=[{"transcript_id": "t2", "speaker_id": "uB", "speaker_name": "小李", "text": "我们先限定MVP范围"}],
     )
 
     assert result == {"needs_prompt": False, "anchor": None, "content": ""}
@@ -314,10 +319,10 @@ def test_generate_structured_push_content_returns_empty_when_model_raises(
     result = structured_push_content.generate_structured_push_content(
         trigger_type="low_participation",
         summary="讨论MVP定义和执行边界",
-        transcripts=[{"transcript_id": "t2", "user_id": "uB", "text": "我们先限定MVP范围"}],
+        transcripts=[{"transcript_id": "t2", "user_id": "uB", "speaker_name": "小李", "text": "我们先限定MVP范围"}],
         user_id="uA",
         trigger_metrics={"speaking_ratio": 0.08},
-        candidate_points=[{"transcript_id": "t2", "speaker_id": "uB", "text": "我们先限定MVP范围"}],
+        candidate_points=[{"transcript_id": "t2", "speaker_id": "uB", "speaker_name": "小李", "text": "我们先限定MVP范围"}],
     )
 
     assert result == {"needs_prompt": False, "anchor": None, "content": ""}
@@ -375,7 +380,7 @@ def test_group_silence_returns_fallback_when_model_raises(
     result = structured_push_content.generate_structured_push_content(
         trigger_type="group_silence",
         summary="讨论产品方向",
-        transcripts=[{"transcript_id": "t1", "user_id": "uA", "text": "我有个想法"}],
+        transcripts=[{"transcript_id": "t1", "user_id": "uA", "speaker_name": "小王", "text": "我有个想法"}],
         user_id="",
         trigger_metrics={"silence_s": 32},
     )
@@ -389,16 +394,46 @@ def test_group_silence_anchor_is_always_none(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # 即使模型错误地返回了 anchor，group_silence 也应该忽略它
-    mock_content = '{"needs_prompt": true, "anchor": {"transcript_id": "t1", "speaker_id": "uA", "text": "我有个想法"}, "content": "这个想法背后的逻辑是什么？"}'
+    mock_content = '{"needs_prompt": true, "anchor": {"transcript_id": "t1", "speaker_id": "uA", "speaker_name": "小王", "text": "我有个想法"}, "content": "这个想法背后的逻辑是什么？"}'
     monkeypatch.setattr(structured_push_content.nlp_settings, "qwen_api_key", "test-key", raising=False)
     monkeypatch.setattr(structured_push_content, "_get_client", lambda: _FakeClient(mock_content))
 
     result = structured_push_content.generate_structured_push_content(
         trigger_type="group_silence",
         summary="讨论产品方向",
-        transcripts=[{"transcript_id": "t1", "user_id": "uA", "text": "我有个想法"}],
+        transcripts=[{"transcript_id": "t1", "user_id": "uA", "speaker_name": "小王", "text": "我有个想法"}],
         user_id="",
         trigger_metrics={"silence_s": 31},
     )
 
     assert result["anchor"] is None
+
+
+def test_generate_structured_push_content_returns_empty_when_content_contains_user_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mock_content = """
+{
+  "needs_prompt": true,
+  "anchor": {
+    "transcript_id": "t2",
+    "speaker_id": "uB",
+    "speaker_name": "小李",
+    "text": "我们先限定MVP范围"
+  },
+  "content": "uB 刚才提到MVP范围，你怎么看？"
+}
+""".strip()
+    monkeypatch.setattr(structured_push_content.nlp_settings, "qwen_api_key", "test-key", raising=False)
+    monkeypatch.setattr(structured_push_content, "_get_client", lambda: _FakeClient(mock_content))
+
+    result = structured_push_content.generate_structured_push_content(
+        trigger_type="low_participation",
+        summary="讨论MVP定义和执行边界",
+        transcripts=[{"transcript_id": "t2", "user_id": "uB", "speaker_name": "小李", "text": "我们先限定MVP范围"}],
+        user_id="uA",
+        trigger_metrics={"speaking_ratio": 0.08},
+        candidate_points=[{"transcript_id": "t2", "speaker_id": "uB", "speaker_name": "小李", "text": "我们先限定MVP范围"}],
+    )
+
+    assert result == {"needs_prompt": False, "anchor": None, "content": ""}

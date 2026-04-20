@@ -248,6 +248,7 @@ class StructuredTranscriptItem(BaseModel):
 class StructuredCandidatePoint(BaseModel):
     transcript_id: str
     speaker_id: str
+    speaker_name: str | None = None
     text: str
 
 
@@ -263,6 +264,7 @@ class GenerateStructuredPushRequest(BaseModel):
 class StructuredAnchorOut(BaseModel):
     transcript_id: str
     speaker_id: str
+    speaker_name: str
     text: str
 
 

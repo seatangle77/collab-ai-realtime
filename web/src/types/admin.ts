@@ -149,6 +149,18 @@ export interface AdminDiscussionRuleUpdate {
 }
 
 // ── 讨论状态 ─────────────────────────────────────────────────────────
+export interface DiscussionStateAnchor {
+  transcript_id: string
+  speaker_id: string
+  speaker_name?: string | null
+  text: string
+}
+
+export type DiscussionStateTriggerMetrics = Record<string, unknown> & {
+  queued_push_id?: string
+  anchor?: DiscussionStateAnchor
+}
+
 export type DiscussionStateType =
   | 'low_participation'
   | 'over_dominance'
@@ -165,7 +177,7 @@ export interface AdminDiscussionState {
   state_type: DiscussionStateType
   target_user_id: string | null
   target_user_name: string | null
-  trigger_metrics: Record<string, unknown> | null
+  trigger_metrics: DiscussionStateTriggerMetrics | null
   ai_analysis_done: boolean
   push_sent: boolean
   window_start: string | null
