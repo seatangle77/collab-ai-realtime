@@ -23,6 +23,7 @@ import { listMyGroups } from '../../api/appGroups'
 import { extractErrorMessage } from '../../utils/error'
 import PushNotification from '../../components/PushNotification.vue'
 import InfoGapButtons, { type InfoGapButton } from '../../components/InfoGapButtons.vue'
+import AiInsightSheet from '../../components/AiInsightSheet.vue'
 import { appHttp } from '../../api/appHttp'
 import { buildPushLogDedupeKey, parsePushLogTime, sortPushLogsByTriggeredAtDesc } from '../../utils/pushLogs'
 
@@ -297,9 +298,7 @@ const recorderMetaText = computed(() => {
   }
   return '连接成功后可开始录音并实时发送音频。'
 })
-const summaryExpanded = ref(false)
 const hasSummary = computed(() => !!currentSummary.value)
-const summaryToggleLabel = computed(() => (summaryExpanded.value ? '收起' : '展开'))
 const shouldShowWsStatus = computed(() => {
   return session.value?.status === 'ongoing' && wsStatus.value !== 'connected'
 })
@@ -580,9 +579,6 @@ function handleManualReconnect() {
   openWebSocket()
 }
 
-function toggleSummaryExpanded() {
-  summaryExpanded.value = !summaryExpanded.value
-}
 
 function handleSessionAction(command: string) {
   if (command === 'edit') {
@@ -1096,13 +1092,6 @@ watch(isRecording, (active) => {
   }
 })
 
-watch(
-  () => session.value?.status,
-  (status) => {
-    summaryExpanded.value = status === 'ended'
-  },
-  { immediate: true },
-)
 
 function mergeTranscriptsById(local: AppTranscript[], remote: AppTranscript[]): AppTranscript[] {
   const map = new Map<string, AppTranscript>()
@@ -1395,27 +1384,7 @@ onUnmounted(() => {
         >
       </div>
 
-      <div v-if="hasSummary" class="app-session-summary-panel" :data-expanded="summaryExpanded">
-        <div class="app-session-summary-header">
-          <span class="app-session-summary-icon" aria-hidden="true">◈</span>
-          <span class="app-session-summary-label">讨论摘要</span>
-          <span class="app-session-summary-version">v{{ summaryVersion }}</span>
-          <button
-            type="button"
-            class="app-session-summary-toggle"
-            @click="toggleSummaryExpanded"
-          >
-            {{ summaryToggleLabel }}
-            <span aria-hidden="true">{{ summaryExpanded ? '▴' : '▾' }}</span>
-          </button>
-        </div>
-        <div v-if="summaryExpanded" class="app-session-summary-body">
-          <p class="app-session-summary-content">{{ currentSummary }}</p>
-          <p class="app-session-summary-note">最新版本，具体轮次见后台</p>
-        </div>
-      </div>
-
-      <div class="app-session-detail-transcripts">
+<div class="app-session-detail-transcripts">
         <div class="app-session-detail-transcripts-header">
           <h3 class="app-session-detail-transcripts-title">
             讨论实录
@@ -1498,21 +1467,7 @@ onUnmounted(() => {
           />
         </div>
         <div v-else ref="transcriptsListEl" class="app-session-detail-transcripts-scroll">
-          <div
-            v-if="session.status === 'ongoing' && infoGapButtons.length > 0"
-            class="app-session-detail-info-gap-sticky"
-          >
-            <div class="app-session-detail-info-gap-head">
-              <span class="app-session-detail-info-gap-icon" aria-hidden="true">💡</span>
-              <span class="app-session-detail-info-gap-label">AI 建议关注：</span>
-            </div>
-            <InfoGapButtons
-              :session-id="sessionId"
-              :buttons="infoGapButtons"
-              @clicked="handleInfoGapButtonClicked"
-            />
-          </div>
-          <ul class="app-session-detail-transcripts-list">
+<ul class="app-session-detail-transcripts-list">
             <li
               v-for="item in transcriptItems"
               :key="item.key"
@@ -1594,79 +1549,24 @@ onUnmounted(() => {
       </div>
     </template>
   </div>
+
+  <AiInsightSheet
+    v-if="session?.status === 'ongoing' && (hasSummary || infoGapButtons.length > 0)"
+    :session-id="sessionId"
+    :summary="currentSummary"
+    :summary-version="summaryVersion"
+    :has-summary="hasSummary"
+    :buttons="infoGapButtons"
+    :session-ongoing="session.status === 'ongoing'"
+    @button-clicked="handleInfoGapButtonClicked"
+  />
 </template>
 
 <style scoped>
-.app-session-summary-panel {
-  padding: 12px 16px;
-  margin-bottom: 12px;
-  border-radius: var(--app-radius-card);
-  background: var(--app-bg-elevated);
-  border: 1px solid var(--app-border);
-  box-shadow: var(--app-shadow-card);
-}
-
-.app-session-summary-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.app-session-summary-icon {
-  font-size: 13px;
-  color: var(--app-color-ai);
-}
-
-.app-session-summary-label {
-  font-size: var(--app-font-size-caption);
-  font-weight: 600;
-  color: var(--app-text-primary);
-}
-
-.app-session-summary-version {
-  font-size: 11px;
-  color: var(--app-text-muted);
-}
-
-.app-session-summary-toggle {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  border: none;
-  background: transparent;
-  color: var(--app-text-secondary);
-  font-size: var(--app-font-size-caption);
-  cursor: pointer;
-  padding: 0;
-}
-
-.app-session-summary-toggle:hover {
-  color: var(--app-text-primary);
-}
-
-.app-session-summary-body {
-  margin-top: 10px;
-}
-
-.app-session-summary-content {
-  margin: 0;
-  font-size: var(--app-font-size-body);
-  line-height: 1.6;
-  color: var(--app-text-primary);
-  white-space: pre-wrap;
-}
-
-.app-session-summary-note {
-  margin: 8px 0 0;
-  font-size: var(--app-font-size-caption);
-  color: var(--app-text-secondary);
-}
-
 .app-session-detail-page {
   max-width: var(--app-content-width-default);
   margin: 0 auto;
-  padding: 8px 0 16px;
+  padding: 8px 0 80px;
 }
 
 .app-session-detail-back-btn {
@@ -1972,56 +1872,6 @@ onUnmounted(() => {
   padding: 12px 12px 8px;
   border-radius: var(--app-radius-md);
   background: var(--app-bg-page);
-}
-
-.app-session-detail-info-gap-sticky {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-bottom: 14px;
-  padding: 12px 14px;
-  border-radius: var(--app-radius-md);
-  background: rgba(248, 250, 252, 0.96);
-  border: 1px solid var(--app-border);
-  backdrop-filter: blur(8px);
-}
-
-.app-session-detail-info-gap-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.app-session-detail-info-gap-icon {
-  font-size: 14px;
-}
-
-.app-session-detail-info-gap-label {
-  font-size: var(--app-font-size-caption);
-  font-weight: 600;
-  color: var(--app-text-primary);
-}
-
-.app-session-detail-info-gap-sticky :deep(.info-gap-container) {
-  padding: 0;
-  gap: 10px;
-  opacity: 1;
-}
-
-.app-session-detail-info-gap-sticky :deep(.info-gap-btn) {
-  padding: 8px 14px;
-  border-radius: var(--app-radius-pill);
-  border: 1px solid var(--app-color-ai-border);
-  background: var(--app-color-ai-soft);
-  color: var(--app-color-ai);
-  font-size: var(--app-font-size-body);
-}
-
-.app-session-detail-info-gap-sticky :deep(.info-gap-btn:hover:not(:disabled)) {
-  background: var(--app-color-ai-border);
 }
 
 .app-session-detail-transcripts-list {

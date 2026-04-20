@@ -131,7 +131,21 @@ describe('runActionLayer (new info-gap flow)', () => {
     await runActionLayer({ ...BASE_PARAMS, triggers });
 
     expect(mockNotifyGroupSilence).toHaveBeenCalledTimes(1);
-    expect(mockGeneratePushContent).not.toHaveBeenCalled();
+    expect(mockGeneratePushContent).toHaveBeenCalledTimes(1);
+    expect(mockGeneratePushContent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: SESSION,
+        memberIds: MEMBERS,
+        summaryText: '当前讨论摘要',
+        triggers: [
+          expect.objectContaining({
+            type: 'group_silence',
+            targetUsers: MEMBERS,
+            triggerMetrics: { silence_s: 35 },
+          }),
+        ],
+      }),
+    );
     expect(mockWritePushQueueItem).not.toHaveBeenCalled();
   });
 

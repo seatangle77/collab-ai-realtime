@@ -11,10 +11,30 @@ const mockGetTranscripts = queries.getTranscriptsInWindow as jest.MockedFunction
 const mockWriteKeywordSkw = queries.writeKeywordSkw as jest.MockedFunction<
   typeof queries.writeKeywordSkw
 >;
-const mockTfidf = nlp.tfidf as jest.MockedFunction<typeof nlp.tfidf>;
-const mockCandidateRecall = nlp.candidateRecall as jest.MockedFunction<typeof nlp.candidateRecall>;
+const mockUpdateKeywordSkwBatch = queries.updateKeywordSkwBatch as jest.MockedFunction<
+  typeof queries.updateKeywordSkwBatch
+>;
+const mockDeleteKeywordSkwByKeyword = queries.deleteKeywordSkwByKeyword as jest.MockedFunction<
+  typeof queries.deleteKeywordSkwByKeyword
+>;
+const mockWriteInfoGapButton = queries.writeInfoGapButton as jest.MockedFunction<
+  typeof queries.writeInfoGapButton
+>;
+const mockHasPendingInfoGapKeyword = queries.hasPendingInfoGapKeyword as jest.MockedFunction<
+  typeof queries.hasPendingInfoGapKeyword
+>;
+const mockHasClickedInfoGapKeywordInRecentWindows =
+  queries.hasClickedInfoGapKeywordInRecentWindows as jest.MockedFunction<
+    typeof queries.hasClickedInfoGapKeywordInRecentWindows
+  >;
+const mockKeywordRecallWithGap = nlp.keywordRecallWithGap as jest.MockedFunction<
+  typeof nlp.keywordRecallWithGap
+>;
 const mockEmbed = nlp.embed as jest.MockedFunction<typeof nlp.embed>;
 const mockSimilarity = nlp.similarity as jest.MockedFunction<typeof nlp.similarity>;
+const mockNotifyInfoGapButton = nlp.notifyInfoGapButton as jest.MockedFunction<
+  typeof nlp.notifyInfoGapButton
+>;
 
 const SESSION = 's_test';
 const MEMBERS = ['u1', 'u2'];
@@ -26,353 +46,471 @@ function makeTranscript(userId: string, text: string) {
            start: WIN_START, end: WIN_END, duration: 10 };
 }
 
+function makeRecall(
+  words: Array<{
+    word: string;
+    needs_prompt?: boolean;
+    target_user_id?: string;
+    reason?: string;
+  }>,
+) {
+  return {
+    keywords: words.map(({ word, needs_prompt = false, target_user_id = '', reason = '' }) => ({
+      word,
+      needs_prompt,
+      target_user_id,
+      reason,
+    })),
+  };
+}
+
+function getAllUpdatedRows() {
+  return mockUpdateKeywordSkwBatch.mock.calls.flatMap((call) => call[0]);
+}
+
 describe('computeSkw', () => {
-  afterEach(() => jest.resetAllMocks());
+  beforeEach(() => {
+    jest.resetAllMocks();
+    mockKeywordRecallWithGap.mockResolvedValue({ keywords: [] });
+    mockWriteKeywordSkw.mockResolvedValue(undefined);
+    mockUpdateKeywordSkwBatch.mockResolvedValue(undefined);
+    mockDeleteKeywordSkwByKeyword.mockResolvedValue(undefined);
+    mockWriteInfoGapButton.mockResolvedValue('igb_mock');
+    mockHasPendingInfoGapKeyword.mockResolvedValue(false);
+    mockHasClickedInfoGapKeywordInRecentWindows.mockResolvedValue(false);
+    mockNotifyInfoGapButton.mockResolvedValue(undefined);
+  });
 
   it('成员 < 2：直接返回空结果，不调用 NLP', async () => {
     const { keywords, scores } = await computeSkw(SESSION, WIN_START, WIN_END, ['u1']);
     expect(keywords).toEqual([]);
     expect(scores).toEqual({});
-    expect(mockTfidf).not.toHaveBeenCalled();
-    expect(mockCandidateRecall).not.toHaveBeenCalled();
+    expect(mockKeywordRecallWithGap).not.toHaveBeenCalled();
+    expect(mockWriteKeywordSkw).not.toHaveBeenCalled();
+    expect(mockUpdateKeywordSkwBatch).not.toHaveBeenCalled();
+    expect(mockWriteInfoGapButton).not.toHaveBeenCalled();
   });
 
   it('无人发言：返回空结果', async () => {
     mockGetTranscripts.mockResolvedValue([]);
-    const { keywords } = await computeSkw(SESSION, WIN_START, WIN_END, MEMBERS);
-    expect(keywords).toEqual([]);
-  });
-
-  it('正常流程：提取关键词并写入 keyword_skw', async () => {
-    mockGetTranscripts.mockResolvedValue([
-      makeTranscript('u1', '人工智能技术很重要'),
-      makeTranscript('u2', '机器学习是核心'),
-    ]);
-    mockTfidf.mockResolvedValue({
-      keywords: ['人工智能', '机器学习'],
-      member_keyword_contexts: {
-        u1: { '人工智能': '人工智能技术很重要', '机器学习': '机器学习是核心' },
-        u2: { '人工智能': '人工智能应用很广', '机器学习': '机器学习是核心' },
-      },
-    });
-    mockCandidateRecall.mockResolvedValue({
-      keywords: ['人工智能'],
-      sources: { '人工智能': 'tfidf' },
-    });
-    mockEmbed.mockResolvedValue([[1, 0], [0.8, 0.2]]);
-    mockSimilarity.mockResolvedValue([0.75]);
-    mockWriteKeywordSkw.mockResolvedValue(undefined);
-
     const { keywords, scores } = await computeSkw(SESSION, WIN_START, WIN_END, MEMBERS);
-
-    expect(keywords).toContain('人工智能');
-    expect(mockWriteKeywordSkw).toHaveBeenCalled();
-    const rows = mockWriteKeywordSkw.mock.calls[0][0];
-    expect(rows.length).toBeGreaterThan(0);
-    expect(rows[0].session_id).toBe(SESSION);
-    expect(rows[0].skw_status).toBe('computed');
-    expect(rows[0].mention_count).toBe(2);
-    expect(scores['人工智能']['u1']['u2']).toBeCloseTo(0.75);
-    expect(scores['人工智能']['u2']['u1']).toBeCloseTo(0.75); // 对称
-  });
-
-  it('tfidf 返回空关键词：不写 DB', async () => {
-    mockGetTranscripts.mockResolvedValue([
-      makeTranscript('u1', '啊'),
-      makeTranscript('u2', '嗯'),
-    ]);
-    mockTfidf.mockResolvedValue({ keywords: [], member_keyword_contexts: {} });
-    mockCandidateRecall.mockResolvedValue({ keywords: [], sources: {} });
-    const { keywords } = await computeSkw(SESSION, WIN_START, WIN_END, MEMBERS);
     expect(keywords).toEqual([]);
+    expect(scores).toEqual({});
+    expect(mockKeywordRecallWithGap).not.toHaveBeenCalled();
     expect(mockWriteKeywordSkw).not.toHaveBeenCalled();
+    expect(mockUpdateKeywordSkwBatch).not.toHaveBeenCalled();
+    expect(mockWriteInfoGapButton).not.toHaveBeenCalled();
   });
 
-  it('三人场景：生成 3 个 pair（u1-u2, u1-u3, u2-u3）', async () => {
-    const members3 = ['u1', 'u2', 'u3'];
-    mockGetTranscripts.mockResolvedValue([
-      makeTranscript('u1', '人工智能'),
-      makeTranscript('u2', '机器学习'),
-      makeTranscript('u3', '深度学习'),
-    ]);
-    mockTfidf.mockResolvedValue({
-      keywords: ['技术'],
-      member_keyword_contexts: {
-        u1: { '技术': '人工智能技术' },
-        u2: { '技术': '机器学习技术' },
-        u3: { '技术': '深度学习技术' },
-      },
+  describe('阶段一：关键词召回', () => {
+    it('大模型返回空关键词：终止，不写任何 DB', async () => {
+      mockGetTranscripts.mockResolvedValue([
+        makeTranscript('u1', '人工智能技术很重要'),
+        makeTranscript('u2', '机器学习是核心'),
+      ]);
+      mockKeywordRecallWithGap.mockResolvedValue({ keywords: [] });
+
+      const { keywords, scores } = await computeSkw(SESSION, WIN_START, WIN_END, MEMBERS);
+
+      expect(keywords).toEqual([]);
+      expect(scores).toEqual({});
+      expect(mockKeywordRecallWithGap).toHaveBeenCalledWith({
+        u1: '人工智能技术很重要',
+        u2: '机器学习是核心',
+      });
+      expect(mockWriteKeywordSkw).not.toHaveBeenCalled();
+      expect(mockUpdateKeywordSkwBatch).not.toHaveBeenCalled();
+      expect(mockDeleteKeywordSkwByKeyword).not.toHaveBeenCalled();
+      expect(mockWriteInfoGapButton).not.toHaveBeenCalled();
+      expect(mockNotifyInfoGapButton).not.toHaveBeenCalled();
     });
-    mockCandidateRecall.mockResolvedValue({ keywords: ['技术'], sources: { 技术: 'tfidf' } });
-    mockEmbed.mockResolvedValue([[1, 0], [0.8, 0.2], [0.6, 0.4]]);
-    mockSimilarity.mockResolvedValue([0.9, 0.7, 0.5]); // 3 pairs
-    mockWriteKeywordSkw.mockResolvedValue(undefined);
 
-    await computeSkw(SESSION, WIN_START, WIN_END, members3);
-    const rows = mockWriteKeywordSkw.mock.calls[0][0];
-    expect(rows).toHaveLength(3); // 3 pairs for 1 keyword
-    expect(rows.every((row) => row.skw_status === 'computed')).toBe(true);
-    expect(rows.every((row) => row.mention_count === 3)).toBe(true);
-  });
+    it('大模型调用失败时：按当前实现视为返回空关键词，整体结束', async () => {
+      mockGetTranscripts.mockResolvedValue([
+        makeTranscript('u1', '我提到了 AI'),
+        makeTranscript('u2', '我提到了 Agent'),
+      ]);
+      mockKeywordRecallWithGap.mockResolvedValue({ keywords: [] });
 
-  it('skw_score 对称性：scores[kw][a][b] === scores[kw][b][a]', async () => {
-    mockGetTranscripts.mockResolvedValue([
-      makeTranscript('u1', '话题A'),
-      makeTranscript('u2', '话题B'),
-    ]);
-    mockTfidf.mockResolvedValue({
-      keywords: ['话题'],
-      member_keyword_contexts: { u1: { '话题': '话题A' }, u2: { '话题': '话题B' } },
+      const { keywords, scores } = await computeSkw(SESSION, WIN_START, WIN_END, MEMBERS);
+
+      expect(keywords).toEqual([]);
+      expect(scores).toEqual({});
+      expect(mockKeywordRecallWithGap).toHaveBeenCalledWith({
+        u1: '我提到了 AI',
+        u2: '我提到了 Agent',
+      });
+      expect(mockWriteKeywordSkw).not.toHaveBeenCalled();
+      expect(mockUpdateKeywordSkwBatch).not.toHaveBeenCalled();
+      expect(mockDeleteKeywordSkwByKeyword).not.toHaveBeenCalled();
+      expect(mockWriteInfoGapButton).not.toHaveBeenCalled();
+      expect(mockNotifyInfoGapButton).not.toHaveBeenCalled();
     });
-    mockCandidateRecall.mockResolvedValue({ keywords: ['话题'], sources: { 话题: 'tfidf' } });
-    mockEmbed.mockResolvedValue([[1, 0], [0.5, 0.5]]);
-    mockSimilarity.mockResolvedValue([0.65]);
-    mockWriteKeywordSkw.mockResolvedValue(undefined);
-
-    const { scores } = await computeSkw(SESSION, WIN_START, WIN_END, MEMBERS);
-    expect(scores['话题']['u1']['u2']).toBeCloseTo(0.65);
-    expect(scores['话题']['u2']['u1']).toBeCloseTo(0.65);
   });
 
-  it('只有一人有发言（另一人无文本）：不满足双人条件，返回空', async () => {
-    mockGetTranscripts.mockResolvedValue([makeTranscript('u1', '只有我说话')]);
-    const { keywords } = await computeSkw(SESSION, WIN_START, WIN_END, MEMBERS);
-    expect(keywords).toEqual([]);
-    expect(mockTfidf).not.toHaveBeenCalled();
-    expect(mockCandidateRecall).not.toHaveBeenCalled();
-  });
+  describe('阶段二：pending 初始写入', () => {
+    it('2人1词：writeKeywordSkw 写入 1 条 pending 记录', async () => {
+      mockGetTranscripts.mockResolvedValue([
+        makeTranscript('u1', '我们聊 AI'),
+        makeTranscript('u2', '我也聊 AI'),
+      ]);
+      mockKeywordRecallWithGap.mockResolvedValue(makeRecall([{ word: 'AI' }]));
+      mockEmbed.mockResolvedValue([[1, 0], [0.8, 0.2]]);
+      mockSimilarity.mockResolvedValue([0.75]);
 
-  it('单人提及：不调用 embed/similarity，写入提及者 vs 其余成员的 single_mention 行', async () => {
-    const members3 = ['u1', 'u2', 'u3'];
-    mockGetTranscripts.mockResolvedValue([
-      makeTranscript('u1', '我只提到搭子'),
-      makeTranscript('u2', '我没提那个词'),
-      makeTranscript('u3', '我也没提那个词'),
-    ]);
-    mockTfidf.mockResolvedValue({
-      keywords: ['搭子'],
-      member_keyword_contexts: {
-        u1: { 搭子: '我只提到搭子' },
-        u2: {},
-        u3: {},
-      },
-    });
-    mockCandidateRecall.mockResolvedValue({ keywords: ['搭子'], sources: { 搭子: 'tfidf' } });
-    mockWriteKeywordSkw.mockResolvedValue(undefined);
+      await computeSkw(SESSION, WIN_START, WIN_END, MEMBERS);
 
-    const { keywords, scores } = await computeSkw(SESSION, WIN_START, WIN_END, members3);
-
-    expect(keywords).toEqual(['搭子']);
-    expect(mockEmbed).not.toHaveBeenCalled();
-    expect(mockSimilarity).not.toHaveBeenCalled();
-    expect(mockWriteKeywordSkw).toHaveBeenCalledTimes(1);
-
-    const rows = mockWriteKeywordSkw.mock.calls[0][0];
-    expect(rows).toHaveLength(2);
-    expect(rows).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        keyword: '搭子',
+      expect(mockWriteKeywordSkw).toHaveBeenCalledTimes(1);
+      const rows = mockWriteKeywordSkw.mock.calls[0][0];
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toEqual(expect.objectContaining({
+        session_id: SESSION,
+        keyword: 'AI',
         user_a_id: 'u1',
         user_b_id: 'u2',
-        skw_score: 0.1,
-        skw_status: 'single_mention',
-        mention_count: 1,
-      }),
-      expect.objectContaining({
-        keyword: '搭子',
-        user_a_id: 'u1',
-        user_b_id: 'u3',
-        skw_score: 0.1,
-        skw_status: 'single_mention',
-        mention_count: 1,
-      }),
-    ]));
+        skw_status: 'pending',
+        skw_score: undefined,
+        mention_count: undefined,
+      }));
+    });
 
-    expect(scores['搭子']['u1']['u2']).toBeCloseTo(0.1);
-    expect(scores['搭子']['u2']['u1']).toBeCloseTo(0.1);
-    expect(scores['搭子']['u1']['u3']).toBeCloseTo(0.1);
-    expect(scores['搭子']['u3']['u1']).toBeCloseTo(0.1);
+    it('3人1词：writeKeywordSkw 写入 3 条 pending 记录', async () => {
+      const members3 = ['u1', 'u2', 'u3'];
+      mockGetTranscripts.mockResolvedValue([
+        makeTranscript('u1', '大家都在聊 AI'),
+        makeTranscript('u2', 'AI 确实重要'),
+        makeTranscript('u3', '我也提到 AI'),
+      ]);
+      mockKeywordRecallWithGap.mockResolvedValue(makeRecall([{ word: 'AI' }]));
+      mockEmbed.mockResolvedValue([[1, 0], [0.8, 0.2], [0.6, 0.4]]);
+      mockSimilarity.mockResolvedValue([0.9, 0.8, 0.7]);
+
+      await computeSkw(SESSION, WIN_START, WIN_END, members3);
+
+      const rows = mockWriteKeywordSkw.mock.calls[0][0];
+      expect(rows).toHaveLength(3);
+      expect(rows.map((row) => `${row.user_a_id}-${row.user_b_id}`)).toEqual([
+        'u1-u2',
+        'u1-u3',
+        'u2-u3',
+      ]);
+      expect(rows.every((row) => row.keyword === 'AI')).toBe(true);
+      expect(rows.every((row) => row.skw_status === 'pending')).toBe(true);
+    });
+
+    it('3人3词：writeKeywordSkw 写入 9 条 pending 记录', async () => {
+      const members3 = ['u1', 'u2', 'u3'];
+      mockGetTranscripts.mockResolvedValue([
+        makeTranscript('u1', 'AI Agent MVP'),
+        makeTranscript('u2', 'AI Agent MVP'),
+        makeTranscript('u3', 'AI Agent MVP'),
+      ]);
+      mockKeywordRecallWithGap.mockResolvedValue(makeRecall([
+        { word: 'AI' },
+        { word: 'Agent' },
+        { word: 'MVP' },
+      ]));
+      mockEmbed.mockResolvedValue([[1, 0], [0.8, 0.2], [0.6, 0.4]]);
+      mockSimilarity.mockResolvedValue([0.9, 0.8, 0.7]);
+
+      await computeSkw(SESSION, WIN_START, WIN_END, members3);
+
+      const rows = mockWriteKeywordSkw.mock.calls[0][0];
+      expect(rows).toHaveLength(9);
+      expect(rows.every((row) => row.skw_status === 'pending')).toBe(true);
+      expect(new Set(rows.map((row) => row.keyword))).toEqual(new Set(['AI', 'Agent', 'MVP']));
+    });
   });
 
-  it('混合场景：single_mention 与 computed 关键词可同时写入，embed 只用于 computed', async () => {
-    const members3 = ['u1', 'u2', 'u3'];
-    mockGetTranscripts.mockResolvedValue([
-      makeTranscript('u1', '我喜欢搭子，也聊兴趣'),
-      makeTranscript('u2', '我主要聊兴趣'),
-      makeTranscript('u3', '我没有提到这两个关键词'),
-    ]);
-    mockTfidf.mockResolvedValue({
-      keywords: ['搭子', '兴趣'],
-      member_keyword_contexts: {
-        u1: { 搭子: '我喜欢搭子', 兴趣: '也聊兴趣' },
-        u2: { 兴趣: '我主要聊兴趣' },
-        u3: {},
-      },
+  describe('阶段三：SKW 分数计算与更新', () => {
+    it('2人都提及同一词：updateKeywordSkwBatch 写入 computed', async () => {
+      mockGetTranscripts.mockResolvedValue([
+        makeTranscript('u1', '我理解 AI 是效率工具'),
+        makeTranscript('u2', '我也觉得 AI 能提升效率'),
+      ]);
+      mockKeywordRecallWithGap.mockResolvedValue(makeRecall([{ word: 'AI' }]));
+      mockEmbed.mockResolvedValue([[1, 0], [0.8, 0.2]]);
+      mockSimilarity.mockResolvedValue([0.75]);
+
+      const { scores } = await computeSkw(SESSION, WIN_START, WIN_END, MEMBERS);
+
+      expect(mockUpdateKeywordSkwBatch).toHaveBeenCalledTimes(1);
+      expect(getAllUpdatedRows()).toEqual([
+        expect.objectContaining({
+          skw_score: 0.75,
+          mention_count: 2,
+          skw_status: 'computed',
+        }),
+      ]);
+      expect(scores.AI.u1.u2).toBeCloseTo(0.75);
+      expect(scores.AI.u2.u1).toBeCloseTo(0.75);
     });
-    mockCandidateRecall.mockResolvedValue({
-      keywords: ['搭子', '兴趣'],
-      sources: { 搭子: 'tfidf', 兴趣: 'tfidf' },
+
+    it('只有1人提及：不调 embed/similarity，updateKeywordSkwBatch 写入 3 条 single_mention', async () => {
+      const members3 = ['u1', 'u2', 'u3'];
+      mockGetTranscripts.mockResolvedValue([
+        makeTranscript('u1', '我只提到搭子'),
+        makeTranscript('u2', '我没提那个词，但我有发言'),
+        makeTranscript('u3', '我也没提那个词，但我也有发言'),
+      ]);
+      mockKeywordRecallWithGap.mockResolvedValue(makeRecall([{ word: '搭子' }]));
+
+      const { scores } = await computeSkw(SESSION, WIN_START, WIN_END, members3);
+
+      expect(mockEmbed).not.toHaveBeenCalled();
+      expect(mockSimilarity).not.toHaveBeenCalled();
+      const rows = getAllUpdatedRows();
+      expect(rows).toHaveLength(3);
+      expect(rows.every((row) => row.skw_status === 'single_mention')).toBe(true);
+      expect(rows.every((row) => row.skw_score === 0.1)).toBe(true);
+      expect(rows.every((row) => row.mention_count === 1)).toBe(true);
+      expect(scores['搭子'].u1.u2).toBeCloseTo(0.1);
+      expect(scores['搭子'].u2.u1).toBeCloseTo(0.1);
+      expect(scores['搭子'].u1.u3).toBeCloseTo(0.1);
+      expect(scores['搭子'].u3.u1).toBeCloseTo(0.1);
     });
-    mockEmbed.mockResolvedValue([[1, 0], [0.7, 0.3]]);
-    mockSimilarity.mockResolvedValue([0.66]);
-    mockWriteKeywordSkw.mockResolvedValue(undefined);
 
-    const { scores } = await computeSkw(SESSION, WIN_START, WIN_END, members3);
+    it('2人提及、1人未提及（三人场景）：1 条 computed + 2 条 single_mention', async () => {
+      const members3 = ['u1', 'u2', 'u3'];
+      mockGetTranscripts.mockResolvedValue([
+        makeTranscript('u1', '我提到话题'),
+        makeTranscript('u2', '我也提到话题'),
+        makeTranscript('u3', '我在说别的内容'),
+      ]);
+      mockKeywordRecallWithGap.mockResolvedValue(makeRecall([{ word: '话题' }]));
+      mockEmbed.mockResolvedValue([[1, 0], [0.6, 0.4]]);
+      mockSimilarity.mockResolvedValue([0.65]);
 
-    expect(mockEmbed).toHaveBeenCalledTimes(1);
-    expect(mockSimilarity).toHaveBeenCalledTimes(1);
+      const { scores } = await computeSkw(SESSION, WIN_START, WIN_END, members3);
 
-    const rows = mockWriteKeywordSkw.mock.calls[0][0];
-    expect(rows).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        keyword: '搭子',
-        skw_status: 'single_mention',
-        skw_score: 0.1,
-        mention_count: 1,
-      }),
-      expect.objectContaining({
-        keyword: '兴趣',
-        skw_status: 'computed',
-        skw_score: 0.66,
-        mention_count: 2,
-      }),
-    ]));
+      const rows = getAllUpdatedRows();
+      expect(rows).toHaveLength(3);
+      expect(rows.filter((row) => row.skw_status === 'computed')).toHaveLength(1);
+      expect(rows.filter((row) => row.skw_status === 'single_mention')).toHaveLength(2);
+      expect(scores['话题'].u1.u2).toBeCloseTo(0.65);
+      expect(scores['话题'].u1.u3).toBeCloseTo(0.1);
+      expect(scores['话题'].u2.u3).toBeCloseTo(0.1);
+    });
 
-    expect(scores['搭子']['u1']['u2']).toBeCloseTo(0.1);
-    expect(scores['兴趣']['u1']['u2']).toBeCloseTo(0.66);
+    it('3人都提及：updateKeywordSkwBatch 写入 3 条 computed，embed/similarity 各调 1 次', async () => {
+      const members3 = ['u1', 'u2', 'u3'];
+      mockGetTranscripts.mockResolvedValue([
+        makeTranscript('u1', 'AI 在这里'),
+        makeTranscript('u2', 'AI 在那里'),
+        makeTranscript('u3', 'AI 在别处'),
+      ]);
+      mockKeywordRecallWithGap.mockResolvedValue(makeRecall([{ word: 'AI' }]));
+      mockEmbed.mockResolvedValue([[1, 0], [0.8, 0.2], [0.6, 0.4]]);
+      mockSimilarity.mockResolvedValue([0.9, 0.8, 0.7]);
+
+      await computeSkw(SESSION, WIN_START, WIN_END, members3);
+
+      expect(mockEmbed).toHaveBeenCalledTimes(1);
+      expect(mockSimilarity).toHaveBeenCalledTimes(1);
+      const rows = getAllUpdatedRows();
+      expect(rows).toHaveLength(3);
+      expect(rows.every((row) => row.skw_status === 'computed')).toBe(true);
+      expect(rows.every((row) => row.mention_count === 3)).toBe(true);
+    });
+
+    it('大模型幻觉词（0人实际提及）：deleteKeywordSkwByKeyword 被调用，且返回 keywords 保留原召回词', async () => {
+      mockGetTranscripts.mockResolvedValue([
+        makeTranscript('u1', '这里没有相关内容'),
+        makeTranscript('u2', '这里也没有相关内容'),
+      ]);
+      mockKeywordRecallWithGap.mockResolvedValue(makeRecall([{ word: 'AI' }]));
+
+      const { keywords, scores } = await computeSkw(SESSION, WIN_START, WIN_END, MEMBERS);
+
+      expect(keywords).toEqual(['AI']);
+      expect(scores).toEqual({ AI: {} });
+      expect(mockDeleteKeywordSkwByKeyword).toHaveBeenCalledWith(SESSION, WIN_START, 'AI');
+      expect(mockUpdateKeywordSkwBatch).not.toHaveBeenCalled();
+    });
+
+    it('scores 对称性：scores[kw][a][b] === scores[kw][b][a]', async () => {
+      mockGetTranscripts.mockResolvedValue([
+        makeTranscript('u1', '我理解话题A中的话题'),
+        makeTranscript('u2', '我理解话题B中的话题'),
+      ]);
+      mockKeywordRecallWithGap.mockResolvedValue(makeRecall([{ word: '话题' }]));
+      mockEmbed.mockResolvedValue([[1, 0], [0.5, 0.5]]);
+      mockSimilarity.mockResolvedValue([0.65]);
+
+      const { scores } = await computeSkw(SESSION, WIN_START, WIN_END, MEMBERS);
+
+      expect(scores['话题'].u1.u2).toBeCloseTo(0.65);
+      expect(scores['话题'].u2.u1).toBeCloseTo(0.65);
+    });
+
+    it('混合词（1个幻觉词 + 1个正常词）：幻觉词删除，正常词更新', async () => {
+      mockGetTranscripts.mockResolvedValue([
+        makeTranscript('u1', '我们聊 AI'),
+        makeTranscript('u2', '我也聊 AI'),
+      ]);
+      mockKeywordRecallWithGap.mockResolvedValue(makeRecall([{ word: 'AI' }, { word: '幻觉词' }]));
+      mockEmbed.mockResolvedValue([[1, 0], [0.8, 0.2]]);
+      mockSimilarity.mockResolvedValue([0.72]);
+
+      const { keywords, scores } = await computeSkw(SESSION, WIN_START, WIN_END, MEMBERS);
+
+      expect(keywords).toEqual(['AI', '幻觉词']);
+      expect(mockDeleteKeywordSkwByKeyword).toHaveBeenCalledWith(SESSION, WIN_START, '幻觉词');
+      expect(getAllUpdatedRows()).toEqual([
+        expect.objectContaining({
+          skw_score: 0.72,
+          mention_count: 2,
+          skw_status: 'computed',
+        }),
+      ]);
+      expect(scores.AI.u1.u2).toBeCloseTo(0.72);
+      expect(scores['幻觉词']).toEqual({});
+    });
   });
 
-  it('候选词无人命中上下文：跳过，不写 DB，不进 scores', async () => {
-    mockGetTranscripts.mockResolvedValue([
-      makeTranscript('u1', '这里没有相关内容'),
-      makeTranscript('u2', '这里也没有'),
-    ]);
-    mockTfidf.mockResolvedValue({
-      keywords: ['AI'],
-      member_keyword_contexts: {
-        u1: {},
-        u2: {},
-      },
+  describe('阶段四：info_gap_buttons 写入与推送', () => {
+    it('needs_prompt=false：不写 info_gap_buttons，不推送', async () => {
+      mockGetTranscripts.mockResolvedValue([
+        makeTranscript('u1', '我们聊 AI'),
+        makeTranscript('u2', '我也聊 AI'),
+      ]);
+      mockKeywordRecallWithGap.mockResolvedValue(makeRecall([{ word: 'AI', needs_prompt: false }]));
+      mockEmbed.mockResolvedValue([[1, 0], [0.8, 0.2]]);
+      mockSimilarity.mockResolvedValue([0.75]);
+
+      await computeSkw(SESSION, WIN_START, WIN_END, MEMBERS);
+
+      expect(mockWriteInfoGapButton).not.toHaveBeenCalled();
+      expect(mockNotifyInfoGapButton).not.toHaveBeenCalled();
     });
-    mockCandidateRecall.mockResolvedValue({ keywords: ['AI'], sources: { AI: 'tfidf' } });
-    mockWriteKeywordSkw.mockResolvedValue(undefined);
 
-    const { keywords, scores } = await computeSkw(SESSION, WIN_START, WIN_END, MEMBERS);
+    it('needs_prompt=true：writeInfoGapButton 和 notifyInfoGapButton 各调 1 次，数据完整且 skw_score 为真实值', async () => {
+      mockGetTranscripts.mockResolvedValue([
+        makeTranscript('u1', '我理解 AI 是效率工具'),
+        makeTranscript('u2', '我也觉得 AI 能提升效率'),
+      ]);
+      mockKeywordRecallWithGap.mockResolvedValue(makeRecall([
+        { word: 'AI', needs_prompt: true, target_user_id: 'u1', reason: 'u1 可以进一步展开 AI 视角' },
+      ]));
+      mockEmbed.mockResolvedValue([[1, 0], [0.8, 0.2]]);
+      mockSimilarity.mockResolvedValue([0.75]);
+      mockWriteInfoGapButton.mockResolvedValue('igb_123');
 
-    expect(keywords).toEqual(['AI']);
-    expect(scores).toEqual({ AI: {} });
-    expect(mockWriteKeywordSkw).toHaveBeenCalledWith([]);
-    expect(mockEmbed).not.toHaveBeenCalled();
-    expect(mockSimilarity).not.toHaveBeenCalled();
-  });
+      await computeSkw(SESSION, WIN_START, WIN_END, MEMBERS);
 
-  it('所有候选词都只有 1 人提及：每词写入提及者对其他成员的 pair，且不调用 embed', async () => {
-    const members3 = ['u1', 'u2', 'u3'];
-    const keywords = Array.from({ length: 15 }, (_, i) => `词${i + 1}`);
-    mockGetTranscripts.mockResolvedValue([
-      makeTranscript('u1', keywords.join(' ')),
-      makeTranscript('u2', '其他内容'),
-      makeTranscript('u3', '更多其他内容'),
-    ]);
-    mockTfidf.mockResolvedValue({
-      keywords,
-      member_keyword_contexts: Object.fromEntries(
-        members3.map((uid) => [uid, uid === 'u1'
-          ? Object.fromEntries(keywords.map((kw) => [kw, `${kw} 只在 u1 出现`]))
-          : {}]),
-      ) as Record<string, Record<string, string>>,
+      expect(mockWriteInfoGapButton).toHaveBeenCalledWith({
+        session_id: SESSION,
+        user_id: 'u1',
+        keyword: 'AI',
+        skw_score: 0.75,
+        window_start: WIN_START,
+        llm_reason: 'u1 可以进一步展开 AI 视角',
+      });
+      expect(mockNotifyInfoGapButton).toHaveBeenCalledWith({
+        session_id: SESSION,
+        user_id: 'u1',
+        button_id: 'igb_123',
+        keyword: 'AI',
+        skw_score: 0.75,
+        window_start: WIN_START.toISOString(),
+      });
     });
-    mockCandidateRecall.mockResolvedValue({
-      keywords,
-      sources: Object.fromEntries(keywords.map((kw) => [kw, 'tfidf'])),
+
+    it('target_user_id 已有 pending 按钮：跳过，不写不推', async () => {
+      mockGetTranscripts.mockResolvedValue([
+        makeTranscript('u1', '我们聊 AI'),
+        makeTranscript('u2', '我也聊 AI'),
+      ]);
+      mockKeywordRecallWithGap.mockResolvedValue(makeRecall([
+        { word: 'AI', needs_prompt: true, target_user_id: 'u1', reason: '需要追问' },
+      ]));
+      mockEmbed.mockResolvedValue([[1, 0], [0.8, 0.2]]);
+      mockSimilarity.mockResolvedValue([0.75]);
+      mockHasPendingInfoGapKeyword.mockResolvedValue(true);
+
+      await computeSkw(SESSION, WIN_START, WIN_END, MEMBERS);
+
+      expect(mockWriteInfoGapButton).not.toHaveBeenCalled();
+      expect(mockNotifyInfoGapButton).not.toHaveBeenCalled();
     });
-    mockWriteKeywordSkw.mockResolvedValue(undefined);
 
-    await computeSkw(SESSION, WIN_START, WIN_END, members3);
+    it('近期已点击过：跳过，不写不推', async () => {
+      mockGetTranscripts.mockResolvedValue([
+        makeTranscript('u1', '我们聊 AI'),
+        makeTranscript('u2', '我也聊 AI'),
+      ]);
+      mockKeywordRecallWithGap.mockResolvedValue(makeRecall([
+        { word: 'AI', needs_prompt: true, target_user_id: 'u1', reason: '需要追问' },
+      ]));
+      mockEmbed.mockResolvedValue([[1, 0], [0.8, 0.2]]);
+      mockSimilarity.mockResolvedValue([0.75]);
+      mockHasClickedInfoGapKeywordInRecentWindows.mockResolvedValue(true);
 
-    expect(mockEmbed).not.toHaveBeenCalled();
-    expect(mockSimilarity).not.toHaveBeenCalled();
-    expect(mockWriteKeywordSkw).toHaveBeenCalledTimes(1);
-    const rows = mockWriteKeywordSkw.mock.calls[0][0];
-    expect(rows).toHaveLength(30);
-    expect(rows.every((row) => row.skw_status === 'single_mention')).toBe(true);
-    expect(rows.every((row) => row.skw_score === 0.1)).toBe(true);
-    expect(rows.every((row) => row.mention_count === 1)).toBe(true);
-  });
+      await computeSkw(SESSION, WIN_START, WIN_END, MEMBERS);
 
-  it('三人场景下某词仅 u1 提及：写入 u1-u2 与 u1-u3 两条对称可回读记录', async () => {
-    const members3 = ['u1', 'u2', 'u3'];
-    mockGetTranscripts.mockResolvedValue([
-      makeTranscript('u1', '搭子'),
-      makeTranscript('u2', '完全无关'),
-      makeTranscript('u3', '也是无关'),
-    ]);
-    mockTfidf.mockResolvedValue({
-      keywords: ['搭子'],
-      member_keyword_contexts: {
-        u1: { 搭子: '搭子' },
-        u2: {},
-        u3: {},
-      },
+      expect(mockWriteInfoGapButton).not.toHaveBeenCalled();
+      expect(mockNotifyInfoGapButton).not.toHaveBeenCalled();
     });
-    mockCandidateRecall.mockResolvedValue({ keywords: ['搭子'], sources: { 搭子: 'tfidf' } });
-    mockWriteKeywordSkw.mockResolvedValue(undefined);
 
-    const { scores } = await computeSkw(SESSION, WIN_START, WIN_END, members3);
+    it('writeInfoGapButton 返回 null（ON CONFLICT）：不调 notifyInfoGapButton', async () => {
+      mockGetTranscripts.mockResolvedValue([
+        makeTranscript('u1', '我们聊 AI'),
+        makeTranscript('u2', '我也聊 AI'),
+      ]);
+      mockKeywordRecallWithGap.mockResolvedValue(makeRecall([
+        { word: 'AI', needs_prompt: true, target_user_id: 'u1', reason: '需要追问' },
+      ]));
+      mockEmbed.mockResolvedValue([[1, 0], [0.8, 0.2]]);
+      mockSimilarity.mockResolvedValue([0.75]);
+      mockWriteInfoGapButton.mockResolvedValue(null);
 
-    const rows = mockWriteKeywordSkw.mock.calls[0][0];
-    expect(rows).toEqual(expect.arrayContaining([
-      expect.objectContaining({ user_a_id: 'u1', user_b_id: 'u2', skw_score: 0.1 }),
-      expect.objectContaining({ user_a_id: 'u1', user_b_id: 'u3', skw_score: 0.1 }),
-    ]));
-    expect(scores['搭子']['u2']['u1']).toBeCloseTo(0.1);
-    expect(scores['搭子']['u3']['u1']).toBeCloseTo(0.1);
-  });
+      await computeSkw(SESSION, WIN_START, WIN_END, MEMBERS);
 
-  it('computed 行写入时包含 skw_status 与 mention_count 新字段', async () => {
-    mockGetTranscripts.mockResolvedValue([
-      makeTranscript('u1', '话题A'),
-      makeTranscript('u2', '话题B'),
-    ]);
-    mockTfidf.mockResolvedValue({
-      keywords: ['话题'],
-      member_keyword_contexts: { u1: { 话题: '话题A' }, u2: { 话题: '话题B' } },
+      expect(mockWriteInfoGapButton).toHaveBeenCalledTimes(1);
+      expect(mockNotifyInfoGapButton).not.toHaveBeenCalled();
     });
-    mockCandidateRecall.mockResolvedValue({ keywords: ['话题'], sources: { 话题: 'tfidf' } });
-    mockEmbed.mockResolvedValue([[1, 0], [0.5, 0.5]]);
-    mockSimilarity.mockResolvedValue([0.65]);
-    mockWriteKeywordSkw.mockResolvedValue(undefined);
 
-    await computeSkw(SESSION, WIN_START, WIN_END, MEMBERS);
+    it('needs_prompt=true 但 target_user_id 为空字符串：跳过', async () => {
+      mockGetTranscripts.mockResolvedValue([
+        makeTranscript('u1', '我们聊 AI'),
+        makeTranscript('u2', '我也聊 AI'),
+      ]);
+      mockKeywordRecallWithGap.mockResolvedValue(makeRecall([
+        { word: 'AI', needs_prompt: true, target_user_id: '', reason: '缺少目标用户' },
+      ]));
+      mockEmbed.mockResolvedValue([[1, 0], [0.8, 0.2]]);
+      mockSimilarity.mockResolvedValue([0.75]);
 
-    const rows = mockWriteKeywordSkw.mock.calls[0][0];
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toEqual(expect.objectContaining({
-      keyword: '话题',
-      user_a_id: 'u1',
-      user_b_id: 'u2',
-      skw_score: 0.65,
-      skw_status: 'computed',
-      mention_count: 2,
-    }));
-  });
+      await computeSkw(SESSION, WIN_START, WIN_END, MEMBERS);
 
-  it('writeKeywordSkw 接收到空数组时也应保持兼容，不抛出 DB 异常', async () => {
-    mockGetTranscripts.mockResolvedValue([
-      makeTranscript('u1', '这里没有相关内容'),
-      makeTranscript('u2', '这里也没有'),
-    ]);
-    mockTfidf.mockResolvedValue({
-      keywords: ['AI'],
-      member_keyword_contexts: {
-        u1: {},
-        u2: {},
-      },
+      expect(mockWriteInfoGapButton).not.toHaveBeenCalled();
+      expect(mockNotifyInfoGapButton).not.toHaveBeenCalled();
     });
-    mockCandidateRecall.mockResolvedValue({ keywords: ['AI'], sources: { AI: 'tfidf' } });
-    mockWriteKeywordSkw.mockResolvedValue(undefined);
 
-    await expect(computeSkw(SESSION, WIN_START, WIN_END, MEMBERS)).resolves.toBeDefined();
-    expect(mockWriteKeywordSkw).toHaveBeenCalledWith([]);
+    it('3人都提及时，按钮写入的 skw_score 是 target_user_id 对其他提及者分数的平均值', async () => {
+      const members3 = ['u1', 'u2', 'u3'];
+      mockGetTranscripts.mockResolvedValue([
+        makeTranscript('u1', 'AI 在这里'),
+        makeTranscript('u2', 'AI 在那里'),
+        makeTranscript('u3', 'AI 在别处'),
+      ]);
+      mockKeywordRecallWithGap.mockResolvedValue(makeRecall([
+        { word: 'AI', needs_prompt: true, target_user_id: 'u1', reason: '让 u1 继续展开' },
+      ]));
+      mockEmbed.mockResolvedValue([[1, 0], [0.8, 0.2], [0.6, 0.4]]);
+      mockSimilarity.mockResolvedValue([0.9, 0.8, 0.7]);
+
+      await computeSkw(SESSION, WIN_START, WIN_END, members3);
+
+      const writeArg = mockWriteInfoGapButton.mock.calls[0][0];
+      expect(writeArg.user_id).toBe('u1');
+      expect(writeArg.keyword).toBe('AI');
+      expect(writeArg.skw_score).toBeCloseTo(0.85);
+
+      const notifyArg = mockNotifyInfoGapButton.mock.calls[0][0];
+      expect(notifyArg.user_id).toBe('u1');
+      expect(notifyArg.keyword).toBe('AI');
+      expect(notifyArg.skw_score).toBeCloseTo(0.85);
+    });
   });
 });

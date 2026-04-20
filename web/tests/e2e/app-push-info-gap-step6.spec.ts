@@ -251,7 +251,7 @@ test.describe('Step 6 - Push and InfoGap behaviors', () => {
     })
     await page.goto(`/app/sessions/${session.id}`)
 
-    await expect(page.locator('.app-session-detail-info-gap-sticky')).toBeVisible()
+    await expect(page.locator('.ai-sheet')).toBeVisible()
     await emitWs(page, {
       type: 'info_gap_button',
       data: {
@@ -262,10 +262,12 @@ test.describe('Step 6 - Push and InfoGap behaviors', () => {
       },
     })
 
+    // 先展开抽屉才能点击按钮
+    await page.locator('.ai-sheet__handle-bar').click()
     await expect(page.locator('.info-gap-btn')).toHaveCount(2)
     await page.locator('.info-gap-btn').filter({ hasText: '预算' }).click()
     await page.locator('.info-gap-btn').filter({ hasText: '风险' }).click()
-    await expect(page.locator('.app-session-detail-info-gap-sticky')).toHaveCount(0)
+    await expect(page.locator('.info-gap-btn')).toHaveCount(0)
   })
 
   test('info-gap click failure keeps the button visible for exception recovery', async ({ page }) => {
@@ -276,6 +278,7 @@ test.describe('Step 6 - Push and InfoGap behaviors', () => {
     await page.goto(`/app/sessions/${session.id}`)
 
     const btn = page.locator('.info-gap-btn').filter({ hasText: '失败恢复' })
+    await page.locator('.ai-sheet__handle-bar').click()
     await btn.click()
     await expect(btn).toBeVisible()
   })
@@ -295,5 +298,53 @@ test.describe('Step 6 - Push and InfoGap behaviors', () => {
 
     await expect(page.locator('.app-session-detail-ai-card').filter({ hasText: /^$/ })).toHaveCount(0)
     await expect(page.locator('.info-gap-btn').filter({ hasText: /^$/ })).toHaveCount(0)
+  })
+
+  test('ai-sheet 默认收起，点击 handle 展开后显示摘要和关键词', async ({ page }) => {
+    await mockApis(page, {
+      infoGapButtons: [{ id: 'sheet-gap', keyword: '预算', skw_score: 0.1 }],
+    })
+    await page.goto(`/app/sessions/${session.id}`)
+    await waitForDetailReady(page)
+
+    const sheet = page.locator('.ai-sheet')
+    await expect(sheet).toBeVisible()
+
+    // 默认收起：body 不可见
+    await expect(page.locator('.ai-sheet__body')).not.toBeVisible()
+    // 预览行有关键词文字
+    await expect(page.locator('.ai-sheet__preview')).toContainText('预算')
+
+    // 点击展开
+    await page.locator('.ai-sheet__handle-bar').click()
+    await expect(page.locator('.ai-sheet__body')).toBeVisible()
+    await expect(page.locator('.ai-sheet__summary-section')).toContainText('Push & InfoGap 测试摘要')
+    await expect(page.locator('.info-gap-btn').filter({ hasText: '预算' })).toBeVisible()
+  })
+
+  test('会话结束后 ai-sheet 不显示', async ({ page }) => {
+    await mockApis(page, {
+      infoGapButtons: [{ id: 'end-gap', keyword: '结束词', skw_score: 0.1 }],
+    })
+    await page.goto(`/app/sessions/${session.id}`)
+    await waitForDetailReady(page)
+
+    await emitWs(page, { type: 'session_ended', data: { session_id: session.id, reason: 'host_ended' } })
+    await page.waitForTimeout(300)
+    await expect(page.locator('.ai-sheet')).not.toBeVisible()
+  })
+
+  test('收到新 info_gap_button WS 推送，预览行实时更新', async ({ page }) => {
+    await mockApis(page)
+    await page.goto(`/app/sessions/${session.id}`)
+    await waitForDetailReady(page)
+
+    await emitWs(page, {
+      type: 'info_gap_button',
+      data: { buttons: [{ id: 'live-gap', keyword: '实时词', skw_score: 0.2 }] },
+    })
+
+    await expect(page.locator('.ai-sheet')).toBeVisible({ timeout: 3000 })
+    await expect(page.locator('.ai-sheet__preview')).toContainText('实时词')
   })
 })
