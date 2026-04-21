@@ -6,8 +6,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from typing import Any, Mapping
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
@@ -231,7 +234,26 @@ async def click_info_gap_button(
 
     await db.commit()
 
-    # 2) 组装上下文并生成真实推送文案
+    # 2) 检查同 session + 同 keyword 是否已有缓存的 explanation
+    cached_result = await db.execute(
+        text(
+            """
+            SELECT explanation FROM info_gap_buttons
+            WHERE session_id = :session_id
+              AND keyword = :keyword
+              AND explanation IS NOT NULL
+            LIMIT 1
+            """
+        ),
+        {"session_id": session_id, "keyword": str(btn["keyword"])},
+    )
+    cached_row = cached_result.mappings().first()
+    if cached_row:
+        final_content = str(cached_row["explanation"])
+        logger.info("[info_gap] 命中缓存 keyword=%s", btn["keyword"])
+        return ClickResponse(success=True, content=final_content, keyword=str(btn["keyword"]))
+
+    # 3) 组装上下文并生成真实推送文案
     summary_result = await db.execute(
         text(
             """
@@ -278,7 +300,7 @@ async def click_info_gap_button(
     username = str(user_row.get("name") or "")
     device_token = user_row.get("device_token")
 
-    generated_content = nlp_push_content.generate_push_content(
+    generated_content = await nlp_push_content.generate_push_content(
         trigger_type="info_gap",
         summary=summary_text,
         transcripts=transcript_text,
@@ -288,7 +310,13 @@ async def click_info_gap_button(
     )
     final_content = generated_content or f"关键词「{btn['keyword']}」可先从讨论语境里看定义和例子。"
 
-    # 3) 写 push_log 记录
+    # 写回 explanation 缓存
+    await db.execute(
+        text("UPDATE info_gap_buttons SET explanation = :exp WHERE id = :id"),
+        {"exp": final_content, "id": body.button_id},
+    )
+
+    # 4) 写 push_log 记录
     log_id = f"pl{uuid.uuid4().hex[:8]}"
     await db.execute(
         text(
@@ -310,7 +338,7 @@ async def click_info_gap_button(
     )
     await db.commit()
 
-    # 4) JPush 推送（如果用户有 device_token）
+    # 5) JPush 推送（如果用户有 device_token）
     if device_token:
         try:
             await asyncio.to_thread(

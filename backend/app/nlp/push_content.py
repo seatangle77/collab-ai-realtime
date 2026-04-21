@@ -13,7 +13,7 @@ import json
 import logging
 from typing import Any
 
-from openai import OpenAI
+from openai import AsyncOpenAI, OpenAI
 
 from ..settings import nlp_settings
 
@@ -161,7 +161,14 @@ def _get_client() -> OpenAI:
     )
 
 
-def generate_push_content(
+def _get_async_client() -> AsyncOpenAI:
+    return AsyncOpenAI(
+        api_key=nlp_settings.qwen_api_key,
+        base_url=nlp_settings.qwen_base_url,
+    )
+
+
+async def generate_push_content(
     trigger_type: str,
     summary: str,
     transcripts: str,
@@ -173,7 +180,7 @@ def generate_push_content(
     skw_score: float = 0.0,
 ) -> str:
     """
-    根据触发类型生成推送文案。
+    根据触发类型生成推送文案（异步）。
     transcripts 传入格式：各成员发言拼接字符串，调用方负责格式化。
     返回 AI 生成的文案字符串，失败时返回空字符串。
     """
@@ -202,8 +209,8 @@ def generate_push_content(
     )
 
     try:
-        client = _get_client()
-        response = client.chat.completions.create(
+        client = _get_async_client()
+        response = await client.chat.completions.create(
             model=nlp_settings.reasoning_model,
             max_tokens=80,
             messages=[
