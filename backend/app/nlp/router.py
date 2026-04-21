@@ -2,7 +2,7 @@
 NLP 微服务路由
 - 前缀：/api/nlp
 - 鉴权：X-Admin-Token（复用现有 require_admin）
-- 接口：segment / embed / similarity / tfidf / candidate_recall / has_reasoning / generate_push / generate_push_batch / assess_gap / generate_summary
+- 接口：segment / embed / similarity / tfidf / candidate_recall / has_reasoning / generate_push_batch / generate_push_structured / assess_gap / generate_summary
 """
 from __future__ import annotations
 
@@ -126,40 +126,6 @@ class ReasoningResponse(BaseModel):
 @router.post("/has_reasoning", response_model=ReasoningResponse)
 def check_reasoning(req: ReasoningRequest, _: bool = Depends(require_admin)):
     return reasoning.has_reasoning(req.text)
-
-
-# ── 7. generate_push ──────────────────────────────────────────────────────────
-
-class GeneratePushRequest(BaseModel):
-    trigger_type: str                          # group_silence / low_participation / shallow_discussion / info_gap
-    summary: str = ""
-    transcripts: str = ""                      # 调用方格式化好的发言文本
-    username: str = ""
-    silence_s: int = 0
-    speaking_ratio: float = 0.0
-    triggered_metrics: str = ""
-    keyword: str = ""
-    skw_score: float = 0.0
-
-
-class GeneratePushResponse(BaseModel):
-    content: str
-
-
-@router.post("/generate_push", response_model=GeneratePushResponse)
-def generate_push(req: GeneratePushRequest, _: bool = Depends(require_admin)):
-    content = push_content.generate_push_content(
-        trigger_type=req.trigger_type,
-        summary=req.summary,
-        transcripts=req.transcripts,
-        username=req.username,
-        silence_s=req.silence_s,
-        speaking_ratio=req.speaking_ratio,
-        triggered_metrics=req.triggered_metrics,
-        keyword=req.keyword,
-        skw_score=req.skw_score,
-    )
-    return {"content": content}
 
 
 # ── 8. generate_push_batch ────────────────────────────────────────────────────

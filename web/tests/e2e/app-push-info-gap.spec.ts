@@ -60,10 +60,41 @@ async function insertInfoGapButton(
   keyword: string,
   skwScore = 0.2,
 ): Promise<string> {
-  // 通过后端 admin SQL 工具或直接调 DB 插入 — 这里用 admin 兜底接口
-  // 实际跑测试时需要 DB 直连能力（见后端测试的 psycopg2 方案）
-  // 此处通过 admin 创建 push_log 方式验证 UI 行为，info_gap_button 数据由 WebSocket mock 提供
-  return `igb_mock_${Date.now()}`
+  const res = await fetch(`${API_BASE}/api/admin/test-seed/info-gap-button`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Admin-Token': ADMIN_API_KEY },
+    body: JSON.stringify({
+      session_id: sessionId,
+      user_id: userId,
+      keyword: keyword,
+      skw_score: skwScore,
+      status: 'pending',
+    }),
+  })
+  if (!res.ok) throw new Error(`插入 info-gap-button 失败: ${await res.text()}`)
+  return (await res.json()).id as string
+}
+
+async function insertInfoGapButtonWithStatus(
+  sessionId: string,
+  userId: string,
+  keyword: string,
+  status: 'pending' | 'clicked' | 'expired',
+  skwScore = 0.2,
+): Promise<string> {
+  const res = await fetch(`${API_BASE}/api/admin/test-seed/info-gap-button`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Admin-Token': ADMIN_API_KEY },
+    body: JSON.stringify({
+      session_id: sessionId,
+      user_id: userId,
+      keyword,
+      skw_score: skwScore,
+      status,
+    }),
+  })
+  if (!res.ok) throw new Error(`插入 ${status} info-gap-button 失败: ${await res.text()}`)
+  return (await res.json()).id as string
 }
 
 async function loginViaUI(page: import('@playwright/test').Page, user: TestUser) {
@@ -269,11 +300,15 @@ test.describe('InfoGapButtons - 信息缺口关键词按钮', () => {
       },
     })
 
-    await expect(page.locator('.info-gap-btn').filter({ hasText: '机器学习' })).toBeVisible({ timeout: 3000 })
-    await expect(page.locator('.info-gap-btn').filter({ hasText: '深度学习' })).toBeVisible()
+    await expect(page.locator('.ai-sheet')).toBeVisible({ timeout: 5000 })
+    await expect(page.locator('.ai-sheet__preview')).toContainText('机器学习', { timeout: 5000 })
+    await page.waitForTimeout(150)
+    await page.locator('.ai-sheet__handle-bar').click()
+    await expect(page.locator('.info-gap-btn').filter({ hasText: '机器学习' }).first()).toBeVisible({ timeout: 5000 })
+    await expect(page.locator('.info-gap-btn').filter({ hasText: '深度学习' }).first()).toBeVisible({ timeout: 5000 })
   })
 
-  test('B-2: 默认低透明度（静默浮现）', async ({ page }) => {
+  test('B-2: 默认收起，关键词先显示在摘要预览区', async ({ page }) => {
     await patchWsForCapture(page)
     const user = await registerAndLogin('b2')
     const { sessionId } = await createGroupAndSession(user.token, 'b2')
@@ -286,14 +321,12 @@ test.describe('InfoGapButtons - 信息缺口关键词按钮', () => {
       data: { buttons: [{ id: 'btn_003', keyword: '人工智能', skw_score: 0.2 }] },
     })
 
-    await expect(page.locator('.info-gap-container')).toBeVisible({ timeout: 3000 })
-    const opacity = await page.locator('.info-gap-container').evaluate(
-      (el) => parseFloat(window.getComputedStyle(el).opacity),
-    )
-    expect(opacity).toBeLessThanOrEqual(0.65)
+    await expect(page.locator('.ai-sheet')).toBeVisible({ timeout: 3000 })
+    await expect(page.locator('.ai-sheet__body')).not.toBeVisible()
+    await expect(page.locator('.ai-sheet__preview')).toContainText('人工智能')
   })
 
-  test('B-3: 点击按钮 → 按钮变灰且不可再点', async ({ page }) => {
+  test('B-3: 点击按钮 → 按钮变为 viewed 且不可再点', async ({ page }) => {
     await patchWsForCapture(page)
     const user = await registerAndLogin('b3')
     const { sessionId } = await createGroupAndSession(user.token, 'b3')
@@ -311,12 +344,17 @@ test.describe('InfoGapButtons - 信息缺口关键词按钮', () => {
       data: { buttons: [{ id: 'btn_004', keyword: '可点击词', skw_score: 0.2 }] },
     })
 
-    const btn = page.locator('.info-gap-btn').filter({ hasText: '可点击词' })
+    await expect(page.locator('.ai-sheet')).toBeVisible({ timeout: 3000 })
+    await expect(page.locator('.ai-sheet__preview')).toContainText('可点击词')
+    await page.waitForTimeout(150)
+    await page.locator('.ai-sheet__handle-bar').click()
+    const btn = page.locator('.info-gap-btn').filter({ hasText: '可点击词' }).first()
     await expect(btn).toBeVisible({ timeout: 3000 })
     await btn.click()
 
-    // 组件点击成功后会 emit 给父组件并从列表移除，断言最终不再可见
-    await expect(btn).not.toBeVisible({ timeout: 5000 })
+    const viewedBtn = page.locator('.info-gap-btn--viewed').filter({ hasText: '可点击词' }).first()
+    await expect(viewedBtn).toBeVisible({ timeout: 5000 })
+    await expect(viewedBtn).toBeDisabled()
   })
 
   test('B-4: 点击按钮发送正确的 POST 请求', async ({ page }) => {
@@ -337,6 +375,7 @@ test.describe('InfoGapButtons - 信息缺口关键词按钮', () => {
       type: 'info_gap_button',
       data: { buttons: [{ id: 'btn_req_005', keyword: '请求验证', skw_score: 0.2 }] },
     })
+    await page.locator('.ai-sheet__handle-bar').click()
     await page.locator('.info-gap-btn').filter({ hasText: '请求验证' }).click()
     await page.waitForTimeout(500)
 
@@ -361,14 +400,17 @@ test.describe('InfoGapButtons - 信息缺口关键词按钮', () => {
       data: { buttons: [{ id: 'btn_fail_006', keyword: '失败词', skw_score: 0.2 }] },
     })
 
-    const btn = page.locator('.info-gap-btn').filter({ hasText: '失败词' })
+    await expect(page.locator('.ai-sheet')).toBeVisible({ timeout: 5000 })
+    await expect(page.locator('.ai-sheet__preview')).toContainText('失败词', { timeout: 5000 })
+    await page.waitForTimeout(150)
+    await page.locator('.ai-sheet__handle-bar').click()
+    const btn = page.locator('.info-gap-btn').filter({ hasText: '失败词' }).first()
     await expect(btn).toBeVisible({ timeout: 3000 })
     await btn.click()
     await page.waitForTimeout(800)
 
-    // 失败后按钮不应该带 clicked class
-    const classes = await btn.getAttribute('class')
-    expect(classes).not.toContain('info-gap-btn--clicked')
+    await expect(page.locator('.info-gap-btn--viewed').filter({ hasText: '失败词' })).toHaveCount(0)
+    await expect(page.locator('.info-gap-result')).toHaveCount(0)
   })
 
   test('B-6: 多次收到 info_gap_button → 去重合并，不重复显示', async ({ page }) => {
@@ -384,6 +426,7 @@ test.describe('InfoGapButtons - 信息缺口关键词按钮', () => {
       type: 'info_gap_button',
       data: { buttons: [{ id: 'btn_dup_007', keyword: '重复词', skw_score: 0.2 }] },
     })
+    await page.locator('.ai-sheet__handle-bar').click()
     await expect(page.locator('.info-gap-btn').filter({ hasText: '重复词' })).toBeVisible({ timeout: 5000 })
     // 再推一次相同 id
     await injectWsMessage(page, {
@@ -393,7 +436,7 @@ test.describe('InfoGapButtons - 信息缺口关键词按钮', () => {
     await expect(page.locator('.info-gap-btn').filter({ hasText: '重复词' })).toHaveCount(1, { timeout: 5000 })
   })
 
-  test('B-7: 会话结束后 InfoGapButtons 不显示', async ({ page }) => {
+  test('B-7: 会话结束后交互按钮隐藏并切换为只读概念', async ({ page }) => {
     await patchWsForCapture(page)
     const user = await registerAndLogin('b7')
     const { sessionId } = await createGroupAndSession(user.token, 'b7')
@@ -407,6 +450,7 @@ test.describe('InfoGapButtons - 信息缺口关键词按钮', () => {
       type: 'info_gap_button',
       data: { buttons: [{ id: 'btn_end_008', keyword: '结束后词', skw_score: 0.2 }] },
     })
+    await page.locator('.ai-sheet__handle-bar').click()
     await expect(page.locator('.info-gap-btn').filter({ hasText: '结束后词' })).toBeVisible({ timeout: 5000 })
 
     // 会话结束
@@ -416,8 +460,8 @@ test.describe('InfoGapButtons - 信息缺口关键词按钮', () => {
     })
     await page.waitForTimeout(500)
 
-    // 会话 ended 后 v-if="session.status === 'ongoing'" 不满足，按钮区域应隐藏
-    await expect(page.locator('.info-gap-container')).not.toBeVisible()
+    await expect(page.locator('.info-gap-btn')).toHaveCount(0)
+    await expect(page.locator('.ai-sheet__readonly-pill').filter({ hasText: '结束后词' })).toBeVisible()
   })
 })
 
@@ -451,6 +495,7 @@ test.describe('GET info-gap/buttons - API 集成', () => {
     const body = await res.json()
     expect(Array.isArray(body)).toBe(true)
   })
+
 })
 
 // ══════════════════════════════════════════════════════════════════════════════

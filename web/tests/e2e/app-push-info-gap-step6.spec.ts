@@ -80,14 +80,33 @@ async function installMockWs(page: Page) {
 async function mockApis(
   page: Page,
   options: {
+    sessionStatus?: 'ongoing' | 'ended'
     pushLogs?: unknown[]
     infoGapButtons?: unknown[]
+    infoGapButtonsAll?: unknown[]
     transcripts?: unknown[]
+    summary?: { content: string; version: number }
+    summaries?: unknown[]
     clickShouldFail?: boolean
   } = {},
 ) {
+  const sessionStatus = options.sessionStatus ?? 'ongoing'
   const pushLogs = options.pushLogs ?? []
   const infoGapButtons = options.infoGapButtons ?? []
+  const infoGapButtonsAll = options.infoGapButtonsAll ?? infoGapButtons
+  const summary = options.summary ?? { content: 'Push & InfoGap 测试摘要', version: 1 }
+  const summaries = options.summaries ?? [
+    {
+      id: 'summary-v1',
+      session_id: session.id,
+      version: summary.version,
+      content: summary.content,
+      analysis_run_id: `summary:${session.id}:v${summary.version}`,
+      window_start: '2026-03-01T10:00:00.000Z',
+      window_end: '2026-03-01T10:05:00.000Z',
+      created_at: '2026-03-01T10:05:00.000Z',
+    },
+  ]
   const transcripts =
     options.transcripts ??
     [
@@ -133,7 +152,11 @@ async function mockApis(
   })
 
   await page.route(`**/api/groups/${group.id}/sessions**`, async (route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([session]) })
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([{ ...session, status: sessionStatus }]),
+    })
   })
 
   await page.route(`**/api/sessions/${session.id}/transcripts`, async (route) => {
@@ -144,7 +167,15 @@ async function mockApis(
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ content: 'Push & InfoGap 测试摘要', version: 1 }),
+      body: JSON.stringify(summary),
+    })
+  })
+
+  await page.route(`**/api/sessions/${session.id}/summaries`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(summaries),
     })
   })
 
@@ -152,8 +183,10 @@ async function mockApis(
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(pushLogs) })
   })
 
-  await page.route(`**/api/sessions/${session.id}/info-gap/buttons`, async (route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(infoGapButtons) })
+  await page.route(`**/api/sessions/${session.id}/info-gap/buttons**`, async (route) => {
+    const url = new URL(route.request().url())
+    const body = url.searchParams.get('include_all') === 'true' ? infoGapButtonsAll : infoGapButtons
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
   })
 
   await page.route(`**/api/sessions/${session.id}/info-gap/click`, async (route) => {
@@ -245,7 +278,7 @@ test.describe('Step 6 - Push and InfoGap behaviors', () => {
     expect(orderedTexts[2]).toContain('再说第二个观点')
   })
 
-  test('duplicate info-gap ids are de-duplicated and toolbar hides after the last successful click', async ({ page }) => {
+  test('duplicate info-gap ids are de-duplicated and successful clicks leave viewed state', async ({ page }) => {
     await mockApis(page, {
       infoGapButtons: [{ id: 'seed-gap', keyword: '预算', skw_score: 0.1 }],
     })
@@ -267,7 +300,8 @@ test.describe('Step 6 - Push and InfoGap behaviors', () => {
     await expect(page.locator('.info-gap-btn')).toHaveCount(2)
     await page.locator('.info-gap-btn').filter({ hasText: '预算' }).click()
     await page.locator('.info-gap-btn').filter({ hasText: '风险' }).click()
-    await expect(page.locator('.info-gap-btn')).toHaveCount(0)
+    await expect(page.locator('.info-gap-btn')).toHaveCount(2)
+    await expect(page.locator('.info-gap-btn--viewed')).toHaveCount(2)
   })
 
   test('info-gap click failure keeps the button visible for exception recovery', async ({ page }) => {
@@ -322,7 +356,7 @@ test.describe('Step 6 - Push and InfoGap behaviors', () => {
     await expect(page.locator('.info-gap-btn').filter({ hasText: '预算' })).toBeVisible()
   })
 
-  test('会话结束后 ai-sheet 不显示', async ({ page }) => {
+  test('会话结束后 ai-sheet 保留并切换为只读概念展示', async ({ page }) => {
     await mockApis(page, {
       infoGapButtons: [{ id: 'end-gap', keyword: '结束词', skw_score: 0.1 }],
     })
@@ -331,7 +365,91 @@ test.describe('Step 6 - Push and InfoGap behaviors', () => {
 
     await emitWs(page, { type: 'session_ended', data: { session_id: session.id, reason: 'host_ended' } })
     await page.waitForTimeout(300)
-    await expect(page.locator('.ai-sheet')).not.toBeVisible()
+    await expect(page.locator('.ai-sheet')).toBeVisible()
+    await page.locator('.ai-sheet__handle-bar').click()
+    await expect(page.locator('.info-gap-btn')).toHaveCount(0)
+    await expect(page.locator('.ai-sheet__readonly-pill').filter({ hasText: '结束词' })).toBeVisible()
+  })
+
+  test('历史摘要在摘要卡内折叠展示，最新摘要保持主位', async ({ page }) => {
+    await mockApis(page, {
+      summary: { content: '当前最新摘要', version: 3 },
+      summaries: [
+        {
+          id: 'summary-v3',
+          session_id: session.id,
+          version: 3,
+          content: '当前最新摘要',
+          analysis_run_id: 'summary-v3',
+          window_start: '2026-03-01T10:20:00.000Z',
+          window_end: '2026-03-01T10:30:00.000Z',
+          created_at: '2026-03-01T10:30:00.000Z',
+        },
+        {
+          id: 'summary-v2',
+          session_id: session.id,
+          version: 2,
+          content: '上一轮摘要',
+          analysis_run_id: 'summary-v2',
+          window_start: '2026-03-01T10:10:00.000Z',
+          window_end: '2026-03-01T10:20:00.000Z',
+          created_at: '2026-03-01T10:20:00.000Z',
+        },
+        {
+          id: 'summary-v1',
+          session_id: session.id,
+          version: 1,
+          content: '更早摘要',
+          analysis_run_id: 'summary-v1',
+          window_start: '2026-03-01T10:00:00.000Z',
+          window_end: '2026-03-01T10:10:00.000Z',
+          created_at: '2026-03-01T10:10:00.000Z',
+        },
+      ],
+    })
+    await page.goto(`/app/sessions/${session.id}`)
+    await waitForDetailReady(page)
+
+    await page.locator('.ai-sheet__handle-bar').click()
+    await expect(page.locator('.ai-sheet__summary-section')).toContainText('当前最新摘要')
+    await expect(page.locator('.ai-sheet__history-toggle')).toContainText('历史版本 (3)')
+    await page.locator('.ai-sheet__history-toggle').click()
+    await expect(page.locator('.ai-sheet__history-item')).toHaveCount(2)
+    await expect(page.locator('.ai-sheet__history-item').first()).toContainText('v2')
+    await expect(page.locator('.ai-sheet__history-item').first()).toContainText('上一轮摘要')
+    await expect(page.locator('.ai-sheet__history-item').nth(1)).toContainText('v1')
+  })
+
+  test('ended 初始加载会带 include_all，保留已点击过的相关概念', async ({ page }) => {
+    let includeAllSeen = false
+    await mockApis(page, {
+      sessionStatus: 'ended',
+      infoGapButtons: [{ id: 'pending-gap', keyword: '未点击概念', skw_score: 0.1 }],
+      infoGapButtonsAll: [
+        { id: 'pending-gap', keyword: '未点击概念', skw_score: 0.1 },
+        { id: 'clicked-gap', keyword: '已点击概念', skw_score: 0.3, status: 'clicked' },
+      ],
+    })
+    await page.unroute(`**/api/sessions/${session.id}/info-gap/buttons**`)
+    await page.route(`**/api/sessions/${session.id}/info-gap/buttons**`, async (route) => {
+      const url = new URL(route.request().url())
+      includeAllSeen = url.searchParams.get('include_all') === 'true'
+      const body = includeAllSeen
+        ? [
+            { id: 'pending-gap', keyword: '未点击概念', skw_score: 0.1 },
+            { id: 'clicked-gap', keyword: '已点击概念', skw_score: 0.3, status: 'clicked' },
+          ]
+        : [{ id: 'pending-gap', keyword: '未点击概念', skw_score: 0.1 }]
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
+    })
+
+    await page.goto(`/app/sessions/${session.id}`)
+    await waitForDetailReady(page)
+    await page.locator('.ai-sheet__handle-bar').click()
+
+    expect(includeAllSeen).toBe(true)
+    await expect(page.locator('.ai-sheet__readonly-pill').filter({ hasText: '未点击概念' })).toBeVisible()
+    await expect(page.locator('.ai-sheet__readonly-pill').filter({ hasText: '已点击概念' })).toBeVisible()
   })
 
   test('收到新 info_gap_button WS 推送，预览行实时更新', async ({ page }) => {

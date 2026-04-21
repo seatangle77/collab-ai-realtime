@@ -9,7 +9,7 @@ import asyncio
 import uuid
 from typing import Any, Mapping
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -136,23 +136,27 @@ async def notify_info_gap_button(
 )
 async def get_info_gap_buttons(
     session_id: str,
+    include_all: bool = Query(False, description="是否返回当前用户该会话下的全部关键词按钮状态"),
     db: AsyncSession = Depends(get_db),
     current_user: Mapping[str, Any] = Depends(get_current_user),
 ) -> list[InfoGapButtonOut]:
-    """查询当前用户在该会话中状态为 pending 的信息缺口关键词按钮。"""
+    """查询当前用户在该会话中的信息缺口关键词按钮，默认仅返回 pending。"""
     await _assert_session_member(session_id, current_user["id"], db)
 
-    result = await db.execute(
-        text(
-            """
+    query_sql = """
             SELECT id, keyword, skw_score, status, window_start, created_at
             FROM info_gap_buttons
             WHERE session_id = :session_id
               AND user_id    = :user_id
-              AND status     = 'pending'
-            ORDER BY created_at DESC
-            """
-        ),
+    """
+    if include_all:
+        query_sql += "\n              AND status IN ('pending', 'clicked')"
+    else:
+        query_sql += "\n              AND status     = 'pending'"
+    query_sql += "\n            ORDER BY created_at DESC"
+
+    result = await db.execute(
+        text(query_sql),
         {"session_id": session_id, "user_id": current_user["id"]},
     )
     rows = result.mappings().all()

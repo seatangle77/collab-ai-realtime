@@ -124,6 +124,22 @@ def test_buttons_excludes_non_pending():
     return _log(ok, "GET buttons 过滤 clicked/expired", {"keywords": [d["keyword"] for d in data]})
 
 
+def test_buttons_include_all_returns_pending_and_clicked():
+    user, token, session_id = _setup_ongoing_session("BtnAll")
+    _seed_button(session_id, user["id"], keyword="A", status="pending")
+    _seed_button(session_id, user["id"], keyword="B", status="clicked")
+    _seed_button(session_id, user["id"], keyword="C", status="expired")
+    r = requests.get(
+        f"{BASE_URL}/api/sessions/{session_id}/info-gap/buttons",
+        headers=_auth(token),
+        params={"include_all": "true"},
+    )
+    data = r.json()
+    keywords = [d["keyword"] for d in data]
+    ok = r.status_code == 200 and keywords == ["B", "A"]
+    return _log(ok, "GET buttons include_all=true 返回 pending + clicked", {"keywords": keywords})
+
+
 def test_buttons_403_non_member():
     _, _, session_id = _setup_ongoing_session("BtnForbid")
     _, outsider_token = _register_and_login("BtnOut")
@@ -161,7 +177,18 @@ def test_click_success():
     r2 = requests.get(f"{BASE_URL}/api/sessions/{session_id}/info-gap/buttons",
                       headers=_auth(token))
     ids = [b["id"] for b in r2.json()]
-    return _log(btn_id not in ids, "POST click 后按钮从 pending 列表消失")
+    if btn_id in ids:
+        return _log(False, "POST click 后按钮从 pending 列表消失", {"ids": ids})
+
+    r3 = requests.get(
+        f"{BASE_URL}/api/sessions/{session_id}/info-gap/buttons",
+        headers=_auth(token),
+        params={"include_all": "true"},
+    )
+    data3 = r3.json()
+    clicked = next((item for item in data3 if item["id"] == btn_id), None)
+    ok = r3.status_code == 200 and clicked is not None and clicked["status"] == "clicked"
+    return _log(ok, "POST click 后 include_all 列表仍可看到 clicked 按钮", data3 if not ok else None)
 
 
 def test_click_double_submit_second_should_conflict():
@@ -250,6 +277,19 @@ def test_summary_returns_latest_version():
     data = r.json()
     ok = r.status_code == 200 and data["version"] == 3 and data["content"] == "第三版"
     return _log(ok, "GET summary 返回最新版本", r.text if not ok else None)
+
+
+def test_summary_history_returns_all_versions_desc():
+    user, token, session_id = _setup_ongoing_session("SumHist")
+    _seed_summary(session_id, content="第一版", version=1)
+    _seed_summary(session_id, content="第二版", version=2)
+    _seed_summary(session_id, content="第三版", version=3)
+    r = requests.get(f"{BASE_URL}/api/sessions/{session_id}/summaries",
+                     headers=_auth(token))
+    data = r.json()
+    versions = [item["version"] for item in data]
+    ok = r.status_code == 200 and versions == [3, 2, 1]
+    return _log(ok, "GET summaries 返回全部历史版本（最新在前）", {"versions": versions})
 
 
 def test_summary_fields_complete():
@@ -352,6 +392,7 @@ def main():
         test_buttons_empty(),
         test_buttons_returns_pending(),
         test_buttons_excludes_non_pending(),
+        test_buttons_include_all_returns_pending_and_clicked(),
         test_buttons_403_non_member(),
         test_buttons_401_no_token(),
     ]
@@ -370,6 +411,7 @@ def main():
     results += [
         test_summary_no_data(),
         test_summary_returns_latest_version(),
+        test_summary_history_returns_all_versions_desc(),
         test_summary_fields_complete(),
         test_summary_403_non_member(),
         test_summary_401_no_token(),

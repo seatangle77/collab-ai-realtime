@@ -83,6 +83,17 @@ interface PushLogItem {
   delivered_at?: string | null
 }
 
+interface SummaryHistoryItem {
+  id: string
+  session_id: string
+  version: number
+  content: string
+  analysis_run_id: string
+  window_start?: string | null
+  window_end?: string | null
+  created_at?: string | null
+}
+
 // ── 推送通知 ──────────────────────────────────────────────────────────────────
 const pushContent = ref('')
 const pushVisible = ref(false)
@@ -97,6 +108,7 @@ function showPushNotification(content: string, _triggeredAt?: string | null) {
 // ── 讨论摘要 ──────────────────────────────────────────────────────────────────
 const currentSummary = ref('')
 const summaryVersion = ref(0)
+const summaryHistory = ref<SummaryHistoryItem[]>([])
 const pushLogs = ref<PushLogItem[]>([])
 const seenPushNotificationKeys = new Set<string>()
 const PUSH_LOGS_POLL_INTERVAL_MS = 5000
@@ -180,6 +192,17 @@ async function fetchLatestSummary() {
   }
 }
 
+async function fetchSummaryHistory() {
+  try {
+    const data = await appHttp.get<SummaryHistoryItem[]>(
+      `/api/sessions/${sessionId}/summaries`,
+    )
+    summaryHistory.value = [...data].sort((a, b) => b.version - a.version)
+  } catch {
+    // 404 或暂无摘要时静默处理
+  }
+}
+
 async function fetchPushLogs(options: { notifyNew?: boolean } = {}) {
   try {
     const data = await appHttp.get<PushLogItem[]>(
@@ -204,8 +227,9 @@ const infoGapButtons = ref<InfoGapButton[]>([])
 
 async function fetchInfoGapButtons() {
   try {
+    const includeAll = session.value?.status === 'ended'
     const data = await appHttp.get<InfoGapButton[]>(
-      `/api/sessions/${sessionId}/info-gap/buttons`,
+      `/api/sessions/${sessionId}/info-gap/buttons${includeAll ? '?include_all=true' : ''}`,
     )
     infoGapButtons.value = data.map((button) => normalizeInfoGapButton(button))
   } catch {
@@ -846,6 +870,7 @@ function handleWsMessage(event: MessageEvent<string>) {
     if (typeof d.content === 'string' && d.content) {
       currentSummary.value = d.content
       summaryVersion.value = d.version ?? summaryVersion.value
+      void fetchSummaryHistory()
     }
     return
   }
@@ -1251,8 +1276,10 @@ onMounted(async () => {
     startPushLogsPolling()
     void fetchInfoGapButtons()
     void fetchLatestSummary()
+    void fetchSummaryHistory()
   } else if (session.value?.status === 'ended') {
     void fetchLatestSummary()
+    void fetchSummaryHistory()
     void fetchInfoGapButtons()
   }
   window.addEventListener('beforeunload', handleBeforeUnload)
@@ -1571,10 +1598,11 @@ onUnmounted(() => {
   </div>
 
   <AiInsightSheet
-    v-if="session?.status === 'ongoing' && (hasSummary || infoGapButtons.length > 0)"
+    v-if="(session?.status === 'ongoing' || session?.status === 'ended') && (hasSummary || infoGapButtons.length > 0)"
     :session-id="sessionId"
     :summary="currentSummary"
     :summary-version="summaryVersion"
+    :summary-history="summaryHistory"
     :has-summary="hasSummary"
     :buttons="infoGapButtons"
     :session-ongoing="session.status === 'ongoing'"

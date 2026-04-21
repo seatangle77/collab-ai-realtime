@@ -39,18 +39,6 @@ export interface ReasoningResult {
   method: string;
 }
 
-export interface GeneratePushParams {
-  trigger_type: string;
-  summary?: string;
-  transcripts?: string;
-  username?: string;
-  silence_s?: number;
-  speaking_ratio?: number;
-  triggered_metrics?: string;
-  keyword?: string;
-  skw_score?: number;
-}
-
 export type ChallengeType =
   | 'personal_stagnation'
   | 'group_stagnation'
@@ -228,17 +216,6 @@ export async function hasReasoning(text: string): Promise<ReasoningResult> {
   } catch (err) {
     logger.error('has_reasoning failed', { message: (err as Error).message });
     throw err;
-  }
-}
-
-/** 生成推送文案，失败时返回空字符串 */
-export async function generatePush(params: GeneratePushParams): Promise<string> {
-  try {
-    const res = await client.post<{ content: string }>('/api/nlp/generate_push', params, { timeout: 30_000 });
-    return res.data.content ?? '';
-  } catch (err) {
-    logger.error('generate_push failed', { message: (err as Error).message });
-    return '';
   }
 }
 

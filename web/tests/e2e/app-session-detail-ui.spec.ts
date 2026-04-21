@@ -138,6 +138,7 @@ async function mockSessionDetailApis(
   options: {
     transcripts?: unknown[]
     summary?: { content: string; version: number } | null
+    summaries?: unknown[]
     pushLogs?: unknown[]
     infoGapButtons?: unknown[]
   } = {},
@@ -147,6 +148,22 @@ async function mockSessionDetailApis(
   ]
 
   const summary = options.summary ?? { content: '这是用于详情页验收的摘要。', version: 3 }
+  const summaries = options.summaries ?? (
+    summary
+      ? [
+          {
+            id: `summary-v${summary.version}`,
+            session_id: session.id,
+            version: summary.version,
+            content: summary.content,
+            analysis_run_id: `summary:${session.id}:v${summary.version}`,
+            window_start: '2026-02-01T08:00:00.000Z',
+            window_end: '2026-02-01T08:05:00.000Z',
+            created_at: '2026-02-01T08:05:00.000Z',
+          },
+        ]
+      : []
+  )
   const pushLogs = options.pushLogs ?? []
   const infoGapButtons = options.infoGapButtons ?? [{ id: 'ig-1', keyword: '风险', skw_score: 0.2 }]
 
@@ -183,11 +200,15 @@ async function mockSessionDetailApis(
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(summary) })
   })
 
+  await page.route(`**/api/sessions/${session.id}/summaries`, async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(summaries) })
+  })
+
   await page.route(`**/api/sessions/${session.id}/push-logs`, async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(pushLogs) })
   })
 
-  await page.route(`**/api/sessions/${session.id}/info-gap/buttons`, async (route) => {
+  await page.route(`**/api/sessions/${session.id}/info-gap/buttons**`, async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(infoGapButtons) })
   })
 }
@@ -212,9 +233,10 @@ test.describe('Step 6 - AppSessionDetail UI', () => {
 
     await page.goto(`/app/sessions/${session.id}`)
     await expect(page.locator('.app-session-detail-transcripts-title')).toBeVisible()
-    await expect(page.locator('.app-session-summary-content')).toHaveCount(0)
-    await expect(page.locator('.app-session-summary-toggle')).toContainText('展开')
-    await expect(page.locator('.app-session-detail-info-gap-sticky')).toBeVisible()
+    await expect(page.locator('.ai-sheet')).toBeVisible()
+    await expect(page.locator('.ai-sheet__body')).toHaveCount(0)
+    await expect(page.locator('.ai-sheet__preview-title')).toContainText('摘要')
+    await expect(page.locator('.ai-sheet__preview')).toContainText('风险')
 
     const transcriptHeaderBox = await page.locator('.app-session-detail-transcripts').boundingBox()
     expect(transcriptHeaderBox).not.toBeNull()
@@ -229,9 +251,10 @@ test.describe('Step 6 - AppSessionDetail UI', () => {
     })
 
     await page.goto(`/app/sessions/${session.id}`)
-    await expect(page.locator('.app-session-summary-content')).toBeVisible()
-    await expect(page.locator('.app-session-summary-toggle')).toContainText('收起')
-    await expect(page.locator('.app-session-detail-info-gap-sticky')).toHaveCount(0)
+    await expect(page.locator('.ai-sheet')).toBeVisible()
+    await expect(page.locator('.ai-sheet__body')).toHaveCount(0)
+    await expect(page.locator('.ai-sheet__preview-title')).toContainText('摘要')
+    await expect(page.locator('.ai-sheet__preview')).toContainText('不该显示')
   })
 
   test('history push logs only render suggestions for current user or broadcast', async ({ page }) => {
@@ -373,7 +396,7 @@ test.describe('Step 6 - AppSessionDetail UI', () => {
     })
 
     await page.goto(`/app/sessions/${session.id}`)
-    await expect(page.locator('.app-session-summary-panel')).toHaveCount(0)
-    await expect(page.locator('.app-empty-state').filter({ hasText: '暂无讨论实录' })).toBeVisible()
+    await expect(page.locator('.ai-sheet')).toHaveCount(0)
+    await expect(page.locator('.app-empty-state-title').filter({ hasText: '暂无讨论实录' })).toBeVisible()
   })
 })

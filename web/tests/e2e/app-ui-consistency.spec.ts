@@ -134,6 +134,25 @@ async function mockCommonApis(page: Page) {
     })
   })
 
+  await page.route('**/api/sessions/session-step6/summaries', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: 'summary-style-v3',
+          session_id: 'session-step6',
+          version: 3,
+          content: '这是一个用于样式验收的讨论摘要。',
+          analysis_run_id: 'summary-style-v3',
+          window_start: '2026-01-01T08:00:00.000Z',
+          window_end: '2026-01-01T08:05:00.000Z',
+          created_at: '2026-01-01T08:05:00.000Z',
+        },
+      ]),
+    })
+  })
+
   await page.route('**/api/sessions/session-step6/push-logs', async (route) => {
     await route.fulfill({
       status: 200,
