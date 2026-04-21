@@ -78,6 +78,7 @@ class NLPSettings(BaseSettings):
     )
 
     embed_model: str = "paraphrase-multilingual-MiniLM-L12-v2"
+    fast_model: str = "qwen-turbo"
     reasoning_model: str = "qwen-plus"
     qwen_api_key: str = Field(default="")
     qwen_base_url: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"

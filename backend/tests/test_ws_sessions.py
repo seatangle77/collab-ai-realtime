@@ -75,6 +75,17 @@ def _auth(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
+def _end_session(token: str, session_id: str) -> None:
+    try:
+        requests.post(
+            f"{BASE_URL}/api/sessions/{session_id}/end",
+            headers=_auth(token),
+            timeout=5,
+        )
+    except Exception:
+        pass
+
+
 def _min_audio_b64() -> str:
     """最小非空合法 base64，用于 audio_b64 字段。"""
     return base64.b64encode(b"\x00" * 64).decode()
@@ -450,21 +461,25 @@ def main() -> None:
         _stop(f"环境准备失败：{e}")
 
     passed = 0
-    for test_fn in TESTS:
-        try:
-            result = test_fn(ctx)
-        except Exception as e:
-            _log(False, test_fn.__name__, str(e))
-            _stop(f"{test_fn.__name__} 抛出异常：{e}")
-            return
-        if not result:
-            _stop(f"{test_fn.__name__} 失败，停止测试。请检查上方详情。")
-            return
-        passed += 1
+    try:
+        for test_fn in TESTS:
+            try:
+                result = test_fn(ctx)
+            except Exception as e:
+                _log(False, test_fn.__name__, str(e))
+                _stop(f"{test_fn.__name__} 抛出异常：{e}")
+                return
+            if not result:
+                _stop(f"{test_fn.__name__} 失败，停止测试。请检查上方详情。")
+                return
+            passed += 1
 
-    print(f"\n{'='*60}")
-    print(f"✅ 全部 {passed}/{len(TESTS)} 通过")
-    print(f"{'='*60}")
+        print(f"\n{'='*60}")
+        print(f"✅ 全部 {passed}/{len(TESTS)} 通过")
+        print(f"{'='*60}")
+    finally:
+        if ctx.get("leader_token") and ctx.get("session_id"):
+            _end_session(ctx["leader_token"], ctx["session_id"])
 
 
 if __name__ == "__main__":

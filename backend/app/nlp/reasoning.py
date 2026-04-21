@@ -67,7 +67,7 @@ def _call_llm(text: str) -> dict[str, bool]:
 
     try:
         response = client.chat.completions.create(
-            model=nlp_settings.reasoning_model,
+            model=nlp_settings.fast_model,
             max_tokens=64,
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},

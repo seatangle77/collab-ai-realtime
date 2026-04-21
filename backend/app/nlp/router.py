@@ -2,7 +2,7 @@
 NLP 微服务路由
 - 前缀：/api/nlp
 - 鉴权：X-Admin-Token（复用现有 require_admin）
-- 接口：segment / embed / similarity / tfidf / candidate_recall / has_reasoning / generate_push_batch / generate_push_structured / assess_gap / generate_summary
+- 接口：segment / embed / similarity / candidate_recall / has_reasoning / generate_summary / assess_gap
 """
 from __future__ import annotations
 
@@ -20,19 +20,9 @@ from . import (
     push_content,
     summary,
     candidate_recall,
-    structured_push_content,
 )
 
 router = APIRouter(prefix="/api/nlp", tags=["nlp"])
-
-BatchChallengeType = Literal[
-    "personal_stagnation",
-    "group_stagnation",
-    "shallow_expression",
-    "information_gap",
-    "none",
-]
-
 
 # ── 1. segment ────────────────────────────────────────────────────────────────
 
@@ -128,52 +118,6 @@ def check_reasoning(req: ReasoningRequest, _: bool = Depends(require_admin)):
     return reasoning.has_reasoning(req.text)
 
 
-# ── 8. generate_push_batch ────────────────────────────────────────────────────
-
-class BatchMemberInput(BaseModel):
-    user_id: str
-
-
-class BatchTargetInput(BaseModel):
-    user_id: str
-    challenge_type: BatchChallengeType
-    evidence: dict[str, Any] = Field(default_factory=dict)
-    diagnosis: str
-    design_goal: str
-
-
-class GeneratePushBatchRequest(BaseModel):
-    session_id: str
-    summary: str = ""
-    transcripts: str = ""
-    members: list[BatchMemberInput] = Field(default_factory=list)
-    targets: list[BatchTargetInput] = Field(default_factory=list)
-
-
-class BatchAnalysisItem(BaseModel):
-    user_id: str
-    challenge_type: BatchChallengeType
-    needs_prompt: bool
-    analysis: str
-    content: str
-
-
-class GeneratePushBatchResponse(BaseModel):
-    items: list[BatchAnalysisItem]
-
-
-@router.post("/generate_push_batch", response_model=GeneratePushBatchResponse)
-def generate_push_batch(req: GeneratePushBatchRequest, _: bool = Depends(require_admin)):
-    items = push_content.generate_push_content_batch(
-        session_id=req.session_id,
-        summary=req.summary,
-        transcripts=req.transcripts,
-        members=[m.model_dump() for m in req.members],
-        targets=[t.model_dump() for t in req.targets],
-    )
-    return {"items": items}
-
-
 # ── 9. generate_summary ──────────────────────────────────────────────────────
 
 class TranscriptItem(BaseModel):
@@ -199,55 +143,91 @@ def generate_summary_route(req: GenerateSummaryRequest, _: bool = Depends(requir
     return {"summary": result}
 
 
-# ── 11. generate_push_structured ─────────────────────────────────────────────
+# ── 10. generate_group_silence（fast_model，实时沉默破冰）────────────────────
 
-StructuredPushTriggerType = Literal["low_participation", "shallow_discussion", "group_silence"]
-
-
-class StructuredTranscriptItem(BaseModel):
-    transcript_id: str
-    user_id: str
-    speaker_name: str | None = None
-    text: str
-
-
-class StructuredCandidatePoint(BaseModel):
-    transcript_id: str
-    speaker_id: str
-    speaker_name: str | None = None
-    text: str
-
-
-class GenerateStructuredPushRequest(BaseModel):
-    trigger_type: StructuredPushTriggerType
+class GenerateGroupSilenceRequest(BaseModel):
     summary: str = ""
-    transcripts: list[StructuredTranscriptItem] = Field(default_factory=list)
-    user_id: str
-    trigger_metrics: dict[str, Any] = Field(default_factory=dict)
-    candidate_points: list[StructuredCandidatePoint] = Field(default_factory=list)
+    transcripts: str = ""
+    silence_s: int = 0
 
 
-class StructuredAnchorOut(BaseModel):
-    transcript_id: str
-    speaker_id: str
-    speaker_name: str
-    text: str
-
-
-class GenerateStructuredPushResponse(BaseModel):
-    needs_prompt: bool
-    anchor: StructuredAnchorOut | None = None
+class GenerateGroupSilenceResponse(BaseModel):
     content: str
 
 
-@router.post("/generate_push_structured", response_model=GenerateStructuredPushResponse)
-def generate_push_structured(req: GenerateStructuredPushRequest, _: bool = Depends(require_admin)):
-    result = structured_push_content.generate_structured_push_content(
-        trigger_type=req.trigger_type,
+@router.post("/generate_group_silence", response_model=GenerateGroupSilenceResponse)
+async def generate_group_silence_route(
+    req: GenerateGroupSilenceRequest,
+    _: bool = Depends(require_admin),
+):
+    content = await push_content.generate_group_silence(
         summary=req.summary,
-        transcripts=[t.model_dump() for t in req.transcripts],
-        user_id=req.user_id,
-        trigger_metrics=req.trigger_metrics,
-        candidate_points=[p.model_dump() for p in req.candidate_points],
+        transcripts=req.transcripts,
+        silence_s=req.silence_s,
+    )
+    return {"content": content}
+
+
+# ── 11. analyze_members（heavy_model，2分钟全员分析）─────────────────────────
+
+class MemberMetricsItem(BaseModel):
+    user_id: str
+    speaking_ratio: float = 0.0
+    silence_s: float = 0.0
+    ttr: float | None = None
+    arg_density: float | None = None
+    srep: float | None = None
+    info_gain: float | None = None
+    has_reasoning: bool | None = None
+    has_evidence: bool | None = None
+
+
+class AnalyzeMembersTranscriptItem(BaseModel):
+    transcript_id: str
+    user_id: str
+    speaker_name: str = ""
+    text: str
+
+
+class AnalyzeMembersRequest(BaseModel):
+    summary: str = ""
+    transcripts: list[AnalyzeMembersTranscriptItem] = Field(default_factory=list)
+    members: list[MemberMetricsItem] = Field(default_factory=list)
+
+
+class MemberAnalysisItem(BaseModel):
+    user_id: str
+    challenge_type: str
+    needs_prompt: bool
+    analysis: str
+    content: str
+    anchor: dict[str, Any] | None = None
+
+
+class AnalyzeMembersResponse(BaseModel):
+    members: list[MemberAnalysisItem]
+
+
+@router.post("/analyze_members", response_model=AnalyzeMembersResponse)
+async def analyze_members_route(
+    req: AnalyzeMembersRequest,
+    _: bool = Depends(require_admin),
+):
+    transcripts_text = "\n".join(
+        f"[{t.transcript_id}] {t.speaker_name or t.user_id}：{t.text}"
+        for t in req.transcripts
+    )
+    members_metrics_text = "\n".join(
+        f"- {m.user_id}：发言比例={round(m.speaking_ratio * 100, 1)}%"
+        f" 静默={round(m.silence_s)}s TTR={m.ttr} 论证密度={m.arg_density}"
+        f" Srep={m.srep} 信息增益={m.info_gain}"
+        f" 有论证={m.has_reasoning} 有证据={m.has_evidence}"
+        for m in req.members
+    )
+    result = await push_content.analyze_members_batch(
+        summary=req.summary,
+        transcripts_text=transcripts_text,
+        members_metrics_text=members_metrics_text,
     )
     return result
+

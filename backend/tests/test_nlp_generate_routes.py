@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(BACKEND_DIR))
 
 from app.nlp.router import router as nlp_router
 
@@ -58,215 +64,140 @@ def test_generate_summary_422_when_transcripts_is_wrong_type() -> None:
     assert resp.status_code == 422
 
 
-def test_generate_push_structured_ok(monkeypatch) -> None:
+def test_keyword_recall_with_gap_ok(monkeypatch) -> None:
     monkeypatch.setattr(
-        "app.nlp.structured_push_content.generate_structured_push_content",
-        lambda **kwargs: {
-            "needs_prompt": True,
-            "anchor": {
-                "transcript_id": "t1",
-                "speaker_id": "uB",
-                "text": "我们先明确范围",
-            },
-            "content": "你同不同意先收窄范围？",
+        "app.nlp.candidate_recall.recall_with_gap",
+        lambda member_texts: {
+            "keywords": [
+                {
+                    "word": "MVP",
+                    "needs_prompt": True,
+                    "target_user_id": "u2",
+                    "reason": "u2 没跟上这个缩写",
+                }
+            ]
         },
     )
     client = _make_client()
 
     resp = client.post(
-        "/api/nlp/generate_push_structured",
+        "/api/nlp/keyword_recall_with_gap",
         headers=ADMIN_HEADERS,
-        json={
-            "trigger_type": "low_participation",
-            "summary": "讨论摘要",
-            "transcripts": [
-                {
-                    "transcript_id": "t1",
-                    "user_id": "uB",
-                    "text": "我们先明确范围",
-                }
-            ],
-            "user_id": "uA",
-            "trigger_metrics": {"speaking_ratio": 0.08},
-            "candidate_points": [
-                {
-                    "transcript_id": "t1",
-                    "speaker_id": "uB",
-                    "text": "我们先明确范围",
-                }
-            ],
-        },
+        json={"member_texts": {"u1": "我们先做 MVP", "u2": "MVP 是什么"}},
     )
 
     assert resp.status_code == 200
-    assert resp.json()["needs_prompt"] is True
-    assert resp.json()["anchor"]["transcript_id"] == "t1"
+    assert resp.json()["keywords"][0]["target_user_id"] == "u2"
 
 
-def test_generate_push_structured_forbidden_without_admin_token() -> None:
+def test_keyword_recall_with_gap_403_without_admin_token() -> None:
     client = _make_client()
 
     resp = client.post(
-        "/api/nlp/generate_push_structured",
-        json={
-            "trigger_type": "shallow_discussion",
-            "transcripts": [],
-            "user_id": "u1",
-        },
+        "/api/nlp/keyword_recall_with_gap",
+        json={"member_texts": {"u1": "x", "u2": "y"}},
     )
 
     assert resp.status_code == 403
 
 
-def test_generate_push_structured_ok_for_shallow_discussion(monkeypatch) -> None:
+def test_generate_group_silence_ok(monkeypatch) -> None:
+    async def _fake_generate_group_silence(**kwargs):
+        return "大家可以先对齐一下当前分歧。"
+
     monkeypatch.setattr(
-        "app.nlp.structured_push_content.generate_structured_push_content",
-        lambda **kwargs: {
-            "needs_prompt": False,
-            "anchor": None,
-            "content": "",
-        },
+        "app.nlp.push_content.generate_group_silence",
+        _fake_generate_group_silence,
     )
     client = _make_client()
 
     resp = client.post(
-        "/api/nlp/generate_push_structured",
+        "/api/nlp/generate_group_silence",
+        headers=ADMIN_HEADERS,
+        json={"summary": "讨论卡住了", "transcripts": "A: ...", "silence_s": 35},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"content": "大家可以先对齐一下当前分歧。"}
+
+
+def test_generate_group_silence_403_without_admin_token() -> None:
+    client = _make_client()
+
+    resp = client.post(
+        "/api/nlp/generate_group_silence",
+        json={"summary": "讨论卡住了", "transcripts": "", "silence_s": 35},
+    )
+
+    assert resp.status_code == 403
+
+
+def test_analyze_members_ok(monkeypatch) -> None:
+    async def _fake_analyze_members_batch(**kwargs):
+        return {
+            "members": [
+                {
+                    "user_id": "u2",
+                    "challenge_type": "low_participation",
+                    "needs_prompt": True,
+                    "analysis": "u2 发言占比偏低。",
+                    "content": "你怎么看刚才这个方案？",
+                    "anchor": {"transcript_id": "t1"},
+                }
+            ]
+        }
+
+    monkeypatch.setattr(
+        "app.nlp.push_content.analyze_members_batch",
+        _fake_analyze_members_batch,
+    )
+    client = _make_client()
+
+    resp = client.post(
+        "/api/nlp/analyze_members",
         headers=ADMIN_HEADERS,
         json={
-            "trigger_type": "shallow_discussion",
             "summary": "讨论摘要",
             "transcripts": [
                 {
                     "transcript_id": "t1",
-                    "user_id": "uA",
-                    "text": "我觉得这个方案挺好",
+                    "user_id": "u1",
+                    "speaker_name": "Alice",
+                    "text": "我们先明确范围",
                 }
             ],
-            "user_id": "uA",
-            "trigger_metrics": {"ttr": 0.2, "arg_density": 0.01},
+            "members": [
+                {
+                    "user_id": "u2",
+                    "speaking_ratio": 0.08,
+                    "silence_s": 42,
+                    "ttr": 0.2,
+                    "arg_density": 0.01,
+                    "srep": 0.1,
+                    "info_gain": 0.0,
+                    "has_reasoning": False,
+                    "has_evidence": False,
+                }
+            ],
         },
     )
 
     assert resp.status_code == 200
-    assert resp.json() == {"needs_prompt": False, "anchor": None, "content": ""}
+    assert resp.json()["members"][0]["user_id"] == "u2"
+    assert resp.json()["members"][0]["needs_prompt"] is True
 
 
-def test_generate_push_structured_422_when_user_id_missing() -> None:
+def test_analyze_members_422_when_transcript_shape_invalid() -> None:
     client = _make_client()
 
     resp = client.post(
-        "/api/nlp/generate_push_structured",
+        "/api/nlp/analyze_members",
         headers=ADMIN_HEADERS,
         json={
-            "trigger_type": "low_participation",
-            "transcripts": [],
+            "summary": "讨论摘要",
+            "transcripts": [{"user_id": "u1", "text": "缺少 transcript_id"}],
+            "members": [],
         },
     )
 
     assert resp.status_code == 422
-
-
-def test_generate_push_structured_422_when_trigger_type_invalid() -> None:
-    client = _make_client()
-
-    resp = client.post(
-        "/api/nlp/generate_push_structured",
-        headers=ADMIN_HEADERS,
-        json={
-            "trigger_type": "group_silence",
-            "transcripts": [],
-            "user_id": "u1",
-        },
-    )
-
-    assert resp.status_code == 422
-
-
-def test_generate_push_structured_422_when_transcripts_has_wrong_shape() -> None:
-    client = _make_client()
-
-    resp = client.post(
-        "/api/nlp/generate_push_structured",
-        headers=ADMIN_HEADERS,
-        json={
-            "trigger_type": "low_participation",
-            "transcripts": [{"user_id": "u1", "text": "hello"}],
-            "user_id": "u1",
-        },
-    )
-
-    assert resp.status_code == 422
-
-
-def test_candidate_recall_ok(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "app.nlp.candidate_recall.recall_candidates",
-        lambda member_texts, top_n=15: {
-            "keywords": ["MVP", "框架"],
-            "sources": {"MVP": "acronym", "框架": "tfidf"},
-        },
-    )
-    client = _make_client()
-
-    resp = client.post(
-        "/api/nlp/candidate_recall",
-        headers=ADMIN_HEADERS,
-        json={"member_texts": {"u1": "我们聊MVP"}, "top_n": 10},
-    )
-
-    assert resp.status_code == 200
-    assert resp.json()["keywords"] == ["MVP", "框架"]
-
-
-def test_candidate_recall_403_without_admin_token() -> None:
-    client = _make_client()
-    resp = client.post("/api/nlp/candidate_recall", json={"member_texts": {"u1": "x"}})
-    assert resp.status_code == 403
-
-
-def test_assess_gap_ok(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "app.nlp.gap_assessor.assess_gap",
-        lambda keywords, summary, member_texts, skw_scores: [
-            {
-                "keyword": "MVP",
-                "needs_prompt": True,
-                "target_user_id": "u2",
-                "gap_type": "缩写不懂",
-                "confidence": 0.81,
-                "reason": "该成员未理解缩写",
-                "skw_score": 0.2,
-            }
-        ],
-    )
-    client = _make_client()
-
-    resp = client.post(
-        "/api/nlp/assess_gap",
-        headers=ADMIN_HEADERS,
-        json={
-            "keywords": ["MVP"],
-            "summary": "讨论产品节奏",
-            "member_texts": {"u1": "MVP", "u2": "不懂MVP"},
-            "skw_scores": {"MVP": 0.2},
-        },
-    )
-
-    assert resp.status_code == 200
-    assert resp.json()["items"][0]["target_user_id"] == "u2"
-
-
-def test_assess_gap_ok_when_keywords_missing() -> None:
-    client = _make_client()
-    resp = client.post(
-        "/api/nlp/assess_gap",
-        headers=ADMIN_HEADERS,
-        json={
-            "summary": "讨论产品节奏",
-            "member_texts": {"u1": "MVP"},
-            "skw_scores": {"MVP": 0.2},
-        },
-    )
-    # keywords 有默认值，不会 422；这里验证至少返回结构正确
-    assert resp.status_code == 200
-    assert "items" in resp.json()

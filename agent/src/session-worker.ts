@@ -5,18 +5,17 @@ import {
   getLastSpeakEndGlobal,
   getLastSummary,
   getTranscriptsInWindowPreferCache,
+  writeDiscussionState,
 } from './db/queries';
 import { runPerceptionPipeline } from './skills/run-perception-pipeline';
-import { runReasoningLayer } from './skills/run-reasoning-layer';
 import { runActionLayer } from './skills/run-action-layer';
 import { runPushDispatcher } from './skills/run-push-dispatcher';
 import { runSummary } from './skills/run-summary';
 import { computeHasReasoning } from './skills/perception/reasoning';
-import { notifyGroupSilence } from './http/nlp-client';
+import { generateGroupSilence, notifyGroupSilence } from './http/nlp-client';
 
 const logger = createLogger('session-worker');
 const GROUP_SILENCE_THRESHOLD_S = 30;
-const GROUP_SILENCE_FIXED_CONTENT = '小组已沉默超过30秒，大家可以继续讨论～';
 
 function buildRunId(kind: 'summary' | 'reasoning', sessionId: string, windowStart: Date): string {
   return `${kind}:${sessionId}:${windowStart.toISOString()}`;
@@ -47,7 +46,6 @@ export class SessionWorker {
       session_started_at: this.sessionStartedAt.toISOString(),
     });
 
-    // 三条时钟都锚定到会话开始时间，而不是 Worker 实际启动时间。
     this.scheduleSilenceTimer();
     this.scheduleSummaryTimer();
     this.scheduleAnalysisTimer();
@@ -141,28 +139,79 @@ export class SessionWorker {
       const silenceMs = Date.now() - lastEnd.getTime();
       const silenceS = silenceMs / 1000;
 
-      if (silenceS > GROUP_SILENCE_THRESHOLD_S) {
-        if (!this.canTriggerGroupSilenceNow(Date.now())) {
-          logger.info('Group silence detected but in cooldown', {
-            sessionId: this.sessionId,
-            scheduled_for: scheduledFor.toISOString(),
-            silence_s: Math.round(silenceS),
-          });
-          return;
-        }
+      if (silenceS <= GROUP_SILENCE_THRESHOLD_S) return;
 
-        const sent = await notifyGroupSilence(this.sessionId, GROUP_SILENCE_FIXED_CONTENT);
-        if (sent) {
-          this.markGroupSilenceTriggered(Date.now());
-        }
-
-        logger.info('Group silence detected', {
+      if (!this.canTriggerGroupSilenceNow(Date.now())) {
+        logger.info('Group silence detected but in cooldown', {
           sessionId: this.sessionId,
-          scheduled_for: scheduledFor.toISOString(),
           silence_s: Math.round(silenceS),
-          notified: sent,
         });
+        return;
       }
+
+      logger.info('Group silence detected, calling fast_model', {
+        sessionId: this.sessionId,
+        scheduled_for: scheduledFor.toISOString(),
+        silence_s: Math.round(silenceS),
+      });
+
+      // 获取上下文：摘要 + 最近发言
+      const windowEnd = new Date();
+      const windowStart = new Date(windowEnd.getTime() - config.agent.longIntervalMs);
+      const [summaryRow, transcripts] = await Promise.all([
+        getLastSummary(this.sessionId),
+        getTranscriptsInWindowPreferCache(this.sessionId, windowStart, windowEnd),
+      ]);
+
+      const summaryText = summaryRow?.content ?? '';
+      const transcriptText = transcripts
+        .filter((t) => t.text?.trim())
+        .map((t) => `${t.speaker_name ?? t.user_id}：${t.text!.trim()}`)
+        .join('\n');
+
+      // fast_model 生成破冰话题
+      const content = await generateGroupSilence({
+        summary: summaryText,
+        transcripts: transcriptText,
+        silence_s: Math.round(silenceS),
+      });
+
+      const finalContent = content.trim() || '大家聊聊目前最关心的是哪个方面？';
+
+      // anchor = 沉默前最后一条发言
+      const lastTranscript = transcripts.length > 0 ? transcripts[transcripts.length - 1] : null;
+
+      // 广播给全组
+      const sent = await notifyGroupSilence(this.sessionId, finalContent);
+      if (sent) {
+        this.markGroupSilenceTriggered(Date.now());
+        logger.info(`group_silence 广播成功，内容="${finalContent}"`, { sessionId: this.sessionId });
+      }
+
+      // 写 discussion_states 记录
+      void writeDiscussionState({
+        session_id: this.sessionId,
+        state_type: 'group_silence',
+        trigger_metrics: {
+          silence_s: Math.round(silenceS),
+          content: finalContent,
+          sent,
+          anchor: lastTranscript
+            ? {
+                transcript_id: lastTranscript.transcript_id,
+                speaker_id: lastTranscript.user_id ?? '',
+                speaker_name: lastTranscript.speaker_name ?? '',
+                text: lastTranscript.text?.trim() ?? '',
+              }
+            : null,
+        },
+        window_start: windowStart,
+      }).catch((err) => {
+        logger.error('writeDiscussionState(group_silence) failed', {
+          sessionId: this.sessionId,
+          message: (err as Error).message,
+        });
+      });
     } catch (err) {
       logger.error('checkGroupSilence failed', {
         sessionId: this.sessionId,
@@ -171,7 +220,7 @@ export class SessionWorker {
     }
   }
 
-  // ── 120s：完整感知层 pipeline ────────────────────────────────────────────────
+  // ── 120s：完整感知层 + 行动层 pipeline ──────────────────────────────────────
 
   private async runAnalysisPipeline(scheduledFor: Date): Promise<void> {
     try {
@@ -190,50 +239,31 @@ export class SessionWorker {
         window_start: windowStart.toISOString(),
         window_end: windowEnd.toISOString(),
       });
-      logger.info('analysis pipeline started', {
-        run_id: runId,
-        sessionId: this.sessionId,
-        scheduled_for: scheduledFor.toISOString(),
-        actual_started_at: new Date(startedAt).toISOString(),
-        window_start: windowStart.toISOString(),
-        window_end: windowEnd.toISOString(),
-        member_count: memberIds.length,
-      });
 
       // Step1：感知层
-      const result = await runPerceptionPipeline({
+      const perceptionResult = await runPerceptionPipeline({
         sessionId: this.sessionId,
         memberIds,
         windowStart,
         windowEnd,
       });
 
-      // Step2：推理层
-      if (!result) return;
-      let triggers = runReasoningLayer(result, memberIds);
+      if (!perceptionResult) return;
 
-      if (triggers.some((trigger) => trigger.type === 'group_silence') && !this.canTriggerGroupSilenceNow(Date.now())) {
-        triggers = triggers.filter((trigger) => trigger.type !== 'group_silence');
-        logger.info('analysis group_silence skipped by cooldown gate', {
-          sessionId: this.sessionId,
-          scheduled_for: scheduledFor.toISOString(),
-        });
-      }
-
-      // hasReasoning（Qwen）后台异步，不阻塞主流程
+      // hasReasoning（Qwen fast_model）后台异步，不阻塞主流程
       void computeHasReasoning(this.sessionId, windowStart, windowEnd, memberIds).catch((err) => {
         logger.error('hasReasoning failed', { sessionId: this.sessionId, message: (err as Error).message });
       });
 
-      // Step3：读当前摘要与本轮发言（行动层 Prompt 需要）
+      // Step2：读当前摘要与本轮发言
       const summaryRow = await getLastSummary(this.sessionId);
       const summaryText = summaryRow?.content ?? '';
       const transcripts = await getTranscriptsInWindowPreferCache(this.sessionId, windowStart, windowEnd);
 
-      // Step4：行动层单独执行；摘要改由独立定时链负责。
+      // Step3：行动层（heavy_model 单次大JSON调用）
       void runActionLayer({
         sessionId: this.sessionId,
-        triggers,
+        perceptionResult,
         windowStart,
         memberIds,
         summaryText,
@@ -246,20 +276,11 @@ export class SessionWorker {
         });
       });
 
-      logger.info('analysis pipeline finished', {
-        run_id: runId,
-        sessionId: this.sessionId,
-        scheduled_for: scheduledFor.toISOString(),
-        actual_finished_at: new Date().toISOString(),
-        window_start: windowStart.toISOString(),
-        window_end: windowEnd.toISOString(),
-        duration_ms: Date.now() - startedAt,
-        trigger_count: triggers.length,
-      });
       logger.info('===== reasoning run end =====', {
         run_id: runId,
         sessionId: this.sessionId,
         scheduled_for: scheduledFor.toISOString(),
+        duration_ms: Date.now() - startedAt,
       });
     } catch (err) {
       logger.error('runAnalysisPipeline failed', {
@@ -282,28 +303,12 @@ export class SessionWorker {
         window_start: windowStart.toISOString(),
         window_end: windowEnd.toISOString(),
       });
-      logger.info('summary pipeline started', {
-        run_id: runId,
-        sessionId: this.sessionId,
-        scheduled_for: scheduledFor.toISOString(),
-        actual_started_at: new Date(startedAt).toISOString(),
-        window_start: windowStart.toISOString(),
-        window_end: windowEnd.toISOString(),
-      });
       await runSummary(this.sessionId, windowStart, windowEnd);
-      logger.info('summary pipeline finished', {
-        run_id: runId,
-        sessionId: this.sessionId,
-        scheduled_for: scheduledFor.toISOString(),
-        actual_finished_at: new Date().toISOString(),
-        window_start: windowStart.toISOString(),
-        window_end: windowEnd.toISOString(),
-        duration_ms: Date.now() - startedAt,
-      });
       logger.info('===== summary run end =====', {
         run_id: runId,
         sessionId: this.sessionId,
         scheduled_for: scheduledFor.toISOString(),
+        duration_ms: Date.now() - startedAt,
       });
     } catch (err) {
       logger.error('runSummaryPipeline failed', {
@@ -323,46 +328,4 @@ export class SessionWorker {
   private markGroupSilenceTriggered(nowMs: number): void {
     this.lastGroupSilenceTriggerAt = nowMs;
   }
-}
-
-function extractSummaryKeywords(summaryText: string): string[] {
-  if (!summaryText.trim()) return [];
-
-  const structuralWords = new Set([
-    '当前讨论主题',
-    '已提出的主要观点',
-    '主要观点',
-    '各成员的主要立场',
-    '主要立场',
-    '当前讨论进展与焦点',
-    '讨论',
-    '成员',
-    '观点',
-    '焦点',
-    '主题',
-    '当前',
-  ]);
-
-  return Array.from(
-    new Set(
-      summaryText
-        .split(/[\s,，。；：:、!！?？()\[\]【】\-]+/)
-        .map((token) => token.trim())
-        .filter((token) => token.length >= 2 && !structuralWords.has(token)),
-    ),
-  ).slice(0, 12);
-}
-
-function filterTranscriptsBySummaryFocus(
-  transcripts: Awaited<ReturnType<typeof getTranscriptsInWindowPreferCache>>,
-  keywords: string[],
-) {
-  if (transcripts.length === 0 || keywords.length === 0) return transcripts;
-
-  const filtered = transcripts.filter((item) => {
-    const text = item.text?.trim() ?? '';
-    return text && keywords.some((keyword) => text.includes(keyword));
-  });
-
-  return filtered.length > 0 ? filtered : transcripts;
 }

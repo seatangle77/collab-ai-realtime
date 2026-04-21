@@ -39,45 +39,6 @@ export interface ReasoningResult {
   method: string;
 }
 
-export type ChallengeType =
-  | 'personal_stagnation'
-  | 'group_stagnation'
-  | 'shallow_expression'
-  | 'information_gap'
-  | 'none';
-
-export interface BatchMemberInput {
-  user_id: string;
-}
-
-export interface BatchTargetInput {
-  user_id: string;
-  challenge_type: ChallengeType;
-  evidence: Record<string, unknown>;
-  diagnosis: string;
-  design_goal: string;
-}
-
-export interface BatchGeneratePushAnalysisParams {
-  session_id: string;
-  summary: string;
-  transcripts: string;
-  members: BatchMemberInput[];
-  targets: BatchTargetInput[];
-}
-
-export interface BatchAnalysisItem {
-  user_id: string;
-  challenge_type: ChallengeType;
-  needs_prompt: boolean;
-  analysis: string;
-  content: string;
-}
-
-export interface BatchGeneratePushAnalysisResult {
-  items: BatchAnalysisItem[];
-}
-
 export interface AssessGapParams {
   keywords?: string[];
   summary?: string;
@@ -98,41 +59,6 @@ export interface AssessGapItem {
 export interface AssessGapResult {
   items: AssessGapItem[];
 }
-
-export interface StructuredPushTranscript {
-  transcript_id: string;
-  user_id: string;
-  speaker_name?: string;
-  text: string;
-}
-
-export interface StructuredPushCandidatePoint {
-  transcript_id: string;
-  speaker_id: string;
-  speaker_name?: string;
-  text: string;
-}
-
-export interface GenerateStructuredPushParams {
-  trigger_type: 'low_participation' | 'shallow_discussion' | 'group_silence';
-  summary: string;
-  transcripts: StructuredPushTranscript[];
-  user_id: string;
-  trigger_metrics?: Record<string, unknown>;
-  candidate_points?: StructuredPushCandidatePoint[];
-}
-
-export interface GenerateStructuredPushResult {
-  needs_prompt: boolean;
-  anchor: {
-    transcript_id: string;
-    speaker_id: string;
-    speaker_name: string;
-    text: string;
-  } | null;
-  content: string;
-}
-
 
 export interface TranscriptItem {
   user_id: string;
@@ -219,23 +145,6 @@ export async function hasReasoning(text: string): Promise<ReasoningResult> {
   }
 }
 
-/** 批量生成成员分析结果，失败时返回空数组 */
-export async function generatePushBatchAnalysis(
-  params: BatchGeneratePushAnalysisParams,
-): Promise<BatchAnalysisItem[]> {
-  try {
-    const res = await client.post<BatchGeneratePushAnalysisResult>(
-      '/api/nlp/generate_push_batch',
-      params,
-      { timeout: 45_000 },
-    );
-    return res.data.items ?? [];
-  } catch (err) {
-    logger.error('generate_push_batch failed', { message: (err as Error).message });
-    return [];
-  }
-}
-
 /** 信息缺口评估（Rubric） */
 export async function assessGap(
   params: AssessGapParams,
@@ -253,20 +162,82 @@ export async function assessGap(
   }
 }
 
-/** 生成带 anchor 的结构化推送内容 */
-export async function generateStructuredPush(
-  params: GenerateStructuredPushParams,
-): Promise<GenerateStructuredPushResult> {
+export interface GroupSilenceResult {
+  content: string;
+}
+
+export interface MemberMetricsInput {
+  user_id: string;
+  speaking_ratio: number;
+  silence_s: number;
+  ttr: number | null;
+  arg_density: number | null;
+  srep: number | null;
+  info_gain: number | null;
+  has_reasoning: boolean | null;
+  has_evidence: boolean | null;
+}
+
+export interface AnalyzeMembersTranscriptInput {
+  transcript_id: string;
+  user_id: string;
+  speaker_name: string;
+  text: string;
+}
+
+export interface MemberAnalysisItem {
+  user_id: string;
+  challenge_type: 'stagnation' | 'shallow' | 'none';
+  needs_prompt: boolean;
+  analysis: string;
+  content: string;
+  anchor: {
+    transcript_id: string;
+    speaker_id: string;
+    speaker_name: string;
+    text: string;
+  } | null;
+}
+
+export interface AnalyzeMembersResult {
+  members: MemberAnalysisItem[];
+}
+
+/** fast_model：为群体沉默生成一句破冰话题 */
+export async function generateGroupSilence(params: {
+  summary: string;
+  transcripts: string;
+  silence_s: number;
+}): Promise<string> {
   try {
-    const res = await client.post<GenerateStructuredPushResult>(
-      '/api/nlp/generate_push_structured',
+    const res = await client.post<GroupSilenceResult>(
+      '/api/nlp/generate_group_silence',
       params,
-      { timeout: 45_000 },
+      { timeout: 15_000 },
     );
-    return res.data;
+    return res.data.content ?? '';
   } catch (err) {
-    logger.error('generate_push_structured failed', { message: (err as Error).message });
-    return { needs_prompt: false, anchor: null, content: '' };
+    logger.error('generate_group_silence failed', { message: (err as Error).message });
+    return '';
+  }
+}
+
+/** heavy_model：对所有成员做一次批量分析，返回大JSON */
+export async function analyzeMembers(params: {
+  summary: string;
+  transcripts: AnalyzeMembersTranscriptInput[];
+  members: MemberMetricsInput[];
+}): Promise<MemberAnalysisItem[]> {
+  try {
+    const res = await client.post<AnalyzeMembersResult>(
+      '/api/nlp/analyze_members',
+      params,
+      { timeout: 60_000 },
+    );
+    return res.data.members ?? [];
+  } catch (err) {
+    logger.error('analyze_members failed', { message: (err as Error).message });
+    return [];
   }
 }
 

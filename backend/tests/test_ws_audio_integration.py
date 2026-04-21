@@ -79,6 +79,30 @@ def _create_group_session(token: str) -> tuple[str, str]:
     return group_id, session_id
 
 
+def _auth(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _safe_close_ws(ws: websocket.WebSocket | None) -> None:
+    if ws is None:
+        return
+    try:
+        ws.close()
+    except Exception:
+        pass
+
+
+def _end_session(token: str, session_id: str) -> None:
+    try:
+        requests.post(
+            f"{BASE_URL}/api/sessions/{session_id}/end",
+            headers=_auth(token),
+            timeout=5,
+        )
+    except Exception:
+        pass
+
+
 def _make_webm_chunk() -> str:
     """最小合法 WebM EBML 头 base64"""
     data = bytes([
@@ -144,77 +168,101 @@ def _setup() -> tuple[dict, str, str]:
 
 def test_A1_audio_chunk_returns_ack():
     """A-1: WS 发 audio_chunk → 收到 audio_chunk_ack"""
-    _, _, session_id = _setup()
-    ws = _ws_connect(session_id)
-    _recv(ws)  # connected
-    ack = _send_chunk(ws, seq=1)
-    ok = ack is not None and ack.get("type") == "audio_chunk_ack" and ack.get("data", {}).get("seq") == 1
-    _log(ok, "A-1: audio_chunk → audio_chunk_ack (seq=1)", ack)
-    ws.close()
+    user, _, session_id = _setup()
+    ws = None
+    try:
+        ws = _ws_connect(session_id)
+        _recv(ws)  # connected
+        ack = _send_chunk(ws, seq=1)
+        ok = ack is not None and ack.get("type") == "audio_chunk_ack" and ack.get("data", {}).get("seq") == 1
+        _log(ok, "A-1: audio_chunk → audio_chunk_ack (seq=1)", ack)
+    finally:
+        _safe_close_ws(ws)
+        _end_session(user["token"], session_id)
 
 
 def test_A2_multiple_chunks_ack_seq():
     """A-2: 连续发 5 个 chunk → ACK seq 依次对应"""
-    _, _, session_id = _setup()
-    ws = _ws_connect(session_id)
-    _recv(ws)
-    results = []
-    for i in range(1, 6):
-        ack = _send_chunk(ws, seq=i)
-        results.append(ack and ack.get("data", {}).get("seq") == i)
-    ok = all(results)
-    _log(ok, "A-2: 连续 5 个 chunk → ACK seq 依次对应", results)
-    ws.close()
+    user, _, session_id = _setup()
+    ws = None
+    try:
+        ws = _ws_connect(session_id)
+        _recv(ws)
+        results = []
+        for i in range(1, 6):
+            ack = _send_chunk(ws, seq=i)
+            results.append(ack and ack.get("data", {}).get("seq") == i)
+        ok = all(results)
+        _log(ok, "A-2: 连续 5 个 chunk → ACK seq 依次对应", results)
+    finally:
+        _safe_close_ws(ws)
+        _end_session(user["token"], session_id)
 
 
 def test_A3_two_clients_receive_broadcast():
     """A-3: 两个 WS 客户端连同一 session，admin 写入 → 两个都收到 transcript"""
-    _, group_id, session_id = _setup()
-    ws1 = _ws_connect(session_id)
-    ws2 = _ws_connect(session_id)
-    _recv(ws1)
-    _recv(ws2)
+    user, group_id, session_id = _setup()
+    ws1 = None
+    ws2 = None
+    try:
+        ws1 = _ws_connect(session_id)
+        ws2 = _ws_connect(session_id)
+        _recv(ws1)
+        _recv(ws2)
 
-    _add_transcript_admin(session_id, group_id, "测试人", "广播测试文本")
-    time.sleep(0.5)
+        _add_transcript_admin(session_id, group_id, "测试人", "广播测试文本")
+        time.sleep(0.5)
 
-    msg1 = _recv(ws1)
-    msg2 = _recv(ws2)
-    ok = (msg1 and msg1.get("type") == "transcript" and
-          msg2 and msg2.get("type") == "transcript")
-    _log(ok, "A-3: 两个 WS 客户端均收到 transcript 广播", {"ws1": msg1, "ws2": msg2})
-    ws1.close()
-    ws2.close()
+        msg1 = _recv(ws1)
+        msg2 = _recv(ws2)
+        ok = (msg1 and msg1.get("type") == "transcript" and
+              msg2 and msg2.get("type") == "transcript")
+        _log(ok, "A-3: 两个 WS 客户端均收到 transcript 广播", {"ws1": msg1, "ws2": msg2})
+    finally:
+        _safe_close_ws(ws1)
+        _safe_close_ws(ws2)
+        _end_session(user["token"], session_id)
 
 
 def test_A4_reconnect_works_after_disconnect():
     """A-4: WS 断开后重连不崩溃，新连接正常收 connected"""
-    _, _, session_id = _setup()
-    ws = _ws_connect(session_id)
-    _recv(ws)
-    ws.close()
-    time.sleep(0.3)
+    user, _, session_id = _setup()
+    ws = None
+    ws2 = None
+    try:
+        ws = _ws_connect(session_id)
+        _recv(ws)
+        _safe_close_ws(ws)
+        ws = None
+        time.sleep(0.3)
 
-    ws2 = _ws_connect(session_id)
-    msg = _recv(ws2)
-    ok = msg is not None and msg.get("type") == "connected"
-    _log(ok, "A-4: 断开后重连 → connected 正常", msg)
-    ws2.close()
+        ws2 = _ws_connect(session_id)
+        msg = _recv(ws2)
+        ok = msg is not None and msg.get("type") == "connected"
+        _log(ok, "A-4: 断开后重连 → connected 正常", msg)
+    finally:
+        _safe_close_ws(ws)
+        _safe_close_ws(ws2)
+        _end_session(user["token"], session_id)
 
 
 def test_A5_chunk_seq_noncontinuous():
     """A-5: seq 不连续（跳号）→ 每个 ACK 对应正确 seq"""
-    _, _, session_id = _setup()
-    ws = _ws_connect(session_id)
-    _recv(ws)
-    seqs = [1, 5, 100, 9999]
-    results = []
-    for s in seqs:
-        ack = _send_chunk(ws, seq=s)
-        results.append(ack and ack.get("data", {}).get("seq") == s)
-    ok = all(results)
-    _log(ok, "A-5: seq 不连续 → 各 ACK seq 正确对应", results)
-    ws.close()
+    user, _, session_id = _setup()
+    ws = None
+    try:
+        ws = _ws_connect(session_id)
+        _recv(ws)
+        seqs = [1, 5, 100, 9999]
+        results = []
+        for s in seqs:
+            ack = _send_chunk(ws, seq=s)
+            results.append(ack and ack.get("data", {}).get("seq") == s)
+        ok = all(results)
+        _log(ok, "A-5: seq 不连续 → 各 ACK seq 正确对应", results)
+    finally:
+        _safe_close_ws(ws)
+        _end_session(user["token"], session_id)
 
 # ════════════════════════════════════════════════════════════════
 # B. 边界场景
@@ -222,83 +270,108 @@ def test_A5_chunk_seq_noncontinuous():
 
 def test_B6_minimal_webm():
     """B-6: 最小合法 WebM（只有 EBML 头）→ 不崩溃，ACK 正常"""
-    _, _, session_id = _setup()
-    ws = _ws_connect(session_id)
-    _recv(ws)
-    ack = _send_chunk(ws, seq=1, audio_b64=_make_webm_chunk())
-    ok = ack is not None and ack.get("type") == "audio_chunk_ack"
-    _log(ok, "B-6: 最小 WebM → 不崩溃，ACK 正常", ack)
-    ws.close()
+    user, _, session_id = _setup()
+    ws = None
+    try:
+        ws = _ws_connect(session_id)
+        _recv(ws)
+        ack = _send_chunk(ws, seq=1, audio_b64=_make_webm_chunk())
+        ok = ack is not None and ack.get("type") == "audio_chunk_ack"
+        _log(ok, "B-6: 最小 WebM → 不崩溃，ACK 正常", ack)
+    finally:
+        _safe_close_ws(ws)
+        _end_session(user["token"], session_id)
 
 
 def test_B7_single_byte_audio():
     """B-7: audio_b64 解码后只有 1 字节 → 后端不崩溃，返回 ACK"""
-    _, _, session_id = _setup()
-    ws = _ws_connect(session_id)
-    _recv(ws)
-    single_byte = base64.b64encode(b"\x00").decode()
-    ack = _send_chunk(ws, seq=1, audio_b64=single_byte)
-    ok = ack is not None and ack.get("type") == "audio_chunk_ack"
-    _log(ok, "B-7: 单字节音频 → 不崩溃，ACK 正常", ack)
-    ws.close()
+    user, _, session_id = _setup()
+    ws = None
+    try:
+        ws = _ws_connect(session_id)
+        _recv(ws)
+        single_byte = base64.b64encode(b"\x00").decode()
+        ack = _send_chunk(ws, seq=1, audio_b64=single_byte)
+        ok = ack is not None and ack.get("type") == "audio_chunk_ack"
+        _log(ok, "B-7: 单字节音频 → 不崩溃，ACK 正常", ack)
+    finally:
+        _safe_close_ws(ws)
+        _end_session(user["token"], session_id)
 
 
 def test_B8_max_size_chunk():
     """B-8: 发送接近最大限制的分片（1.4MB base64）→ ACK 正常，不超时"""
-    _, _, session_id = _setup()
-    ws = _ws_connect(session_id)
-    ws.settimeout(15)
-    _recv(ws)
-    big_bytes = b"\x1A\x45\xDF\xA3" + b"\x00" * (1_000_000)
-    big_b64 = base64.b64encode(big_bytes).decode()
-    ack = _send_chunk(ws, seq=1, audio_b64=big_b64)
-    ok = ack is not None and ack.get("type") == "audio_chunk_ack"
-    _log(ok, "B-8: 接近最大分片 → ACK 正常（无超时）", ack)
-    ws.close()
+    user, _, session_id = _setup()
+    ws = None
+    try:
+        ws = _ws_connect(session_id)
+        ws.settimeout(15)
+        _recv(ws)
+        big_bytes = b"\x1A\x45\xDF\xA3" + b"\x00" * (1_000_000)
+        big_b64 = base64.b64encode(big_bytes).decode()
+        ack = _send_chunk(ws, seq=1, audio_b64=big_b64)
+        ok = ack is not None and ack.get("type") == "audio_chunk_ack"
+        _log(ok, "B-8: 接近最大分片 → ACK 正常（无超时）", ack)
+    finally:
+        _safe_close_ws(ws)
+        _end_session(user["token"], session_id)
 
 
 def test_B9_hundred_chunks():
     """B-9: 快速发 100 个 chunk → 全部 ACK，无丢失"""
-    _, _, session_id = _setup()
-    ws = _ws_connect(session_id)
-    ws.settimeout(30)
-    _recv(ws)
-    failed = []
-    for i in range(1, 101):
-        ack = _send_chunk(ws, seq=i)
-        if not ack or ack.get("data", {}).get("seq") != i:
-            failed.append(i)
-    ok = len(failed) == 0
-    _log(ok, f"B-9: 100 个 chunk 全部 ACK（失败：{len(failed)} 个）", failed[:5] if failed else None)
-    ws.close()
+    user, _, session_id = _setup()
+    ws = None
+    try:
+        ws = _ws_connect(session_id)
+        ws.settimeout(30)
+        _recv(ws)
+        failed = []
+        for i in range(1, 101):
+            ack = _send_chunk(ws, seq=i)
+            if not ack or ack.get("data", {}).get("seq") != i:
+                failed.append(i)
+        ok = len(failed) == 0
+        _log(ok, f"B-9: 100 个 chunk 全部 ACK（失败：{len(failed)} 个）", failed[:5] if failed else None)
+    finally:
+        _safe_close_ws(ws)
+        _end_session(user["token"], session_id)
 
 
 def test_B10_seq_zero():
     """B-10: seq=0 → ACK 正常（边界值）"""
-    _, _, session_id = _setup()
-    ws = _ws_connect(session_id)
-    _recv(ws)
-    ack = _send_chunk(ws, seq=0)
-    ok = ack is not None and ack.get("data", {}).get("seq") == 0
-    _log(ok, "B-10: seq=0 → ACK 正常", ack)
-    ws.close()
+    user, _, session_id = _setup()
+    ws = None
+    try:
+        ws = _ws_connect(session_id)
+        _recv(ws)
+        ack = _send_chunk(ws, seq=0)
+        ok = ack is not None and ack.get("data", {}).get("seq") == 0
+        _log(ok, "B-10: seq=0 → ACK 正常", ack)
+    finally:
+        _safe_close_ws(ws)
+        _end_session(user["token"], session_id)
 
 
 def test_B11_create_destroy_cycle():
     """B-11: 同一 session 连续建立/断开 5 次 → 服务不崩溃，第 5 次仍正常"""
-    _, _, session_id = _setup()
-    for i in range(5):
-        ws = _ws_connect(session_id)
-        _recv(ws)
-        _send_chunk(ws, seq=i)
-        ws.close()
-        time.sleep(0.2)
+    user, _, session_id = _setup()
+    ws = None
+    try:
+        for i in range(5):
+            ws = _ws_connect(session_id)
+            _recv(ws)
+            _send_chunk(ws, seq=i)
+            _safe_close_ws(ws)
+            ws = None
+            time.sleep(0.2)
 
-    ws = _ws_connect(session_id)
-    msg = _recv(ws)
-    ok = msg is not None and msg.get("type") == "connected"
-    _log(ok, "B-11: 5 次建立/断开后第 5 次仍正常连接", msg)
-    ws.close()
+        ws = _ws_connect(session_id)
+        msg = _recv(ws)
+        ok = msg is not None and msg.get("type") == "connected"
+        _log(ok, "B-11: 5 次建立/断开后第 5 次仍正常连接", msg)
+    finally:
+        _safe_close_ws(ws)
+        _end_session(user["token"], session_id)
 
 # ════════════════════════════════════════════════════════════════
 # C. 异常场景
@@ -306,115 +379,147 @@ def test_B11_create_destroy_cycle():
 
 def test_C12_corrupted_webm():
     """C-12: 发送完全随机 bytes（不是 WebM）→ 后端不崩溃，ACK 正常"""
-    _, _, session_id = _setup()
-    ws = _ws_connect(session_id)
-    _recv(ws)
-    garbage = base64.b64encode(b"\xFF\xFE\xAB\xCD" * 500).decode()
-    ack = _send_chunk(ws, seq=1, audio_b64=garbage)
-    ok = ack is not None and ack.get("type") == "audio_chunk_ack"
-    _log(ok, "C-12: 损坏 WebM → 不崩溃，ACK 正常", ack)
-    ws.close()
+    user, _, session_id = _setup()
+    ws = None
+    try:
+        ws = _ws_connect(session_id)
+        _recv(ws)
+        garbage = base64.b64encode(b"\xFF\xFE\xAB\xCD" * 500).decode()
+        ack = _send_chunk(ws, seq=1, audio_b64=garbage)
+        ok = ack is not None and ack.get("type") == "audio_chunk_ack"
+        _log(ok, "C-12: 损坏 WebM → 不崩溃，ACK 正常", ack)
+    finally:
+        _safe_close_ws(ws)
+        _end_session(user["token"], session_id)
 
 
 def test_C13_missing_seq():
     """C-13: audio_chunk 缺少 seq 字段 → INVALID_AUDIO_CHUNK_SCHEMA"""
-    _, _, session_id = _setup()
-    ws = _ws_connect(session_id)
-    _recv(ws)
-    ws.send(json.dumps({
-        "type": "audio_chunk",
-        "data": {"mime_type": "audio/webm", "audio_b64": _make_webm_chunk()}
-    }))
-    msg = _recv(ws)
-    ok = msg is not None and msg.get("data", {}).get("error_code") == "INVALID_AUDIO_CHUNK_SCHEMA"
-    _log(ok, "C-13: 缺 seq → INVALID_AUDIO_CHUNK_SCHEMA", msg)
-    ws.close()
+    user, _, session_id = _setup()
+    ws = None
+    try:
+        ws = _ws_connect(session_id)
+        _recv(ws)
+        ws.send(json.dumps({
+            "type": "audio_chunk",
+            "data": {"mime_type": "audio/webm", "audio_b64": _make_webm_chunk()}
+        }))
+        msg = _recv(ws)
+        ok = msg is not None and msg.get("data", {}).get("error_code") == "INVALID_AUDIO_CHUNK_SCHEMA"
+        _log(ok, "C-13: 缺 seq → INVALID_AUDIO_CHUNK_SCHEMA", msg)
+    finally:
+        _safe_close_ws(ws)
+        _end_session(user["token"], session_id)
 
 
 def test_C14_wrong_mime_type():
     """C-14: mime_type 非 audio/webm → INVALID_AUDIO_CHUNK_SCHEMA"""
-    _, _, session_id = _setup()
-    ws = _ws_connect(session_id)
-    _recv(ws)
-    ws.send(json.dumps({
-        "type": "audio_chunk",
-        "data": {"seq": 1, "mime_type": "audio/mp3", "audio_b64": _make_webm_chunk()}
-    }))
-    msg = _recv(ws)
-    ok = msg is not None and msg.get("data", {}).get("error_code") == "INVALID_AUDIO_CHUNK_SCHEMA"
-    _log(ok, "C-14: 非法 mime_type → INVALID_AUDIO_CHUNK_SCHEMA", msg)
-    ws.close()
+    user, _, session_id = _setup()
+    ws = None
+    try:
+        ws = _ws_connect(session_id)
+        _recv(ws)
+        ws.send(json.dumps({
+            "type": "audio_chunk",
+            "data": {"seq": 1, "mime_type": "audio/mp3", "audio_b64": _make_webm_chunk()}
+        }))
+        msg = _recv(ws)
+        ok = msg is not None and msg.get("data", {}).get("error_code") == "INVALID_AUDIO_CHUNK_SCHEMA"
+        _log(ok, "C-14: 非法 mime_type → INVALID_AUDIO_CHUNK_SCHEMA", msg)
+    finally:
+        _safe_close_ws(ws)
+        _end_session(user["token"], session_id)
 
 
 def test_C15_invalid_base64():
     """C-15: audio_b64 不是合法 base64 → INVALID_AUDIO_CHUNK_SCHEMA"""
-    _, _, session_id = _setup()
-    ws = _ws_connect(session_id)
-    _recv(ws)
-    ws.send(json.dumps({
-        "type": "audio_chunk",
-        "data": {"seq": 1, "mime_type": "audio/webm", "audio_b64": "!!!not_base64!!!"}
-    }))
-    msg = _recv(ws)
-    ok = msg is not None and msg.get("data", {}).get("error_code") == "INVALID_AUDIO_CHUNK_SCHEMA"
-    _log(ok, "C-15: 非法 base64 → INVALID_AUDIO_CHUNK_SCHEMA", msg)
-    ws.close()
+    user, _, session_id = _setup()
+    ws = None
+    try:
+        ws = _ws_connect(session_id)
+        _recv(ws)
+        ws.send(json.dumps({
+            "type": "audio_chunk",
+            "data": {"seq": 1, "mime_type": "audio/webm", "audio_b64": "!!!not_base64!!!"}
+        }))
+        msg = _recv(ws)
+        ok = msg is not None and msg.get("data", {}).get("error_code") == "INVALID_AUDIO_CHUNK_SCHEMA"
+        _log(ok, "C-15: 非法 base64 → INVALID_AUDIO_CHUNK_SCHEMA", msg)
+    finally:
+        _safe_close_ws(ws)
+        _end_session(user["token"], session_id)
 
 
 def test_C16_oversized_chunk():
     """C-16: audio_b64 超过 1.5MB → INVALID_AUDIO_CHUNK_SCHEMA"""
-    _, _, session_id = _setup()
-    ws = _ws_connect(session_id)
-    ws.settimeout(15)
-    _recv(ws)
-    over_limit = base64.b64encode(b"\x00" * 1_200_000).decode()
-    ws.send(json.dumps({
-        "type": "audio_chunk",
-        "data": {"seq": 1, "mime_type": "audio/webm", "audio_b64": over_limit}
-    }))
-    msg = _recv(ws)
-    ok = msg is not None and msg.get("data", {}).get("error_code") == "INVALID_AUDIO_CHUNK_SCHEMA"
-    _log(ok, "C-16: 超大 audio_b64 → INVALID_AUDIO_CHUNK_SCHEMA", msg)
-    ws.close()
+    user, _, session_id = _setup()
+    ws = None
+    try:
+        ws = _ws_connect(session_id)
+        ws.settimeout(15)
+        _recv(ws)
+        over_limit = base64.b64encode(b"\x00" * 1_200_000).decode()
+        ws.send(json.dumps({
+            "type": "audio_chunk",
+            "data": {"seq": 1, "mime_type": "audio/webm", "audio_b64": over_limit}
+        }))
+        msg = _recv(ws)
+        ok = msg is not None and msg.get("data", {}).get("error_code") == "INVALID_AUDIO_CHUNK_SCHEMA"
+        _log(ok, "C-16: 超大 audio_b64 → INVALID_AUDIO_CHUNK_SCHEMA", msg)
+    finally:
+        _safe_close_ws(ws)
+        _end_session(user["token"], session_id)
 
 
 def test_C17_empty_audio_b64():
     """C-17: audio_b64 为空字符串 → INVALID_AUDIO_CHUNK_SCHEMA"""
-    _, _, session_id = _setup()
-    ws = _ws_connect(session_id)
-    _recv(ws)
-    ws.send(json.dumps({
-        "type": "audio_chunk",
-        "data": {"seq": 1, "mime_type": "audio/webm", "audio_b64": ""}
-    }))
-    msg = _recv(ws)
-    ok = msg is not None and msg.get("data", {}).get("error_code") == "INVALID_AUDIO_CHUNK_SCHEMA"
-    _log(ok, "C-17: 空 audio_b64 → INVALID_AUDIO_CHUNK_SCHEMA", msg)
-    ws.close()
+    user, _, session_id = _setup()
+    ws = None
+    try:
+        ws = _ws_connect(session_id)
+        _recv(ws)
+        ws.send(json.dumps({
+            "type": "audio_chunk",
+            "data": {"seq": 1, "mime_type": "audio/webm", "audio_b64": ""}
+        }))
+        msg = _recv(ws)
+        ok = msg is not None and msg.get("data", {}).get("error_code") == "INVALID_AUDIO_CHUNK_SCHEMA"
+        _log(ok, "C-17: 空 audio_b64 → INVALID_AUDIO_CHUNK_SCHEMA", msg)
+    finally:
+        _safe_close_ws(ws)
+        _end_session(user["token"], session_id)
 
 
 def test_C18_unknown_message_type():
     """C-18: 未知消息类型 → UNKNOWN_TYPE"""
-    _, _, session_id = _setup()
-    ws = _ws_connect(session_id)
-    _recv(ws)
-    ws.send(json.dumps({"type": "unknown_xyz", "data": {}}))
-    msg = _recv(ws)
-    ok = msg is not None and msg.get("data", {}).get("error_code") == "UNKNOWN_TYPE"
-    _log(ok, "C-18: 未知类型 → UNKNOWN_TYPE", msg)
-    ws.close()
+    user, _, session_id = _setup()
+    ws = None
+    try:
+        ws = _ws_connect(session_id)
+        _recv(ws)
+        ws.send(json.dumps({"type": "unknown_xyz", "data": {}}))
+        msg = _recv(ws)
+        ok = msg is not None and msg.get("data", {}).get("error_code") == "UNKNOWN_TYPE"
+        _log(ok, "C-18: 未知类型 → UNKNOWN_TYPE", msg)
+    finally:
+        _safe_close_ws(ws)
+        _end_session(user["token"], session_id)
 
 
 def test_C19_invalid_json():
     """C-19: 非法 JSON → INVALID_JSON"""
-    _, _, session_id = _setup()
-    ws = _ws_connect(session_id)
-    _recv(ws)
-    ws.send("{{not_json}}")
-    msg = _recv(ws)
-    ok = msg is not None and msg.get("data", {}).get("error_code") == "INVALID_JSON"
-    _log(ok, "C-19: 非法 JSON → INVALID_JSON", msg)
-    ws.close()
+    user, _, session_id = _setup()
+    ws = None
+    try:
+        ws = _ws_connect(session_id)
+        _recv(ws)
+        ws.send("{{not_json}}")
+        msg = _recv(ws)
+        ok = msg is not None and msg.get("data", {}).get("error_code") == "INVALID_JSON"
+        _log(ok, "C-19: 非法 JSON → INVALID_JSON", msg)
+    finally:
+        _safe_close_ws(ws)
+        _end_session(user["token"], session_id)
 
 # ════════════════════════════════════════════════════════════════
 # D. 资源与清理
@@ -441,18 +546,23 @@ def test_D21_concurrent_sessions():
         gid, sid = _create_group_session(user["token"])
         sessions.append(sid)
 
-    wss = [_ws_connect(sid) for sid in sessions]
-    for ws in wss:
-        _recv(ws)
+    wss = []
+    try:
+        wss = [_ws_connect(sid) for sid in sessions]
+        for ws in wss:
+            _recv(ws)
 
-    for i, ws in enumerate(wss):
-        ack = _send_chunk(ws, seq=i + 1)
-        results.append(ack and ack.get("data", {}).get("seq") == i + 1)
+        for i, ws in enumerate(wss):
+            ack = _send_chunk(ws, seq=i + 1)
+            results.append(ack and ack.get("data", {}).get("seq") == i + 1)
 
-    ok = all(results)
-    _log(ok, "D-21: 3 个并发 session 各自 ACK 正确", results)
-    for ws in wss:
-        ws.close()
+        ok = all(results)
+        _log(ok, "D-21: 3 个并发 session 各自 ACK 正确", results)
+    finally:
+        for ws in wss:
+            _safe_close_ws(ws)
+        for sid in sessions:
+            _end_session(user["token"], sid)
 
 
 def test_D22_broadcast_only_to_same_session():
@@ -461,44 +571,57 @@ def test_D22_broadcast_only_to_same_session():
     gid_a, sid_a = _create_group_session(user["token"])
     gid_b, sid_b = _create_group_session(user["token"])
 
-    ws_a = _ws_connect(sid_a)
-    ws_b = _ws_connect(sid_b)
-    _recv(ws_a)
-    _recv(ws_b)
-
-    _add_transcript_admin(sid_a, gid_a, "A说话人", "只有A应收到")
-    time.sleep(0.5)
-
-    msg_a = _recv(ws_a)
-    ws_b.settimeout(1)
+    ws_a = None
+    ws_b = None
     try:
-        msg_b = _recv(ws_b)
-    except Exception:
-        msg_b = None
+        ws_a = _ws_connect(sid_a)
+        ws_b = _ws_connect(sid_b)
+        _recv(ws_a)
+        _recv(ws_b)
 
-    ok = (msg_a and msg_a.get("type") == "transcript") and msg_b is None
-    _log(ok, "D-22: session A 广播不泄漏到 session B",
-         {"ws_a_got": msg_a and msg_a.get("type"), "ws_b_got": msg_b})
-    ws_a.close()
-    ws_b.close()
+        _add_transcript_admin(sid_a, gid_a, "A说话人", "只有A应收到")
+        time.sleep(0.5)
+
+        msg_a = _recv(ws_a)
+        ws_b.settimeout(1)
+        try:
+            msg_b = _recv(ws_b)
+        except Exception:
+            msg_b = None
+
+        ok = (msg_a and msg_a.get("type") == "transcript") and msg_b is None
+        _log(ok, "D-22: session A 广播不泄漏到 session B",
+             {"ws_a_got": msg_a and msg_a.get("type"), "ws_b_got": msg_b})
+    finally:
+        _safe_close_ws(ws_a)
+        _safe_close_ws(ws_b)
+        _end_session(user["token"], sid_a)
+        _end_session(user["token"], sid_b)
 
 
 def test_D23_new_connection_after_heavy_load():
     """D-23: 压测 50 个 chunk 后，新连接仍正常"""
-    _, _, session_id = _setup()
-    ws = _ws_connect(session_id)
-    ws.settimeout(30)
-    _recv(ws)
-    for i in range(50):
-        _send_chunk(ws, seq=i)
-    ws.close()
-    time.sleep(0.3)
+    user, _, session_id = _setup()
+    ws = None
+    ws2 = None
+    try:
+        ws = _ws_connect(session_id)
+        ws.settimeout(30)
+        _recv(ws)
+        for i in range(50):
+            _send_chunk(ws, seq=i)
+        _safe_close_ws(ws)
+        ws = None
+        time.sleep(0.3)
 
-    ws2 = _ws_connect(session_id)
-    msg = _recv(ws2)
-    ok = msg is not None and msg.get("type") == "connected"
-    _log(ok, "D-23: 50 chunk 压测后新连接仍正常", msg)
-    ws2.close()
+        ws2 = _ws_connect(session_id)
+        msg = _recv(ws2)
+        ok = msg is not None and msg.get("type") == "connected"
+        _log(ok, "D-23: 50 chunk 压测后新连接仍正常", msg)
+    finally:
+        _safe_close_ws(ws)
+        _safe_close_ws(ws2)
+        _end_session(user["token"], session_id)
 
 # ── 入口 ──────────────────────────────────────────────────────────
 
