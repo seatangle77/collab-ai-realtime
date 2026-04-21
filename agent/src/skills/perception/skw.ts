@@ -4,6 +4,7 @@ import {
   updateKeywordSkwBatch,
   deleteKeywordSkwByKeyword,
   writeInfoGapButton,
+  writeKeywordRecallAnalysis,
   hasPendingInfoGapKeyword,
   hasClickedInfoGapKeywordInRecentWindows,
 } from '../../db/queries';
@@ -84,6 +85,23 @@ export async function computeSkw(
 
   const words = recallKeywords.map((k) => k.word);
   logger.info(`[SKW] 召回关键词：${words.join('、')}`, { sessionId });
+
+  // ── 阶段一补充：将 AI 原始判断写入 keyword_recall_analysis（全量，含 needs_prompt=false）──
+  await Promise.allSettled(
+    recallKeywords.map((item) =>
+      writeKeywordRecallAnalysis({
+        id: 'kra_' + nanoid(12),
+        session_id: sessionId,
+        window_start: windowStart,
+        keyword: item.word,
+        needs_prompt: item.needs_prompt,
+        target_user_id: item.target_user_id || null,
+        llm_reason: item.reason || null,
+      }).catch((err: Error) => {
+        logger.error('[SKW] writeKeywordRecallAnalysis 失败', { sessionId, keyword: item.word, message: err.message });
+      }),
+    ),
+  );
 
   // ── 阶段二：写入 keyword_skw 初始记录（pending）────────────────────────────
 

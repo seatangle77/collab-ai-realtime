@@ -284,6 +284,46 @@ export interface AdminKeywordSkw {
   created_at: string | null
 }
 
+// ── AI 推送分析 ───────────────────────────────────────────────────────
+export type AiPushDropReason =
+  | 'passed'
+  | 'needs_prompt_false'
+  | 'anchor_invalid'
+  | 'content_empty'
+  | 'persist_failed'
+
+export interface AdminAiPushAnalysis {
+  id: string
+  session_id: string
+  target_user_id: string
+  target_user_name: string | null
+  state_type: string
+  window_start: string
+  ai_needs_prompt: boolean
+  ai_anchor: {
+    transcript_id: string
+    speaker_id: string
+    speaker_name: string
+    text: string
+  } | null
+  ai_content: string | null
+  drop_reason: AiPushDropReason | null
+  created_at: string | null
+}
+
+// ── 关键词召回分析 ────────────────────────────────────────────────────
+export interface AdminKeywordRecallAnalysis {
+  id: string
+  session_id: string
+  window_start: string
+  keyword: string
+  needs_prompt: boolean
+  target_user_id: string | null
+  target_user_name: string | null
+  llm_reason: string | null
+  created_at: string | null
+}
+
 // ── 语音转写（后台列表）──────────────────────────────────────────────
 export interface AdminSpeechTranscript {
   transcript_id: string

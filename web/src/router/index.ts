@@ -163,6 +163,16 @@ const routes: RouteRecordRaw[] = [
         name: 'AdminChatSessionDetail',
         component: () => import('../views/admin/AdminChatSessionDetailPage.vue'),
       },
+      {
+        path: 'ai-push-analysis',
+        name: 'AdminAiPushAnalysis',
+        component: () => import('../views/admin/AdminAiPushAnalysisPage.vue'),
+      },
+      {
+        path: 'keyword-recall-analysis',
+        name: 'AdminKeywordRecallAnalysis',
+        component: () => import('../views/admin/AdminKeywordRecallAnalysisPage.vue'),
+      },
     ],
   },
 ]

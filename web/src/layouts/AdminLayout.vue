@@ -36,6 +36,8 @@ const menuGroups = computed<AdminMenuGroup[]>(() => [
       { path: '/admin/discussion-summaries', label: '讨论摘要' },
       { path: '/admin/info-gap-buttons', label: '信息缺口按钮' },
       { path: '/admin/keyword-skw', label: '关键词 SKW' },
+      { path: '/admin/ai-push-analysis', label: 'AI 推送分析' },
+      { path: '/admin/keyword-recall-analysis', label: '关键词召回分析' },
     ],
   },
   {

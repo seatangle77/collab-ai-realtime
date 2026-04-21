@@ -19,6 +19,7 @@ jest.mock('../src/skills/generate-push-content');
 
 const mockWritePushQueueItem = queries.writePushQueueItem as jest.MockedFunction<typeof queries.writePushQueueItem>;
 const mockWriteDiscussionState = queries.writeDiscussionState as jest.MockedFunction<typeof queries.writeDiscussionState>;
+const mockWriteAiPushAnalysis = queries.writeAiPushAnalysis as jest.MockedFunction<typeof queries.writeAiPushAnalysis>;
 const mockWriteInfoGapButton = queries.writeInfoGapButton as jest.MockedFunction<typeof queries.writeInfoGapButton>;
 const mockDismissPendingBeforeWindow = queries.dismissPendingInfoGapButtonsBeforeWindow as jest.MockedFunction<
   typeof queries.dismissPendingInfoGapButtonsBeforeWindow
@@ -87,6 +88,7 @@ describe('runActionLayer (new info-gap flow)', () => {
     jest.resetAllMocks();
     mockWritePushQueueItem.mockResolvedValue('pq_mock');
     mockWriteDiscussionState.mockResolvedValue('ds_mock');
+    mockWriteAiPushAnalysis.mockResolvedValue(undefined);
     mockWriteInfoGapButton.mockResolvedValue('igb_mock');
     mockDismissPendingBeforeWindow.mockResolvedValue(0);
     mockHasPendingKeyword.mockResolvedValue(false);
@@ -129,6 +131,15 @@ describe('runActionLayer (new info-gap flow)', () => {
       { type: 'group_silence', targetUsers: MEMBERS, triggerMetrics: { silence_s: 35 } },
       { type: 'shallow_discussion', userId: 'uA', targetUsers: ['uA'], triggerMetrics: { description: 'TTR偏低' } },
     ];
+    mockGeneratePushContent.mockResolvedValue(
+      MEMBERS.map((uid) => ({
+        targetUserId: uid,
+        triggerType: 'group_silence' as const,
+        content: '请大家继续讨论',
+        needsPrompt: true,
+        anchor: null,
+      })),
+    );
 
     await runActionLayer({ ...BASE_PARAMS, triggers });
 
@@ -149,6 +160,16 @@ describe('runActionLayer (new info-gap flow)', () => {
       }),
     );
     expect(mockWritePushQueueItem).not.toHaveBeenCalled();
+    expect(mockWriteAiPushAnalysis).toHaveBeenCalledTimes(MEMBERS.length);
+    expect(mockWriteAiPushAnalysis).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session_id: SESSION,
+        state_type: 'group_silence',
+        ai_needs_prompt: true,
+        ai_content: '请大家继续讨论',
+        drop_reason: 'passed',
+      }),
+    );
   });
 
   it('普通触发：新 skill 产出后写入 push_queue 和 discussion_states', async () => {
@@ -187,6 +208,16 @@ describe('runActionLayer (new info-gap flow)', () => {
         }),
       }),
     );
+    expect(mockWriteAiPushAnalysis).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session_id: SESSION,
+        target_user_id: 'uA',
+        state_type: 'low_participation',
+        ai_needs_prompt: true,
+        ai_content: '这是一条测试推送文案',
+        drop_reason: 'passed',
+      }),
+    );
   });
 
   it('anchor 校验失败时不应入队', async () => {
@@ -199,6 +230,146 @@ describe('runActionLayer (new info-gap flow)', () => {
 
     expect(mockWritePushQueueItem).not.toHaveBeenCalled();
     expect(mockWriteDiscussionState).not.toHaveBeenCalled();
+    expect(mockWriteAiPushAnalysis).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session_id: SESSION,
+        target_user_id: 'uA',
+        state_type: 'low_participation',
+        drop_reason: 'anchor_invalid',
+      }),
+    );
+  });
+
+  it('needsPrompt=false 时应写入 needs_prompt_false 分析记录', async () => {
+    mockGeneratePushContent.mockResolvedValue([
+      {
+        targetUserId: 'uA',
+        triggerType: 'low_participation',
+        content: '这条不会发送',
+        needsPrompt: false,
+        anchor: null,
+      },
+    ]);
+
+    await runActionLayer({
+      ...BASE_PARAMS,
+      triggers: [makeTrigger({})],
+    });
+
+    expect(mockWritePushQueueItem).not.toHaveBeenCalled();
+    expect(mockWriteAiPushAnalysis).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session_id: SESSION,
+        target_user_id: 'uA',
+        state_type: 'low_participation',
+        ai_needs_prompt: false,
+        ai_content: '这条不会发送',
+        drop_reason: 'needs_prompt_false',
+      }),
+    );
+  });
+
+  it('content 为空时应写入 content_empty 分析记录', async () => {
+    mockGeneratePushContent.mockResolvedValue([
+      {
+        targetUserId: 'uA',
+        triggerType: 'low_participation',
+        content: '   ',
+        needsPrompt: true,
+        anchor: null,
+      },
+    ]);
+
+    await runActionLayer({
+      ...BASE_PARAMS,
+      triggers: [makeTrigger({})],
+    });
+
+    expect(mockWritePushQueueItem).not.toHaveBeenCalled();
+    expect(mockWriteAiPushAnalysis).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session_id: SESSION,
+        target_user_id: 'uA',
+        state_type: 'low_participation',
+        ai_needs_prompt: true,
+        ai_content: '   ',
+        drop_reason: 'content_empty',
+      }),
+    );
+  });
+
+  it('入队失败时应写入 persist_failed 分析记录', async () => {
+    mockWritePushQueueItem.mockRejectedValue(new Error('queue failed'));
+
+    await runActionLayer({
+      ...BASE_PARAMS,
+      triggers: [makeTrigger({})],
+    });
+
+    expect(mockWriteDiscussionState).not.toHaveBeenCalled();
+    expect(mockWriteAiPushAnalysis).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session_id: SESSION,
+        target_user_id: 'uA',
+        state_type: 'low_participation',
+        ai_needs_prompt: true,
+        ai_content: '这是一条测试推送文案',
+        drop_reason: 'persist_failed',
+      }),
+    );
+  });
+
+  it('writeDiscussionState 失败时应写入 persist_failed 分析记录', async () => {
+    mockWriteDiscussionState.mockRejectedValue(new Error('state failed'));
+
+    await runActionLayer({
+      ...BASE_PARAMS,
+      triggers: [makeTrigger({})],
+    });
+
+    expect(mockWriteAiPushAnalysis).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session_id: SESSION,
+        target_user_id: 'uA',
+        state_type: 'low_participation',
+        ai_needs_prompt: true,
+        ai_content: '这是一条测试推送文案',
+        drop_reason: 'persist_failed',
+      }),
+    );
+  });
+
+  it('group_silence 广播失败时应逐个写入 persist_failed 分析记录', async () => {
+    mockNotifyGroupSilence.mockResolvedValue(false);
+    mockGeneratePushContent.mockResolvedValue(
+      MEMBERS.map((uid) => ({
+        targetUserId: uid,
+        triggerType: 'group_silence' as const,
+        content: '请大家继续讨论',
+        needsPrompt: true,
+        anchor: null,
+      })),
+    );
+
+    await runActionLayer({
+      ...BASE_PARAMS,
+      triggers: [
+        { type: 'group_silence', targetUsers: MEMBERS, triggerMetrics: { silence_s: 35 } },
+      ],
+    });
+
+    expect(mockWriteAiPushAnalysis).toHaveBeenCalledTimes(MEMBERS.length);
+    for (const uid of MEMBERS) {
+      expect(mockWriteAiPushAnalysis).toHaveBeenCalledWith(
+        expect.objectContaining({
+          session_id: SESSION,
+          target_user_id: uid,
+          state_type: 'group_silence',
+          ai_content: '请大家继续讨论',
+          drop_reason: 'persist_failed',
+        }),
+      );
+    }
   });
 
   it('info_gap: 当前 action-layer 仅处理历史按钮过期，不做评估和写按钮', async () => {

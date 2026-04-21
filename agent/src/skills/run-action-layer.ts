@@ -1,7 +1,9 @@
 import { createLogger } from '../logger';
+import { nanoid } from 'nanoid';
 import {
   writePushQueueItem,
   writeDiscussionState,
+  writeAiPushAnalysis,
   dismissPendingInfoGapButtonsBeforeWindow,
 } from '../db/queries';
 import {
@@ -35,6 +37,10 @@ interface SelectedTarget {
   trigger: DirectPushTrigger;
   recipientUserIds: string[];
 }
+
+type PersistPushDecisionResult =
+  | { ok: true }
+  | { ok: false; reason: 'embedding_empty' | 'queue_write_failed' | 'state_write_failed' | 'unknown' };
 
 function isDirectPushTrigger(trigger: Trigger): trigger is DirectPushTrigger {
   return (
@@ -86,8 +92,13 @@ export async function runActionLayer(params: {
       summaryText,
       memberIds,
     });
-    const silenceItem = generatedItems.find((item) => item.triggerType === 'group_silence');
-    const content = silenceItem?.content?.trim() || '先聊聊你们各自最关心的是哪个方面？';
+    const silenceItems = generatedItems.filter((item) => item.triggerType === 'group_silence');
+    if (silenceItems.length === 0) {
+      logger.warn('group_silence 未生成任何分析结果，跳过广播记录', { sessionId });
+      return;
+    }
+
+    const content = silenceItems[0]?.content?.trim() || '先聊聊你们各自最关心的是哪个方面？';
     const sent = await notifyGroupSilence(sessionId, content);
     if (sent) {
       logger.info(`group_silence 广播成功，内容="${content}"`, { sessionId });
@@ -95,6 +106,23 @@ export async function runActionLayer(params: {
     } else {
       logger.warn('group_silence 广播失败', { sessionId });
     }
+
+    for (const item of silenceItems) {
+      void writeAiPushAnalysis({
+        id: 'apa_' + nanoid(12),
+        session_id: sessionId,
+        target_user_id: item.targetUserId,
+        state_type: item.triggerType,
+        window_start: windowStart,
+        ai_needs_prompt: item.needsPrompt,
+        ai_anchor: null,
+        ai_content: item.content?.trim() || null,
+        drop_reason: sent ? 'passed' : 'persist_failed',
+      }).catch((err) => {
+        logger.error('writeAiPushAnalysis(group_silence) failed', { sessionId, message: (err as Error).message });
+      });
+    }
+
     logger.info('group_silence 触发时按优先级跳过其余个人推送', { sessionId });
     return;
   }
@@ -146,6 +174,19 @@ export async function runActionLayer(params: {
     }
 
     if (!item.needsPrompt || !item.content.trim()) {
+      void writeAiPushAnalysis({
+        id: 'apa_' + nanoid(12),
+        session_id: sessionId,
+        target_user_id: item.targetUserId,
+        state_type: item.triggerType,
+        window_start: windowStart,
+        ai_needs_prompt: item.needsPrompt,
+        ai_anchor: null,
+        ai_content: item.content || null,
+        drop_reason: !item.needsPrompt ? 'needs_prompt_false' : 'content_empty',
+      }).catch((err) => {
+        logger.error('writeAiPushAnalysis(drop) failed', { sessionId, message: (err as Error).message });
+      });
       continue;
     }
 
@@ -156,11 +197,24 @@ export async function runActionLayer(params: {
     });
     if (!anchor) {
       logger.warn(`anchor 校验失败，丢弃推送 type=${item.triggerType} user=${item.targetUserId}`, { sessionId });
+      void writeAiPushAnalysis({
+        id: 'apa_' + nanoid(12),
+        session_id: sessionId,
+        target_user_id: item.targetUserId,
+        state_type: item.triggerType,
+        window_start: windowStart,
+        ai_needs_prompt: true,
+        ai_anchor: item.anchor as Record<string, string> | null,
+        ai_content: item.content,
+        drop_reason: 'anchor_invalid',
+      }).catch((err) => {
+        logger.error('writeAiPushAnalysis(anchor_invalid) failed', { sessionId, message: (err as Error).message });
+      });
       continue;
     }
 
     for (const recipientUserId of selected.recipientUserIds) {
-      const persisted = await persistPushDecision({
+      const persistResult = await persistPushDecision({
         sessionId,
         trigger: selected.trigger,
         targetUserId: recipientUserId,
@@ -168,8 +222,41 @@ export async function runActionLayer(params: {
         anchor,
         windowStart,
       });
-      if (persisted) {
+      if (persistResult.ok) {
         persistedCount += 1;
+        void writeAiPushAnalysis({
+          id: 'apa_' + nanoid(12),
+          session_id: sessionId,
+          target_user_id: recipientUserId,
+          state_type: item.triggerType,
+          window_start: windowStart,
+          ai_needs_prompt: true,
+          ai_anchor: anchor as unknown as Record<string, string>,
+          ai_content: item.content.trim(),
+          drop_reason: 'passed',
+        }).catch((err) => {
+          logger.error('writeAiPushAnalysis(passed) failed', { sessionId, message: (err as Error).message });
+        });
+      } else {
+        logger.warn('persistPushDecision failed after AI generation', {
+          sessionId,
+          targetUserId: recipientUserId,
+          stateType: item.triggerType,
+          reason: persistResult.reason,
+        });
+        void writeAiPushAnalysis({
+          id: 'apa_' + nanoid(12),
+          session_id: sessionId,
+          target_user_id: recipientUserId,
+          state_type: item.triggerType,
+          window_start: windowStart,
+          ai_needs_prompt: true,
+          ai_anchor: anchor as unknown as Record<string, string>,
+          ai_content: item.content.trim(),
+          drop_reason: 'persist_failed',
+        }).catch((err) => {
+          logger.error('writeAiPushAnalysis(persist_failed) failed', { sessionId, message: (err as Error).message });
+        });
       }
     }
   }
@@ -184,7 +271,7 @@ async function persistPushDecision(params: {
   content: string;
   anchor: StructuredAnchor;
   windowStart: Date;
-}): Promise<boolean> {
+}): Promise<PersistPushDecisionResult> {
   const { sessionId, trigger, targetUserId, content, anchor, windowStart } = params;
 
   try {
@@ -193,39 +280,50 @@ async function persistPushDecision(params: {
 
     if (!contentEmbedding || contentEmbedding.length === 0) {
       logger.warn('push embedding 为空，跳过入队', { sessionId, targetUserId });
-      return false;
+      return { ok: false, reason: 'embedding_empty' };
     }
 
-    const queueId = await writePushQueueItem({
-      session_id: sessionId,
-      target_user_id: targetUserId,
-      state_type: trigger.type,
-      push_content: content,
-      content_embedding: contentEmbedding,
-      analysis_window_start: windowStart,
-    });
+    let queueId: string;
+    try {
+      queueId = await writePushQueueItem({
+        session_id: sessionId,
+        target_user_id: targetUserId,
+        state_type: trigger.type,
+        push_content: content,
+        content_embedding: contentEmbedding,
+        analysis_window_start: windowStart,
+      });
+    } catch (err) {
+      logger.error('writePushQueueItem 失败', { sessionId, targetUserId, message: (err as Error).message });
+      return { ok: false, reason: 'queue_write_failed' };
+    }
 
-    await writeDiscussionState({
-      session_id: sessionId,
-      state_type: trigger.type,
-      target_user_id: targetUserId,
-      trigger_metrics: {
-        ...trigger.triggerMetrics,
-        queued_push_id: queueId,
-        anchor: {
-          transcript_id: anchor.transcriptId,
-          speaker_id: anchor.speakerId,
-          speaker_name: anchor.speakerName,
-          text: anchor.text,
+    try {
+      await writeDiscussionState({
+        session_id: sessionId,
+        state_type: trigger.type,
+        target_user_id: targetUserId,
+        trigger_metrics: {
+          ...trigger.triggerMetrics,
+          queued_push_id: queueId,
+          anchor: {
+            transcript_id: anchor.transcriptId,
+            speaker_id: anchor.speakerId,
+            speaker_name: anchor.speakerName,
+            text: anchor.text,
+          },
         },
-      },
-      window_start: windowStart,
-    });
+        window_start: windowStart,
+      });
+    } catch (err) {
+      logger.error('writeDiscussionState 失败', { sessionId, targetUserId, message: (err as Error).message });
+      return { ok: false, reason: 'state_write_failed' };
+    }
   } catch (err) {
     logger.error('persistPushDecision 失败', { sessionId, message: (err as Error).message });
-    return false;
+    return { ok: false, reason: 'unknown' };
   }
 
   logger.info(`推送已入队 用户=${targetUserId} state=${trigger.type} 文案="${content}"`, { sessionId });
-  return true;
+  return { ok: true };
 }

@@ -741,6 +741,76 @@ export async function deleteKeywordSkwByKeyword(
   );
 }
 
+// ── ai_push_analysis ──────────────────────────────────────────────────────────
+
+export type AiPushDropReason =
+  | 'passed'
+  | 'needs_prompt_false'
+  | 'anchor_invalid'
+  | 'content_empty'
+  | 'persist_failed';
+
+/** 写入 ai_push_analysis（每次结构化推送 AI 调用的原始结果，不论是否通过过滤） */
+export async function writeAiPushAnalysis(row: {
+  id: string;
+  session_id: string;
+  target_user_id: string;
+  state_type: string;
+  window_start: Date;
+  ai_needs_prompt: boolean;
+  ai_anchor: Record<string, string> | null;
+  ai_content: string | null;
+  drop_reason: AiPushDropReason;
+}): Promise<void> {
+  await pool.query(
+    `INSERT INTO ai_push_analysis
+       (id, session_id, target_user_id, state_type, window_start,
+        ai_needs_prompt, ai_anchor, ai_content, drop_reason, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())
+     ON CONFLICT (id) DO NOTHING`,
+    [
+      row.id,
+      row.session_id,
+      row.target_user_id,
+      row.state_type,
+      toUtcString(row.window_start),
+      row.ai_needs_prompt,
+      row.ai_anchor ? JSON.stringify(row.ai_anchor) : null,
+      row.ai_content,
+      row.drop_reason,
+    ],
+  );
+}
+
+// ── keyword_recall_analysis ───────────────────────────────────────────────────
+
+/** 写入 keyword_recall_analysis（每次关键词召回 AI 返回的原始判断，包含 needs_prompt=false 的词） */
+export async function writeKeywordRecallAnalysis(row: {
+  id: string;
+  session_id: string;
+  window_start: Date;
+  keyword: string;
+  needs_prompt: boolean;
+  target_user_id: string | null;
+  llm_reason: string | null;
+}): Promise<void> {
+  await pool.query(
+    `INSERT INTO keyword_recall_analysis
+       (id, session_id, window_start, keyword, needs_prompt, target_user_id, llm_reason, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
+     ON CONFLICT (id) DO NOTHING`,
+    [
+      row.id,
+      row.session_id,
+      toUtcString(row.window_start),
+      row.keyword,
+      row.needs_prompt,
+      row.target_user_id,
+      row.llm_reason,
+    ],
+  );
+}
+
 /** 批量写入 keyword_skw */
 export async function writeKeywordSkw(rows: KeywordSkwRow[]): Promise<void> {
   if (rows.length === 0) return;
