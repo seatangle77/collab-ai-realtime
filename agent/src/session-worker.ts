@@ -11,7 +11,6 @@ import { runPerceptionPipeline } from './skills/run-perception-pipeline';
 import { runActionLayer } from './skills/run-action-layer';
 import { runPushDispatcher } from './skills/run-push-dispatcher';
 import { runSummary } from './skills/run-summary';
-import { computeHasReasoning } from './skills/perception/reasoning';
 import { generateGroupSilence, notifyGroupSilence } from './http/nlp-client';
 
 const logger = createLogger('session-worker');
@@ -63,7 +62,7 @@ export class SessionWorker {
 
   private scheduleAnalysisTimer(): void {
     if (!this.running) return;
-    const scheduledFor = this.nextAlignedAt(config.agent.longIntervalMs, config.agent.longIntervalMs);
+    const scheduledFor = this.nextAlignedAt(config.agent.shortIntervalMs, config.agent.shortIntervalMs);
     this.analysisTimer = setTimeout(() => {
       void this.runAnalysisPipeline(scheduledFor)
         .finally(() => this.scheduleAnalysisTimer());
@@ -229,42 +228,48 @@ export class SessionWorker {
       if (memberIds.length === 0) return;
 
       const windowEnd = scheduledFor;
-      const windowStart = new Date(windowEnd.getTime() - config.agent.longIntervalMs);
+      // 短窗口（60s）：感知层 + 论证判定
+      const shortWindowStart = new Date(windowEnd.getTime() - config.agent.shortIntervalMs);
+      // 长窗口（120s）：深度分析，会话前两分钟内用 sessionStartedAt 兜底
+      const longWindowStart = new Date(
+        Math.max(this.sessionStartedAt.getTime(), windowEnd.getTime() - config.agent.longIntervalMs),
+      );
+
       const startedAt = Date.now();
-      const runId = buildRunId('reasoning', this.sessionId, windowStart);
+      const runId = buildRunId('reasoning', this.sessionId, shortWindowStart);
       logger.info('===== reasoning run begin =====', {
         run_id: runId,
         sessionId: this.sessionId,
         scheduled_for: scheduledFor.toISOString(),
-        window_start: windowStart.toISOString(),
+        short_window_start: shortWindowStart.toISOString(),
+        long_window_start: longWindowStart.toISOString(),
         window_end: windowEnd.toISOString(),
       });
 
-      // Step1：感知层
+      // Step1：感知层（含论证结构批量判定，60s 窗口，同步 await）
       const perceptionResult = await runPerceptionPipeline({
         sessionId: this.sessionId,
         memberIds,
-        windowStart,
+        windowStart: shortWindowStart,
         windowEnd,
       });
 
       if (!perceptionResult) return;
 
-      // hasReasoning（Qwen fast_model）后台异步，不阻塞主流程
-      void computeHasReasoning(this.sessionId, windowStart, windowEnd, memberIds).catch((err) => {
-        logger.error('hasReasoning failed', { sessionId: this.sessionId, message: (err as Error).message });
-      });
-
-      // Step2：读当前摘要与本轮发言
+      // Step2：读当前摘要与本轮发言（120s 窗口）
       const summaryRow = await getLastSummary(this.sessionId);
       const summaryText = summaryRow?.content ?? '';
-      const transcripts = await getTranscriptsInWindowPreferCache(this.sessionId, windowStart, windowEnd);
+      const transcripts = await getTranscriptsInWindowPreferCache(
+        this.sessionId,
+        longWindowStart,
+        windowEnd,
+      );
 
-      // Step3：行动层（heavy_model 单次大JSON调用）
+      // Step3：行动层（heavy_model 单次大JSON调用，120s 窗口）
       void runActionLayer({
         sessionId: this.sessionId,
         perceptionResult,
-        windowStart,
+        windowStart: longWindowStart,
         memberIds,
         summaryText,
         transcripts,

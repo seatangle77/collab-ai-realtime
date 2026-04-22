@@ -185,20 +185,28 @@ async def generate_group_silence(
 # ── analyze_members_batch：heavy_model 全员分析大JSON ──────────────────────────
 
 _ANALYZE_MEMBERS_SYSTEM = (
-    "你是一个小组讨论分析专家。根据讨论摘要、发言记录和各成员的量化指标，"
-    "判断每位成员是否需要干预提示，并生成自然友好的推送文案（≤30字）。\n"
+    "你是一个小组讨论分析专家。根据讨论摘要、发言记录和各成员的量化指标与论证结构判定结果，"
+    "判断每位成员是否需要干预提示，并生成自然友好的推送文案（≤30字）。\n\n"
     "challenge_type 只能是：\n"
-    "  stagnation — 发言越来越少、陷入沉默（speaking_ratio<0.15 或 info_gain<0.3）\n"
-    "  shallow    — 说了很多但缺乏深度/论证（ttr<0.4 或 arg_density<0.02 且 srep>0.65）\n"
-    "  none       — 不需要干预\n"
-    "anchor 必须引用 transcripts 中真实存在的一条（使用该条的 transcript_id）。\n"
+    "  stagnation — 参与不足、思路停滞或新增贡献不足。重点信号：speaking_ratio<0.15 或 info_gain<0.3。\n"
+    "               干预目标：帮助成员重新进入讨论。文案风格：低门槛、鼓励式、重新开口导向。\n"
+    "  shallow    — 阐述浅薄、表达浅层、结构不足或展开不充分。重点信号：ttr<0.4 或 arg_density<0.02 或 srep>0.65。\n"
+    "               论证结构是判断 shallow 的核心输入，规则如下：\n"
+    "               · reasoning_status=false 且 evidence_status=false，且本轮发言量不低 → 优先判断是否需要深化型干预\n"
+    "               · reasoning_status=true  且 evidence_status=false → 优先引导补充例子、数据或事实依据\n"
+    "               · reasoning_status=false 且 evidence_status=true  → 优先引导补充原因、逻辑或判断链条\n"
+    "               · reasoning_status=true  且 evidence_status=true  → 视为结构较完整，再结合其他指标判断是否仍需干预\n"
+    "               reasoning_source / evidence_source 是模型对该成员表达特征的文字说明，可作为生成 analysis 和 content 的参考。\n"
+    "               干预目标：帮助成员补充理由、补充依据或继续展开。文案风格：追问式、深化式、展开导向。\n"
+    "  none       — 不需要干预\n\n"
+    "anchor 必须引用 transcripts 中真实存在的一条（使用该条的 transcript_id），不允许编造。\n"
     "严格按 JSON 返回，不输出任何解释或 markdown。"
 )
 
 _ANALYZE_MEMBERS_TEMPLATE = (
     "讨论摘要：{summary}\n\n"
     "最近发言记录：\n{transcripts}\n\n"
-    "各成员指标：\n{members_metrics}\n\n"
+    "各成员指标与论证结构判定：\n{members_metrics}\n\n"
     "请对每位成员输出分析，返回格式：\n"
     '{"members": [{"user_id": "...", "challenge_type": "stagnation|shallow|none", '
     '"needs_prompt": true/false, "analysis": "一句中文分析", "content": "推送文案（≤30字）", '

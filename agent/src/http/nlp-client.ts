@@ -39,6 +39,14 @@ export interface ReasoningResult {
   method: string;
 }
 
+export interface MemberReasoningResult {
+  user_id: string;
+  reasoning_status: boolean;
+  evidence_status: boolean;
+  reasoning_source: string;
+  evidence_source: string;
+}
+
 export interface AssessGapParams {
   keywords?: string[];
   summary?: string;
@@ -150,7 +158,7 @@ export async function extractKeywordsBroad(texts: string[], topN = 10): Promise<
   }
 }
 
-/** 判断文本是否含论证结构 */
+/** 判断文本是否含论证结构（单条，调试用） */
 export async function hasReasoning(text: string): Promise<ReasoningResult> {
   try {
     const res = await client.post<ReasoningResult>('/api/nlp/has_reasoning', { text }, { timeout: 30_000 });
@@ -158,6 +166,24 @@ export async function hasReasoning(text: string): Promise<ReasoningResult> {
   } catch (err) {
     logger.error('has_reasoning failed', { message: (err as Error).message });
     throw err;
+  }
+}
+
+/** 全员批量论证结构判定（主分析链路用），失败时返回空数组 */
+export async function reasoningBatch(
+  members: Array<{ user_id: string; text: string }>,
+): Promise<MemberReasoningResult[]> {
+  if (members.length === 0) return [];
+  try {
+    const res = await client.post<{ members: MemberReasoningResult[] }>(
+      '/api/nlp/reasoning_batch',
+      { members },
+      { timeout: 30_000 },
+    );
+    return res.data.members ?? [];
+  } catch (err) {
+    logger.error('reasoning_batch failed', { message: (err as Error).message });
+    return [];
   }
 }
 
@@ -190,8 +216,10 @@ export interface MemberMetricsInput {
   arg_density: number | null;
   srep: number | null;
   info_gain: number | null;
-  has_reasoning: boolean | null;
-  has_evidence: boolean | null;
+  reasoning_status: boolean | null;
+  evidence_status: boolean | null;
+  reasoning_source: string | null;
+  evidence_source: string | null;
 }
 
 export interface AnalyzeMembersTranscriptInput {

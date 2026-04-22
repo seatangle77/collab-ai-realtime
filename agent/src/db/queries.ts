@@ -40,6 +40,8 @@ export interface WindowMetricsRow {
   info_gain: number | null;
   has_reasoning: boolean | null;
   has_evidence: boolean | null;
+  reasoning_source: string | null;
+  evidence_source: string | null;
 }
 
 export interface KeywordSkwRow {
@@ -281,9 +283,10 @@ export async function writeWindowMetrics(row: WindowMetricsRow): Promise<void> {
     `INSERT INTO window_metrics
        (id, session_id, user_id, window_start, window_end,
         speaking_ratio, silence_s, ttr, arg_density,
-        srep, info_gain, has_reasoning, has_evidence, created_at)
+        srep, info_gain, has_reasoning, has_evidence,
+        reasoning_source, evidence_source, created_at)
      VALUES
-       ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())`,
+       ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())`,
     [
       id,
       row.session_id,
@@ -298,6 +301,8 @@ export async function writeWindowMetrics(row: WindowMetricsRow): Promise<void> {
       row.info_gain,
       row.has_reasoning,
       row.has_evidence,
+      row.reasoning_source,
+      row.evidence_source,
     ],
   );
 }

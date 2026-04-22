@@ -27,6 +27,8 @@ export interface PipelineResult {
   infoGains: Record<string, number | null>;
   hasReasoningMap: Record<string, boolean | null>;
   hasEvidenceMap: Record<string, boolean | null>;
+  reasoningSourceMap: Record<string, string | null>;
+  evidenceSourceMap: Record<string, string | null>;
   skwScores: Record<string, Record<string, Record<string, number>>>;
   keywords: string[];
 }
@@ -54,7 +56,7 @@ export async function runPerceptionPipeline(input: PipelineInput): Promise<Pipel
     窗口结束: windowEnd.toISOString(),
   });
 
-  // ── Step 1：并行执行互不依赖的 5 个纯计算 skill（hasReasoning 已移出，由调用方后台执行）────
+  // ── Step 1：并行执行互不依赖的 5 个纯计算 skill ──────────────────────────────
   logger.info('[Step 1] 并行执行：发言比例 / 静默检测 / TTR / 论证密度 / 语义重复', { sessionId });
   const [
     speakingRatioRes,
@@ -75,8 +77,14 @@ export async function runPerceptionPipeline(input: PipelineInput): Promise<Pipel
   const ttrs = settledValue(ttrRes, '词汇多样性TTR')?.ttrs ?? {};
   const argDensities = settledValue(argDensityRes, '论证密度')?.argDensities ?? {};
   const sreps = settledValue(srepRes, '语义重复度Srep')?.sreps ?? {};
-  const hasReasoningMap: Record<string, boolean | null> = {};
-  const hasEvidenceMap: Record<string, boolean | null> = {};
+
+  // ── Step 2：论证结构批量判定（fast_model，同窗口，await 阻塞，硬前置）───────
+  logger.info('[Step 2] 论证结构批量判定（fast_model）', { sessionId });
+  const reasoningResult = await computeHasReasoning(sessionId, windowStart, windowEnd, memberIds);
+  const hasReasoningMap = reasoningResult.hasReasoningMap;
+  const hasEvidenceMap = reasoningResult.hasEvidenceMap;
+  const reasoningSourceMap = reasoningResult.reasoningSourceMap;
+  const evidenceSourceMap = reasoningResult.evidenceSourceMap;
 
   // ── Step 2 & 3：skw 与 info-gain 并行执行（互不依赖）──────────────────────
   logger.info('[Step 2+3] 并行执行：关键词提取与跨成员语义分析（Skw）+ 信息增益计算（InfoGain）', { sessionId });
@@ -119,6 +127,8 @@ export async function runPerceptionPipeline(input: PipelineInput): Promise<Pipel
         info_gain: infoGains[uid] ?? null,
         has_reasoning: hasReasoningMap[uid] ?? null,
         has_evidence: hasEvidenceMap[uid] ?? null,
+        reasoning_source: reasoningSourceMap[uid] ?? null,
+        evidence_source: evidenceSourceMap[uid] ?? null,
       }).catch((err) => {
         logger.error('写入 window_metrics 失败', { sessionId, uid, message: (err as Error).message });
       }),
@@ -159,6 +169,8 @@ export async function runPerceptionPipeline(input: PipelineInput): Promise<Pipel
     infoGains,
     hasReasoningMap,
     hasEvidenceMap,
+    reasoningSourceMap,
+    evidenceSourceMap,
     skwScores: skwRes?.scores ?? {},
     keywords: currentKeywords,
   };

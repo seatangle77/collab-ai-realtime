@@ -22,6 +22,7 @@ from . import (
     candidate_recall,
     tfidf,
 )
+from .reasoning import batch_has_reasoning, MemberReasoningInput
 
 router = APIRouter(prefix="/api/nlp", tags=["nlp"])
 
@@ -119,7 +120,7 @@ def extract_keywords_broad(req: ExtractKeywordsBroadRequest, _: bool = Depends(r
     return {"keywords": keywords}
 
 
-# ── 6. has_reasoning ─────────────────────────────────────────────────────────
+# ── 6. has_reasoning（单条，调试用）─────────────────────────────────────────
 
 class ReasoningRequest(BaseModel):
     text: str
@@ -128,12 +129,44 @@ class ReasoningRequest(BaseModel):
 class ReasoningResponse(BaseModel):
     has_reasoning: bool
     has_evidence: bool
-    method: str                           # "rule" 或 "llm"
+    method: str
 
 
 @router.post("/has_reasoning", response_model=ReasoningResponse)
 def check_reasoning(req: ReasoningRequest, _: bool = Depends(require_admin)):
     return reasoning.has_reasoning(req.text)
+
+
+# ── 7. reasoning_batch（全员批量，主分析链路用）──────────────────────────────
+
+class BatchReasoningMemberInput(BaseModel):
+    user_id: str
+    text: str
+
+
+class BatchReasoningRequest(BaseModel):
+    members: list[BatchReasoningMemberInput]
+
+
+class MemberReasoningResultOut(BaseModel):
+    user_id: str
+    reasoning_status: bool
+    evidence_status: bool
+    reasoning_source: str
+    evidence_source: str
+
+
+class BatchReasoningResponse(BaseModel):
+    members: list[MemberReasoningResultOut]
+
+
+@router.post("/reasoning_batch", response_model=BatchReasoningResponse)
+def reasoning_batch(req: BatchReasoningRequest, _: bool = Depends(require_admin)):
+    inputs: list[MemberReasoningInput] = [
+        {"user_id": m.user_id, "text": m.text} for m in req.members
+    ]
+    results = batch_has_reasoning(inputs)
+    return {"members": results}
 
 
 # ── 9. generate_summary ──────────────────────────────────────────────────────
@@ -196,8 +229,10 @@ class MemberMetricsItem(BaseModel):
     arg_density: float | None = None
     srep: float | None = None
     info_gain: float | None = None
-    has_reasoning: bool | None = None
-    has_evidence: bool | None = None
+    reasoning_status: bool | None = None
+    evidence_status: bool | None = None
+    reasoning_source: str | None = None
+    evidence_source: str | None = None
 
 
 class AnalyzeMembersTranscriptItem(BaseModel):
@@ -239,7 +274,8 @@ async def analyze_members_route(
         f"- {m.user_id}：发言比例={round(m.speaking_ratio * 100, 1)}%"
         f" 静默={round(m.silence_s)}s TTR={m.ttr} 论证密度={m.arg_density}"
         f" Srep={m.srep} 信息增益={m.info_gain}"
-        f" 有论证={m.has_reasoning} 有证据={m.has_evidence}"
+        f"\n  论证结构={m.reasoning_status}（{m.reasoning_source or '无说明'}）"
+        f" 支撑依据={m.evidence_status}（{m.evidence_source or '无说明'}）"
         for m in req.members
     )
     result = await push_content.analyze_members_batch(

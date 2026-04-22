@@ -1,19 +1,19 @@
 import { getTranscriptsInWindow } from '../../db/queries';
-import { hasReasoning } from '../../http/nlp-client';
+import { reasoningBatch } from '../../http/nlp-client';
 import { createLogger } from '../../logger';
 
 const logger = createLogger('skill:reasoning');
 
 export interface ReasoningResult {
-  /** user_id → has_reasoning，无发言为 null */
   hasReasoningMap: Record<string, boolean | null>;
-  /** user_id → has_evidence，无发言为 null */
   hasEvidenceMap: Record<string, boolean | null>;
+  reasoningSourceMap: Record<string, string | null>;
+  evidenceSourceMap: Record<string, string | null>;
 }
 
 /**
- * 对每位用户的合并发言调用 /api/nlp/has_reasoning（背后由 Qwen 判断）
- * 返回该用户是否含论证结构（has_reasoning）以及是否引用了证据（has_evidence）
+ * 全员批量论证结构判定（fast_model，一次调用返回全组四字段结果）。
+ * 无发言的成员直接填 null，不进入 LLM。
  */
 export async function computeHasReasoning(
   sessionId: string,
@@ -34,34 +34,41 @@ export async function computeHasReasoning(
 
   const hasReasoningMap: Record<string, boolean | null> = {};
   const hasEvidenceMap: Record<string, boolean | null> = {};
-
-  await Promise.allSettled(
-    memberIds.map(async (uid) => {
-      const combined = textByUser[uid].join(' ').trim();
-      if (!combined) {
-        hasReasoningMap[uid] = null;
-        hasEvidenceMap[uid] = null;
-        return;
-      }
-
-      logger.info(`[论证检测 Qwen] 正在分析用户 ${uid} 的发言是否含论证结构（${combined.length} 字）`, { sessionId });
-      const result = await hasReasoning(combined);
-      hasReasoningMap[uid] = result.has_reasoning;
-      hasEvidenceMap[uid] = result.has_evidence;
-
-      const reasoningLabel = result.has_reasoning ? '✅ 含论证' : '❌ 无论证';
-      const evidenceLabel = result.has_evidence ? '✅ 有引用证据' : '❌ 无证据引用';
-      const methodLabel = result.method === 'llm' ? '（Qwen 判断）' : '（关键词规则）';
-      logger.info(`[论证检测 Qwen] 用户 ${uid} 结果：${reasoningLabel}，${evidenceLabel} ${methodLabel}`, { sessionId });
-    }),
-  );
+  const reasoningSourceMap: Record<string, string | null> = {};
+  const evidenceSourceMap: Record<string, string | null> = {};
 
   for (const uid of memberIds) {
-    if (!(uid in hasReasoningMap)) {
-      hasReasoningMap[uid] = null;
-      hasEvidenceMap[uid] = null;
-    }
+    hasReasoningMap[uid] = null;
+    hasEvidenceMap[uid] = null;
+    reasoningSourceMap[uid] = null;
+    evidenceSourceMap[uid] = null;
   }
 
-  return { hasReasoningMap, hasEvidenceMap };
+  const batchInput = memberIds
+    .map((uid) => ({ user_id: uid, text: textByUser[uid].join(' ').trim() }))
+    .filter((m) => m.text.length > 0);
+
+  if (batchInput.length === 0) {
+    logger.info('[论证检测] 本轮全员无发言，跳过批量判定', { sessionId });
+    return { hasReasoningMap, hasEvidenceMap, reasoningSourceMap, evidenceSourceMap };
+  }
+
+  logger.info(`[论证检测] 批量判定 成员数=${batchInput.length}`, { sessionId });
+  const results = await reasoningBatch(batchInput);
+
+  for (const r of results) {
+    hasReasoningMap[r.user_id] = r.reasoning_status;
+    hasEvidenceMap[r.user_id] = r.evidence_status;
+    reasoningSourceMap[r.user_id] = r.reasoning_source;
+    evidenceSourceMap[r.user_id] = r.evidence_source;
+
+    const rsn = r.reasoning_status ? '✅ 含论证' : '❌ 无论证';
+    const evi = r.evidence_status ? '✅ 有证据' : '❌ 无证据';
+    logger.info(
+      `[论证检测] 用户 ${r.user_id} 结果：${rsn}（${r.reasoning_source}），${evi}（${r.evidence_source}）`,
+      { sessionId },
+    );
+  }
+
+  return { hasReasoningMap, hasEvidenceMap, reasoningSourceMap, evidenceSourceMap };
 }

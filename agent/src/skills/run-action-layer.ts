@@ -84,8 +84,10 @@ export async function runActionLayer(params: {
     arg_density: perceptionResult.argDensities[uid] ?? null,
     srep: perceptionResult.sreps[uid] ?? null,
     info_gain: perceptionResult.infoGains[uid] ?? null,
-    has_reasoning: perceptionResult.hasReasoningMap[uid] ?? null,
-    has_evidence: perceptionResult.hasEvidenceMap[uid] ?? null,
+    reasoning_status: perceptionResult.hasReasoningMap[uid] ?? null,
+    evidence_status: perceptionResult.hasEvidenceMap[uid] ?? null,
+    reasoning_source: perceptionResult.reasoningSourceMap[uid] ?? null,
+    evidence_source: perceptionResult.evidenceSourceMap[uid] ?? null,
   }));
 
   logger.info('行动层：调用 heavy_model 全员分析', { sessionId, member_count: memberIds.length });
