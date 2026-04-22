@@ -245,7 +245,7 @@ test.describe.serial('Admin 讨论摘要与讨论状态页面', () => {
         id: 'state-1',
         session_id: 'session-state-1',
         triggered_at: '2026-04-10T11:00:00Z',
-        state_type: 'low_participation',
+        state_type: 'stagnation',
         target_user_id: 'user-1',
         target_user_name: '用户甲',
         trigger_metrics: { speaking_ratio: 0.12, silence_s: 60 },

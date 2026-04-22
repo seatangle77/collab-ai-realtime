@@ -19,6 +19,7 @@ router = APIRouter(
 )
 
 VALID_STATE_TYPES = {
+    "stagnation", "shallow", "none",
     "low_participation", "over_dominance", "disengaged",
     "deadlock", "topic_drift", "low_depth", "homogeneous",
 }

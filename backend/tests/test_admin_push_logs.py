@@ -65,7 +65,7 @@ def _create_log(**kwargs) -> Dict[str, Any]:
 def _create_discussion_state(session_id: str) -> str:
     r = requests.post(f"{BASE_URL}/api/admin/discussion-states/",
                       headers=ADMIN_HEADERS,
-                      json={"session_id": session_id, "state_type": "low_participation"})
+                      json={"session_id": session_id, "state_type": "stagnation"})
     r.raise_for_status()
     return r.json()["id"]
 
@@ -176,7 +176,7 @@ def scenario_create_full_fields() -> bool:
                 "target_user_name", "push_content", "push_channel",
                 "jpush_message_id", "delivery_status", "triggered_at"]
     ok = all(f in data for f in required)
-    ok &= data.get("state_type") == "low_participation"
+    ok &= data.get("state_type") == "stagnation"
     ok &= data.get("push_channel") == "glasses"
     return _log(ok, "POST /admin/push-logs 全字段创建，state_type JOIN 正确", data)
 
@@ -415,7 +415,7 @@ def scenario_list_join_fields() -> bool:
     item = data["items"][0]
     ok = item.get("session_title") is not None
     ok &= item.get("target_user_name") is not None
-    ok &= item.get("state_type") == "low_participation"
+    ok &= item.get("state_type") == "stagnation"
     return _log(ok, "GET /admin/push-logs JOIN 字段（session_title、target_user_name、state_type）", item)
 
 

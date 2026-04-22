@@ -29,8 +29,9 @@ const filters = reactive({
 
 const STATE_TYPE_OPTIONS = [
   { label: '全部', value: '' },
-  { label: 'low_participation', value: 'low_participation' },
-  { label: 'shallow_discussion', value: 'shallow_discussion' },
+  { label: 'stagnation', value: 'stagnation' },
+  { label: 'shallow', value: 'shallow' },
+  { label: 'none', value: 'none' },
   { label: 'group_silence', value: 'group_silence' },
 ]
 

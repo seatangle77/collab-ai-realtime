@@ -11,7 +11,7 @@ ADMIN_HEADERS = {"X-Admin-Token": "TestAdminKey123"}
 BAD_HEADERS = {"X-Admin-Token": "WrongKey"}
 
 VALID_STATE_TYPES = [
-    "low_participation", "over_dominance", "disengaged",
+    "stagnation", "over_dominance", "disengaged",
     "deadlock", "topic_drift", "low_depth", "homogeneous",
 ]
 
@@ -123,7 +123,7 @@ def scenario_ds_create_member_state() -> bool:
     user_id, session_id = _setup_session("DSMemberState")
     r = requests.post(f"{BASE_URL}/api/admin/discussion-states/",
                       headers=ADMIN_HEADERS,
-                      json={"session_id": session_id, "state_type": "low_participation",
+                      json={"session_id": session_id, "state_type": "stagnation",
                             "target_user_id": user_id,
                             "trigger_metrics": {"speaking_ratio": 0.05},
                             "ai_analysis_done": True, "push_sent": True})
@@ -180,7 +180,7 @@ def scenario_ds_filter_invalid_state_type() -> bool:
 
 def scenario_ds_filter_target_user() -> bool:
     user_id, session_id = _setup_session("DSFilterUser")
-    _create_state(session_id, "low_participation", target_user_id=user_id)
+    _create_state(session_id, "stagnation", target_user_id=user_id)
     r = requests.get(f"{BASE_URL}/api/admin/discussion-states/",
                      headers=ADMIN_HEADERS, params={"target_user_id": user_id})
     r.raise_for_status()

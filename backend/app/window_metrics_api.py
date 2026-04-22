@@ -31,6 +31,8 @@ class WindowMetricsOut(BaseModel):
     info_gain: float | None = None
     has_reasoning: bool | None = None
     has_evidence: bool | None = None
+    reasoning_source: str | None = None
+    evidence_source: str | None = None
     created_at: Any
 
 
@@ -84,7 +86,8 @@ async def get_latest_window_metrics(
             """
             SELECT id, session_id, user_id, window_start, window_end,
                    speaking_ratio, silence_s, ttr, arg_density,
-                   srep, info_gain, has_reasoning, has_evidence, created_at
+                   srep, info_gain, has_reasoning, has_evidence,
+                   reasoning_source, evidence_source, created_at
             FROM window_metrics
             WHERE session_id   = :session_id
               AND window_start = :window_start

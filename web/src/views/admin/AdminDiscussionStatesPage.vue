@@ -31,6 +31,18 @@ const filters = reactive({
   triggeredRange: [] as Date[],
 })
 
+const STATE_TYPE_OPTIONS: Array<{ label: string; value: DiscussionStateType }> = [
+  { label: DISCUSSION_STATE_LABELS.stagnation, value: 'stagnation' },
+  { label: DISCUSSION_STATE_LABELS.shallow, value: 'shallow' },
+  { label: DISCUSSION_STATE_LABELS.none, value: 'none' },
+  { label: DISCUSSION_STATE_LABELS.over_dominance, value: 'over_dominance' },
+  { label: DISCUSSION_STATE_LABELS.disengaged, value: 'disengaged' },
+  { label: DISCUSSION_STATE_LABELS.deadlock, value: 'deadlock' },
+  { label: DISCUSSION_STATE_LABELS.topic_drift, value: 'topic_drift' },
+  { label: DISCUSSION_STATE_LABELS.low_depth, value: 'low_depth' },
+  { label: DISCUSSION_STATE_LABELS.homogeneous, value: 'homogeneous' },
+]
+
 async function fetchData() {
   loading.value = true
   try {
@@ -149,7 +161,7 @@ onMounted(() => { fetchData() })
           <el-col :span="6">
             <el-form-item label="状态类型">
               <el-select v-model="filters.state_type" placeholder="全部" clearable style="width: 100%">
-                <el-option v-for="(label, val) in DISCUSSION_STATE_LABELS" :key="val" :label="label" :value="val" />
+                <el-option v-for="item in STATE_TYPE_OPTIONS" :key="item.value" :label="item.label" :value="item.value" />
               </el-select>
             </el-form-item>
           </el-col>

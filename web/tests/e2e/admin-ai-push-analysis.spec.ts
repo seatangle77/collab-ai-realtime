@@ -25,7 +25,7 @@ test.describe.serial('Admin AI 推送分析页', () => {
         session_id: 'sess-ai-1',
         target_user_id: 'user-1',
         target_user_name: '用户甲',
-        state_type: 'low_participation',
+        state_type: 'stagnation',
         window_start: '2026-04-10T10:00:00Z',
         ai_needs_prompt: true,
         ai_anchor: {
@@ -56,7 +56,7 @@ test.describe.serial('Admin AI 推送分析页', () => {
         session_id: 'sess-ai-3',
         target_user_id: 'user-3',
         target_user_name: null,
-        state_type: 'shallow_discussion',
+        state_type: 'shallow',
         window_start: '2026-04-10T12:00:00Z',
         ai_needs_prompt: false,
         ai_anchor: null,

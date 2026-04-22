@@ -94,7 +94,7 @@ def seed_rows() -> None:
             "id": f"apa_test_{uuid.uuid4().hex[:8]}",
             "session_id": SESSION_PREFIX,
             "target_user_id": "u_apa_passed",
-            "state_type": "low_participation",
+            "state_type": "stagnation",
             "window_start": "2025-01-01 10:00:00",
             "ai_needs_prompt": "true",
             "ai_anchor": "NULL",
@@ -105,7 +105,7 @@ def seed_rows() -> None:
             "id": f"apa_test_{uuid.uuid4().hex[:8]}",
             "session_id": SESSION_PREFIX,
             "target_user_id": "u_apa_np_false",
-            "state_type": "shallow_discussion",
+            "state_type": "shallow",
             "window_start": "2025-01-01 10:01:00",
             "ai_needs_prompt": "false",
             "ai_anchor": "NULL",
@@ -116,7 +116,7 @@ def seed_rows() -> None:
             "id": f"apa_test_{uuid.uuid4().hex[:8]}",
             "session_id": SESSION_PREFIX,
             "target_user_id": "u_apa_anchor_invalid",
-            "state_type": "low_participation",
+            "state_type": "stagnation",
             "window_start": "2025-01-01 10:02:00",
             "ai_needs_prompt": "true",
             "ai_anchor": "'{\"speaker_name\":\"成员A\",\"text\":\"anchor失效\"}'::jsonb",
@@ -127,7 +127,7 @@ def seed_rows() -> None:
             "id": f"apa_test_{uuid.uuid4().hex[:8]}",
             "session_id": SESSION_PREFIX,
             "target_user_id": "u_apa_empty",
-            "state_type": "shallow_discussion",
+            "state_type": "shallow",
             "window_start": "2025-01-01 10:03:00",
             "ai_needs_prompt": "true",
             "ai_anchor": "NULL",
@@ -138,7 +138,7 @@ def seed_rows() -> None:
             "id": f"apa_test_{uuid.uuid4().hex[:8]}",
             "session_id": SESSION_PREFIX,
             "target_user_id": "u_apa_persist_failed",
-            "state_type": "low_participation",
+            "state_type": "stagnation",
             "window_start": "2025-01-01 10:04:00",
             "ai_needs_prompt": "true",
             "ai_anchor": "NULL",
@@ -212,15 +212,15 @@ data = check("filter: target_user_id 精确匹配",
 if data:
     assert_items_all(data, lambda item: item["target_user_id"] == "u_apa_persist_failed", "target_user_id 过滤错误")
 
-data = check("filter: state_type=low_participation",
-             requests.get(f"{URL}/?session_id={SESSION_PREFIX}&state_type=low_participation", headers=HEADERS))
+data = check("filter: state_type=stagnation",
+             requests.get(f"{URL}/?session_id={SESSION_PREFIX}&state_type=stagnation", headers=HEADERS))
 if data:
-    assert_items_all(data, lambda item: item["state_type"] == "low_participation", "state_type 过滤错误")
+    assert_items_all(data, lambda item: item["state_type"] == "stagnation", "state_type 过滤错误")
 
-data = check("filter: state_type=shallow_discussion",
-             requests.get(f"{URL}/?session_id={SESSION_PREFIX}&state_type=shallow_discussion", headers=HEADERS))
+data = check("filter: state_type=shallow",
+             requests.get(f"{URL}/?session_id={SESSION_PREFIX}&state_type=shallow", headers=HEADERS))
 if data:
-    assert_items_all(data, lambda item: item["state_type"] == "shallow_discussion", "state_type 过滤错误")
+    assert_items_all(data, lambda item: item["state_type"] == "shallow", "state_type 过滤错误")
 
 data = check("filter: state_type=group_silence",
              requests.get(f"{URL}/?session_id={SESSION_PREFIX}&state_type=group_silence", headers=HEADERS))

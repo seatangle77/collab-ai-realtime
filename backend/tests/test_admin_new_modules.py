@@ -87,7 +87,7 @@ def create_temp_discussion_state(session_id: str) -> str | None:
     r = requests.post(
         f"{BASE}/api/admin/discussion-states/",
         headers=HEADERS,
-        json={"session_id": session_id, "state_type": "low_participation"},
+        json={"session_id": session_id, "state_type": "stagnation"},
     )
     if r.status_code != 201:
         print(f"  - 创建临时 discussion_state 失败，跳过真实 DELETE 测试: {r.status_code} {r.text[:120]}")
@@ -106,8 +106,8 @@ URL_DS = f"{BASE}/api/admin/discussion-states"
 data = check("GET list（全量）", requests.get(f"{URL_DS}/", headers=HEADERS))
 
 # 所有查询条件
-check("filter: state_type=low_participation",
-      requests.get(f"{URL_DS}/?state_type=low_participation", headers=HEADERS))
+check("filter: state_type=stagnation",
+      requests.get(f"{URL_DS}/?state_type=stagnation", headers=HEADERS))
 check("filter: state_type=over_dominance",
       requests.get(f"{URL_DS}/?state_type=over_dominance", headers=HEADERS))
 check("filter: state_type=deadlock",
@@ -190,8 +190,8 @@ check("filter: status=delivered",
       requests.get(f"{URL_PQ}/?status=delivered", headers=HEADERS))
 check("filter: 非法 status → 400",
       requests.get(f"{URL_PQ}/?status=unknown", headers=HEADERS), 400)
-check("filter: state_type=low_participation",
-      requests.get(f"{URL_PQ}/?state_type=low_participation", headers=HEADERS))
+check("filter: state_type=stagnation",
+      requests.get(f"{URL_PQ}/?state_type=stagnation", headers=HEADERS))
 check("filter: 非法 state_type → 400",
       requests.get(f"{URL_PQ}/?state_type=bad_type", headers=HEADERS), 400)
 check("filter: session_id 精确",

@@ -24,6 +24,10 @@ def _log(ok: bool, msg: str, extra: Any = None) -> bool:
     return ok
 
 
+def _assert_log(ok: bool, msg: str, extra: Any = None) -> None:
+    assert _log(ok, msg, extra)
+
+
 def _register_and_login(label: str) -> Tuple[Dict, str]:
     email = f"igtest_{label}_{RUN_ID}@example.com"
     r = requests.post(f"{BASE_URL}/api/auth/register", json={
@@ -98,7 +102,7 @@ def test_buttons_empty():
     user, token, session_id = _setup_ongoing_session("BtnEmpty")
     r = requests.get(f"{BASE_URL}/api/sessions/{session_id}/info-gap/buttons",
                      headers=_auth(token))
-    return _log(r.status_code == 200 and r.json() == [],
+    _assert_log(r.status_code == 200 and r.json() == [],
                 "GET buttons 无数据 → 空列表", r.text)
 
 
@@ -109,7 +113,7 @@ def test_buttons_returns_pending():
                      headers=_auth(token))
     data = r.json()
     ok = r.status_code == 200 and len(data) == 1 and data[0]["keyword"] == "机器学习"
-    return _log(ok, "GET buttons 返回 pending 按钮", r.text if not ok else None)
+    _assert_log(ok, "GET buttons 返回 pending 按钮", r.text if not ok else None)
 
 
 def test_buttons_excludes_non_pending():
@@ -121,7 +125,7 @@ def test_buttons_excludes_non_pending():
                      headers=_auth(token))
     data = r.json()
     ok = r.status_code == 200 and [d["keyword"] for d in data] == ["A"]
-    return _log(ok, "GET buttons 过滤 clicked/expired", {"keywords": [d["keyword"] for d in data]})
+    _assert_log(ok, "GET buttons 过滤 clicked/expired", {"keywords": [d["keyword"] for d in data]})
 
 
 def test_buttons_include_all_returns_pending_and_clicked():
@@ -137,7 +141,7 @@ def test_buttons_include_all_returns_pending_and_clicked():
     data = r.json()
     keywords = [d["keyword"] for d in data]
     ok = r.status_code == 200 and keywords == ["B", "A"]
-    return _log(ok, "GET buttons include_all=true 返回 pending + clicked", {"keywords": keywords})
+    _assert_log(ok, "GET buttons include_all=true 返回 pending + clicked", {"keywords": keywords})
 
 
 def test_buttons_403_non_member():
@@ -145,13 +149,13 @@ def test_buttons_403_non_member():
     _, outsider_token = _register_and_login("BtnOut")
     r = requests.get(f"{BASE_URL}/api/sessions/{session_id}/info-gap/buttons",
                      headers=_auth(outsider_token))
-    return _log(r.status_code == 403, "GET buttons 非成员 → 403", r.text)
+    _assert_log(r.status_code == 403, "GET buttons 非成员 → 403", r.text)
 
 
 def test_buttons_401_no_token():
     _, _, session_id = _setup_ongoing_session("BtnNoTok")
     r = requests.get(f"{BASE_URL}/api/sessions/{session_id}/info-gap/buttons")
-    return _log(r.status_code == 401, "GET buttons 无 token → 401", r.text)
+    _assert_log(r.status_code == 401, "GET buttons 无 token → 401", r.text)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -164,21 +168,21 @@ def test_click_success():
     r = requests.post(f"{BASE_URL}/api/sessions/{session_id}/info-gap/click",
                       headers=_auth(token), json={"button_id": btn_id})
     if r.status_code != 200:
-        return _log(False, "POST click 成功", r.text)
+        _assert_log(False, "POST click 成功", r.text)
     data = r.json()
     if data.get("success") is not True:
-        return _log(False, "POST click 返回 success=true", r.text)
+        _assert_log(False, "POST click 返回 success=true", r.text)
     if not isinstance(data.get("content"), str):
-        return _log(False, "POST click 返回 content 字段（str）", r.text)
+        _assert_log(False, "POST click 返回 content 字段（str）", r.text)
     if not isinstance(data.get("keyword"), str):
-        return _log(False, "POST click 返回 keyword 字段（str）", r.text)
+        _assert_log(False, "POST click 返回 keyword 字段（str）", r.text)
 
     # 验证再取一次 buttons 该按钮不出现（已 clicked）
     r2 = requests.get(f"{BASE_URL}/api/sessions/{session_id}/info-gap/buttons",
                       headers=_auth(token))
     ids = [b["id"] for b in r2.json()]
     if btn_id in ids:
-        return _log(False, "POST click 后按钮从 pending 列表消失", {"ids": ids})
+        _assert_log(False, "POST click 后按钮从 pending 列表消失", {"ids": ids})
 
     r3 = requests.get(
         f"{BASE_URL}/api/sessions/{session_id}/info-gap/buttons",
@@ -188,7 +192,7 @@ def test_click_success():
     data3 = r3.json()
     clicked = next((item for item in data3 if item["id"] == btn_id), None)
     ok = r3.status_code == 200 and clicked is not None and clicked["status"] == "clicked"
-    return _log(ok, "POST click 后 include_all 列表仍可看到 clicked 按钮", data3 if not ok else None)
+    _assert_log(ok, "POST click 后 include_all 列表仍可看到 clicked 按钮", data3 if not ok else None)
 
 
 def test_click_double_submit_second_should_conflict():
@@ -199,20 +203,20 @@ def test_click_double_submit_second_should_conflict():
         headers=_auth(token), json={"button_id": btn_id}
     )
     if r1.status_code != 200:
-        return _log(False, "POST click 第一次应成功", r1.text)
+        _assert_log(False, "POST click 第一次应成功", r1.text)
 
     r2 = requests.post(
         f"{BASE_URL}/api/sessions/{session_id}/info-gap/click",
         headers=_auth(token), json={"button_id": btn_id}
     )
-    return _log(r2.status_code == 409, "POST click 第二次应 409（原子幂等）", r2.text)
+    _assert_log(r2.status_code == 409, "POST click 第二次应 409（原子幂等）", r2.text)
 
 
 def test_click_not_found():
     user, token, session_id = _setup_ongoing_session("ClickNF")
     r = requests.post(f"{BASE_URL}/api/sessions/{session_id}/info-gap/click",
                       headers=_auth(token), json={"button_id": "nonexistent_id"})
-    return _log(r.status_code == 404, "POST click 不存在 → 404", r.text)
+    _assert_log(r.status_code == 404, "POST click 不存在 → 404", r.text)
 
 
 def test_click_already_clicked():
@@ -220,7 +224,7 @@ def test_click_already_clicked():
     btn_id = _seed_button(session_id, user["id"], status="clicked")
     r = requests.post(f"{BASE_URL}/api/sessions/{session_id}/info-gap/click",
                       headers=_auth(token), json={"button_id": btn_id})
-    return _log(r.status_code == 409, "POST click 已点击 → 409", r.text)
+    _assert_log(r.status_code == 409, "POST click 已点击 → 409", r.text)
 
 
 def test_click_expired():
@@ -228,7 +232,7 @@ def test_click_expired():
     btn_id = _seed_button(session_id, user["id"], status="expired")
     r = requests.post(f"{BASE_URL}/api/sessions/{session_id}/info-gap/click",
                       headers=_auth(token), json={"button_id": btn_id})
-    return _log(r.status_code == 409, "POST click expired → 409", r.text)
+    _assert_log(r.status_code == 409, "POST click expired → 409", r.text)
 
 
 def test_click_other_users_button():
@@ -237,7 +241,7 @@ def test_click_other_users_button():
     btn_id = _seed_button(session_id, user1["id"])
     r = requests.post(f"{BASE_URL}/api/sessions/{session_id}/info-gap/click",
                       headers=_auth(token2), json={"button_id": btn_id})
-    return _log(r.status_code in (403, 404), "POST click 他人按钮 → 403/404", r.text)
+    _assert_log(r.status_code in (403, 404), "POST click 他人按钮 → 403/404", r.text)
 
 
 def test_click_403_non_member():
@@ -246,14 +250,14 @@ def test_click_403_non_member():
     _, outsider_token = _register_and_login("ClickFbOut")
     r = requests.post(f"{BASE_URL}/api/sessions/{session_id}/info-gap/click",
                       headers=_auth(outsider_token), json={"button_id": btn_id})
-    return _log(r.status_code == 403, "POST click 非成员 → 403", r.text)
+    _assert_log(r.status_code == 403, "POST click 非成员 → 403", r.text)
 
 
 def test_click_missing_body():
     user, token, session_id = _setup_ongoing_session("ClickMiss")
     r = requests.post(f"{BASE_URL}/api/sessions/{session_id}/info-gap/click",
                       headers=_auth(token), json={})
-    return _log(r.status_code == 422, "POST click 缺 button_id → 422", r.text)
+    _assert_log(r.status_code == 422, "POST click 缺 button_id → 422", r.text)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -264,7 +268,7 @@ def test_summary_no_data():
     user, token, session_id = _setup_ongoing_session("SumEmpty")
     r = requests.get(f"{BASE_URL}/api/sessions/{session_id}/summary",
                      headers=_auth(token))
-    return _log(r.status_code == 404, "GET summary 无数据 → 404", r.text)
+    _assert_log(r.status_code == 404, "GET summary 无数据 → 404", r.text)
 
 
 def test_summary_returns_latest_version():
@@ -276,7 +280,7 @@ def test_summary_returns_latest_version():
                      headers=_auth(token))
     data = r.json()
     ok = r.status_code == 200 and data["version"] == 3 and data["content"] == "第三版"
-    return _log(ok, "GET summary 返回最新版本", r.text if not ok else None)
+    _assert_log(ok, "GET summary 返回最新版本", r.text if not ok else None)
 
 
 def test_summary_history_returns_all_versions_desc():
@@ -289,7 +293,7 @@ def test_summary_history_returns_all_versions_desc():
     data = r.json()
     versions = [item["version"] for item in data]
     ok = r.status_code == 200 and versions == [3, 2, 1]
-    return _log(ok, "GET summaries 返回全部历史版本（最新在前）", {"versions": versions})
+    _assert_log(ok, "GET summaries 返回全部历史版本（最新在前）", {"versions": versions})
 
 
 def test_summary_fields_complete():
@@ -300,7 +304,7 @@ def test_summary_fields_complete():
     data = r.json()
     required = {"id", "session_id", "version", "content", "window_start", "window_end", "created_at"}
     ok = r.status_code == 200 and required.issubset(data.keys())
-    return _log(ok, "GET summary 字段完整", set(data.keys()) if not ok else None)
+    _assert_log(ok, "GET summary 字段完整", set(data.keys()) if not ok else None)
 
 
 def test_summary_403_non_member():
@@ -308,20 +312,20 @@ def test_summary_403_non_member():
     _, outsider_token = _register_and_login("SumFbOut")
     r = requests.get(f"{BASE_URL}/api/sessions/{session_id}/summary",
                      headers=_auth(outsider_token))
-    return _log(r.status_code == 403, "GET summary 非成员 → 403", r.text)
+    _assert_log(r.status_code == 403, "GET summary 非成员 → 403", r.text)
 
 
 def test_summary_401_no_token():
     _, _, session_id = _setup_ongoing_session("SumNoTok")
     r = requests.get(f"{BASE_URL}/api/sessions/{session_id}/summary")
-    return _log(r.status_code == 401, "GET summary 无 token → 401", r.text)
+    _assert_log(r.status_code == 401, "GET summary 无 token → 401", r.text)
 
 
 def test_summary_invalid_session():
     _, token, _ = _setup_ongoing_session("SumInv")
     r = requests.get(f"{BASE_URL}/api/sessions/s_nonexistent/summary",
                      headers=_auth(token))
-    return _log(r.status_code in (403, 404), "GET summary 会话不存在 → 403/404", r.text)
+    _assert_log(r.status_code in (403, 404), "GET summary 会话不存在 → 403/404", r.text)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -332,14 +336,14 @@ def test_metrics_403_non_admin():
     user, token, session_id = _setup_ongoing_session("WMFb")
     r = requests.get(f"{BASE_URL}/api/sessions/{session_id}/window-metrics",
                      headers=_auth(token))
-    return _log(r.status_code == 403, "GET window-metrics 普通用户 → 403", r.text)
+    _assert_log(r.status_code == 403, "GET window-metrics 普通用户 → 403", r.text)
 
 
 def test_metrics_404_no_data():
     _, _, session_id = _setup_ongoing_session("WMEmpty")
     r = requests.get(f"{BASE_URL}/api/sessions/{session_id}/window-metrics",
                      headers=ADMIN_HEADERS)
-    return _log(r.status_code == 404, "GET window-metrics 无数据 → 404", r.text)
+    _assert_log(r.status_code == 404, "GET window-metrics 无数据 → 404", r.text)
 
 
 def test_metrics_returns_data():
@@ -349,7 +353,7 @@ def test_metrics_returns_data():
                      headers=ADMIN_HEADERS)
     data = r.json()
     ok = r.status_code == 200 and len(data) >= 1 and data[0]["speaking_ratio"] == 0.6
-    return _log(ok, "GET window-metrics 返回数据", r.text if not ok else None)
+    _assert_log(ok, "GET window-metrics 返回数据", r.text if not ok else None)
 
 
 def test_metrics_fields_complete():
@@ -360,9 +364,10 @@ def test_metrics_fields_complete():
     data = r.json()
     required = {"id", "session_id", "user_id", "window_start", "window_end",
                 "speaking_ratio", "silence_s", "ttr", "arg_density",
-                "srep", "info_gain", "has_reasoning", "has_evidence", "created_at"}
+                "srep", "info_gain", "has_reasoning", "has_evidence",
+                "reasoning_source", "evidence_source", "created_at"}
     ok = r.status_code == 200 and len(data) > 0 and required.issubset(data[0].keys())
-    return _log(ok, "GET window-metrics 字段完整", None)
+    _assert_log(ok, "GET window-metrics 字段完整", None)
 
 
 def test_metrics_null_fields_ok():
@@ -372,13 +377,13 @@ def test_metrics_null_fields_ok():
                      headers=ADMIN_HEADERS)
     data = r.json()
     ok = r.status_code == 200 and data[0]["ttr"] is None
-    return _log(ok, "GET window-metrics null 字段正常返回", r.text if not ok else None)
+    _assert_log(ok, "GET window-metrics null 字段正常返回", r.text if not ok else None)
 
 
 def test_metrics_invalid_session():
     r = requests.get(f"{BASE_URL}/api/sessions/s_nonexistent/window-metrics",
                      headers=ADMIN_HEADERS)
-    return _log(r.status_code == 404, "GET window-metrics 会话不存在 → 404", r.text)
+    _assert_log(r.status_code == 404, "GET window-metrics 会话不存在 → 404", r.text)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

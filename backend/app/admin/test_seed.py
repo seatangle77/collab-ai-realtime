@@ -108,6 +108,8 @@ class WindowMetricsSeed(BaseModel):
     info_gain: float | None = None
     has_reasoning: bool | None = None
     has_evidence: bool | None = None
+    reasoning_source: str | None = None
+    evidence_source: str | None = None
 
 
 @router.post("/window-metrics")
@@ -122,12 +124,12 @@ async def seed_window_metrics(
             INSERT INTO window_metrics
               (id, session_id, user_id, window_start, window_end,
                speaking_ratio, silence_s, ttr, arg_density,
-               srep, info_gain, has_reasoning, has_evidence, created_at)
+               srep, info_gain, has_reasoning, has_evidence, reasoning_source, evidence_source, created_at)
             VALUES
               (:id, :session_id, :user_id,
                NOW() - INTERVAL '2 minutes', NOW(),
                :speaking_ratio, :silence_s, :ttr, :arg_density,
-               :srep, :info_gain, :has_reasoning, :has_evidence, NOW())
+               :srep, :info_gain, :has_reasoning, :has_evidence, :reasoning_source, :evidence_source, NOW())
             """
         ),
         {
@@ -142,6 +144,8 @@ async def seed_window_metrics(
             "info_gain": body.info_gain,
             "has_reasoning": body.has_reasoning,
             "has_evidence": body.has_evidence,
+            "reasoning_source": body.reasoning_source,
+            "evidence_source": body.evidence_source,
         },
     )
     await db.commit()

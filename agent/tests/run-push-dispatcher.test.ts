@@ -30,7 +30,7 @@ const QUEUE_ITEM = {
   id: 'pq_1',
   session_id: SESSION,
   target_user_id: 'uA',
-  state_type: 'low_participation',
+  state_type: 'stagnation',
   push_content: '请试着补充一个新的观点',
   content_embedding: [1, 0, 0],
   analysis_window_start: new Date('2024-01-01T10:00:00Z'),
@@ -68,7 +68,7 @@ describe('runPushDispatcher', () => {
       'uA',
       '请试着补充一个新的观点',
       'ds_1',
-      'low_participation',
+      'stagnation',
       'pq_1',
     );
     expect(mockUpdatePushQueueStatus).toHaveBeenCalledWith('pq_1', 'delivered', expect.any(Date));
@@ -79,7 +79,7 @@ describe('runPushDispatcher', () => {
     mockFindDiscussionStateByQueuedPushId.mockResolvedValue({
       id: 'ds_existing',
       session_id: SESSION,
-      state_type: 'low_participation',
+      state_type: 'stagnation',
       target_user_id: 'uA',
       trigger_metrics: { queued_push_id: 'pq_1' },
       window_start: new Date('2024-01-01T10:00:00Z'),
@@ -93,7 +93,7 @@ describe('runPushDispatcher', () => {
       'uA',
       '请试着补充一个新的观点',
       'ds_existing',
-      'low_participation',
+      'stagnation',
       'pq_1',
     );
   });
@@ -146,7 +146,7 @@ describe('runPushDispatcher', () => {
     expect(mockGetRecentDeliveredEmbeddings).toHaveBeenCalledWith(
       SESSION,
       'uA',
-      'low_participation',
+      'stagnation',
       2,
     );
     expect(mockWriteDiscussionState).not.toHaveBeenCalled();

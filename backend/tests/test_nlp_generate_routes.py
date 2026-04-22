@@ -132,13 +132,66 @@ def test_generate_group_silence_403_without_admin_token() -> None:
     assert resp.status_code == 403
 
 
+def test_reasoning_batch_ok(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.nlp.router.batch_has_reasoning",
+        lambda members: [
+            {
+                "user_id": "u1",
+                "reasoning_status": True,
+                "evidence_status": False,
+                "reasoning_source": "发言中明确说明了选择该方案的原因。",
+                "evidence_source": "发言中没有提供例子、数据或事实依据。",
+            },
+            {
+                "user_id": "u2",
+                "reasoning_status": False,
+                "evidence_status": True,
+                "reasoning_source": "发言中只有观点表态，没有展开原因。",
+                "evidence_source": "发言中引用了具体案例作为支撑。",
+            },
+        ],
+    )
+    client = _make_client()
+
+    resp = client.post(
+        "/api/nlp/reasoning_batch",
+        headers=ADMIN_HEADERS,
+        json={
+            "members": [
+                {"user_id": "u1", "text": "我建议先做 MVP，因为范围更容易控制。"},
+                {"user_id": "u2", "text": "比如腾讯会议也用了类似做法。"},
+            ]
+        },
+    )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["members"][0]["user_id"] == "u1"
+    assert payload["members"][0]["reasoning_status"] is True
+    assert payload["members"][0]["evidence_source"] == "发言中没有提供例子、数据或事实依据。"
+    assert payload["members"][1]["evidence_status"] is True
+
+
+def test_reasoning_batch_422_when_members_shape_invalid() -> None:
+    client = _make_client()
+
+    resp = client.post(
+        "/api/nlp/reasoning_batch",
+        headers=ADMIN_HEADERS,
+        json={"members": [{"user_id": "u1"}]},
+    )
+
+    assert resp.status_code == 422
+
+
 def test_analyze_members_ok(monkeypatch) -> None:
     async def _fake_analyze_members_batch(**kwargs):
         return {
             "members": [
                 {
                     "user_id": "u2",
-                    "challenge_type": "low_participation",
+                    "challenge_type": "stagnation",
                     "needs_prompt": True,
                     "analysis": "u2 发言占比偏低。",
                     "content": "你怎么看刚才这个方案？",
@@ -175,8 +228,10 @@ def test_analyze_members_ok(monkeypatch) -> None:
                     "arg_density": 0.01,
                     "srep": 0.1,
                     "info_gain": 0.0,
-                    "has_reasoning": False,
-                    "has_evidence": False,
+                    "reasoning_status": False,
+                    "evidence_status": False,
+                    "reasoning_source": "发言中只有观点表态，没有展开原因。",
+                    "evidence_source": "发言中没有提供例子、数据或事实依据。",
                 }
             ],
         },

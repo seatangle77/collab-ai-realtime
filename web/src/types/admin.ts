@@ -162,6 +162,9 @@ export type DiscussionStateTriggerMetrics = Record<string, unknown> & {
 }
 
 export type DiscussionStateType =
+  | 'stagnation'
+  | 'shallow'
+  | 'none'
   | 'low_participation'
   | 'over_dominance'
   | 'disengaged'

@@ -32,6 +32,8 @@ test.describe.serial('Admin 分析与指标页面', () => {
         info_gain: 0.55,
         has_reasoning: true,
         has_evidence: false,
+        reasoning_source: '发言中明确说明了选择该方案的原因。',
+        evidence_source: '发言中没有提供例子、数据或事实依据。',
         created_at: '2026-04-10T10:06:00Z',
       },
       {
@@ -49,6 +51,8 @@ test.describe.serial('Admin 分析与指标页面', () => {
         info_gain: 0.65,
         has_reasoning: false,
         has_evidence: true,
+        reasoning_source: '发言中只有观点表态，没有展开原因。',
+        evidence_source: '发言中引用了具体案例作为支撑。',
         created_at: '2026-04-10T11:06:00Z',
       },
     ]
@@ -115,6 +119,8 @@ test.describe.serial('Admin 分析与指标页面', () => {
         info_gain: 0.55,
         has_reasoning: true,
         has_evidence: false,
+        reasoning_source: '发言中明确说明了选择该方案的原因。',
+        evidence_source: '发言中没有提供例子、数据或事实依据。',
         created_at: '2026-04-10T10:06:00Z',
       },
       {
@@ -132,6 +138,8 @@ test.describe.serial('Admin 分析与指标页面', () => {
         info_gain: 0.65,
         has_reasoning: false,
         has_evidence: true,
+        reasoning_source: '发言中只有观点表态，没有展开原因。',
+        evidence_source: '发言中引用了具体案例作为支撑。',
         created_at: '2026-04-10T11:06:00Z',
       },
       {
@@ -149,6 +157,8 @@ test.describe.serial('Admin 分析与指标页面', () => {
         info_gain: 0.75,
         has_reasoning: true,
         has_evidence: true,
+        reasoning_source: '发言中明确说明了选择该方案的原因。',
+        evidence_source: '发言中引用了具体案例作为支撑。',
         created_at: '2026-04-10T12:06:00Z',
       },
     ]
