@@ -41,6 +41,7 @@ class AiPushAnalysisOut(BaseModel):
     ai_needs_prompt: bool
     ai_anchor: Any = None
     ai_content: str | None = None
+    ai_analysis: str | None = None
     drop_reason: str | None = None
     created_at: Any = None
 
@@ -98,7 +99,7 @@ async def list_ai_push_analysis(
             SELECT
                 a.id, a.session_id, a.target_user_id,
                 a.state_type, a.window_start,
-                a.ai_needs_prompt, a.ai_anchor, a.ai_content,
+                a.ai_needs_prompt, a.ai_anchor, a.ai_content, a.ai_analysis,
                 a.drop_reason, a.created_at,
                 u.name AS target_user_name
             FROM ai_push_analysis a

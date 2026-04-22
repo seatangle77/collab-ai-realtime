@@ -767,13 +767,14 @@ export async function writeAiPushAnalysis(row: {
   ai_needs_prompt: boolean;
   ai_anchor: Record<string, string> | null;
   ai_content: string | null;
+  ai_analysis: string | null;
   drop_reason: AiPushDropReason;
 }): Promise<void> {
   await pool.query(
     `INSERT INTO ai_push_analysis
        (id, session_id, target_user_id, state_type, window_start,
-        ai_needs_prompt, ai_anchor, ai_content, drop_reason, created_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())
+        ai_needs_prompt, ai_anchor, ai_content, ai_analysis, drop_reason, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
      ON CONFLICT (id) DO NOTHING`,
     [
       row.id,
@@ -784,7 +785,34 @@ export async function writeAiPushAnalysis(row: {
       row.ai_needs_prompt,
       row.ai_anchor ? JSON.stringify(row.ai_anchor) : null,
       row.ai_content,
+      row.ai_analysis,
       row.drop_reason,
+    ],
+  );
+}
+
+/** 写入 window_metrics_batch_reasoning（batch_has_reasoning 完整原始输出） */
+export async function writeWindowMetricsBatchReasoning(row: {
+  session_id: string;
+  window_start: Date;
+  members: Array<{
+    user_id: string;
+    reasoning_status: boolean | null;
+    evidence_status: boolean | null;
+    reasoning_source: string | null;
+    evidence_source: string | null;
+  }>;
+}): Promise<void> {
+  const id = 'wmbr_' + nanoid(12);
+  await pool.query(
+    `INSERT INTO window_metrics_batch_reasoning
+       (id, session_id, window_start, members, created_at)
+     VALUES ($1, $2, $3, $4, NOW())`,
+    [
+      id,
+      row.session_id,
+      toUtcString(row.window_start),
+      JSON.stringify(row.members),
     ],
   );
 }

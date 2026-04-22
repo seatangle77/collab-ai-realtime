@@ -17,6 +17,9 @@ const pageSize = ref(20)
 const total = ref(0)
 const tableRef = ref<{ clearSelection: () => void } | null>(null)
 const selectedRows = ref<AdminAiPushAnalysis[]>([])
+const analysisDialogVisible = ref(false)
+const analysisDialogTitle = ref('')
+const analysisDialogContent = ref('')
 
 const filters = reactive({
   session_id: '',
@@ -67,6 +70,18 @@ function dropReasonTagType(reason: string | null): 'success' | 'warning' | 'dang
 function formatAnchor(anchor: AdminAiPushAnalysis['ai_anchor']): string {
   if (!anchor) return '—'
   return `${anchor.speaker_name}：${anchor.text}`
+}
+
+function truncateText(text: string | null | undefined, maxLength = 24): string {
+  if (!text) return '—'
+  if (text.length <= maxLength) return text
+  return `${text.slice(0, maxLength)}...`
+}
+
+function handleViewAnalysis(row: AdminAiPushAnalysis) {
+  analysisDialogTitle.value = `AI 分析 - ${row.target_user_name || row.target_user_id}`
+  analysisDialogContent.value = row.ai_analysis || '暂无 AI 分析'
+  analysisDialogVisible.value = true
 }
 
 async function fetchData() {
@@ -134,6 +149,7 @@ function handleExportCsv() {
       { key: 'state_type', title: '触发类型' },
       { key: 'ai_needs_prompt', title: 'AI 判断需推送', format: (row) => row.ai_needs_prompt ? '是' : '否' },
       { key: 'ai_content', title: '生成文案', format: (row) => row.ai_content || '' },
+      { key: 'ai_analysis', title: 'AI 分析', format: (row) => row.ai_analysis || '' },
       { key: 'ai_anchor', title: 'Anchor', format: (row) => formatAnchor(row.ai_anchor) },
       { key: 'drop_reason', title: '结果', format: (row) => formatDropReason(row.drop_reason) },
       { key: 'created_at', title: '创建时间', format: (row) => formatDateTimeToCST(row.created_at) },
@@ -301,6 +317,22 @@ onMounted(() => { fetchData() })
         <el-table-column label="生成文案" min-width="200" show-overflow-tooltip>
           <template #default="{ row }">{{ row.ai_content || '—' }}</template>
         </el-table-column>
+        <el-table-column label="AI 分析" min-width="240">
+          <template #default="{ row }">
+            <div class="analysis-cell">
+              <span class="analysis-text" :title="row.ai_analysis || ''">{{ truncateText(row.ai_analysis) }}</span>
+              <el-button
+                v-if="row.ai_analysis"
+                link
+                size="small"
+                type="primary"
+                @click="handleViewAnalysis(row)"
+              >
+                查看分析
+              </el-button>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="Anchor" min-width="200" show-overflow-tooltip>
           <template #default="{ row }">
             <el-tooltip
@@ -342,6 +374,10 @@ onMounted(() => { fetchData() })
         />
       </div>
     </el-card>
+
+    <el-dialog v-model="analysisDialogVisible" :title="analysisDialogTitle" width="680px">
+      <pre class="analysis-dialog-content">{{ analysisDialogContent }}</pre>
+    </el-dialog>
   </div>
 </template>
 
@@ -351,4 +387,20 @@ onMounted(() => { fetchData() })
 .page-title { margin: 0; font-size: 18px; font-weight: 600; }
 .toolbar { display: flex; gap: 8px; margin-bottom: 8px; }
 .pagination { display: flex; justify-content: flex-end; margin-top: 12px; }
+.analysis-cell { display: flex; align-items: center; gap: 8px; }
+.analysis-text {
+  flex: 1;
+  min-width: 0;
+  color: #374151;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.analysis-dialog-content {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
+  color: #1f2937;
+}
 </style>

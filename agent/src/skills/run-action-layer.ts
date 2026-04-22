@@ -118,6 +118,7 @@ export async function runActionLayer(params: {
     if (!item.needs_prompt || !item.content.trim()) {
       void writeAiPushAnalysis({
         ...baseRow,
+        ai_analysis: item.analysis ?? null,
         drop_reason: !item.needs_prompt ? 'needs_prompt_false' : 'content_empty',
       }).catch((err) => {
         logger.error('writeAiPushAnalysis(drop) failed', { sessionId, message: (err as Error).message });
@@ -132,6 +133,7 @@ export async function runActionLayer(params: {
         ...baseRow,
         ai_needs_prompt: true,
         ai_anchor: item.anchor as Record<string, string> | null,
+        ai_analysis: item.analysis ?? null,
         drop_reason: 'anchor_invalid',
       }).catch((err) => {
         logger.error('writeAiPushAnalysis(anchor_invalid) failed', { sessionId, message: (err as Error).message });
@@ -179,6 +181,7 @@ export async function runActionLayer(params: {
         ai_needs_prompt: true,
         ai_anchor: anchor as unknown as Record<string, string>,
         ai_content: item.content.trim(),
+        ai_analysis: item.analysis ?? null,
         drop_reason: 'passed',
       }).catch((err) => {
         logger.error('writeAiPushAnalysis(passed) failed', { sessionId, message: (err as Error).message });

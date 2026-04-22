@@ -251,6 +251,22 @@ export interface AdminWindowMetricsKeyword {
   created_at: string | null
 }
 
+export interface AdminWindowMetricsBatchReasoningMember {
+  user_id: string
+  reasoning_status: boolean | null
+  evidence_status: boolean | null
+  reasoning_source: string | null
+  evidence_source: string | null
+}
+
+export interface AdminWindowMetricsBatchReasoning {
+  id: string
+  session_id: string
+  window_start: string
+  members: AdminWindowMetricsBatchReasoningMember[]
+  created_at: string | null
+}
+
 // ── 讨论摘要 ──────────────────────────────────────────────────────────
 export interface AdminDiscussionSummary {
   id: string
@@ -318,6 +334,7 @@ export interface AdminAiPushAnalysis {
     text: string
   } | null
   ai_content: string | null
+  ai_analysis: string | null
   drop_reason: AiPushDropReason | null
   created_at: string | null
 }

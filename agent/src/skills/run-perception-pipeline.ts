@@ -1,5 +1,5 @@
 import { createLogger } from '../logger';
-import { writeWindowMetrics } from '../db/queries';
+import { writeWindowMetrics, writeWindowMetricsBatchReasoning } from '../db/queries';
 import { computeSpeakingRatio } from './perception/speaking-ratio';
 import { computeSilence } from './perception/silence';
 import { computeTtr } from './perception/ttr';
@@ -85,6 +85,23 @@ export async function runPerceptionPipeline(input: PipelineInput): Promise<Pipel
   const hasEvidenceMap = reasoningResult.hasEvidenceMap;
   const reasoningSourceMap = reasoningResult.reasoningSourceMap;
   const evidenceSourceMap = reasoningResult.evidenceSourceMap;
+
+  // 写入 window_metrics_batch_reasoning（batch_has_reasoning 完整原始输出）
+  void writeWindowMetricsBatchReasoning({
+    session_id: sessionId,
+    window_start: windowStart,
+    members: memberIds
+      .filter((uid) => hasReasoningMap[uid] !== null)
+      .map((uid) => ({
+        user_id: uid,
+        reasoning_status: hasReasoningMap[uid] ?? null,
+        evidence_status: hasEvidenceMap[uid] ?? null,
+        reasoning_source: reasoningSourceMap[uid] ?? null,
+        evidence_source: evidenceSourceMap[uid] ?? null,
+      })),
+  }).catch((err) => {
+    logger.error('写入 window_metrics_batch_reasoning 失败', { sessionId, message: (err as Error).message });
+  });
 
   // ── Step 2 & 3：skw 与 info-gain 并行执行（互不依赖）──────────────────────
   logger.info('[Step 2+3] 并行执行：关键词提取与跨成员语义分析（Skw）+ 信息增益计算（InfoGain）', { sessionId });

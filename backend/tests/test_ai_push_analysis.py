@@ -99,6 +99,7 @@ def seed_rows() -> None:
             "ai_needs_prompt": "true",
             "ai_anchor": "NULL",
             "ai_content": "'内容-pass'",
+            "ai_analysis": "'分析-pass'",
             "drop_reason": "passed",
         },
         {
@@ -110,6 +111,7 @@ def seed_rows() -> None:
             "ai_needs_prompt": "false",
             "ai_anchor": "NULL",
             "ai_content": "'内容-needs-false'",
+            "ai_analysis": "NULL",
             "drop_reason": "needs_prompt_false",
         },
         {
@@ -121,6 +123,7 @@ def seed_rows() -> None:
             "ai_needs_prompt": "true",
             "ai_anchor": "'{\"speaker_name\":\"成员A\",\"text\":\"anchor失效\"}'::jsonb",
             "ai_content": "'内容-anchor-invalid'",
+            "ai_analysis": "'分析-anchor-invalid'",
             "drop_reason": "anchor_invalid",
         },
         {
@@ -132,6 +135,7 @@ def seed_rows() -> None:
             "ai_needs_prompt": "true",
             "ai_anchor": "NULL",
             "ai_content": "''",
+            "ai_analysis": "NULL",
             "drop_reason": "content_empty",
         },
         {
@@ -143,6 +147,7 @@ def seed_rows() -> None:
             "ai_needs_prompt": "true",
             "ai_anchor": "NULL",
             "ai_content": "'内容-persist-failed'",
+            "ai_analysis": "'分析-persist-failed'",
             "drop_reason": "persist_failed",
         },
         {
@@ -154,19 +159,20 @@ def seed_rows() -> None:
             "ai_needs_prompt": "true",
             "ai_anchor": "NULL",
             "ai_content": "'内容-group-silence'",
+            "ai_analysis": "'分析-group-silence'",
             "drop_reason": "passed",
         },
     ]
     SEEDED_IDS.extend(row["id"] for row in rows)
     values = ",\n".join(
         "('{id}', '{session_id}', '{target_user_id}', '{state_type}', '{window_start}', "
-        "{ai_needs_prompt}, {ai_anchor}, {ai_content}, '{drop_reason}', NOW())".format(**row)
+        "{ai_needs_prompt}, {ai_anchor}, {ai_content}, {ai_analysis}, '{drop_reason}', NOW())".format(**row)
         for row in rows
     )
     sql = f"""
     INSERT INTO ai_push_analysis
       (id, session_id, target_user_id, state_type, window_start,
-       ai_needs_prompt, ai_anchor, ai_content, drop_reason, created_at)
+       ai_needs_prompt, ai_anchor, ai_content, ai_analysis, drop_reason, created_at)
     VALUES
       {values}
     ON CONFLICT (id) DO NOTHING;
@@ -196,10 +202,19 @@ data = check("GET 全量列表", requests.get(f"{URL}/?session_id={SESSION_PREFI
 if data:
     assert data["meta"]["total"] >= 6, "seed 数据数量异常"
     assert len(data["items"]) >= 6, "seed 数据未查到"
+    sample = data["items"][0]
+    assert "ai_analysis" in sample, "响应缺少 ai_analysis 字段"
     print(f"      total={data['meta']['total']}, page={data['meta']['page']}, page_size={data['meta']['page_size']}")
 
 check("GET 列表（默认分页）结构正确",
       requests.get(f"{URL}/?session_id={SESSION_PREFIX}&page=1&page_size=20", headers=HEADERS))
+
+data = check("GET ai_analysis 有值/空值正确返回",
+             requests.get(f"{URL}/?session_id={SESSION_PREFIX}&page_size=20", headers=HEADERS))
+if data:
+    by_user = {item["target_user_id"]: item for item in data["items"]}
+    assert by_user["u_apa_passed"]["ai_analysis"] == "分析-pass", "ai_analysis 非空值返回错误"
+    assert by_user["u_apa_np_false"]["ai_analysis"] is None, "ai_analysis NULL 应返回 null"
 
 section("3. 过滤条件")
 

@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import { test, expect } from '@playwright/test'
-import { loginAsAdmin, goToAdminPage } from './admin-helpers'
+import { loginAsAdmin, goToAdminPage, toTruncatedText } from './admin-helpers'
 
 function pageResponse<T>(items: T[], page = 1, pageSize = 20) {
   return { items, meta: { total: items.length, page, page_size: pageSize } }
@@ -35,6 +35,7 @@ test.describe.serial('Admin AI 推送分析页', () => {
           text: '我对这个功能还不是很理解',
         },
         ai_content: '你可以先说说自己的理解。',
+        ai_analysis: '这位成员已经表达出困惑，但还没有继续展开具体卡点，适合进一步追问澄清。',
         drop_reason: 'passed',
         created_at: '2026-04-10T10:02:00Z',
       },
@@ -48,6 +49,7 @@ test.describe.serial('Admin AI 推送分析页', () => {
         ai_needs_prompt: true,
         ai_anchor: null,
         ai_content: '请大家分别说一下当前最关心的问题。',
+        ai_analysis: '群体进入短暂停顿，需要用开放式问题重新激活讨论，并帮助成员显性化当前关注点。',
         drop_reason: 'persist_failed',
         created_at: '2026-04-10T11:02:00Z',
       },
@@ -61,6 +63,7 @@ test.describe.serial('Admin AI 推送分析页', () => {
         ai_needs_prompt: false,
         ai_anchor: null,
         ai_content: null,
+        ai_analysis: null,
         drop_reason: 'needs_prompt_false',
         created_at: '2026-04-10T12:02:00Z',
       },
@@ -101,6 +104,13 @@ test.describe.serial('Admin AI 推送分析页', () => {
     await expect(table.getByText('用户乙')).toBeVisible()
     await expect(table.getByText('落库失败')).toBeVisible()
     await expect(table.getByText('成员甲：我对这个功能还不是很理解')).toBeVisible()
+    await expect(table.getByText(toTruncatedText(items[0].ai_analysis, 24), { exact: true })).toBeVisible()
+
+    await table.getByRole('button', { name: '查看分析' }).first().click()
+    await expect(page.getByRole('dialog')).toBeVisible()
+    await expect(page.getByText(items[0].ai_analysis)).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('dialog')).toHaveCount(0)
 
     await formInput(page, '会话 ID').fill('sess-ai-2')
     await page.getByRole('button', { name: '查询' }).click()
@@ -137,9 +147,12 @@ test.describe.serial('Admin AI 推送分析页', () => {
     const csvText = fs.readFileSync((await download.path()) as string, 'utf-8')
     expect(csvText).toContain('会话 ID')
     expect(csvText).toContain('目标用户')
+    expect(csvText).toContain('AI 分析')
     expect(csvText).toContain('结果')
     expect(csvText).toContain('用户甲')
     expect(csvText).toContain('用户乙')
+    expect(csvText).toContain(items[0].ai_analysis)
+    expect(csvText).toContain(items[1].ai_analysis)
     expect(csvText).not.toContain('sess-ai-3')
 
     await page.locator('.el-table__body .el-checkbox').first().click()
@@ -156,7 +169,7 @@ test.describe.serial('Admin AI 推送分析页', () => {
 
     await page.getByRole('button', { name: '重置' }).click()
     await expect(table.getByText('不需要', { exact: true })).toBeVisible()
-    await expect(table.getByText('—', { exact: true }).first()).toBeVisible()
+    await expect(page.locator('.analysis-text').filter({ hasText: '—' }).first()).toBeVisible()
   })
 
   test('接口失败时显示错误提示，空列表时页面不崩', async ({ page }) => {
