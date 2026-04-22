@@ -308,7 +308,7 @@ async def click_info_gap_button(
         keyword=str(btn["keyword"]),
         skw_score=float(btn.get("skw_score") or 0.0),
     )
-    final_content = generated_content or f"关键词「{btn['keyword']}」可先从讨论语境里看定义和例子。"
+    final_content = generated_content or "可先从讨论语境里看定义和例子。"
 
     # 写回 explanation 缓存
     await db.execute(

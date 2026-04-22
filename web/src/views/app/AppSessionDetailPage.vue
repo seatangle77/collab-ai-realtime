@@ -246,7 +246,7 @@ function handleInfoGapButtonClicked(buttonId: string, content: string, keyword: 
       viewed: true,
     }
   })
-  if (content) showPushNotification(`已添加「${keyword}」的概念解释`)
+  if (content) showPushNotification(`${keyword}：${content}`)
 }
 
 function upsertPushEvent(push: PushLogItem) {
