@@ -30,13 +30,13 @@ export async function listKeywordSkw(
   if (params.window_start_to) query.set('window_start_to', params.window_start_to)
 
   const qs = query.toString()
-  return http.get<Page<AdminKeywordSkw>>('/api/admin/keyword-skw/' + (qs ? `?${qs}` : ''))
+  return http.get<Page<AdminKeywordSkw>>('/api/admin/info-gap-skw/' + (qs ? `?${qs}` : ''))
 }
 
 export async function deleteKeywordSkw(id: string): Promise<void> {
-  await http.delete<void>(`/api/admin/keyword-skw/${id}`)
+  await http.delete<void>(`/api/admin/info-gap-skw/${id}`)
 }
 
 export async function batchDeleteKeywordSkw(ids: string[]): Promise<BatchDeleteResponse> {
-  return http.post<BatchDeleteResponse>('/api/admin/keyword-skw/batch-delete', { ids })
+  return http.post<BatchDeleteResponse>('/api/admin/info-gap-skw/batch-delete', { ids })
 }

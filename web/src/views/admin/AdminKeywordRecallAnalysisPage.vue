@@ -6,7 +6,7 @@ import {
   listKeywordRecallAnalysis,
   deleteKeywordRecallAnalysis,
   batchDeleteKeywordRecallAnalysis,
-} from '../../api/admin/keyword-recall-analysis'
+} from '../../api/admin/info-gap-recall-analysis'
 import { formatDateTimeToCST } from '../../utils/datetime'
 import { exportRowsToCsv } from '../../utils/csv'
 

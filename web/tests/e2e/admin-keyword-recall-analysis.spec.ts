@@ -56,7 +56,7 @@ test.describe.serial('Admin 关键词召回分析页', () => {
     ]
 
     await loginAsAdmin(page)
-    await page.route('**/api/admin/keyword-recall-analysis/**', async (route) => {
+    await page.route('**/api/admin/info-gap-recall-analysis/**', async (route) => {
       const url = route.request().url()
       const method = route.request().method()
       if (method === 'GET') {
@@ -83,7 +83,7 @@ test.describe.serial('Admin 关键词召回分析页', () => {
       await route.fallback()
     })
 
-    await goToAdminPage(page, '/admin/keyword-recall-analysis', '关键词召回分析')
+    await goToAdminPage(page, '/admin/info-gap-recall-analysis', '关键词召回分析')
     await expect(table.getByText('机器学习')).toBeVisible()
     await expect(table.getByText('MVP 方案')).toBeVisible()
     await expect(table.getByText('关键词_特殊%字符')).toBeVisible()
@@ -147,7 +147,7 @@ test.describe.serial('Admin 关键词召回分析页', () => {
     let mode: 'error' | 'empty' = 'error'
 
     await loginAsAdmin(page)
-    await page.route('**/api/admin/keyword-recall-analysis/**', async (route) => {
+    await page.route('**/api/admin/info-gap-recall-analysis/**', async (route) => {
       if (route.request().method() !== 'GET') {
         await route.fallback()
         return
@@ -159,7 +159,7 @@ test.describe.serial('Admin 关键词召回分析页', () => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(pageResponse([])) })
     })
 
-    await goToAdminPage(page, '/admin/keyword-recall-analysis', '关键词召回分析')
+    await goToAdminPage(page, '/admin/info-gap-recall-analysis', '关键词召回分析')
     await expect(page.getByText('{"detail":"boom"}')).toBeVisible()
 
     mode = 'empty'

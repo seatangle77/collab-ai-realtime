@@ -20,6 +20,7 @@ from . import (
     push_content,
     summary,
     candidate_recall,
+    tfidf,
 )
 
 router = APIRouter(prefix="/api/nlp", tags=["nlp"])
@@ -99,6 +100,23 @@ class KeywordRecallWithGapResponse(BaseModel):
 @router.post("/keyword_recall_with_gap", response_model=KeywordRecallWithGapResponse)
 def keyword_recall_with_gap(req: KeywordRecallWithGapRequest, _: bool = Depends(require_admin)):
     return candidate_recall.recall_with_gap(req.member_texts)
+
+
+# ── 5. extract_keywords_broad ────────────────────────────────────────────────
+
+class ExtractKeywordsBroadRequest(BaseModel):
+    texts: list[str]
+    top_n: int = Field(default=10, ge=1, le=50)
+
+
+class ExtractKeywordsBroadResponse(BaseModel):
+    keywords: list[str]
+
+
+@router.post("/extract_keywords_broad", response_model=ExtractKeywordsBroadResponse)
+def extract_keywords_broad(req: ExtractKeywordsBroadRequest, _: bool = Depends(require_admin)):
+    keywords = tfidf.extract_tfidf_broad(req.texts, top_n=req.top_n)
+    return {"keywords": keywords}
 
 
 # ── 6. has_reasoning ─────────────────────────────────────────────────────────

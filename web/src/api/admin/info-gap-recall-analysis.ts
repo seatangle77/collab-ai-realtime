@@ -25,14 +25,14 @@ export async function listKeywordRecallAnalysis(
 
   const qs = query.toString()
   return http.get<Page<AdminKeywordRecallAnalysis>>(
-    '/api/admin/keyword-recall-analysis/' + (qs ? `?${qs}` : ''),
+    '/api/admin/info-gap-recall-analysis/' + (qs ? `?${qs}` : ''),
   )
 }
 
 export async function deleteKeywordRecallAnalysis(id: string): Promise<void> {
-  await http.delete<void>(`/api/admin/keyword-recall-analysis/${id}`)
+  await http.delete<void>(`/api/admin/info-gap-recall-analysis/${id}`)
 }
 
 export async function batchDeleteKeywordRecallAnalysis(ids: string[]): Promise<BatchDeleteResponse> {
-  return http.post<BatchDeleteResponse>('/api/admin/keyword-recall-analysis/batch-delete', { ids })
+  return http.post<BatchDeleteResponse>('/api/admin/info-gap-recall-analysis/batch-delete', { ids })
 }

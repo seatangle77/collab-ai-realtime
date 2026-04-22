@@ -18,8 +18,8 @@ from .deps import require_admin
 from .schemas import BatchDeleteRequest, BatchDeleteResponse, Page, PageMeta
 
 router = APIRouter(
-    prefix="/api/admin/keyword-recall-analysis",
-    tags=["admin-keyword-recall-analysis"],
+    prefix="/api/admin/info-gap-recall-analysis",
+    tags=["admin-info-gap-recall-analysis"],
     dependencies=[Depends(require_admin)],
 )
 
@@ -43,7 +43,7 @@ class KeywordRecallAnalysisOut(BaseModel):
 
 
 @router.get("/", response_model=Page[KeywordRecallAnalysisOut])
-async def list_keyword_recall_analysis(
+async def list_info_gap_recall_analysis(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     session_id: str | None = None,
@@ -76,7 +76,7 @@ async def list_keyword_recall_analysis(
     where_sql = " AND ".join(where)
 
     count_result = await db.execute(
-        text(f"SELECT COUNT(*) FROM keyword_recall_analysis k WHERE {where_sql}"),
+        text(f"SELECT COUNT(*) FROM info_gap_recall_analysis k WHERE {where_sql}"),
         params,
     )
     total = count_result.scalar_one()
@@ -89,7 +89,7 @@ async def list_keyword_recall_analysis(
                 k.needs_prompt, k.target_user_id,
                 k.llm_reason, k.created_at,
                 u.name AS target_user_name
-            FROM keyword_recall_analysis k
+            FROM info_gap_recall_analysis k
             LEFT JOIN users_info u ON u.id = k.target_user_id
             WHERE {where_sql}
             ORDER BY k.created_at DESC
@@ -108,12 +108,12 @@ async def list_keyword_recall_analysis(
 
 
 @router.delete("/{record_id}", status_code=204)
-async def delete_keyword_recall_analysis(
+async def delete_info_gap_recall_analysis(
     record_id: str,
     db: AsyncSession = Depends(get_db),
 ) -> None:
     result = await db.execute(
-        text("DELETE FROM keyword_recall_analysis WHERE id = :id RETURNING id"),
+        text("DELETE FROM info_gap_recall_analysis WHERE id = :id RETURNING id"),
         {"id": record_id},
     )
     await db.commit()
@@ -122,12 +122,12 @@ async def delete_keyword_recall_analysis(
 
 
 @router.post("/batch-delete", response_model=BatchDeleteResponse)
-async def batch_delete_keyword_recall_analysis(
+async def batch_delete_info_gap_recall_analysis(
     payload: BatchDeleteRequest,
     db: AsyncSession = Depends(get_db),
 ) -> BatchDeleteResponse:
     result = await db.execute(
-        text("DELETE FROM keyword_recall_analysis WHERE id = ANY(:ids) RETURNING id"),
+        text("DELETE FROM info_gap_recall_analysis WHERE id = ANY(:ids) RETURNING id"),
         {"ids": payload.ids},
     )
     await db.commit()

@@ -139,7 +139,7 @@ const routes: RouteRecordRaw[] = [
         component: () => import('../views/admin/AdminInfoGapButtonsPage.vue'),
       },
       {
-        path: 'keyword-skw',
+        path: 'info-gap-skw',
         name: 'AdminKeywordSkw',
         component: () => import('../views/admin/AdminKeywordSkwPage.vue'),
       },
@@ -169,7 +169,7 @@ const routes: RouteRecordRaw[] = [
         component: () => import('../views/admin/AdminAiPushAnalysisPage.vue'),
       },
       {
-        path: 'keyword-recall-analysis',
+        path: 'info-gap-recall-analysis',
         name: 'AdminKeywordRecallAnalysis',
         component: () => import('../views/admin/AdminKeywordRecallAnalysisPage.vue'),
       },

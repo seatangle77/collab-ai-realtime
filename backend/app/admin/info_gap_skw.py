@@ -13,8 +13,8 @@ from .deps import require_admin
 from .schemas import BatchDeleteRequest, BatchDeleteResponse, Page, PageMeta
 
 router = APIRouter(
-    prefix="/api/admin/keyword-skw",
-    tags=["admin-keyword-skw"],
+    prefix="/api/admin/info-gap-skw",
+    tags=["admin-info-gap-skw"],
     dependencies=[Depends(require_admin)],
 )
 
@@ -41,7 +41,7 @@ class AdminKeywordSkwOut(BaseModel):
 
 
 @router.get("/", response_model=Page[AdminKeywordSkwOut])
-async def list_keyword_skw(
+async def list_info_gap_skw(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     session_id: str | None = None,
@@ -86,7 +86,7 @@ async def list_keyword_skw(
     where_sql = " AND ".join(where)
 
     count_result = await db.execute(
-        text(f"SELECT COUNT(*) FROM keyword_skw ks WHERE {where_sql}"),
+        text(f"SELECT COUNT(*) FROM info_gap_skw ks WHERE {where_sql}"),
         params,
     )
     total = count_result.scalar_one()
@@ -100,7 +100,7 @@ async def list_keyword_skw(
                 ks.mention_count, ks.skw_status, ks.created_at,
                 ua.name AS user_a_name,
                 ub.name AS user_b_name
-            FROM keyword_skw ks
+            FROM info_gap_skw ks
             LEFT JOIN users_info ua ON ua.id = ks.user_a_id
             LEFT JOIN users_info ub ON ub.id = ks.user_b_id
             WHERE {where_sql}
@@ -120,12 +120,12 @@ async def list_keyword_skw(
 
 
 @router.delete("/{skw_id}", status_code=204)
-async def delete_keyword_skw(
+async def delete_info_gap_skw(
     skw_id: str,
     db: AsyncSession = Depends(get_db),
 ) -> None:
     result = await db.execute(
-        text("DELETE FROM keyword_skw WHERE id = :id RETURNING id"),
+        text("DELETE FROM info_gap_skw WHERE id = :id RETURNING id"),
         {"id": skw_id},
     )
     await db.commit()
@@ -134,12 +134,12 @@ async def delete_keyword_skw(
 
 
 @router.post("/batch-delete", response_model=BatchDeleteResponse)
-async def batch_delete_keyword_skw(
+async def batch_delete_info_gap_skw(
     payload: BatchDeleteRequest,
     db: AsyncSession = Depends(get_db),
 ) -> BatchDeleteResponse:
     result = await db.execute(
-        text("DELETE FROM keyword_skw WHERE id = ANY(:ids) RETURNING id"),
+        text("DELETE FROM info_gap_skw WHERE id = ANY(:ids) RETURNING id"),
         {"ids": payload.ids},
     )
     await db.commit()

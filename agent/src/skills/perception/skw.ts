@@ -86,7 +86,7 @@ export async function computeSkw(
   const words = recallKeywords.map((k) => k.word);
   logger.info(`[SKW] 召回关键词：${words.join('、')}`, { sessionId });
 
-  // ── 阶段一补充：将 AI 原始判断写入 keyword_recall_analysis（全量，含 needs_prompt=false）──
+  // ── 阶段一补充：将 AI 原始判断写入 info_gap_recall_analysis（全量，含 needs_prompt=false）──
   await Promise.allSettled(
     recallKeywords.map((item) =>
       writeKeywordRecallAnalysis({
@@ -103,7 +103,7 @@ export async function computeSkw(
     ),
   );
 
-  // ── 阶段二：写入 keyword_skw 初始记录（pending）────────────────────────────
+  // ── 阶段二：写入 info_gap_skw 初始记录（pending）────────────────────────────
 
   const activeMembers = Object.keys(activeMemberTexts);
 
@@ -136,7 +136,7 @@ export async function computeSkw(
   await writeKeywordSkw(initialRows);
   logger.info(`[SKW] 写入初始记录 ${initialRows.length} 条`, { sessionId });
 
-  // ── 阶段三：SKW 分数计算，更新 keyword_skw ──────────────────────────────────
+  // ── 阶段三：SKW 分数计算，更新 info_gap_skw ──────────────────────────────────
 
   const scores: SkwResult['scores'] = {};
   // 记录每个词每个 user 最终的 skw_score（用于阶段四查分）

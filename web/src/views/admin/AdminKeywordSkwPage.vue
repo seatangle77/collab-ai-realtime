@@ -2,7 +2,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { AdminKeywordSkw } from '../../types/admin'
-import { listKeywordSkw, deleteKeywordSkw, batchDeleteKeywordSkw } from '../../api/admin/keyword-skw'
+import { listKeywordSkw, deleteKeywordSkw, batchDeleteKeywordSkw } from '../../api/admin/info-gap-skw'
 import { formatDateTimeToCST } from '../../utils/datetime'
 import { exportRowsToCsv } from '../../utils/csv'
 

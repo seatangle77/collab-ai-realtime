@@ -20,7 +20,7 @@ const GROUPS = [
       { label: '窗口指标', path: '/admin/window-metrics', heading: '窗口指标' },
       { label: '讨论摘要', path: '/admin/discussion-summaries', heading: '讨论摘要' },
       { label: '信息缺口按钮', path: '/admin/info-gap-buttons', heading: '信息缺口按钮' },
-      { label: '关键词 SKW', path: '/admin/keyword-skw', heading: '关键词 SKW' },
+      { label: '关键词 SKW', path: '/admin/info-gap-skw', heading: '关键词 SKW' },
     ],
   },
   {

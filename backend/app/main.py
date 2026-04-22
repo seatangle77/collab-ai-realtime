@@ -35,12 +35,12 @@ from .admin.push_queue import router as admin_push_queue_router
 from .admin.window_metrics import router as admin_window_metrics_router
 from .admin.discussion_summaries import router as admin_discussion_summaries_router
 from .admin.info_gap_buttons import router as admin_info_gap_buttons_router
-from .admin.keyword_skw import router as admin_keyword_skw_router
+from .admin.info_gap_skw import router as admin_info_gap_skw_router
 from .admin.speech_transcripts import router as admin_speech_transcripts_router
 from .admin.test_seed import router as test_seed_router
 from .vad import router as vad_router
 from .admin.ai_push_analysis import router as admin_ai_push_analysis_router
-from .admin.keyword_recall_analysis import router as admin_keyword_recall_analysis_router
+from .admin.info_gap_recall_analysis import router as admin_info_gap_recall_analysis_router
 
 app = FastAPI()
 
@@ -84,10 +84,10 @@ app.include_router(admin_push_queue_router)
 app.include_router(admin_window_metrics_router)
 app.include_router(admin_discussion_summaries_router)
 app.include_router(admin_info_gap_buttons_router)
-app.include_router(admin_keyword_skw_router)
+app.include_router(admin_info_gap_skw_router)
 app.include_router(admin_speech_transcripts_router)
 app.include_router(admin_ai_push_analysis_router)
-app.include_router(admin_keyword_recall_analysis_router)
+app.include_router(admin_info_gap_recall_analysis_router)
 app.include_router(ws_sessions_router)
 app.include_router(nlp_router)
 app.include_router(info_gap_router)

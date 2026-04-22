@@ -123,6 +123,54 @@ def _apply_reweight(feature_names: list[str], raw_scores: np.ndarray) -> np.ndar
     return scores
 
 
+def _tokenize_broad(text: str) -> list[str]:
+    """宽松分词：只去停用词 + 单字符，不过滤词性，不排除领域词表"""
+    pipeline = get_pipeline()
+    result = pipeline(text, tasks=["tok/fine"])
+    words = _flatten_terms(result["tok/fine"])
+    tokens: list[str] = []
+    for word in words:
+        word = word.strip()
+        if not word or len(word) <= 1:
+            continue
+        if word in STOPWORDS:
+            continue
+        tokens.append(word)
+    return tokens
+
+
+def extract_tfidf_broad(texts: list[str], top_n: int = 10) -> list[str]:
+    """
+    宽松 TF-IDF 关键词提取，供 info_gain 使用。
+    - 输入：多段文本列表（不区分 user）
+    - 过滤：仅去停用词，不做词性过滤，不做重加权
+    - 输出：全局 top N 关键词列表
+    """
+    if not texts:
+        return []
+    corpus = [t for t in texts if t.strip()]
+    if not corpus:
+        return []
+    vectorizer = TfidfVectorizer(
+        tokenizer=_tokenize_broad,
+        token_pattern=None,
+    )
+    try:
+        tfidf_matrix = vectorizer.fit_transform(corpus)
+    except ValueError:
+        return []
+    feature_names: list[str] = vectorizer.get_feature_names_out().tolist()
+    raw_scores = np.asarray(tfidf_matrix.sum(axis=0)).flatten()
+    keywords: list[str] = []
+    for idx in raw_scores.argsort()[::-1]:
+        if raw_scores[idx] <= 0:
+            break
+        keywords.append(feature_names[idx])
+        if len(keywords) >= top_n:
+            break
+    return keywords
+
+
 def extract_tfidf(member_texts: dict[str, str], top_n: int = 5) -> dict:
     """
     对多位成员的发言做 TF-IDF 关键词提取。

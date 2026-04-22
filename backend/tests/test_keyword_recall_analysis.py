@@ -3,7 +3,7 @@
 覆盖：稳定 seed 数据、查询过滤、分页边界、DELETE / batch-delete、参数异常、认证鉴权
 
 用法（在 backend/ 目录下）：
-    python -m tests.test_keyword_recall_analysis
+    python -m tests.test_info_gap_recall_analysis
 
 前置条件：
     后端已启动：uvicorn app.main:app --reload --port 8000
@@ -26,7 +26,7 @@ from app.settings import settings
 
 BASE = "http://localhost:8000"
 HEADERS = {"X-Admin-Token": "TestAdminKey123"}
-URL = f"{BASE}/api/admin/keyword-recall-analysis"
+URL = f"{BASE}/api/admin/info-gap-recall-analysis"
 SESSION_PREFIX = f"sess_test_kra_{uuid.uuid4().hex[:8]}"
 SEEDED_IDS: list[str] = []
 
@@ -83,7 +83,7 @@ def cleanup_seed_rows() -> None:
     if not SEEDED_IDS:
         return
     try:
-        asyncio.run(exec_sql("DELETE FROM keyword_recall_analysis WHERE id = ANY(:ids)", {"ids": SEEDED_IDS}))
+        asyncio.run(exec_sql("DELETE FROM info_gap_recall_analysis WHERE id = ANY(:ids)", {"ids": SEEDED_IDS}))
     except Exception as exc:
         print(f"[cleanup] 删除测试数据失败: {exc}")
 
@@ -143,7 +143,7 @@ def seed_rows() -> None:
         for row in rows
     )
     sql = f"""
-    INSERT INTO keyword_recall_analysis
+    INSERT INTO info_gap_recall_analysis
       (id, session_id, window_start, keyword, needs_prompt, target_user_id, llm_reason, created_at)
     VALUES
       {values}
@@ -307,7 +307,7 @@ check("session_id 超长字符串（1000 字符）",
 check("keyword 为空字符串（应被忽略，返回全量）",
       requests.get(f"{URL}/?keyword=", headers=HEADERS))
 check("keyword SQL 注入尝试",
-      requests.get(f"{URL}/?keyword='; DROP TABLE keyword_recall_analysis; --", headers=HEADERS))
+      requests.get(f"{URL}/?keyword='; DROP TABLE info_gap_recall_analysis; --", headers=HEADERS))
 data = check("window_start_from 等于 window_start_to（精确时间点）",
              requests.get(
                  f"{URL}/?session_id={SESSION_PREFIX}"

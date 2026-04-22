@@ -35,10 +35,9 @@ export interface PipelineResult {
  * 完整感知层 Pipeline（每 120s 触发一次）
  *
  * 执行顺序：
- * 1. speaking-ratio / silence / ttr / arg-density / srep / has_reasoning 并行执行（互不依赖）
- * 2. skw 依赖 tfidf，单独执行（内部已处理 DB 写入）
- * 3. info-gain 依赖 skw 产出的 keywords，最后执行
- * 4. 汇总所有结果，按用户逐条写入 window_metrics
+ * 1. speaking-ratio / silence / ttr / arg-density / srep 并行执行（互不依赖）
+ * 2. skw 与 info-gain 并行执行（互不依赖：skw 用 LLM 召回专业词，info-gain 自行提取宽松 TF-IDF 词）
+ * 3. 汇总所有结果，按用户逐条写入 window_metrics
  */
 export async function runPerceptionPipeline(input: PipelineInput): Promise<PipelineResult | undefined> {
   const { sessionId, memberIds, windowStart, windowEnd } = input;
@@ -79,31 +78,28 @@ export async function runPerceptionPipeline(input: PipelineInput): Promise<Pipel
   const hasReasoningMap: Record<string, boolean | null> = {};
   const hasEvidenceMap: Record<string, boolean | null> = {};
 
-  // ── Step 2：skw（内部写 keyword_skw 表）────────────────────────────────────
-  logger.info('[Step 2] 执行关键词提取与跨成员语义分析（Skw）', { sessionId });
+  // ── Step 2 & 3：skw 与 info-gain 并行执行（互不依赖）──────────────────────
+  logger.info('[Step 2+3] 并行执行：关键词提取与跨成员语义分析（Skw）+ 信息增益计算（InfoGain）', { sessionId });
   let currentKeywords: string[] = [];
   let skwRes: Awaited<ReturnType<typeof computeSkw>> | null = null;
-  try {
-    skwRes = await computeSkw(sessionId, windowStart, windowEnd, memberIds);
+  let infoGains: Record<string, number | null> = {};
+
+  const [skwSettled, igSettled] = await Promise.allSettled([
+    computeSkw(sessionId, windowStart, windowEnd, memberIds),
+    computeInfoGain(sessionId, windowStart, windowEnd, memberIds),
+  ]);
+
+  if (skwSettled.status === 'fulfilled') {
+    skwRes = skwSettled.value;
     currentKeywords = skwRes.keywords;
-  } catch (err) {
-    logger.error('Skw 关键词分析失败', { sessionId, message: (err as Error).message });
+  } else {
+    logger.error('Skw 关键词分析失败', { sessionId, message: (skwSettled.reason as Error)?.message });
   }
 
-  // ── Step 3：info-gain（依赖 currentKeywords）─────────────────────────────
-  logger.info('[Step 3] 执行信息增益计算（InfoGain）', { sessionId });
-  let infoGains: Record<string, number | null> = {};
-  try {
-    const igRes = await computeInfoGain(
-      sessionId,
-      windowStart,
-      windowEnd,
-      memberIds,
-      currentKeywords,
-    );
-    infoGains = igRes.infoGains;
-  } catch (err) {
-    logger.error('InfoGain 信息增益计算失败', { sessionId, message: (err as Error).message });
+  if (igSettled.status === 'fulfilled') {
+    infoGains = igSettled.value.infoGains;
+  } else {
+    logger.error('InfoGain 信息增益计算失败', { sessionId, message: (igSettled.reason as Error)?.message });
   }
 
   // ── Step 4：逐用户写入 window_metrics ─────────────────────────────────────

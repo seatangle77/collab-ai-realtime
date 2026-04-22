@@ -134,6 +134,22 @@ export async function keywordRecallWithGap(
   }
 }
 
+/** 宽松 TF-IDF 关键词提取，供 info_gain 使用 */
+export async function extractKeywordsBroad(texts: string[], topN = 10): Promise<string[]> {
+  if (texts.length === 0) return [];
+  try {
+    const res = await client.post<{ keywords: string[] }>(
+      '/api/nlp/extract_keywords_broad',
+      { texts, top_n: topN },
+      { timeout: 30_000 },
+    );
+    return res.data.keywords ?? [];
+  } catch (err) {
+    logger.error('extract_keywords_broad failed', { message: (err as Error).message });
+    return [];
+  }
+}
+
 /** 判断文本是否含论证结构 */
 export async function hasReasoning(text: string): Promise<ReasoningResult> {
   try {

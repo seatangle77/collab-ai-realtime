@@ -241,14 +241,32 @@ export async function getLastSpeakEndGlobal(
   return res.rows[0]?.last_end ?? null;
 }
 
-/** 获取历史窗口中的关键词（用于 info_gain 计算） */
-export async function getHistoricalKeywords(
+/** 写入当前窗口的宽松 TF-IDF 关键词（供 info_gain 历史对比使用） */
+export async function writeWindowMetricsKeywords(
+  sessionId: string,
+  windowStart: Date,
+  keywords: string[],
+): Promise<void> {
+  if (keywords.length === 0) return;
+  const values = keywords
+    .map((_, i) => `('wmk_' || substr(md5(random()::text), 1, 12), $1, $2, $${i + 3}, NOW())`)
+    .join(', ');
+  await pool.query(
+    `INSERT INTO window_metrics_keywords (id, session_id, window_start, keyword, created_at)
+     VALUES ${values}
+     ON CONFLICT DO NOTHING`,
+    [sessionId, toUtcString(windowStart), ...keywords],
+  );
+}
+
+/** 获取历史窗口中的宽松关键词（info_gain 对比用，来源是 window_metrics_keywords） */
+export async function getHistoricalWindowMetricsKeywords(
   sessionId: string,
   before: Date,
 ): Promise<HistoricalKeyword[]> {
   const res = await pool.query<HistoricalKeyword>(
     `SELECT DISTINCT keyword
-     FROM keyword_skw
+     FROM window_metrics_keywords
      WHERE session_id = $1
        AND window_start < $2`,
     [sessionId, toUtcString(before)],
@@ -711,14 +729,14 @@ export async function writeDiscussionSummary(row: {
   );
 }
 
-/** 批量更新 keyword_skw 的 skw_score / mention_count / skw_status */
+/** 批量更新 info_gap_skw 的 skw_score / mention_count / skw_status */
 export async function updateKeywordSkwBatch(
   rows: { id: string; skw_score: number; mention_count: number; skw_status: string }[],
 ): Promise<void> {
   if (rows.length === 0) return;
   for (const row of rows) {
     await pool.query(
-      `UPDATE keyword_skw
+      `UPDATE info_gap_skw
        SET skw_score = $1, mention_count = $2, skw_status = $3
        WHERE id = $4`,
       [row.skw_score, row.mention_count, row.skw_status, row.id],
@@ -726,14 +744,14 @@ export async function updateKeywordSkwBatch(
   }
 }
 
-/** 删除指定窗口内某个关键词的所有 keyword_skw 记录（大模型幻觉词处理） */
+/** 删除指定窗口内某个关键词的所有 info_gap_skw 记录（大模型幻觉词处理） */
 export async function deleteKeywordSkwByKeyword(
   sessionId: string,
   windowStart: Date,
   keyword: string,
 ): Promise<void> {
   await pool.query(
-    `DELETE FROM keyword_skw
+    `DELETE FROM info_gap_skw
      WHERE session_id = $1
        AND window_start = $2
        AND keyword = $3`,
@@ -782,9 +800,9 @@ export async function writeAiPushAnalysis(row: {
   );
 }
 
-// ── keyword_recall_analysis ───────────────────────────────────────────────────
+// ── info_gap_recall_analysis ───────────────────────────────────────────────────
 
-/** 写入 keyword_recall_analysis（每次关键词召回 AI 返回的原始判断，包含 needs_prompt=false 的词） */
+/** 写入 info_gap_recall_analysis（每次关键词召回 AI 返回的原始判断，包含 needs_prompt=false 的词） */
 export async function writeKeywordRecallAnalysis(row: {
   id: string;
   session_id: string;
@@ -795,7 +813,7 @@ export async function writeKeywordRecallAnalysis(row: {
   llm_reason: string | null;
 }): Promise<void> {
   await pool.query(
-    `INSERT INTO keyword_recall_analysis
+    `INSERT INTO info_gap_recall_analysis
        (id, session_id, window_start, keyword, needs_prompt, target_user_id, llm_reason, created_at)
      VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
      ON CONFLICT (id) DO NOTHING`,
@@ -811,7 +829,7 @@ export async function writeKeywordRecallAnalysis(row: {
   );
 }
 
-/** 批量写入 keyword_skw */
+/** 批量写入 info_gap_skw */
 export async function writeKeywordSkw(rows: KeywordSkwRow[]): Promise<void> {
   if (rows.length === 0) return;
 
@@ -833,7 +851,7 @@ export async function writeKeywordSkw(rows: KeywordSkwRow[]): Promise<void> {
   });
 
   await pool.query(
-    `INSERT INTO keyword_skw
+    `INSERT INTO info_gap_skw
        (id, session_id, window_start, keyword, user_a_id, user_b_id, skw_score, mention_count, skw_status, created_at)
      VALUES ${placeholders.join(', ')}
      ON CONFLICT DO NOTHING`,

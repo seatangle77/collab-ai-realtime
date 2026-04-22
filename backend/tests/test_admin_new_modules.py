@@ -403,11 +403,11 @@ test_batch_delete_boundaries(URL_IGB)
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Step 7: keyword_skw
+# Step 7: info_gap_skw
 # ═══════════════════════════════════════════════════════════════════════
-section("Step 7: keyword_skw — GET list / DELETE / batch-delete")
+section("Step 7: info_gap_skw — GET list / DELETE / batch-delete")
 
-URL_KS = f"{BASE}/api/admin/keyword-skw"
+URL_KS = f"{BASE}/api/admin/info-gap-skw"
 
 data = check("GET list（全量）", requests.get(f"{URL_KS}/", headers=HEADERS))
 
@@ -521,7 +521,7 @@ for url in [
     f"{BASE}/api/admin/window-metrics/",
     f"{BASE}/api/admin/discussion-summaries/",
     f"{BASE}/api/admin/info-gap-buttons/",
-    f"{BASE}/api/admin/keyword-skw/",
+    f"{BASE}/api/admin/info-gap-skw/",
     f"{BASE}/api/admin/speech-transcripts/",
 ]:
     path = url.replace(BASE, "")

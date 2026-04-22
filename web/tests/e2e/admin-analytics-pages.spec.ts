@@ -386,7 +386,7 @@ test.describe.serial('Admin 分析与指标页面', () => {
     ]
 
     await loginAsAdmin(page)
-    await page.route('**/api/admin/keyword-skw/**', async (route) => {
+    await page.route('**/api/admin/info-gap-skw/**', async (route) => {
       const url = route.request().url()
       const method = route.request().method()
       if (method === 'GET') {
@@ -412,7 +412,7 @@ test.describe.serial('Admin 分析与指标页面', () => {
       await route.fallback()
     })
 
-    await goToAdminPage(page, '/admin/keyword-skw', '关键词 SKW')
+    await goToAdminPage(page, '/admin/info-gap-skw', '关键词 SKW')
     await expect(page.getByText('0.8123')).toBeVisible()
     await expect(page.locator('.high-score')).toContainText('0.8123')
     await formInput(page, 'SKW 最小值').fill('0.9000')
@@ -480,7 +480,7 @@ test.describe.serial('Admin 分析与指标页面', () => {
     ]
 
     await loginAsAdmin(page)
-    await page.route('**/api/admin/keyword-skw/**', async (route) => {
+    await page.route('**/api/admin/info-gap-skw/**', async (route) => {
       if (route.request().method() === 'GET') {
         await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(pageResponse(items)) })
         return
@@ -488,7 +488,7 @@ test.describe.serial('Admin 分析与指标页面', () => {
       await route.fallback()
     })
 
-    await goToAdminPage(page, '/admin/keyword-skw', '关键词 SKW')
+    await goToAdminPage(page, '/admin/info-gap-skw', '关键词 SKW')
 
     const exportBtn = page.getByRole('button', { name: '导出选中' })
     await expect(exportBtn).toBeDisabled()
