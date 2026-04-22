@@ -21,6 +21,8 @@ const GROUPS = [
       { label: '讨论摘要', path: '/admin/discussion-summaries', heading: '讨论摘要' },
       { label: '信息缺口按钮', path: '/admin/info-gap-buttons', heading: '信息缺口按钮' },
       { label: '关键词 SKW', path: '/admin/info-gap-skw', heading: '关键词 SKW' },
+      { label: 'AI 推送分析', path: '/admin/ai-push-analysis', heading: 'AI 推送分析' },
+      { label: '关键词召回分析', path: '/admin/info-gap-recall-analysis', heading: '关键词召回分析' },
     ],
   },
   {
@@ -43,13 +45,17 @@ test.describe.serial('Admin 导航菜单重构', () => {
     await loginAsAdmin(page)
   })
 
-  test('1. 左侧显示 4 个分组标题与 14 个菜单项', async ({ page }) => {
+  test('1. 左侧显示 4 个分组标题与 16 个菜单项', async ({ page }) => {
+    const totalItems = GROUPS.reduce((sum, group) => sum + group.items.length, 0)
+
     for (const group of GROUPS) {
       await expect(page.locator('.el-menu-item-group__title').filter({ hasText: group.title })).toBeVisible()
       for (const item of group.items) {
         await expect(page.locator('.admin-menu .el-menu-item').filter({ hasText: item.label })).toBeVisible()
       }
     }
+
+    await expect(page.locator('.admin-menu .el-menu-item')).toHaveCount(totalItems)
   })
 
   test('2. 菜单项可点击并跳到对应页面', async ({ page }) => {
@@ -66,28 +72,28 @@ test.describe.serial('Admin 导航菜单重构', () => {
     const toggleBtn = page.locator('.admin-header button').first()
     await expect(page.locator('.admin-menu .el-menu-item').first()).toBeVisible()
     await toggleBtn.click()
-    await expect(page.locator('.el-aside')).toHaveCSS('width', '0px')
+    await expect(page.locator('.el-aside')).toHaveAttribute('style', /width:\s*0px/)
   })
 
   test('5. 再次点击 toggle 按钮可展开侧边栏', async ({ page }) => {
     const toggleBtn = page.locator('.admin-header button').first()
     await toggleBtn.click()
     await toggleBtn.click()
-    await expect(page.locator('.el-aside')).toHaveCSS('width', '220px')
+    await expect(page.locator('.el-aside')).toHaveAttribute('style', /width:\s*220px/)
     await expect(page.locator('.admin-menu .el-menu-item').first()).toBeVisible()
   })
 
   test('3. 刷新后当前菜单项保持高亮', async ({ page }) => {
-    await page.goto('/admin/discussion-rules')
-    await expect(page.getByRole('heading', { name: '讨论规则配置' })).toBeVisible()
+    await page.goto('/admin/info-gap-recall-analysis')
+    await expect(page.getByRole('heading', { name: '关键词召回分析' })).toBeVisible()
 
     const activeBeforeReload = page.locator('.admin-menu .el-menu-item.is-active')
-    await expect(activeBeforeReload).toContainText('讨论规则')
+    await expect(activeBeforeReload).toContainText('关键词召回分析')
 
     await page.reload()
-    await expect(page.getByRole('heading', { name: '讨论规则配置' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '关键词召回分析' })).toBeVisible()
 
     const activeAfterReload = page.locator('.admin-menu .el-menu-item.is-active')
-    await expect(activeAfterReload).toContainText('讨论规则')
+    await expect(activeAfterReload).toContainText('关键词召回分析')
   })
 })

@@ -515,4 +515,30 @@ test.describe.serial('Admin 分析与指标页面', () => {
     expect(csvText).toContain('沟通')
     expect(csvText).not.toContain('反馈')
   })
+
+  test('4.2 关键词 SKW 接口失败时显示错误提示，空列表时页面不崩', async ({ page }) => {
+    let mode: 'error' | 'empty' = 'error'
+
+    await loginAsAdmin(page)
+    await page.route('**/api/admin/info-gap-skw/**', async (route) => {
+      if (route.request().method() !== 'GET') {
+        await route.fallback()
+        return
+      }
+      if (mode === 'error') {
+        await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: 'boom' }) })
+        return
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(pageResponse([])) })
+    })
+
+    await goToAdminPage(page, '/admin/info-gap-skw', '关键词 SKW')
+    await expect(page.getByText('{"detail":"boom"}')).toBeVisible()
+
+    mode = 'empty'
+    await page.getByRole('button', { name: '查询' }).click()
+    await expect(page.getByText('{"detail":"boom"}')).toHaveCount(0)
+    await expect(page.locator('.el-table__body tbody tr')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: '导出选中' })).toBeDisabled()
+  })
 })
