@@ -718,22 +718,6 @@ export async function getLastSummary(
   return res.rows[0] ?? null;
 }
 
-/** 写入讨论摘要 */
-export async function writeDiscussionSummary(row: {
-  session_id: string;
-  summary_text: string;
-  window_start: Date;
-  window_end: Date;
-}): Promise<void> {
-  const id = 'sum_' + nanoid(12);
-  await pool.query(
-    `INSERT INTO discussion_summaries
-       (id, session_id, summary_text, window_start, window_end, created_at)
-     VALUES ($1, $2, $3, $4, $5, NOW())`,
-    [id, row.session_id, row.summary_text, toUtcString(row.window_start), toUtcString(row.window_end)],
-  );
-}
-
 /** 批量更新 info_gap_skw 的 skw_score / mention_count / skw_status */
 export async function updateKeywordSkwBatch(
   rows: { id: string; skw_score: number; mention_count: number; skw_status: string }[],
