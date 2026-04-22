@@ -118,7 +118,7 @@ async def generate_push_content(
     try:
         client = _get_async_client()
         response = await client.chat.completions.create(
-            model=nlp_settings.reasoning_model,
+            model=nlp_settings.fast_model if trigger_type == "info_gap" else nlp_settings.reasoning_model,
             max_tokens=80,
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},
@@ -139,13 +139,14 @@ async def generate_push_content(
 _GROUP_SILENCE_SYSTEM = (
     "你是一个温暖积极的讨论伙伴。根据当前讨论摘要和最近发言，"
     "生成一句自然友好的话题提示，帮助全组重新打开讨论。"
+    "话题本身要有追问性质，让成员自然地说出理由或举例，而不只是表态。"
     "不超过30字，直接给出话题，不要任何前缀或解释。"
 )
 
 _GROUP_SILENCE_TEMPLATE = (
     "讨论摘要：{summary}\n"
     "最近发言记录：{transcripts}\n"
-    "全组已沉默 {silence_s} 秒，请生成一句话题提示帮助全组重新开口。"
+    "全组已沉默 {silence_s} 秒，请生成一句话题提示帮助全组重新开口，并自然引导成员说出自己的理由或具体例子。"
 )
 
 
