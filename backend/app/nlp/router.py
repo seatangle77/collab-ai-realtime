@@ -2,7 +2,7 @@
 NLP 微服务路由
 - 前缀：/api/nlp
 - 鉴权：X-Admin-Token（复用现有 require_admin）
-- 接口：segment / embed / similarity / candidate_recall / has_reasoning / generate_summary / assess_gap
+- 接口：segment / embed / similarity / candidate_recall / reasoning_batch / generate_summary / assess_gap
 """
 from __future__ import annotations
 
@@ -120,24 +120,7 @@ def extract_keywords_broad(req: ExtractKeywordsBroadRequest, _: bool = Depends(r
     return {"keywords": keywords}
 
 
-# ── 6. has_reasoning（单条，调试用）─────────────────────────────────────────
-
-class ReasoningRequest(BaseModel):
-    text: str
-
-
-class ReasoningResponse(BaseModel):
-    has_reasoning: bool
-    has_evidence: bool
-    method: str
-
-
-@router.post("/has_reasoning", response_model=ReasoningResponse)
-def check_reasoning(req: ReasoningRequest, _: bool = Depends(require_admin)):
-    return reasoning.has_reasoning(req.text)
-
-
-# ── 7. reasoning_batch（全员批量，主分析链路用）──────────────────────────────
+# ── 6. reasoning_batch（全员批量，主分析链路用）──────────────────────────────
 
 class BatchReasoningMemberInput(BaseModel):
     user_id: str

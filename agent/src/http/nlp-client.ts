@@ -158,17 +158,6 @@ export async function extractKeywordsBroad(texts: string[], topN = 10): Promise<
   }
 }
 
-/** 判断文本是否含论证结构（单条，调试用） */
-export async function hasReasoning(text: string): Promise<ReasoningResult> {
-  try {
-    const res = await client.post<ReasoningResult>('/api/nlp/has_reasoning', { text }, { timeout: 30_000 });
-    return res.data;
-  } catch (err) {
-    logger.error('has_reasoning failed', { message: (err as Error).message });
-    throw err;
-  }
-}
-
 /** 全员批量论证结构判定（主分析链路用），失败时返回空数组 */
 export async function reasoningBatch(
   members: Array<{ user_id: string; text: string }>,

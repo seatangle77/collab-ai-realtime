@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 NLP 微服务接口测试
-覆盖：/api/nlp/segment · /api/nlp/embed · /api/nlp/similarity · /api/nlp/extract_keywords_broad · /api/nlp/keyword_recall_with_gap · /api/nlp/has_reasoning · /api/nlp/reasoning_batch
+覆盖：/api/nlp/segment · /api/nlp/embed · /api/nlp/similarity · /api/nlp/extract_keywords_broad · /api/nlp/keyword_recall_with_gap · /api/nlp/reasoning_batch
 
 运行前提：后端服务已在 127.0.0.1:8000 启动，且 NLP 模型已预加载。
 运行方式：python -m backend.tests.test_nlp_api
@@ -55,7 +55,6 @@ def test_auth_no_token() -> None:
         ("POST", "/api/nlp/similarity",    {"pairs": []}),
         ("POST", "/api/nlp/extract_keywords_broad", {"texts": ["测试"]}),
         ("POST", "/api/nlp/keyword_recall_with_gap", {"member_texts": {"u": "测试"}}),
-        ("POST", "/api/nlp/has_reasoning", {"text": "测试"}),
         ("POST", "/api/nlp/reasoning_batch", {"members": [{"user_id": "u1", "text": "测试"}]}),
     ]
     results = []
@@ -73,7 +72,6 @@ def test_auth_wrong_token() -> None:
         ("POST", "/api/nlp/similarity",    {"pairs": []}),
         ("POST", "/api/nlp/extract_keywords_broad", {"texts": ["测试"]}),
         ("POST", "/api/nlp/keyword_recall_with_gap", {"member_texts": {"u": "测试"}}),
-        ("POST", "/api/nlp/has_reasoning", {"text": "测试"}),
         ("POST", "/api/nlp/reasoning_batch", {"members": [{"user_id": "u1", "text": "测试"}]}),
     ]
     results = []
@@ -474,99 +472,6 @@ def test_keyword_recall_with_gap_basic() -> None:
 
 
 # ══════════════════════════════════════════════════════════════════
-# /api/nlp/has_reasoning
-# ══════════════════════════════════════════════════════════════════
-
-def test_reasoning_rule_both_true() -> None:
-    """含明确论证词 + 证据词：method='rule'，两者均 True，不调 LLM"""
-    resp = requests.post(
-        f"{BASE_URL}/api/nlp/has_reasoning",
-        json={"text": "因为研究表明AI能提高效率，所以它对教育很有帮助，例如个性化学习就是典型案例"},
-        headers=ADMIN_HEADERS,
-    )
-    if resp.status_code != 200:
-        _assert_log(False, "has_reasoning 规则两者为 True 应返回 200", resp.text)
-    d = resp.json()
-    ok = d["has_reasoning"] is True and d["has_evidence"] is True and d["method"] == "rule"
-    _assert_log(ok, f"has_reasoning：规则层，两者均 True，method={d['method']}", d)
-
-
-def test_reasoning_rule_only_reasoning_keyword() -> None:
-    """只含论证词，不含证据词：has_reasoning=True，触发 LLM 兜底"""
-    resp = requests.post(
-        f"{BASE_URL}/api/nlp/has_reasoning",
-        json={"text": "因为AI改变了学习效率，所以教育行业必须跟上这个趋势"},
-        headers=ADMIN_HEADERS,
-    )
-    if resp.status_code != 200:
-        _assert_log(False, "has_reasoning 只含论证词应返回 200", resp.text)
-    d = resp.json()
-    ok = d["has_reasoning"] is True and "method" in d
-    _assert_log(ok, f"has_reasoning：只含论证词，has_reasoning=True，method={d['method']}", d)
-
-
-def test_reasoning_rule_only_evidence_keyword() -> None:
-    """只含证据词，不含论证词：has_evidence=True，触发 LLM 兜底"""
-    resp = requests.post(
-        f"{BASE_URL}/api/nlp/has_reasoning",
-        json={"text": "比如说，很多学校已经开始使用AI辅助教学了"},
-        headers=ADMIN_HEADERS,
-    )
-    if resp.status_code != 200:
-        _assert_log(False, "has_reasoning 只含证据词应返回 200", resp.text)
-    d = resp.json()
-    ok = d["has_evidence"] is True and "method" in d
-    _assert_log(ok, f"has_reasoning：只含证据词，has_evidence=True，method={d['method']}", d)
-
-
-def test_reasoning_llm_fallback_pure_statement() -> None:
-    """纯陈述句，无关键词：触发 LLM 兜底，method='llm'，结构正确"""
-    resp = requests.post(
-        f"{BASE_URL}/api/nlp/has_reasoning",
-        json={"text": "AI对教育很有帮助，学生可以学得更快"},
-        headers=ADMIN_HEADERS,
-    )
-    if resp.status_code != 200:
-        _assert_log(False, "has_reasoning LLM 兜底应返回 200", resp.text)
-    d = resp.json()
-    # LLM 路径：method="llm"，结构字段齐全
-    ok = (
-        d["method"] == "llm"
-        and isinstance(d["has_reasoning"], bool)
-        and isinstance(d["has_evidence"], bool)
-    )
-    _assert_log(ok, f"has_reasoning：LLM 兜底，method=llm，结构正确", d)
-
-
-def test_reasoning_edge_empty_text() -> None:
-    """空字符串：不报错，返回合法结构"""
-    resp = requests.post(
-        f"{BASE_URL}/api/nlp/has_reasoning",
-        json={"text": ""},
-        headers=ADMIN_HEADERS,
-    )
-    if resp.status_code != 200:
-        _assert_log(False, "has_reasoning 空字符串应返回 200", resp.text)
-    d = resp.json()
-    ok = "has_reasoning" in d and "has_evidence" in d and "method" in d
-    _assert_log(ok, "has_reasoning：空字符串，返回合法结构", d)
-
-
-def test_reasoning_edge_single_arg_word() -> None:
-    """只有一个论证词：has_reasoning=True"""
-    resp = requests.post(
-        f"{BASE_URL}/api/nlp/has_reasoning",
-        json={"text": "因为"},
-        headers=ADMIN_HEADERS,
-    )
-    if resp.status_code != 200:
-        _assert_log(False, "has_reasoning 单论证词应返回 200", resp.text)
-    d = resp.json()
-    ok = d["has_reasoning"] is True
-    _assert_log(ok, "has_reasoning：单论证词，has_reasoning=True", d)
-
-
-# ══════════════════════════════════════════════════════════════════
 # /api/nlp/reasoning_batch
 # ══════════════════════════════════════════════════════════════════
 
@@ -658,13 +563,7 @@ def main() -> int:
         ("extract_keywords_broad 边界：空 texts",         test_extract_keywords_broad_edge_empty_texts),
         ("keyword_recall_with_gap：基础结构",             test_keyword_recall_with_gap_basic),
 
-        # ── has_reasoning ─────────────────────────────────────
-        ("has_reasoning：规则层，两者均 True",            test_reasoning_rule_both_true),
-        ("has_reasoning：只含论证词",                     test_reasoning_rule_only_reasoning_keyword),
-        ("has_reasoning：只含证据词",                     test_reasoning_rule_only_evidence_keyword),
-        ("has_reasoning：LLM 兜底，纯陈述",              test_reasoning_llm_fallback_pure_statement),
-        ("has_reasoning 边界：空字符串",                  test_reasoning_edge_empty_text),
-        ("has_reasoning 边界：单论证词",                  test_reasoning_edge_single_arg_word),
+        # ── reasoning_batch ───────────────────────────────────
         ("reasoning_batch：多成员完整四字段",             test_reasoning_batch_multi_members),
         ("reasoning_batch 边界：空文本",                  test_reasoning_batch_edge_empty_text),
     ]

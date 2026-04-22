@@ -1,6 +1,5 @@
 """
 论证结构判定模块
-- has_reasoning：单条文本判定（规则优先，LLM 兜底），供工具调试接口使用
 - batch_has_reasoning：全员批量判定（一次 LLM 调用，返回逐成员四字段），供主分析链路使用
 """
 from __future__ import annotations
@@ -28,68 +27,11 @@ EVIDENCE_KEYWORDS: set[str] = {
     "以……为例", "以...为例",
 }
 
-# ── 单条判定（调试用）────────────────────────────────────────────────────────
-
-_SINGLE_SYSTEM = (
-    "你是一个语言分析助手。请判断用户发言是否包含以下两种成分，"
-    "只返回 JSON，不要任何解释。"
-)
-
-_SINGLE_USER_TEMPLATE = """判断以下发言：
-1. has_reasoning：是否有明确的原因解释（如"因为"、"由于"、"导致"等因果逻辑，或隐式的逻辑推理）
-2. has_evidence：是否有具体的例子、数据、事实或引用作为证据支持
-
-发言：{text}
-
-只返回 JSON：{{"has_reasoning": true或false, "has_evidence": true或false}}"""
-
-
 def _get_client() -> OpenAI:
     return OpenAI(
         api_key=nlp_settings.qwen_api_key,
         base_url=nlp_settings.qwen_base_url,
     )
-
-
-def _call_llm_single(text: str) -> dict[str, bool]:
-    if not nlp_settings.qwen_api_key:
-        return {"has_reasoning": False, "has_evidence": False}
-    client = _get_client()
-    try:
-        response = client.chat.completions.create(
-            model=nlp_settings.fast_model,
-            max_tokens=64,
-            messages=[
-                {"role": "system", "content": _SINGLE_SYSTEM},
-                {"role": "user",   "content": _SINGLE_USER_TEMPLATE.format(text=text)},
-            ],
-        )
-    except Exception as e:
-        logger.warning("[NLP/reasoning] 单条调用失败: %s", e)
-        return {"has_reasoning": False, "has_evidence": False}
-    content = (response.choices[0].message.content or "").strip()
-    try:
-        result = json.loads(content)
-        return {
-            "has_reasoning": bool(result.get("has_reasoning", False)),
-            "has_evidence":  bool(result.get("has_evidence", False)),
-        }
-    except (json.JSONDecodeError, KeyError):
-        return {"has_reasoning": False, "has_evidence": False}
-
-
-def has_reasoning(text: str) -> dict:
-    """单条文本判定，供 /api/nlp/has_reasoning 调试接口使用。"""
-    rule_reasoning = any(kw in text for kw in REASONING_KEYWORDS)
-    rule_evidence  = any(kw in text for kw in EVIDENCE_KEYWORDS)
-    if rule_reasoning and rule_evidence:
-        return {"has_reasoning": True, "has_evidence": True, "method": "rule"}
-    llm_result = _call_llm_single(text)
-    return {
-        "has_reasoning": rule_reasoning or llm_result["has_reasoning"],
-        "has_evidence":  rule_evidence  or llm_result["has_evidence"],
-        "method": "llm",
-    }
 
 
 # ── 批量判定（主分析链路用）──────────────────────────────────────────────────
