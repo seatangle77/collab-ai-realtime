@@ -18,6 +18,7 @@ const GROUPS = [
     items: [
       { label: '讨论状态', path: '/admin/discussion-states', heading: '讨论状态' },
       { label: '窗口指标', path: '/admin/window-metrics', heading: '窗口指标' },
+      { label: '窗口关键词', path: '/admin/window-metrics-keywords', heading: '窗口关键词' },
       { label: '讨论摘要', path: '/admin/discussion-summaries', heading: '讨论摘要' },
       { label: '信息缺口按钮', path: '/admin/info-gap-buttons', heading: '信息缺口按钮' },
       { label: '关键词 SKW', path: '/admin/info-gap-skw', heading: '关键词 SKW' },
@@ -45,7 +46,7 @@ test.describe.serial('Admin 导航菜单重构', () => {
     await loginAsAdmin(page)
   })
 
-  test('1. 左侧显示 4 个分组标题与 16 个菜单项', async ({ page }) => {
+  test('1. 左侧显示 4 个分组标题与 17 个菜单项', async ({ page }) => {
     const totalItems = GROUPS.reduce((sum, group) => sum + group.items.length, 0)
 
     for (const group of GROUPS) {

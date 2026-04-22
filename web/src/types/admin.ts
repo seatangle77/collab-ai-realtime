@@ -240,6 +240,14 @@ export interface AdminWindowMetric {
   created_at: string | null
 }
 
+export interface AdminWindowMetricsKeyword {
+  id: string
+  session_id: string
+  window_start: string
+  keyword: string
+  created_at: string | null
+}
+
 // ── 讨论摘要 ──────────────────────────────────────────────────────────
 export interface AdminDiscussionSummary {
   id: string

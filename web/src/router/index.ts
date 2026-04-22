@@ -129,6 +129,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('../views/admin/AdminWindowMetricsPage.vue'),
       },
       {
+        path: 'window-metrics-keywords',
+        name: 'AdminWindowMetricsKeywords',
+        component: () => import('../views/admin/AdminWindowMetricsKeywordsPage.vue'),
+      },
+      {
         path: 'discussion-summaries',
         name: 'AdminDiscussionSummaries',
         component: () => import('../views/admin/AdminDiscussionSummariesPage.vue'),

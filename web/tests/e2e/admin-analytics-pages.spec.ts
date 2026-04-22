@@ -190,6 +190,132 @@ test.describe.serial('Admin 分析与指标页面', () => {
     expect(csvText).not.toContain('导出用户丙')
   })
 
+  test('1.2 窗口关键词页支持筛选、单删、批删和导出', async ({ page, browserName }) => {
+    test.skip(browserName === 'webkit', '下载在部分浏览器环境下不稳定，这里主测 Chromium/Firefox')
+
+    let items = [
+      {
+        id: 'wmk-1',
+        session_id: 'session-wmk-1',
+        window_start: '2026-04-10T09:00:00Z',
+        keyword: '机器学习',
+        created_at: '2026-04-10T09:01:00Z',
+      },
+      {
+        id: 'wmk-2',
+        session_id: 'session-wmk-2',
+        window_start: '2026-04-10T09:10:00Z',
+        keyword: 'MVP 方案',
+        created_at: '2026-04-10T09:11:00Z',
+      },
+      {
+        id: 'wmk-3',
+        session_id: 'session-wmk-3',
+        window_start: '2026-04-10T09:20:00Z',
+        keyword: '关键词_特殊%字符',
+        created_at: '2026-04-10T09:21:00Z',
+      },
+    ]
+
+    await loginAsAdmin(page)
+    await page.route('**/api/admin/window-metrics-keywords/**', async (route) => {
+      const url = route.request().url()
+      const method = route.request().method()
+      if (method === 'GET') {
+        const query = new URL(url).searchParams
+        let filtered = [...items]
+        if (query.get('session_id')) filtered = filtered.filter((item) => item.session_id === query.get('session_id'))
+        if (query.get('keyword')) filtered = filtered.filter((item) => item.keyword.includes(query.get('keyword') as string))
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(pageResponse(filtered)) })
+        return
+      }
+      if (method === 'DELETE') {
+        const id = new URL(url).pathname.split('/').pop() as string
+        items = items.filter((item) => item.id !== id)
+        await route.fulfill({ status: 204, body: '' })
+        return
+      }
+      if (method === 'POST' && url.includes('/batch-delete')) {
+        const payload = route.request().postDataJSON() as { ids: string[] }
+        items = items.filter((item) => !payload.ids.includes(item.id))
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ deleted: payload.ids.length }) })
+        return
+      }
+      await route.fallback()
+    })
+
+    await goToAdminPage(page, '/admin/window-metrics-keywords', '窗口关键词')
+    await expect(page.getByText('机器学习')).toBeVisible()
+
+    await formInput(page, '会话 ID').fill('session-wmk-2')
+    await page.getByRole('button', { name: '查询' }).click()
+    await expect(page.getByText('MVP 方案')).toBeVisible()
+    await expect(page.getByText('机器学习')).toHaveCount(0)
+
+    await page.getByRole('button', { name: '重置' }).click()
+    await formInput(page, '关键词').fill('特殊%字符')
+    await page.getByRole('button', { name: '查询' }).click()
+    await expect(page.getByText('关键词_特殊%字符')).toBeVisible()
+
+    await page.getByRole('button', { name: '重置' }).click()
+    const exportBtn = page.getByRole('button', { name: '导出选中' })
+    await expect(exportBtn).toBeDisabled()
+
+    const checkboxes = page.locator('.el-table__body .el-checkbox')
+    await checkboxes.nth(0).click()
+    await checkboxes.nth(1).click()
+    await expect(exportBtn).toBeEnabled()
+    await expect(exportBtn).toHaveText(/导出选中\s*[（(]2[）)]/)
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      exportBtn.click(),
+    ])
+    const csvText = fs.readFileSync((await download.path()) as string, 'utf-8')
+    expect(csvText).toContain('会话 ID')
+    expect(csvText).toContain('关键词')
+    expect(csvText).toContain('机器学习')
+    expect(csvText).toContain('MVP 方案')
+    expect(csvText).not.toContain('关键词_特殊%字符')
+
+    await page.locator('.el-table__body .el-checkbox').first().click()
+    await page.locator('.el-table').getByRole('button', { name: '删除' }).first().click()
+    await page.getByRole('button', { name: '删除' }).last().click()
+    await expect(page.getByText('删除成功')).toBeVisible()
+
+    await page.getByRole('button', { name: '重置' }).click()
+    await page.locator('.el-table__body .el-checkbox').first().click()
+    await page.getByRole('button', { name: /批量删除/ }).click()
+    await page.getByRole('button', { name: '删除' }).last().click()
+    await expect(page.getByText('成功删除 1 条记录')).toBeVisible()
+  })
+
+  test('1.3 窗口关键词页接口失败时显示错误提示，空列表时页面不崩', async ({ page }) => {
+    let mode: 'error' | 'empty' = 'error'
+
+    await loginAsAdmin(page)
+    await page.route('**/api/admin/window-metrics-keywords/**', async (route) => {
+      if (route.request().method() !== 'GET') {
+        await route.fallback()
+        return
+      }
+      if (mode === 'error') {
+        await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: 'boom' }) })
+        return
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(pageResponse([])) })
+    })
+
+    await goToAdminPage(page, '/admin/window-metrics-keywords', '窗口关键词')
+    await expect(page.getByText('{"detail":"boom"}')).toBeVisible()
+
+    mode = 'empty'
+    await page.getByRole('button', { name: '查询' }).click()
+    await expect(page.getByText('{"detail":"boom"}')).toHaveCount(0)
+    await expect(page.locator('.el-table__body tbody tr')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: '导出选中' })).toBeDisabled()
+  })
+
   test('2. 信息缺口按钮页支持三态 status、has_clicked 筛选、点击时间展示、单删和批删', async ({ page }) => {
     let items = [
       {

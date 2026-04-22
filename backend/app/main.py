@@ -36,6 +36,7 @@ from .admin.window_metrics import router as admin_window_metrics_router
 from .admin.discussion_summaries import router as admin_discussion_summaries_router
 from .admin.info_gap_buttons import router as admin_info_gap_buttons_router
 from .admin.info_gap_skw import router as admin_info_gap_skw_router
+from .admin.window_metrics_keywords import router as admin_window_metrics_keywords_router
 from .admin.speech_transcripts import router as admin_speech_transcripts_router
 from .admin.test_seed import router as test_seed_router
 from .vad import router as vad_router
@@ -85,6 +86,7 @@ app.include_router(admin_window_metrics_router)
 app.include_router(admin_discussion_summaries_router)
 app.include_router(admin_info_gap_buttons_router)
 app.include_router(admin_info_gap_skw_router)
+app.include_router(admin_window_metrics_keywords_router)
 app.include_router(admin_speech_transcripts_router)
 app.include_router(admin_ai_push_analysis_router)
 app.include_router(admin_info_gap_recall_analysis_router)
