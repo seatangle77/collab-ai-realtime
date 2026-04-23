@@ -345,7 +345,7 @@ async def click_info_gap_button(
                 send_push_to_registration_id,
                 device_token,
                 final_content,
-                "信息缺口提示",
+                "",
             )
             await db.execute(
                 text(

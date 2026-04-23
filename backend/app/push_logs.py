@@ -153,7 +153,7 @@ async def push_notify(
     token_row = token_result.mappings().first()
     device_token = token_row["device_token"] if token_row else None
     if device_token:
-        await _jpush_safe(device_token, body.content, "AI 讨论建议")
+        await _jpush_safe(device_token, body.content, "")
 
     return {"id": log_id, "delivery_status": new_status, "ws_sent": sent}
 
@@ -247,7 +247,7 @@ async def group_notify(
     device_tokens = [row["device_token"] for row in member_token_result.mappings().all()]
     if device_tokens:
         await asyncio.gather(
-            *[_jpush_safe(token, body.content, "AI 讨论建议") for token in device_tokens]
+            *[_jpush_safe(token, body.content, "") for token in device_tokens]
         )
 
     return {
