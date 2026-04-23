@@ -4,7 +4,6 @@ import {
 } from './admin-helpers'
 
 type DiscussionRules = {
-  silence_threshold_minutes: number
   speaking_ratio_min: number
   speaking_ratio_max: number
   cosine_similarity_threshold: number
@@ -29,7 +28,6 @@ let originalRules: DiscussionRules
 let currentRules: DiscussionRules
 
 const BASE_RULES: DiscussionRules = {
-  silence_threshold_minutes: 5,
   speaking_ratio_min: 0.1,
   speaking_ratio_max: 0.6,
   cosine_similarity_threshold: 0.35,
@@ -132,7 +130,6 @@ test.describe.serial('Admin 讨论规则配置页', () => {
 
   test('1. 页面加载并展示当前规则值', async ({ page }) => {
     await expect(page.getByText('AI 分析开关')).toBeVisible()
-    await expectNumericValue(page, '静默阈值（分钟）', originalRules.silence_threshold_minutes)
     await expectNumericValue(page, '发言比例最小值', originalRules.speaking_ratio_min)
     await expectNumericValue(page, '发言比例最大值', originalRules.speaking_ratio_max)
     await expect(page.getByText(/最后更新时间：/)).toBeVisible()
@@ -187,7 +184,6 @@ test.describe.serial('Admin 讨论规则配置页', () => {
   })
 
   test('5. 正常保存后页面回填更新值，并在刷新后保持持久化', async ({ page }) => {
-    const silenceValue = String(originalRules.silence_threshold_minutes + 1)
     const pushIntervalValue = String(originalRules.push_interval_minutes + 1)
     const maxPushValue = String(originalRules.max_push_per_member + 1)
     const expectedSwitchValue = !originalRules.analysis_enabled
@@ -195,21 +191,18 @@ test.describe.serial('Admin 讨论规则配置页', () => {
     const switchEl = page.locator('.analysis-switch-row .el-switch')
     await expectSwitchChecked(page, originalRules.analysis_enabled)
 
-    await setNumberInput(page, '静默阈值（分钟）', silenceValue)
     await setNumberInput(page, '推送间隔（分钟）', pushIntervalValue)
     await setNumberInput(page, '每人最大推送次数', maxPushValue)
     await switchEl.click()
     await page.getByRole('button', { name: '保存' }).click()
 
     await expect(page.getByText('保存成功')).toBeVisible()
-    await expectNumericValue(page, '静默阈值（分钟）', Number(silenceValue))
     await expectNumericValue(page, '推送间隔（分钟）', Number(pushIntervalValue))
     await expectNumericValue(page, '每人最大推送次数', Number(maxPushValue))
     await expectSwitchChecked(page, expectedSwitchValue)
 
     await page.reload()
     await expect(page.getByRole('heading', { name: '讨论规则配置' })).toBeVisible()
-    await expectNumericValue(page, '静默阈值（分钟）', Number(silenceValue))
     await expectNumericValue(page, '推送间隔（分钟）', Number(pushIntervalValue))
     await expectNumericValue(page, '每人最大推送次数', Number(maxPushValue))
     await expectSwitchChecked(page, expectedSwitchValue)

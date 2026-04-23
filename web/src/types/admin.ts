@@ -106,7 +106,6 @@ export interface AdminVoiceProfileDetail {
 
 // ── 讨论规则配置 ──────────────────────────────────────────────────────
 export interface AdminDiscussionRule {
-  silence_threshold_minutes: number
   speaking_ratio_min: number
   speaking_ratio_max: number
   cosine_similarity_threshold: number
@@ -128,7 +127,6 @@ export interface AdminDiscussionRule {
 }
 
 export interface AdminDiscussionRuleUpdate {
-  silence_threshold_minutes?: number
   speaking_ratio_min?: number
   speaking_ratio_max?: number
   cosine_similarity_threshold?: number

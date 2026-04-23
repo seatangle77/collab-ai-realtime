@@ -266,11 +266,12 @@ def scenario_rules_get_defaults() -> bool:
     data = _load_rules_or_skip()
     if data is None:
         return True
-    required = ["silence_threshold_minutes", "speaking_ratio_min", "speaking_ratio_max",
+    required = ["speaking_ratio_min", "speaking_ratio_max",
                 "cosine_similarity_threshold", "min_session_duration_minutes",
                 "push_interval_minutes", "max_push_per_member",
                 "analysis_enabled", "updated_at"]
     ok = all(f in data for f in required)
+    ok &= "silence_threshold_minutes" not in data
     return _log(ok, "Rules GET 返回默认值，所有字段存在场景", data)
 
 
@@ -288,7 +289,6 @@ def scenario_rules_put_single_field() -> bool:
     data = r.json()
     ok = data["analysis_enabled"] == new_val
     # 其他字段不变
-    ok &= data["silence_threshold_minutes"] == before["silence_threshold_minutes"]
     ok &= data["speaking_ratio_min"] == before["speaking_ratio_min"]
     return _log(ok, "Rules PUT 单字段更新，其他字段不变场景", data)
 
@@ -297,7 +297,6 @@ def scenario_rules_put_all_fields() -> bool:
     if _load_rules_or_skip() is None:
         return True
     new_rules = {
-        "silence_threshold_minutes": 7,
         "speaking_ratio_min": 0.12,
         "speaking_ratio_max": 0.55,
         "cosine_similarity_threshold": 0.35,
@@ -329,26 +328,25 @@ def scenario_rules_put_persist() -> bool:
     """GET → PUT → GET，验证持久化。"""
     if _load_rules_or_skip() is None:
         return True
-    val = 6
+    val = 0.23
     requests.put(f"{BASE_URL}/api/admin/discussion-rules/",
                  headers=ADMIN_HEADERS,
-                 json={"silence_threshold_minutes": val}).raise_for_status()
+                 json={"speaking_ratio_min": val}).raise_for_status()
     r = requests.get(f"{BASE_URL}/api/admin/discussion-rules/", headers=ADMIN_HEADERS)
     r.raise_for_status()
-    ok = r.json().get("silence_threshold_minutes") == val
-    return _log(ok, "Rules PUT 后 GET 持久化验证场景", {"value": r.json().get("silence_threshold_minutes")})
+    ok = r.json().get("speaking_ratio_min") == val
+    return _log(ok, "Rules PUT 后 GET 持久化验证场景", {"value": r.json().get("speaking_ratio_min")})
 
 
 def scenario_rules_put_invalid_values() -> bool:
     if _load_rules_or_skip() is None:
         return True
     ok = True
-    # ge=1 校验：0 应被拒绝
     r1 = requests.put(f"{BASE_URL}/api/admin/discussion-rules/",
                       headers=ADMIN_HEADERS,
-                      json={"silence_threshold_minutes": 0})
+                      json={"min_session_duration_minutes": 0})
     ok &= _log(r1.status_code == 422,
-               "Rules PUT silence_threshold_minutes=0 被拒绝", {"status": r1.status_code})
+               "Rules PUT min_session_duration_minutes=0 被拒绝", {"status": r1.status_code})
     # float 超出 0~1 范围
     r2 = requests.put(f"{BASE_URL}/api/admin/discussion-rules/",
                       headers=ADMIN_HEADERS,

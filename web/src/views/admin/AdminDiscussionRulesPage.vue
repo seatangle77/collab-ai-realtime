@@ -8,7 +8,6 @@ const loading = ref(false)
 const saving = ref(false)
 
 const form = reactive<AdminDiscussionRuleUpdate & { updated_at?: string }>({
-  silence_threshold_minutes: undefined,
   speaking_ratio_min: undefined,
   speaking_ratio_max: undefined,
   cosine_similarity_threshold: undefined,
@@ -53,7 +52,6 @@ function validateForm() {
   }
 
   const nonNegativeFields: Array<[string, number | undefined]> = [
-    ['静默阈值（分钟）', form.silence_threshold_minutes],
     ['群体静默阈值（秒）', form.group_silence_threshold_s],
     ['个人停滞比例', form.personal_stagnation_ratio],
     ['最短会话时长（分钟）', form.min_session_duration_minutes],
@@ -97,7 +95,6 @@ async function handleSave() {
   saving.value = true
   try {
     const payload: AdminDiscussionRuleUpdate = {
-      silence_threshold_minutes: form.silence_threshold_minutes,
       speaking_ratio_min: form.speaking_ratio_min,
       speaking_ratio_max: form.speaking_ratio_max,
       cosine_similarity_threshold: form.cosine_similarity_threshold,
@@ -153,11 +150,6 @@ onMounted(() => {
       </template>
       <el-form :model="form" label-width="200px">
         <el-row :gutter="24">
-          <el-col :span="12">
-            <el-form-item label="静默阈值（分钟）">
-              <el-input-number v-model="form.silence_threshold_minutes" :min="0" :precision="2" :step="0.01" style="width: 100%" />
-            </el-form-item>
-          </el-col>
           <el-col :span="12">
             <el-form-item label="群体静默阈值（秒）">
               <el-input-number v-model="form.group_silence_threshold_s" :min="0" :precision="2" :step="0.01" style="width: 100%" />

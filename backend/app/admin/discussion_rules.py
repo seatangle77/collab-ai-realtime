@@ -19,7 +19,6 @@ router = APIRouter(
 
 
 class DiscussionRulesOut(BaseModel):
-    silence_threshold_minutes: int
     speaking_ratio_min: float
     speaking_ratio_max: float
     cosine_similarity_threshold: float
@@ -31,7 +30,6 @@ class DiscussionRulesOut(BaseModel):
 
 
 class DiscussionRulesUpdate(BaseModel):
-    silence_threshold_minutes: int | None = Field(None, ge=1)
     speaking_ratio_min: float | None = Field(None, ge=0.0, le=1.0)
     speaking_ratio_max: float | None = Field(None, ge=0.0, le=1.0)
     cosine_similarity_threshold: float | None = Field(None, ge=0.0, le=1.0)
@@ -45,7 +43,7 @@ async def _get_rules(db: AsyncSession) -> DiscussionRulesOut:
     result = await db.execute(
         text(
             """
-            SELECT silence_threshold_minutes, speaking_ratio_min, speaking_ratio_max,
+            SELECT speaking_ratio_min, speaking_ratio_max,
                    cosine_similarity_threshold, min_session_duration_minutes,
                    push_interval_minutes, max_push_per_member,
                    analysis_enabled, updated_at
@@ -75,9 +73,6 @@ async def update_discussion_rules(
     sets: list[str] = []
     params: dict[str, Any] = {}
 
-    if payload.silence_threshold_minutes is not None:
-        sets.append("silence_threshold_minutes = :silence_threshold_minutes")
-        params["silence_threshold_minutes"] = payload.silence_threshold_minutes
     if payload.speaking_ratio_min is not None:
         sets.append("speaking_ratio_min = :speaking_ratio_min")
         params["speaking_ratio_min"] = payload.speaking_ratio_min
