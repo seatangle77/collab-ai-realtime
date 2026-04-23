@@ -63,18 +63,6 @@ def _create_state(session_id: str, state_type: str, **kwargs) -> Dict[str, Any]:
     return r.json()
 
 
-def _get_rules_response() -> requests.Response:
-    return requests.get(f"{BASE_URL}/api/admin/discussion-rules/", headers=ADMIN_HEADERS)
-
-
-def _load_rules_or_skip() -> Dict[str, Any] | None:
-    r = _get_rules_response()
-    if r.status_code != 200:
-        _log(True, "Rules 默认配置缺失，跳过规则相关场景", {"status": r.status_code, "body": r.text})
-        return None
-    return r.json()
-
-
 # ──────────────────────────────
 # B. Admin discussion-states
 # ──────────────────────────────
@@ -252,123 +240,6 @@ def scenario_ds_page_size_over_limit() -> bool:
     return _log(ok, "DS page_size=201 超限返回 422", {"status": r.status_code})
 
 
-# ──────────────────────────────
-# C. Admin discussion-rules
-# ──────────────────────────────
-
-def scenario_rules_no_token() -> bool:
-    r = requests.get(f"{BASE_URL}/api/admin/discussion-rules/")
-    ok = r.status_code == 403
-    return _log(ok, "Rules 无 token GET 返回 403", {"status": r.status_code})
-
-
-def scenario_rules_get_defaults() -> bool:
-    data = _load_rules_or_skip()
-    if data is None:
-        return True
-    required = ["speaking_ratio_min", "speaking_ratio_max",
-                "cosine_similarity_threshold", "min_session_duration_minutes",
-                "push_interval_minutes", "max_push_per_member",
-                "analysis_enabled", "updated_at"]
-    ok = all(f in data for f in required)
-    ok &= "silence_threshold_minutes" not in data
-    return _log(ok, "Rules GET 返回默认值，所有字段存在场景", data)
-
-
-def scenario_rules_put_single_field() -> bool:
-    # 先 GET 当前值
-    before = _load_rules_or_skip()
-    if before is None:
-        return True
-    new_val = not before["analysis_enabled"]
-    r = requests.put(f"{BASE_URL}/api/admin/discussion-rules/",
-                     headers=ADMIN_HEADERS,
-                     json={"analysis_enabled": new_val})
-    if r.status_code != 200:
-        return _log(False, "Rules PUT 单字段失败（期望 200）", r.text)
-    data = r.json()
-    ok = data["analysis_enabled"] == new_val
-    # 其他字段不变
-    ok &= data["speaking_ratio_min"] == before["speaking_ratio_min"]
-    return _log(ok, "Rules PUT 单字段更新，其他字段不变场景", data)
-
-
-def scenario_rules_put_all_fields() -> bool:
-    if _load_rules_or_skip() is None:
-        return True
-    new_rules = {
-        "speaking_ratio_min": 0.12,
-        "speaking_ratio_max": 0.55,
-        "cosine_similarity_threshold": 0.35,
-        "min_session_duration_minutes": 8,
-        "push_interval_minutes": 15,
-        "max_push_per_member": 5,
-        "analysis_enabled": True,
-    }
-    r = requests.put(f"{BASE_URL}/api/admin/discussion-rules/",
-                     headers=ADMIN_HEADERS, json=new_rules)
-    if r.status_code != 200:
-        return _log(False, "Rules PUT 全字段失败（期望 200）", r.text)
-    data = r.json()
-    ok = all(data.get(k) == v for k, v in new_rules.items())
-    ok &= data.get("updated_at") is not None
-    return _log(ok, "Rules PUT 全字段更新场景", data)
-
-
-def scenario_rules_put_empty_body() -> bool:
-    if _load_rules_or_skip() is None:
-        return True
-    r = requests.put(f"{BASE_URL}/api/admin/discussion-rules/",
-                     headers=ADMIN_HEADERS, json={})
-    ok = r.status_code == 400
-    return _log(ok, "Rules PUT 空 body 返回 400", {"status": r.status_code})
-
-
-def scenario_rules_put_persist() -> bool:
-    """GET → PUT → GET，验证持久化。"""
-    if _load_rules_or_skip() is None:
-        return True
-    val = 0.23
-    requests.put(f"{BASE_URL}/api/admin/discussion-rules/",
-                 headers=ADMIN_HEADERS,
-                 json={"speaking_ratio_min": val}).raise_for_status()
-    r = requests.get(f"{BASE_URL}/api/admin/discussion-rules/", headers=ADMIN_HEADERS)
-    r.raise_for_status()
-    ok = r.json().get("speaking_ratio_min") == val
-    return _log(ok, "Rules PUT 后 GET 持久化验证场景", {"value": r.json().get("speaking_ratio_min")})
-
-
-def scenario_rules_put_invalid_values() -> bool:
-    if _load_rules_or_skip() is None:
-        return True
-    ok = True
-    r1 = requests.put(f"{BASE_URL}/api/admin/discussion-rules/",
-                      headers=ADMIN_HEADERS,
-                      json={"min_session_duration_minutes": 0})
-    ok &= _log(r1.status_code == 422,
-               "Rules PUT min_session_duration_minutes=0 被拒绝", {"status": r1.status_code})
-    # float 超出 0~1 范围
-    r2 = requests.put(f"{BASE_URL}/api/admin/discussion-rules/",
-                      headers=ADMIN_HEADERS,
-                      json={"speaking_ratio_min": 1.5})
-    ok &= _log(r2.status_code == 422,
-               "Rules PUT speaking_ratio_min=1.5 被拒绝", {"status": r2.status_code})
-    return ok
-
-
-def scenario_rules_toggle_analysis_enabled() -> bool:
-    """analysis_enabled 反复切换 true → false → true。"""
-    if _load_rules_or_skip() is None:
-        return True
-    ok = True
-    for expected in [True, False, True]:
-        r = requests.put(f"{BASE_URL}/api/admin/discussion-rules/",
-                         headers=ADMIN_HEADERS,
-                         json={"analysis_enabled": expected})
-        ok &= r.status_code == 200 and r.json().get("analysis_enabled") == expected
-    return _log(ok, "Rules analysis_enabled 反复切换场景")
-
-
 def run_all() -> bool:
     print("=== 开始 Admin Discussion 管理端接口测试 ===")
     ok = True
@@ -388,16 +259,6 @@ def run_all() -> bool:
     ok &= scenario_ds_filter_push_sent()
     ok &= scenario_ds_filter_time_range()
     ok &= scenario_ds_page_size_over_limit()
-
-    print("\n--- C. Admin discussion-rules ---")
-    ok &= scenario_rules_no_token()
-    ok &= scenario_rules_get_defaults()
-    ok &= scenario_rules_put_single_field()
-    ok &= scenario_rules_put_all_fields()
-    ok &= scenario_rules_put_empty_body()
-    ok &= scenario_rules_put_persist()
-    ok &= scenario_rules_put_invalid_values()
-    ok &= scenario_rules_toggle_analysis_enabled()
 
     print("\n=== Admin Discussion 测试结果: {} ===".format("全部通过 ✅" if ok else "有失败 ❌"))
     return ok

@@ -104,11 +104,6 @@ const routes: RouteRecordRaw[] = [
         component: () => import('../views/admin/AdminChatSessionsPage.vue'),
       },
       {
-        path: 'discussion-rules',
-        name: 'AdminDiscussionRules',
-        component: () => import('../views/admin/AdminDiscussionRulesPage.vue'),
-      },
-      {
         path: 'discussion-states',
         name: 'AdminDiscussionStates',
         component: () => import('../views/admin/AdminDiscussionStatesPage.vue'),

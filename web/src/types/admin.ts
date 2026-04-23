@@ -104,48 +104,6 @@ export interface AdminVoiceProfileDetail {
   primary_group_name?: string | null
 }
 
-// ── 讨论规则配置 ──────────────────────────────────────────────────────
-export interface AdminDiscussionRule {
-  speaking_ratio_min: number
-  speaking_ratio_max: number
-  cosine_similarity_threshold: number
-  min_session_duration_minutes: number
-  push_interval_minutes: number
-  max_push_per_member: number
-  analysis_enabled: boolean
-  updated_at: string
-  personal_stagnation_ratio: number | null
-  group_silence_threshold_s: number | null
-  srep_threshold: number | null
-  ttr_threshold: number | null
-  arg_density_threshold: number | null
-  info_gain_threshold: number | null
-  skw_threshold_low: number | null
-  skw_threshold_high: number | null
-  same_state_cooldown_s: number | null
-  cross_state_cooldown_s: number | null
-}
-
-export interface AdminDiscussionRuleUpdate {
-  speaking_ratio_min?: number
-  speaking_ratio_max?: number
-  cosine_similarity_threshold?: number
-  min_session_duration_minutes?: number
-  push_interval_minutes?: number
-  max_push_per_member?: number
-  analysis_enabled?: boolean
-  personal_stagnation_ratio?: number
-  group_silence_threshold_s?: number
-  srep_threshold?: number
-  ttr_threshold?: number
-  arg_density_threshold?: number
-  info_gain_threshold?: number
-  skw_threshold_low?: number
-  skw_threshold_high?: number
-  same_state_cooldown_s?: number
-  cross_state_cooldown_s?: number
-}
-
 // ── 讨论状态 ─────────────────────────────────────────────────────────
 export interface DiscussionStateAnchor {
   transcript_id: string

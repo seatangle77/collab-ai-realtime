@@ -20,7 +20,6 @@ from .admin.chat_sessions import router as admin_chat_sessions_router
 from .admin.voice_profiles import router as admin_voice_profiles_router
 from .admin.transcripts import router as admin_transcripts_router
 from .admin.discussion_states import router as admin_discussion_states_router
-from .admin.discussion_rules import router as admin_discussion_rules_router
 from .push_logs import router as push_logs_router
 from .admin.push_logs import router as admin_push_logs_router
 from .ws_sessions import router as ws_sessions_router
@@ -81,7 +80,6 @@ app.include_router(admin_chat_sessions_router)
 app.include_router(admin_voice_profiles_router)
 app.include_router(admin_transcripts_router)
 app.include_router(admin_discussion_states_router)
-app.include_router(admin_discussion_rules_router)
 app.include_router(push_logs_router)
 app.include_router(admin_push_logs_router)
 app.include_router(admin_push_queue_router)

@@ -34,12 +34,6 @@ const GROUPS = [
       { label: '推送日志', path: '/admin/push-logs', heading: '推送日志' },
     ],
   },
-  {
-    title: '系统配置',
-    items: [
-      { label: '讨论规则', path: '/admin/discussion-rules', heading: '讨论规则配置' },
-    ],
-  },
 ]
 
 test.describe.serial('Admin 导航菜单重构', () => {
@@ -47,7 +41,7 @@ test.describe.serial('Admin 导航菜单重构', () => {
     await loginAsAdmin(page)
   })
 
-  test('1. 左侧显示 4 个分组标题与 18 个菜单项', async ({ page }) => {
+  test('1. 左侧显示 3 个分组标题与 17 个菜单项', async ({ page }) => {
     const totalItems = GROUPS.reduce((sum, group) => sum + group.items.length, 0)
 
     for (const group of GROUPS) {

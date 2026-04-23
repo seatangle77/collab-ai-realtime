@@ -49,12 +49,6 @@ const menuGroups = computed<AdminMenuGroup[]>(() => [
       { path: '/admin/push-logs', label: '推送日志' },
     ],
   },
-  {
-    label: '系统配置',
-    items: [
-      { path: '/admin/discussion-rules', label: '讨论规则' },
-    ],
-  },
 ])
 
 const collapsed = ref(false)
