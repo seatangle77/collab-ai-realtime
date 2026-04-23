@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Any, Mapping
 
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .admin.deps import require_admin
 from .auth import get_current_user
 from .db import get_db
+from .jpush_client import send_push_to_registration_id
 from .ws_manager import ws_manager
 from .ws_protocol import build_group_notification, build_push_notification
 
@@ -18,6 +20,19 @@ router = APIRouter(prefix="/api", tags=["push-logs"])
 
 VALID_PUSH_CHANNELS = {"web", "app", "glasses", "info_gap"}
 VALID_DELIVERY_STATUSES = {"pending", "delivered", "failed"}
+
+
+async def _jpush_safe(device_token: str, content: str, title: str) -> None:
+    """JPush 推送，失败静默处理，不抛出异常。"""
+    try:
+        await asyncio.to_thread(
+            send_push_to_registration_id,
+            device_token,
+            content,
+            title,
+        )
+    except Exception:
+        pass
 
 
 class PushNotifyIn(BaseModel):
@@ -130,6 +145,16 @@ async def push_notify(
     )
     await db.commit()
 
+    # 4. JPush：目标用户有 device_token 时额外推送，离线也通知
+    token_result = await db.execute(
+        text("SELECT device_token FROM users_info WHERE id = :uid"),
+        {"uid": body.target_user_id},
+    )
+    token_row = token_result.mappings().first()
+    device_token = token_row["device_token"] if token_row else None
+    if device_token:
+        await _jpush_safe(device_token, body.content, "AI 讨论建议")
+
     return {"id": log_id, "delivery_status": new_status, "ws_sent": sent}
 
 
@@ -203,6 +228,27 @@ async def group_notify(
             {"s": new_status, "id": row["id"]},
         )
     await db.commit()
+
+    # 4. JPush：群组全部 active 成员并发推送，离线也通知
+    member_token_result = await db.execute(
+        text(
+            """
+            SELECT u.device_token
+            FROM group_memberships gm
+            JOIN users_info u ON u.id = gm.user_id
+            JOIN chat_sessions cs ON cs.group_id = gm.group_id
+            WHERE cs.id = :session_id
+              AND gm.status = 'active'
+              AND u.device_token IS NOT NULL
+            """
+        ),
+        {"session_id": session_id},
+    )
+    device_tokens = [row["device_token"] for row in member_token_result.mappings().all()]
+    if device_tokens:
+        await asyncio.gather(
+            *[_jpush_safe(token, body.content, "AI 讨论建议") for token in device_tokens]
+        )
 
     return {
         "id": inserted_logs[0]["id"],
