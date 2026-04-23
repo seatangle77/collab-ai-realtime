@@ -34,7 +34,12 @@ export interface PipelineResult {
 }
 
 /**
- * 完整感知层 Pipeline（每 120s 触发一次）
+ * 完整感知层 Pipeline。
+ *
+ * 当前由上层成员分析链按文档节奏触发：
+ * 1. 每 60s 触发一次
+ * 2. 本层处理最近 60s 的成员级窗口数据
+ * 3. 输出结果供后续 120s 组级深度分析使用
  *
  * 执行顺序：
  * 1. speaking-ratio / silence / ttr / arg-density / srep 并行执行（互不依赖）

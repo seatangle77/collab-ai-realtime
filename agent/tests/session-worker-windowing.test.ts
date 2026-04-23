@@ -1,7 +1,8 @@
 jest.mock('../src/config', () => ({
   config: {
     agent: {
-      shortIntervalMs: 60_000,
+      silenceIntervalMs: 30_000,
+      analysisIntervalMs: 60_000,
       longIntervalMs: 120_000,
       sessionPollMs: 15_000,
     },
@@ -50,6 +51,9 @@ import { SessionWorker } from '../src/session-worker';
 import * as queries from '../src/db/queries';
 import { runPerceptionPipeline } from '../src/skills/run-perception-pipeline';
 import { runActionLayer } from '../src/skills/run-action-layer';
+import { runSummary } from '../src/skills/run-summary';
+import { runPushDispatcher } from '../src/skills/run-push-dispatcher';
+import * as nlpClient from '../src/http/nlp-client';
 
 const mockGetSessionMembers = queries.getSessionMembers as jest.MockedFunction<typeof queries.getSessionMembers>;
 const mockGetLastSummary = queries.getLastSummary as jest.MockedFunction<typeof queries.getLastSummary>;
@@ -57,6 +61,11 @@ const mockGetTranscriptsInWindowPreferCache =
   queries.getTranscriptsInWindowPreferCache as jest.MockedFunction<typeof queries.getTranscriptsInWindowPreferCache>;
 const mockRunPerceptionPipeline = runPerceptionPipeline as jest.MockedFunction<typeof runPerceptionPipeline>;
 const mockRunActionLayer = runActionLayer as jest.MockedFunction<typeof runActionLayer>;
+const mockRunSummary = runSummary as jest.MockedFunction<typeof runSummary>;
+const mockRunPushDispatcher = runPushDispatcher as jest.MockedFunction<typeof runPushDispatcher>;
+const mockGetLastSpeakEndGlobal = queries.getLastSpeakEndGlobal as jest.MockedFunction<typeof queries.getLastSpeakEndGlobal>;
+const mockGenerateGroupSilence = nlpClient.generateGroupSilence as jest.MockedFunction<typeof nlpClient.generateGroupSilence>;
+const mockNotifyGroupSilence = nlpClient.notifyGroupSilence as jest.MockedFunction<typeof nlpClient.notifyGroupSilence>;
 
 const PERCEPTION_RESULT = {
   speakingRatios: { u1: 0.1 },
@@ -75,9 +84,11 @@ const PERCEPTION_RESULT = {
 
 describe('SessionWorker windowing', () => {
   beforeEach(() => {
+    jest.useRealTimers();
     jest.resetAllMocks();
     mockGetSessionMembers.mockResolvedValue([{ user_id: 'u1' }] as never);
     mockGetLastSummary.mockResolvedValue({ content: '摘要' } as never);
+    mockGetLastSpeakEndGlobal.mockResolvedValue(null as never);
     mockGetTranscriptsInWindowPreferCache.mockResolvedValue([
       {
         transcript_id: 't1',
@@ -88,6 +99,10 @@ describe('SessionWorker windowing', () => {
     ] as never);
     mockRunPerceptionPipeline.mockResolvedValue(PERCEPTION_RESULT as never);
     mockRunActionLayer.mockResolvedValue(undefined);
+    mockRunSummary.mockResolvedValue('摘要输出');
+    mockRunPushDispatcher.mockResolvedValue(undefined);
+    mockGenerateGroupSilence.mockResolvedValue('破冰话题');
+    mockNotifyGroupSilence.mockResolvedValue(true);
   });
 
   it('稳定阶段使用 60 秒成员级窗口和 120 秒组级窗口', async () => {
@@ -140,5 +155,45 @@ describe('SessionWorker windowing', () => {
         windowStart: startedAt,
       }),
     );
+  });
+
+  it('群体沉默检测、成员分析和摘要使用独立调度节奏', async () => {
+    jest.useFakeTimers();
+    const startedAt = new Date('2026-04-22T10:00:00Z');
+    jest.setSystemTime(startedAt);
+
+    const worker = new SessionWorker('s1', startedAt);
+    const checkGroupSilenceSpy = jest
+      .spyOn(worker as never, 'checkGroupSilence' as never)
+      .mockResolvedValue(undefined as never);
+    const runAnalysisPipelineSpy = jest
+      .spyOn(worker as never, 'runAnalysisPipeline' as never)
+      .mockResolvedValue(undefined as never);
+    const runSummaryPipelineSpy = jest
+      .spyOn(worker as never, 'runSummaryPipeline' as never)
+      .mockResolvedValue(undefined as never);
+
+    worker.start();
+
+    await jest.advanceTimersByTimeAsync(30_000);
+    expect(checkGroupSilenceSpy).toHaveBeenCalledTimes(1);
+    expect(runAnalysisPipelineSpy).toHaveBeenCalledTimes(0);
+    expect(runSummaryPipelineSpy).toHaveBeenCalledTimes(0);
+    expect(checkGroupSilenceSpy).toHaveBeenLastCalledWith(new Date('2026-04-22T10:00:30Z'));
+
+    await jest.advanceTimersByTimeAsync(30_000);
+    expect(checkGroupSilenceSpy).toHaveBeenCalledTimes(2);
+    expect(runAnalysisPipelineSpy).toHaveBeenCalledTimes(1);
+    expect(runSummaryPipelineSpy).toHaveBeenCalledTimes(0);
+    expect(runAnalysisPipelineSpy).toHaveBeenLastCalledWith(new Date('2026-04-22T10:01:00Z'));
+
+    await jest.advanceTimersByTimeAsync(45_000);
+    expect(checkGroupSilenceSpy).toHaveBeenCalledTimes(3);
+    expect(runAnalysisPipelineSpy).toHaveBeenCalledTimes(1);
+    expect(runSummaryPipelineSpy).toHaveBeenCalledTimes(1);
+    expect(runSummaryPipelineSpy).toHaveBeenLastCalledWith(new Date('2026-04-22T10:01:45Z'));
+
+    worker.stop();
+    jest.useRealTimers();
   });
 });

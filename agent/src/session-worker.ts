@@ -23,7 +23,7 @@ function buildRunId(kind: 'summary' | 'reasoning', sessionId: string, windowStar
 export class SessionWorker {
   private readonly sessionId: string;
   private readonly sessionStartedAt: Date;
-  private shortTimer: ReturnType<typeof setTimeout> | null = null;
+  private silenceTimer: ReturnType<typeof setTimeout> | null = null;
   private analysisTimer: ReturnType<typeof setTimeout> | null = null;
   private summaryTimer: ReturnType<typeof setTimeout> | null = null;
   private dispatchTimer: ReturnType<typeof setInterval> | null = null;
@@ -51,31 +51,46 @@ export class SessionWorker {
     this.startDispatchLoop();
   }
 
-  private scheduleSilenceTimer(): void {
+  private scheduleSilenceTimer(nextScheduledFor?: Date): void {
     if (!this.running) return;
-    const scheduledFor = this.nextAlignedAt(config.agent.shortIntervalMs, config.agent.shortIntervalMs);
-    this.shortTimer = setTimeout(() => {
+    const scheduledFor = nextScheduledFor
+      ?? this.nextAlignedAt(config.agent.silenceIntervalMs, config.agent.silenceIntervalMs);
+    this.silenceTimer = setTimeout(() => {
       void this.checkGroupSilence(scheduledFor)
-        .finally(() => this.scheduleSilenceTimer());
+        .finally(() => {
+          this.scheduleSilenceTimer(
+            new Date(scheduledFor.getTime() + config.agent.silenceIntervalMs),
+          );
+        });
     }, Math.max(0, scheduledFor.getTime() - Date.now()));
   }
 
-  private scheduleAnalysisTimer(): void {
+  private scheduleAnalysisTimer(nextScheduledFor?: Date): void {
     if (!this.running) return;
-    const scheduledFor = this.nextAlignedAt(config.agent.shortIntervalMs, config.agent.shortIntervalMs);
+    const scheduledFor = nextScheduledFor
+      ?? this.nextAlignedAt(config.agent.analysisIntervalMs, config.agent.analysisIntervalMs);
     this.analysisTimer = setTimeout(() => {
       void this.runAnalysisPipeline(scheduledFor)
-        .finally(() => this.scheduleAnalysisTimer());
+        .finally(() => {
+          this.scheduleAnalysisTimer(
+            new Date(scheduledFor.getTime() + config.agent.analysisIntervalMs),
+          );
+        });
     }, Math.max(0, scheduledFor.getTime() - Date.now()));
   }
 
-  private scheduleSummaryTimer(): void {
+  private scheduleSummaryTimer(nextScheduledFor?: Date): void {
     if (!this.running) return;
     const firstOffset = Math.max(0, config.agent.longIntervalMs - SessionWorker.SUMMARY_LEAD_MS);
-    const scheduledFor = this.nextAlignedAt(firstOffset, config.agent.longIntervalMs);
+    const scheduledFor = nextScheduledFor
+      ?? this.nextAlignedAt(firstOffset, config.agent.longIntervalMs);
     this.summaryTimer = setTimeout(() => {
       void this.runSummaryPipeline(scheduledFor)
-        .finally(() => this.scheduleSummaryTimer());
+        .finally(() => {
+          this.scheduleSummaryTimer(
+            new Date(scheduledFor.getTime() + config.agent.longIntervalMs),
+          );
+        });
     }, Math.max(0, scheduledFor.getTime() - Date.now()));
   }
 
@@ -95,9 +110,9 @@ export class SessionWorker {
     if (!this.running) return;
     this.running = false;
 
-    if (this.shortTimer !== null) {
-      clearTimeout(this.shortTimer);
-      this.shortTimer = null;
+    if (this.silenceTimer !== null) {
+      clearTimeout(this.silenceTimer);
+      this.silenceTimer = null;
     }
     if (this.analysisTimer !== null) {
       clearTimeout(this.analysisTimer);
@@ -128,7 +143,7 @@ export class SessionWorker {
     }, SessionWorker.DISPATCH_INTERVAL_MS);
   }
 
-  // ── 30s：群体沉默检测 ────────────────────────────────────────────────────────
+  // ── 群体沉默检测：默认每 30s 检查一次 ───────────────────────────────────────────
 
   private async checkGroupSilence(scheduledFor: Date): Promise<void> {
     try {
@@ -219,7 +234,7 @@ export class SessionWorker {
     }
   }
 
-  // ── 120s：完整感知层 + 行动层 pipeline ──────────────────────────────────────
+  // ── 成员分析链：默认每 60s 触发一次；成员窗 60s，组级深度分析窗 120s ─────────────
 
   private async runAnalysisPipeline(scheduledFor: Date): Promise<void> {
     try {
@@ -228,8 +243,8 @@ export class SessionWorker {
       if (memberIds.length === 0) return;
 
       const windowEnd = scheduledFor;
-      // 短窗口（60s）：感知层 + 论证判定
-      const shortWindowStart = new Date(windowEnd.getTime() - config.agent.shortIntervalMs);
+      // 成员窗口（60s）：基础指标 + 论证结构判定
+      const shortWindowStart = new Date(windowEnd.getTime() - config.agent.analysisIntervalMs);
       // 长窗口（120s）：深度分析，会话前两分钟内用 sessionStartedAt 兜底
       const longWindowStart = new Date(
         Math.max(this.sessionStartedAt.getTime(), windowEnd.getTime() - config.agent.longIntervalMs),
@@ -246,7 +261,7 @@ export class SessionWorker {
         window_end: windowEnd.toISOString(),
       });
 
-      // Step1：感知层（含论证结构批量判定，60s 窗口，同步 await）
+      // Step1：感知层（含论证结构批量判定，成员窗口 60s，同步 await）
       const perceptionResult = await runPerceptionPipeline({
         sessionId: this.sessionId,
         memberIds,
@@ -256,7 +271,7 @@ export class SessionWorker {
 
       if (!perceptionResult) return;
 
-      // Step2：读当前摘要与本轮发言（120s 窗口）
+      // Step2：读当前摘要与本轮发言（组级窗口 120s）
       const summaryRow = await getLastSummary(this.sessionId);
       const summaryText = summaryRow?.content ?? '';
       const transcripts = await getTranscriptsInWindowPreferCache(
@@ -265,7 +280,7 @@ export class SessionWorker {
         windowEnd,
       );
 
-      // Step3：行动层（heavy_model 单次大JSON调用，120s 窗口）
+      // Step3：行动层（heavy_model 单次大 JSON 调用，组级窗口 120s）
       void runActionLayer({
         sessionId: this.sessionId,
         perceptionResult,

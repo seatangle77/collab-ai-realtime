@@ -17,6 +17,9 @@ const mockUpdateKeywordSkwBatch = queries.updateKeywordSkwBatch as jest.MockedFu
 const mockDeleteKeywordSkwByKeyword = queries.deleteKeywordSkwByKeyword as jest.MockedFunction<
   typeof queries.deleteKeywordSkwByKeyword
 >;
+const mockWriteKeywordRecallAnalysis = queries.writeKeywordRecallAnalysis as jest.MockedFunction<
+  typeof queries.writeKeywordRecallAnalysis
+>;
 const mockWriteInfoGapButton = queries.writeInfoGapButton as jest.MockedFunction<
   typeof queries.writeInfoGapButton
 >;
@@ -75,6 +78,7 @@ describe('computeSkw', () => {
     mockWriteKeywordSkw.mockResolvedValue(undefined);
     mockUpdateKeywordSkwBatch.mockResolvedValue(undefined);
     mockDeleteKeywordSkwByKeyword.mockResolvedValue(undefined);
+    mockWriteKeywordRecallAnalysis.mockResolvedValue(undefined);
     mockWriteInfoGapButton.mockResolvedValue('igb_mock');
     mockHasPendingInfoGapKeyword.mockResolvedValue(false);
     mockHasClickedInfoGapKeywordInRecentWindows.mockResolvedValue(false);
