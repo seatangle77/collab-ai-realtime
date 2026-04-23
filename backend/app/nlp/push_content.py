@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 推送文案生成模块
-- info_gap               ≤ 40字，用户点击后触发，使用 reasoning_model（heavy）
+- info_gap               ≤ 40字，用户点击后触发，使用 fast_model
 - generate_group_silence  ≤ 30字，实时沉默检测触发，使用 fast_model
 - analyze_members_batch  全员分析，每2分钟触发，使用 reasoning_model（heavy），返回大JSON
 """
@@ -20,33 +20,8 @@ logger = logging.getLogger(__name__)
 # ── Prompt 模板 ───────────────────────────────────────────────────────────────
 
 _PROMPTS: dict[str, str] = {
-    "group_silence": (
-        "你是一个温暖积极的讨论伙伴。以下是当前小组讨论的摘要和最近的发言记录。\n"
-        "讨论摘要：{summary}\n"
-        "最近发言记录：{transcripts}\n"
-        "检测数据：全组已持续沉默{silence_s}秒，超过30秒，说明讨论陷入僵局。\n"
-        "请根据当前讨论摘要，找出一个全组尚未覆盖的讨论方向，用轻松自然的语气生成1条话题提示，"
-        "帮助全组重新打开讨论。要求：语气轻松自然，像朋友抛出话题一样，不超过30字，直接给出话题，不要解释原因。"
-    ),
-    "low_participation": (
-        "你是一个温暖积极的讨论伙伴。以下是当前小组讨论的摘要和最近的发言记录。\n"
-        "讨论摘要：{summary}\n"
-        "最近发言记录：{transcripts}\n"
-        "检测数据：成员{username}过去120秒发言时长占比为{speaking_ratio}%，低于15%，"
-        "说明该成员参与较少，判定陷入思路停滞。\n"
-        "请根据当前讨论内容，找出一个尚未被成员{username}提及的有趣角度或观点，用鼓励、自然的语气生成1条简短提示，"
-        "激发该成员加入讨论。要求：语气友好亲切，像朋友提醒一样，不超过30字，直接给出观点，不要解释原因。"
-    ),
-    "shallow_discussion": (
-        "你是一个温暖积极的讨论伙伴。以下是当前小组讨论的摘要和最近的发言记录。\n"
-        "讨论摘要：{summary}\n"
-        "最近发言记录：{transcripts}\n"
-        "检测数据：成员{username}过去120秒发言触发以下指标：{triggered_metrics}，说明该成员发言深度不足。\n"
-        "请根据该成员的具体发言内容，找出一个可以深化的论点或逻辑缺口，用鼓励、好奇的语气生成1个追问，"
-        "引导该成员进一步展开思考。要求：语气像朋友追问一样好奇自然，不超过30字，直接给出问题，不要解释原因。"
-    ),
     "info_gap": (
-        "你是一个温暖积极的讨论伙伴。以下是当前小组讨论的摘要和最近的发言记录。\n"
+        "以下是当前小组讨论的摘要和最近的发言记录。\n"
         "讨论摘要：{summary}\n"
         "最近发言记录：{transcripts}\n"
         "检测数据：基于讨论语境判断成员{username}对关键词\"{keyword}\"存在理解缺口"
@@ -137,8 +112,8 @@ async def generate_push_content(
 # ── group_silence：fast_model 生成一句破冰话题 ────────────────────────────────
 
 _GROUP_SILENCE_SYSTEM = (
-    "你是一个温暖积极的讨论伙伴。根据当前讨论摘要和最近发言，"
-    "生成一句自然友好的话题提示，帮助全组重新打开讨论。"
+    "你是一个温暖积极的讨论伙伴。"
+    "输出一句自然友好的破冰话题，帮助全组重新打开讨论。"
     "话题本身要有追问性质，让成员自然地说出理由或举例，而不只是表态。"
     "不超过30字，直接给出话题，不要任何前缀或解释。"
 )
@@ -146,7 +121,8 @@ _GROUP_SILENCE_SYSTEM = (
 _GROUP_SILENCE_TEMPLATE = (
     "讨论摘要：{summary}\n"
     "最近发言记录：{transcripts}\n"
-    "全组已沉默 {silence_s} 秒，请生成一句话题提示帮助全组重新开口，并自然引导成员说出自己的理由或具体例子。"
+    "全组已沉默 {silence_s} 秒。\n"
+    "请基于以上上下文输出一句话题提示。"
 )
 
 
@@ -187,30 +163,32 @@ async def generate_group_silence(
 _ANALYZE_MEMBERS_SYSTEM = (
     "你是一个小组讨论分析专家。根据讨论摘要、发言记录和各成员的量化指标与论证结构判定结果，"
     "判断每位成员是否需要干预提示，并生成自然友好的推送文案（≤30字）。\n\n"
-    "challenge_type 只能是：\n"
-    "  stagnation — 参与不足、思路停滞或新增贡献不足。重点信号：speaking_ratio<0.15 或 info_gain<0.3。\n"
-    "               干预目标：帮助成员重新进入讨论。文案风格：低门槛、鼓励式、重新开口导向。\n"
-    "  shallow    — 阐述浅薄、表达浅层、结构不足或展开不充分。重点信号：ttr<0.4 或 arg_density<0.02 或 srep>0.65。\n"
-    "               论证结构是判断 shallow 的核心输入，规则如下：\n"
-    "               · reasoning_status=false 且 evidence_status=false，且本轮发言量不低 → 优先判断是否需要深化型干预\n"
-    "               · reasoning_status=true  且 evidence_status=false → 优先引导补充例子、数据或事实依据\n"
-    "               · reasoning_status=false 且 evidence_status=true  → 优先引导补充原因、逻辑或判断链条\n"
-    "               · reasoning_status=true  且 evidence_status=true  → 视为结构较完整，再结合其他指标判断是否仍需干预\n"
-    "               reasoning_source / evidence_source 是模型对该成员表达特征的文字说明，可作为生成 analysis 和 content 的参考。\n"
-    "               干预目标：帮助成员补充理由、补充依据或继续展开。文案风格：追问式、深化式、展开导向。\n"
-    "  none       — 不需要干预\n\n"
-    "anchor 必须引用 transcripts 中真实存在的一条（使用该条的 transcript_id），不允许编造。\n"
-    "严格按 JSON 返回，不输出任何解释或 markdown。"
+    "【分类规则】\n"
+    "stagnation — 参与不足、思路停滞或新增贡献不足。重点信号：speaking_ratio<0.15 或 info_gain<0.3。\n"
+    "             干预目标：帮助成员重新进入讨论。文案风格：低门槛、鼓励式、重新开口导向。\n\n"
+    "shallow    — 阐述浅薄、表达浅层、结构不足或展开不充分。重点信号：ttr<0.4 或 arg_density<0.02 或 srep>0.65。\n"
+    "             论证结构判断规则：\n"
+    "             · reasoning=false + evidence=false，且发言量不低 → 深化型干预\n"
+    "             · reasoning=true  + evidence=false → 引导补充例子、数据或事实依据\n"
+    "             · reasoning=false + evidence=true  → 引导补充原因、逻辑或判断链条\n"
+    "             · reasoning=true  + evidence=true  → 结构较完整，结合其他指标再判断\n"
+    "             reasoning_source / evidence_source 可作为生成 analysis 和 content 的参考。\n"
+    "             干预目标：帮助成员补充理由或依据。文案风格：追问式、深化式、展开导向。\n\n"
+    "none       — 不需要干预\n\n"
+    "【重要：anchor 约束】\n"
+    "anchor 必须引用 transcripts 中真实存在的一条：transcript_id、speaker_id、speaker_name、text 均须与原文一致，不允许编造任何字段。\n"
+    "如无合适发言可引用，设为 null。\n\n"
+    "【输出格式】\n"
+    "严格返回 JSON，不输出任何解释或 markdown：\n"
+    '{"members": [{"user_id": "...", "challenge_type": "stagnation|shallow|none", '
+    '"needs_prompt": true/false, "analysis": "一句中文分析", "content": "推送文案（≤30字）", '
+    '"anchor": {"transcript_id": "...", "speaker_id": "...", "speaker_name": "...", "text": "..."} 或 null}]}'
 )
 
 _ANALYZE_MEMBERS_TEMPLATE = (
     "讨论摘要：{summary}\n\n"
     "最近发言记录：\n{transcripts}\n\n"
-    "各成员指标与论证结构判定：\n{members_metrics}\n\n"
-    "请对每位成员输出分析，返回格式：\n"
-    '{"members": [{"user_id": "...", "challenge_type": "stagnation|shallow|none", '
-    '"needs_prompt": true/false, "analysis": "一句中文分析", "content": "推送文案（≤30字）", '
-    '"anchor": {"transcript_id": "...", "speaker_id": "...", "speaker_name": "...", "text": "..."} 或 null}]}'
+    "各成员指标与论证结构判定：\n{members_metrics}"
 )
 
 
