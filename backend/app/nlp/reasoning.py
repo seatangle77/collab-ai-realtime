@@ -53,8 +53,8 @@ class MemberReasoningInput(TypedDict):
 
 class MemberReasoningResult(TypedDict):
     user_id: str
-    reasoning_status: bool
-    evidence_status: bool
+    reasoning_status: bool | None
+    evidence_status: bool | None
     reasoning_source: str
     evidence_source: str
 
@@ -83,8 +83,8 @@ _BATCH_USER_TEMPLATE = (
 def _make_fallback(user_id: str, reason: str = "无发言内容") -> MemberReasoningResult:
     return MemberReasoningResult(
         user_id=user_id,
-        reasoning_status=False,
-        evidence_status=False,
+        reasoning_status=None,
+        evidence_status=None,
         reasoning_source=reason,
         evidence_source=reason,
     )
@@ -94,7 +94,7 @@ def batch_has_reasoning(members: list[MemberReasoningInput]) -> list[MemberReaso
     """
     全员批量论证结构判定，一次 LLM 调用返回逐成员四字段结果。
     无发言的成员直接返回降级结果，不进入 LLM。
-    失败时每个成员均返回 reasoning_status=False 的降级结果。
+    失败时每个成员均返回 reasoning_status=None 的降级结果。
     """
     if not members:
         return []
@@ -155,8 +155,8 @@ def batch_has_reasoning(members: list[MemberReasoningInput]) -> list[MemberReaso
             continue
         results.append(MemberReasoningResult(
             user_id=m["user_id"],
-            reasoning_status=bool(item.get("reasoning_status", False)),
-            evidence_status=bool(item.get("evidence_status", False)),
+            reasoning_status=item.get("reasoning_status") if isinstance(item.get("reasoning_status"), bool) else None,
+            evidence_status=item.get("evidence_status") if isinstance(item.get("evidence_status"), bool) else None,
             reasoning_source=str(item.get("reasoning_source") or "").strip() or "无说明",
             evidence_source=str(item.get("evidence_source") or "").strip() or "无说明",
         ))

@@ -513,8 +513,8 @@ def test_reasoning_batch_edge_empty_text() -> None:
     member = d["members"][0]
     ok = (
         member["user_id"] == "u1"
-        and isinstance(member["reasoning_status"], bool)
-        and isinstance(member["evidence_status"], bool)
+        and member["reasoning_status"] is None
+        and member["evidence_status"] is None
         and isinstance(member["reasoning_source"], str)
         and isinstance(member["evidence_source"], str)
     )

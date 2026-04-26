@@ -41,8 +41,8 @@ export interface ReasoningResult {
 
 export interface MemberReasoningResult {
   user_id: string;
-  reasoning_status: boolean;
-  evidence_status: boolean;
+  reasoning_status: boolean | null;
+  evidence_status: boolean | null;
   reasoning_source: string;
   evidence_source: string;
 }

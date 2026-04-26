@@ -62,8 +62,16 @@ export async function computeHasReasoning(
     reasoningSourceMap[r.user_id] = r.reasoning_source;
     evidenceSourceMap[r.user_id] = r.evidence_source;
 
-    const rsn = r.reasoning_status ? '✅ 含论证' : '❌ 无论证';
-    const evi = r.evidence_status ? '✅ 有证据' : '❌ 无证据';
+    const rsn = r.reasoning_status === null
+      ? '未知'
+      : r.reasoning_status
+        ? '✅ 含论证'
+        : '❌ 无论证';
+    const evi = r.evidence_status === null
+      ? '未知'
+      : r.evidence_status
+        ? '✅ 有证据'
+        : '❌ 无证据';
     logger.info(
       `[论证检测] 用户 ${r.user_id} 结果：${rsn}（${r.reasoning_source}），${evi}（${r.evidence_source}）`,
       { sessionId },

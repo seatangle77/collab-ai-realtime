@@ -133,8 +133,8 @@ class BatchReasoningRequest(BaseModel):
 
 class MemberReasoningResultOut(BaseModel):
     user_id: str
-    reasoning_status: bool
-    evidence_status: bool
+    reasoning_status: bool | None
+    evidence_status: bool | None
     reasoning_source: str
     evidence_source: str
 
