@@ -5,7 +5,6 @@ import { computeSilence } from './perception/silence';
 import { computeTtr } from './perception/ttr';
 import { computeArgDensity } from './perception/arg-density';
 import { computeSrep } from './perception/srep';
-import { computeSkw } from './perception/skw';
 import { computeInfoGain } from './perception/info-gain';
 import { computeHasReasoning } from './perception/reasoning';
 
@@ -43,8 +42,11 @@ export interface PipelineResult {
  *
  * 执行顺序：
  * 1. speaking-ratio / silence / ttr / arg-density / srep 并行执行（互不依赖）
- * 2. skw 与 info-gain 并行执行（互不依赖：skw 用 LLM 召回专业词，info-gain 自行提取宽松 TF-IDF 词）
+ * 2. info-gain 独立执行，自行提取宽松 TF-IDF 词
  * 3. 汇总所有结果，按用户逐条写入 window_metrics
+ *
+ * 信息缺口不在本链路内执行。它有自己的业务节奏：
+ * 每 60s 召回候选关键词，每 120s 决定是否推送解释按钮。
  */
 export async function runPerceptionPipeline(input: PipelineInput): Promise<PipelineResult | undefined> {
   const { sessionId, memberIds, windowStart, windowEnd } = input;
@@ -108,23 +110,13 @@ export async function runPerceptionPipeline(input: PipelineInput): Promise<Pipel
     logger.error('写入 window_metrics_batch_reasoning 失败', { sessionId, message: (err as Error).message });
   });
 
-  // ── Step 2 & 3：skw 与 info-gain 并行执行（互不依赖）──────────────────────
-  logger.info('[Step 2+3] 并行执行：关键词提取与跨成员语义分析（Skw）+ 信息增益计算（InfoGain）', { sessionId });
-  let currentKeywords: string[] = [];
-  let skwRes: Awaited<ReturnType<typeof computeSkw>> | null = null;
+  // ── Step 3：信息增益计算。信息缺口已拆到独立调度链，不在成员分析链内执行。───────
+  logger.info('[Step 3] 信息增益计算（InfoGain）', { sessionId });
   let infoGains: Record<string, number | null> = {};
 
-  const [skwSettled, igSettled] = await Promise.allSettled([
-    computeSkw(sessionId, windowStart, windowEnd, memberIds),
+  const [igSettled] = await Promise.allSettled([
     computeInfoGain(sessionId, windowStart, windowEnd, memberIds),
   ]);
-
-  if (skwSettled.status === 'fulfilled') {
-    skwRes = skwSettled.value;
-    currentKeywords = skwRes.keywords;
-  } else {
-    logger.error('Skw 关键词分析失败', { sessionId, message: (skwSettled.reason as Error)?.message });
-  }
 
   if (igSettled.status === 'fulfilled') {
     infoGains = igSettled.value.infoGains;
@@ -158,7 +150,7 @@ export async function runPerceptionPipeline(input: PipelineInput): Promise<Pipel
   );
 
   // ── 打印每位成员汇总（单行紧凑格式）────────────────────────────────────────
-  logger.info(`===== Pipeline 完成 关键词：${currentKeywords.join('、') || '无'} =====`, { sessionId });
+  logger.info('===== Pipeline 完成 =====', { sessionId });
   for (const uid of memberIds) {
     const ratio  = speakingRatios[uid] ?? 0;
     const sil    = silenceSeconds[uid] ?? null;
@@ -193,8 +185,8 @@ export async function runPerceptionPipeline(input: PipelineInput): Promise<Pipel
     hasEvidenceMap,
     reasoningSourceMap,
     evidenceSourceMap,
-    skwScores: skwRes?.scores ?? {},
-    keywords: currentKeywords,
+    skwScores: {},
+    keywords: [],
   };
 }
 

@@ -4,7 +4,6 @@ import {
   writePushQueueItem,
   writeDiscussionState,
   writeAiPushAnalysis,
-  dismissPendingInfoGapButtonsBeforeWindow,
 } from '../db/queries';
 import { embed, analyzeMembers } from '../http/nlp-client';
 import type { PipelineResult } from './run-perception-pipeline';
@@ -53,16 +52,6 @@ export async function runActionLayer(params: {
   if (memberIds.length === 0) {
     logger.info('行动层：成员列表为空，跳过', { sessionId });
     return;
-  }
-
-  // 过期历史 info_gap 按钮
-  try {
-    const dismissed = await dismissPendingInfoGapButtonsBeforeWindow(sessionId, windowStart);
-    if (dismissed > 0) {
-      logger.info(`[action] 已过期历史 info_gap 按钮 数量=${dismissed}`, { sessionId });
-    }
-  } catch (err) {
-    logger.warn('[action] info_gap 按钮过期处理失败', { sessionId, message: (err as Error).message });
   }
 
   // 构造 transcripts 输入

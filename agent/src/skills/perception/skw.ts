@@ -7,6 +7,7 @@ import {
   writeKeywordRecallAnalysis,
   hasPendingInfoGapKeyword,
   hasClickedInfoGapKeywordInRecentWindows,
+  dismissPendingInfoGapButtonsBeforeWindow,
 } from '../../db/queries';
 import { keywordRecallWithGap, embed, similarity, notifyInfoGapButton } from '../../http/nlp-client';
 import { createLogger } from '../../logger';
@@ -22,6 +23,29 @@ export interface SkwResult {
   scores: Record<string, Record<string, Record<string, number>>>;
 }
 
+export interface InfoGapKeywordCandidate {
+  word: string;
+  needs_prompt: boolean;
+  target_user_id: string;
+  reason: string;
+  sourceByUser: Record<string, string>;
+  activeMemberIds: string[];
+  windowStart: Date;
+  windowEnd: Date;
+}
+
+export interface InfoGapKeywordRecallResult {
+  candidates: InfoGapKeywordCandidate[];
+  activeMemberTexts: Record<string, string>;
+}
+
+export interface InfoGapDecisionInput {
+  sessionId: string;
+  windowStart: Date;
+  memberIds: string[];
+  candidates: InfoGapKeywordCandidate[];
+}
+
 function splitSentences(text: string): string[] {
   return text
     .split(/[。！？.!?\n]+/)
@@ -34,16 +58,12 @@ function findContext(text: string, keyword: string): string {
   return hit ?? '';
 }
 
-export async function computeSkw(
+async function buildActiveMemberTexts(
   sessionId: string,
   windowStart: Date,
   windowEnd: Date,
   memberIds: string[],
-): Promise<SkwResult> {
-  if (memberIds.length < 2) {
-    return { keywords: [], scores: {} };
-  }
-
+): Promise<Record<string, string>> {
   const transcripts = await getTranscriptsInWindow(sessionId, windowStart, windowEnd);
 
   const textByUser: Record<string, string[]> = {};
@@ -57,12 +77,48 @@ export async function computeSkw(
     const combined = textByUser[uid].join(' ').trim();
     if (combined) activeMemberTexts[uid] = combined;
   }
+  return activeMemberTexts;
+}
 
-  if (Object.keys(activeMemberTexts).length < 2) {
-    return { keywords: [], scores: {} };
+function mergeCandidates(candidates: InfoGapKeywordCandidate[]): InfoGapKeywordCandidate[] {
+  const byWord = new Map<string, InfoGapKeywordCandidate>();
+
+  for (const item of candidates) {
+    const existing = byWord.get(item.word);
+    if (!existing) {
+      byWord.set(item.word, { ...item, sourceByUser: { ...item.sourceByUser } });
+      continue;
+    }
+
+    for (const [uid, source] of Object.entries(item.sourceByUser)) {
+      if (source) existing.sourceByUser[uid] = existing.sourceByUser[uid] ?? source;
+    }
+
+    if (!existing.needs_prompt && item.needs_prompt) {
+      existing.needs_prompt = true;
+      existing.target_user_id = item.target_user_id;
+      existing.reason = item.reason;
+    }
+    existing.windowEnd = item.windowEnd > existing.windowEnd ? item.windowEnd : existing.windowEnd;
   }
 
-  // ── 阶段一：大模型召回 + 评估 ────────────────────────────────────────────────
+  return [...byWord.values()];
+}
+
+export async function recallInfoGapKeywords(
+  sessionId: string,
+  windowStart: Date,
+  windowEnd: Date,
+  memberIds: string[],
+): Promise<InfoGapKeywordRecallResult> {
+  if (memberIds.length < 2) {
+    return { candidates: [], activeMemberTexts: {} };
+  }
+
+  const activeMemberTexts = await buildActiveMemberTexts(sessionId, windowStart, windowEnd, memberIds);
+  if (Object.keys(activeMemberTexts).length < 2) {
+    return { candidates: [], activeMemberTexts };
+  }
 
   logger.info('[SKW] 调用大模型召回关键词', { sessionId });
   const recallResult = await keywordRecallWithGap(activeMemberTexts);
@@ -70,45 +126,85 @@ export async function computeSkw(
 
   if (recallKeywords.length === 0) {
     logger.info('[SKW] 大模型未返回关键词，终止', { sessionId });
-    return { keywords: [], scores: {} };
-  }
-
-  // needs_prompt 信息暂存内存：word -> { needs_prompt, target_user_id, reason }
-  const needsPromptMap: Record<string, { needs_prompt: boolean; target_user_id: string; reason: string }> = {};
-  for (const item of recallKeywords) {
-    needsPromptMap[item.word] = {
-      needs_prompt: item.needs_prompt,
-      target_user_id: item.target_user_id,
-      reason: item.reason,
-    };
+    return { candidates: [], activeMemberTexts };
   }
 
   const words = recallKeywords.map((k) => k.word);
   logger.info(`[SKW] 召回关键词：${words.join('、')}`, { sessionId });
 
-  // ── 阶段一补充：将 AI 原始判断写入 info_gap_recall_analysis（全量，含 needs_prompt=false）──
   await Promise.allSettled(
     recallKeywords.map((item) =>
-      writeKeywordRecallAnalysis({
-        id: 'kra_' + nanoid(12),
-        session_id: sessionId,
-        window_start: windowStart,
-        keyword: item.word,
-        needs_prompt: item.needs_prompt,
-        target_user_id: item.target_user_id || null,
-        llm_reason: item.reason || null,
-      }).catch((err: Error) => {
-        logger.error('[SKW] writeKeywordRecallAnalysis 失败', { sessionId, keyword: item.word, message: err.message });
+      Promise.resolve(
+        writeKeywordRecallAnalysis({
+          id: 'kra_' + nanoid(12),
+          session_id: sessionId,
+          window_start: windowStart,
+          keyword: item.word,
+          needs_prompt: item.needs_prompt,
+          target_user_id: item.target_user_id || null,
+          llm_reason: item.reason || null,
+        }),
+      ).catch((err: Error) => {
+        logger.error('[SKW] writeKeywordRecallAnalysis 失败', {
+          sessionId,
+          keyword: item.word,
+          message: err.message,
+        });
       }),
     ),
   );
 
-  // ── 阶段二：写入 info_gap_skw 初始记录（pending）────────────────────────────
+  const candidates = recallKeywords.map((item): InfoGapKeywordCandidate => {
+    const sourceByUser: Record<string, string> = {};
+    for (const [uid, text] of Object.entries(activeMemberTexts)) {
+      const source = findContext(text, item.word);
+      if (source) sourceByUser[uid] = source;
+    }
 
-  const activeMembers = Object.keys(activeMemberTexts);
+    return {
+      word: item.word,
+      needs_prompt: item.needs_prompt,
+      target_user_id: item.target_user_id,
+      reason: item.reason,
+      sourceByUser,
+      activeMemberIds: Object.keys(activeMemberTexts),
+      windowStart,
+      windowEnd,
+    };
+  });
 
-  // 生成所有 pair 组合，并记录每条记录的 id 供后续更新
-  // pendingIds: word -> [{ id, userA, userB }]
+  return { candidates, activeMemberTexts };
+}
+
+export async function decideInfoGapButtons(input: InfoGapDecisionInput): Promise<SkwResult> {
+  const { sessionId, windowStart, memberIds } = input;
+  const candidates = mergeCandidates(input.candidates);
+  const words = candidates.map((item) => item.word);
+
+  try {
+    const dismissed = await dismissPendingInfoGapButtonsBeforeWindow(sessionId, windowStart);
+    if (dismissed > 0) {
+      logger.info(`[SKW] 已过期历史 info_gap 按钮 数量=${dismissed}`, { sessionId });
+    }
+  } catch (err) {
+    logger.warn('[SKW] info_gap 按钮过期处理失败', {
+      sessionId,
+      message: (err as Error).message,
+    });
+  }
+
+  if (memberIds.length < 2 || candidates.length === 0) {
+    return { keywords: words, scores: {} };
+  }
+
+  const activeMembers = memberIds.filter((uid) =>
+    candidates.some((item) => item.activeMemberIds.includes(uid)),
+  );
+  if (activeMembers.length < 2) {
+    return { keywords: words, scores: {} };
+  }
+
+  const candidateByWord = new Map(candidates.map((item) => [item.word, item]));
   const pendingIds: Record<string, { id: string; userA: string; userB: string }[]> = {};
 
   const initialRows = [];
@@ -136,38 +232,27 @@ export async function computeSkw(
   await writeKeywordSkw(initialRows);
   logger.info(`[SKW] 写入初始记录 ${initialRows.length} 条`, { sessionId });
 
-  // ── 阶段三：SKW 分数计算，更新 info_gap_skw ──────────────────────────────────
-
   const scores: SkwResult['scores'] = {};
-  // 记录每个词每个 user 最终的 skw_score（用于阶段四查分）
   const skwScoreByWordUser: Record<string, Record<string, number>> = {};
 
   for (const word of words) {
+    const candidate = candidateByWord.get(word);
+    const contextByUser = candidate?.sourceByUser ?? {};
     scores[word] = {};
     skwScoreByWordUser[word] = {};
-
-    // 找到实际提及该词的成员及其上下文句子
-    const contextByUser: Record<string, string> = {};
-    for (const uid of activeMembers) {
-      const ctx = findContext(activeMemberTexts[uid], word);
-      if (ctx) contextByUser[uid] = ctx;
-    }
 
     const mentionCount = Object.keys(contextByUser).length;
     const pairs = pendingIds[word];
 
-    // 0人提及：大模型幻觉，删除初始记录
     if (mentionCount === 0) {
       logger.info(`[SKW] 关键词「${word}」无人提及（幻觉），删除记录`, { sessionId });
       await deleteKeywordSkwByKeyword(sessionId, windowStart, word);
-      delete needsPromptMap[word];
       continue;
     }
 
     const updateRows: { id: string; skw_score: number; mention_count: number; skw_status: string }[] = [];
 
     if (mentionCount === 1) {
-      // 1人提及：全部更新为 single_mention
       logger.info(`[SKW] 关键词「${word}」仅1人提及`, { sessionId });
       const mentioner = Object.keys(contextByUser)[0];
       for (const { id, userA, userB } of pairs) {
@@ -178,9 +263,7 @@ export async function computeSkw(
         scores[word][userB][userA] = 0.1;
       }
       skwScoreByWordUser[word][mentioner] = 0.1;
-
     } else {
-      // 2人或3人提及：对有上下文的成员做 embedding，计算余弦相似度
       const mentioners = Object.keys(contextByUser);
       const texts = mentioners.map((uid) => contextByUser[uid]);
       logger.info(`[SKW] 关键词「${word}」${mentionCount}人提及，开始 embedding`, { sessionId });
@@ -189,7 +272,6 @@ export async function computeSkw(
       const embeddingByUser: Record<string, number[]> = {};
       mentioners.forEach((uid, i) => { embeddingByUser[uid] = embeddings[i]; });
 
-      // 计算所有提及者之间的相似度
       const simPairs: { vec_a: number[]; vec_b: number[] }[] = [];
       const simMeta: { userA: string; userB: string }[] = [];
       for (let i = 0; i < mentioners.length; i++) {
@@ -214,7 +296,6 @@ export async function computeSkw(
         logger.info(`[SKW] 「${word}」${userA} vs ${userB} 相似度=${score.toFixed(3)}`, { sessionId });
       });
 
-      // 按 pair 记录更新值
       for (const { id, userA, userB } of pairs) {
         const bothMentioned = userA in contextByUser && userB in contextByUser;
         if (bothMentioned) {
@@ -230,7 +311,6 @@ export async function computeSkw(
       }
 
       for (const uid of mentioners) {
-        // 取该用户与其他所有人的平均分作为代表分
         const peerScores = Object.values(simMap[uid] ?? {});
         skwScoreByWordUser[word][uid] = peerScores.length > 0
           ? peerScores.reduce((a, b) => a + b, 0) / peerScores.length
@@ -241,55 +321,69 @@ export async function computeSkw(
     await updateKeywordSkwBatch(updateRows);
   }
 
-  // ── 阶段四：写入 info_gap_buttons，推送按钮 ──────────────────────────────────
+  for (const item of candidates) {
+    if (!item.needs_prompt || !item.target_user_id) continue;
 
-  for (const word of Object.keys(needsPromptMap)) {
-    const { needs_prompt, target_user_id, reason } = needsPromptMap[word];
-    if (!needs_prompt || !target_user_id) continue;
-
-    // 去重：已有 pending 按钮则跳过
-    const alreadyPending = await hasPendingInfoGapKeyword(sessionId, target_user_id, word);
+    const alreadyPending = await hasPendingInfoGapKeyword(sessionId, item.target_user_id, item.word);
     if (alreadyPending) {
-      logger.info(`[SKW] 「${word}」用户 ${target_user_id} 已有 pending 按钮，跳过`, { sessionId });
+      logger.info(`[SKW] 「${item.word}」用户 ${item.target_user_id} 已有 pending 按钮，跳过`, { sessionId });
       continue;
     }
 
-    // 近期已点击过则跳过
     const recentlyClicked = await hasClickedInfoGapKeywordInRecentWindows(
-      sessionId, target_user_id, word, windowStart, RECENT_WINDOW_COUNT, WINDOW_MS,
+      sessionId,
+      item.target_user_id,
+      item.word,
+      windowStart,
+      RECENT_WINDOW_COUNT,
+      WINDOW_MS,
     );
     if (recentlyClicked) {
-      logger.info(`[SKW] 「${word}」用户 ${target_user_id} 近期已点击，跳过`, { sessionId });
+      logger.info(`[SKW] 「${item.word}」用户 ${item.target_user_id} 近期已点击，跳过`, { sessionId });
       continue;
     }
 
-    const skwScore = skwScoreByWordUser[word]?.[target_user_id] ?? 0.1;
-
+    const skwScore = skwScoreByWordUser[item.word]?.[item.target_user_id] ?? 0.1;
     const buttonId = await writeInfoGapButton({
       session_id: sessionId,
-      user_id: target_user_id,
-      keyword: word,
+      user_id: item.target_user_id,
+      keyword: item.word,
       skw_score: skwScore,
       window_start: windowStart,
-      llm_reason: reason,
+      llm_reason: item.reason,
     });
 
     if (!buttonId) {
-      logger.info(`[SKW] 「${word}」writeInfoGapButton 未插入（ON CONFLICT），跳过`, { sessionId });
+      logger.info(`[SKW] 「${item.word}」writeInfoGapButton 未插入（ON CONFLICT），跳过`, { sessionId });
       continue;
     }
 
     await notifyInfoGapButton({
       session_id: sessionId,
-      user_id: target_user_id,
+      user_id: item.target_user_id,
       button_id: buttonId,
-      keyword: word,
+      keyword: item.word,
       skw_score: skwScore,
       window_start: windowStart.toISOString(),
     });
 
-    logger.info(`[SKW] 「${word}」按钮已推送给用户 ${target_user_id}`, { sessionId });
+    logger.info(`[SKW] 「${item.word}」按钮已推送给用户 ${item.target_user_id}`, { sessionId });
   }
 
   return { keywords: words, scores };
+}
+
+export async function computeSkw(
+  sessionId: string,
+  windowStart: Date,
+  windowEnd: Date,
+  memberIds: string[],
+): Promise<SkwResult> {
+  const recall = await recallInfoGapKeywords(sessionId, windowStart, windowEnd, memberIds);
+  return decideInfoGapButtons({
+    sessionId,
+    windowStart,
+    memberIds,
+    candidates: recall.candidates,
+  });
 }

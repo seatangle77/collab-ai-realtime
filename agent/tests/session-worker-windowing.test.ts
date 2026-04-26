@@ -3,6 +3,8 @@ jest.mock('../src/config', () => ({
     agent: {
       silenceIntervalMs: 30_000,
       analysisIntervalMs: 60_000,
+      infoGapIntervalMs: 60_000,
+      infoGapDecisionIntervalMs: 120_000,
       longIntervalMs: 120_000,
       sessionPollMs: 15_000,
     },
@@ -42,6 +44,11 @@ jest.mock('../src/skills/run-push-dispatcher', () => ({
   runPushDispatcher: jest.fn(),
 }));
 
+jest.mock('../src/skills/perception/skw', () => ({
+  recallInfoGapKeywords: jest.fn(),
+  decideInfoGapButtons: jest.fn(),
+}));
+
 jest.mock('../src/http/nlp-client', () => ({
   generateGroupSilence: jest.fn(),
   notifyGroupSilence: jest.fn(),
@@ -53,6 +60,7 @@ import { runPerceptionPipeline } from '../src/skills/run-perception-pipeline';
 import { runActionLayer } from '../src/skills/run-action-layer';
 import { runSummary } from '../src/skills/run-summary';
 import { runPushDispatcher } from '../src/skills/run-push-dispatcher';
+import { decideInfoGapButtons, recallInfoGapKeywords } from '../src/skills/perception/skw';
 import * as nlpClient from '../src/http/nlp-client';
 
 const mockGetSessionMembers = queries.getSessionMembers as jest.MockedFunction<typeof queries.getSessionMembers>;
@@ -63,6 +71,8 @@ const mockRunPerceptionPipeline = runPerceptionPipeline as jest.MockedFunction<t
 const mockRunActionLayer = runActionLayer as jest.MockedFunction<typeof runActionLayer>;
 const mockRunSummary = runSummary as jest.MockedFunction<typeof runSummary>;
 const mockRunPushDispatcher = runPushDispatcher as jest.MockedFunction<typeof runPushDispatcher>;
+const mockRecallInfoGapKeywords = recallInfoGapKeywords as jest.MockedFunction<typeof recallInfoGapKeywords>;
+const mockDecideInfoGapButtons = decideInfoGapButtons as jest.MockedFunction<typeof decideInfoGapButtons>;
 const mockGetLastSpeakEndGlobal = queries.getLastSpeakEndGlobal as jest.MockedFunction<typeof queries.getLastSpeakEndGlobal>;
 const mockGenerateGroupSilence = nlpClient.generateGroupSilence as jest.MockedFunction<typeof nlpClient.generateGroupSilence>;
 const mockNotifyGroupSilence = nlpClient.notifyGroupSilence as jest.MockedFunction<typeof nlpClient.notifyGroupSilence>;
@@ -101,6 +111,8 @@ describe('SessionWorker windowing', () => {
     mockRunActionLayer.mockResolvedValue(undefined);
     mockRunSummary.mockResolvedValue('摘要输出');
     mockRunPushDispatcher.mockResolvedValue(undefined);
+    mockRecallInfoGapKeywords.mockResolvedValue({ candidates: [], activeMemberTexts: {} });
+    mockDecideInfoGapButtons.mockResolvedValue({ keywords: [], scores: {} });
     mockGenerateGroupSilence.mockResolvedValue('破冰话题');
     mockNotifyGroupSilence.mockResolvedValue(true);
   });
@@ -172,28 +184,90 @@ describe('SessionWorker windowing', () => {
     const runSummaryPipelineSpy = jest
       .spyOn(worker as never, 'runSummaryPipeline' as never)
       .mockResolvedValue(undefined as never);
+    const runInfoGapPipelineSpy = jest
+      .spyOn(worker as never, 'runInfoGapPipeline' as never)
+      .mockResolvedValue(undefined as never);
 
     worker.start();
 
     await jest.advanceTimersByTimeAsync(30_000);
     expect(checkGroupSilenceSpy).toHaveBeenCalledTimes(1);
     expect(runAnalysisPipelineSpy).toHaveBeenCalledTimes(0);
+    expect(runInfoGapPipelineSpy).toHaveBeenCalledTimes(0);
     expect(runSummaryPipelineSpy).toHaveBeenCalledTimes(0);
     expect(checkGroupSilenceSpy).toHaveBeenLastCalledWith(new Date('2026-04-22T10:00:30Z'));
 
     await jest.advanceTimersByTimeAsync(30_000);
     expect(checkGroupSilenceSpy).toHaveBeenCalledTimes(2);
     expect(runAnalysisPipelineSpy).toHaveBeenCalledTimes(1);
+    expect(runInfoGapPipelineSpy).toHaveBeenCalledTimes(1);
     expect(runSummaryPipelineSpy).toHaveBeenCalledTimes(0);
     expect(runAnalysisPipelineSpy).toHaveBeenLastCalledWith(new Date('2026-04-22T10:01:00Z'));
+    expect(runInfoGapPipelineSpy).toHaveBeenLastCalledWith(new Date('2026-04-22T10:01:00Z'));
 
     await jest.advanceTimersByTimeAsync(45_000);
     expect(checkGroupSilenceSpy).toHaveBeenCalledTimes(3);
     expect(runAnalysisPipelineSpy).toHaveBeenCalledTimes(1);
+    expect(runInfoGapPipelineSpy).toHaveBeenCalledTimes(1);
     expect(runSummaryPipelineSpy).toHaveBeenCalledTimes(1);
     expect(runSummaryPipelineSpy).toHaveBeenLastCalledWith(new Date('2026-04-22T10:01:45Z'));
 
     worker.stop();
     jest.useRealTimers();
+  });
+
+  it('信息缺口每 60 秒召回关键词，每 120 秒基于最近两轮候选词决策', async () => {
+    const startedAt = new Date('2026-04-22T10:00:00Z');
+    const worker = new SessionWorker('s1', startedAt);
+    const firstScheduledFor = new Date('2026-04-22T10:01:00Z');
+    const secondScheduledFor = new Date('2026-04-22T10:02:00Z');
+    const firstCandidate = {
+      word: 'MVP',
+      needs_prompt: true,
+      target_user_id: 'u2',
+      reason: '可能不理解 MVP',
+      sourceByUser: { u1: '我们先做 MVP' },
+      activeMemberIds: ['u1', 'u2'],
+      windowStart: startedAt,
+      windowEnd: firstScheduledFor,
+    };
+    const secondCandidate = {
+      word: '冷启动',
+      needs_prompt: true,
+      target_user_id: 'u1',
+      reason: '可能不理解冷启动',
+      sourceByUser: { u2: '冷启动是重点' },
+      activeMemberIds: ['u1', 'u2'],
+      windowStart: firstScheduledFor,
+      windowEnd: secondScheduledFor,
+    };
+
+    mockGetSessionMembers.mockResolvedValue([{ user_id: 'u1' }, { user_id: 'u2' }] as never);
+    mockRecallInfoGapKeywords
+      .mockResolvedValueOnce({ candidates: [firstCandidate], activeMemberTexts: {} })
+      .mockResolvedValueOnce({ candidates: [secondCandidate], activeMemberTexts: {} });
+
+    await (worker as any).runInfoGapPipeline(firstScheduledFor);
+    expect(mockRecallInfoGapKeywords).toHaveBeenLastCalledWith(
+      's1',
+      startedAt,
+      firstScheduledFor,
+      ['u1', 'u2'],
+    );
+    expect(mockDecideInfoGapButtons).not.toHaveBeenCalled();
+
+    await (worker as any).runInfoGapPipeline(secondScheduledFor);
+    expect(mockRecallInfoGapKeywords).toHaveBeenLastCalledWith(
+      's1',
+      firstScheduledFor,
+      secondScheduledFor,
+      ['u1', 'u2'],
+    );
+    expect(mockDecideInfoGapButtons).toHaveBeenCalledWith({
+      sessionId: 's1',
+      windowStart: startedAt,
+      memberIds: ['u1', 'u2'],
+      candidates: [firstCandidate, secondCandidate],
+    });
   });
 });

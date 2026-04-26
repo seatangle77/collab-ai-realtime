@@ -28,6 +28,8 @@ export const config = {
   agent: {
     silenceIntervalMs: parseInt(process.env.SILENCE_INTERVAL_MS ?? '30000', 10),
     analysisIntervalMs: parseInt(process.env.ANALYSIS_INTERVAL_MS ?? '60000', 10),
+    infoGapIntervalMs: parseInt(process.env.INFO_GAP_INTERVAL_MS ?? '60000', 10),
+    infoGapDecisionIntervalMs: parseInt(process.env.INFO_GAP_DECISION_INTERVAL_MS ?? '120000', 10),
     longIntervalMs: parseInt(process.env.LONG_INTERVAL_MS ?? '120000', 10),
     sessionPollMs: parseInt(process.env.SESSION_POLL_MS ?? '15000', 10),
   },

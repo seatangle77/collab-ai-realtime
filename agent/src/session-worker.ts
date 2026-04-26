@@ -11,6 +11,11 @@ import { runPerceptionPipeline } from './skills/run-perception-pipeline';
 import { runActionLayer } from './skills/run-action-layer';
 import { runPushDispatcher } from './skills/run-push-dispatcher';
 import { runSummary } from './skills/run-summary';
+import {
+  decideInfoGapButtons,
+  recallInfoGapKeywords,
+  type InfoGapKeywordCandidate,
+} from './skills/perception/skw';
 import { generateGroupSilence, notifyGroupSilence } from './http/nlp-client';
 
 const logger = createLogger('session-worker');
@@ -25,8 +30,10 @@ export class SessionWorker {
   private readonly sessionStartedAt: Date;
   private silenceTimer: ReturnType<typeof setTimeout> | null = null;
   private analysisTimer: ReturnType<typeof setTimeout> | null = null;
+  private infoGapTimer: ReturnType<typeof setTimeout> | null = null;
   private summaryTimer: ReturnType<typeof setTimeout> | null = null;
   private dispatchTimer: ReturnType<typeof setInterval> | null = null;
+  private infoGapCandidates: InfoGapKeywordCandidate[] = [];
   private lastGroupSilenceTriggerAt: number | null = null;
   private running = false;
   private static readonly SUMMARY_LEAD_MS = 15_000;
@@ -48,6 +55,7 @@ export class SessionWorker {
     this.scheduleSilenceTimer();
     this.scheduleSummaryTimer();
     this.scheduleAnalysisTimer();
+    this.scheduleInfoGapTimer();
     this.startDispatchLoop();
   }
 
@@ -74,6 +82,20 @@ export class SessionWorker {
         .finally(() => {
           this.scheduleAnalysisTimer(
             new Date(scheduledFor.getTime() + config.agent.analysisIntervalMs),
+          );
+        });
+    }, Math.max(0, scheduledFor.getTime() - Date.now()));
+  }
+
+  private scheduleInfoGapTimer(nextScheduledFor?: Date): void {
+    if (!this.running) return;
+    const scheduledFor = nextScheduledFor
+      ?? this.nextAlignedAt(config.agent.infoGapIntervalMs, config.agent.infoGapIntervalMs);
+    this.infoGapTimer = setTimeout(() => {
+      void this.runInfoGapPipeline(scheduledFor)
+        .finally(() => {
+          this.scheduleInfoGapTimer(
+            new Date(scheduledFor.getTime() + config.agent.infoGapIntervalMs),
           );
         });
     }, Math.max(0, scheduledFor.getTime() - Date.now()));
@@ -117,6 +139,10 @@ export class SessionWorker {
     if (this.analysisTimer !== null) {
       clearTimeout(this.analysisTimer);
       this.analysisTimer = null;
+    }
+    if (this.infoGapTimer !== null) {
+      clearTimeout(this.infoGapTimer);
+      this.infoGapTimer = null;
     }
     if (this.summaryTimer !== null) {
       clearTimeout(this.summaryTimer);
@@ -310,6 +336,64 @@ export class SessionWorker {
     }
   }
 
+  // ── 信息缺口链：每 60s 召回候选词；每 120s 基于最近两轮候选词决定是否推按钮 ───────
+
+  private async runInfoGapPipeline(scheduledFor: Date): Promise<void> {
+    try {
+      const members = await getSessionMembers(this.sessionId);
+      const memberIds = members.map((m) => m.user_id);
+      if (memberIds.length < 2) return;
+
+      const windowEnd = scheduledFor;
+      const recallWindowStart = new Date(
+        Math.max(this.sessionStartedAt.getTime(), windowEnd.getTime() - config.agent.infoGapIntervalMs),
+      );
+      const decisionWindowStart = new Date(
+        Math.max(this.sessionStartedAt.getTime(), windowEnd.getTime() - config.agent.infoGapDecisionIntervalMs),
+      );
+
+      const recall = await recallInfoGapKeywords(
+        this.sessionId,
+        recallWindowStart,
+        windowEnd,
+        memberIds,
+      );
+      this.infoGapCandidates.push(...recall.candidates);
+      this.trimInfoGapCandidates(decisionWindowStart);
+
+      if (!this.isInfoGapDecisionPoint(scheduledFor)) {
+        logger.info('info_gap 关键词召回完成，未到按钮决策点', {
+          sessionId: this.sessionId,
+          scheduled_for: scheduledFor.toISOString(),
+          candidates: recall.candidates.length,
+        });
+        return;
+      }
+
+      const candidatesForDecision = this.infoGapCandidates.filter(
+        (item) => item.windowEnd > decisionWindowStart && item.windowEnd <= windowEnd,
+      );
+      logger.info('info_gap 按钮决策开始', {
+        sessionId: this.sessionId,
+        scheduled_for: scheduledFor.toISOString(),
+        window_start: decisionWindowStart.toISOString(),
+        candidates: candidatesForDecision.length,
+      });
+
+      await decideInfoGapButtons({
+        sessionId: this.sessionId,
+        windowStart: decisionWindowStart,
+        memberIds,
+        candidates: candidatesForDecision,
+      });
+    } catch (err) {
+      logger.error('runInfoGapPipeline failed', {
+        sessionId: this.sessionId,
+        message: (err as Error).message,
+      });
+    }
+  }
+
   private async runSummaryPipeline(scheduledFor: Date): Promise<void> {
     try {
       const windowEnd = scheduledFor;
@@ -347,5 +431,14 @@ export class SessionWorker {
 
   private markGroupSilenceTriggered(nowMs: number): void {
     this.lastGroupSilenceTriggerAt = nowMs;
+  }
+
+  private isInfoGapDecisionPoint(scheduledFor: Date): boolean {
+    const elapsedMs = scheduledFor.getTime() - this.sessionStartedAt.getTime();
+    return elapsedMs > 0 && elapsedMs % config.agent.infoGapDecisionIntervalMs === 0;
+  }
+
+  private trimInfoGapCandidates(windowStart: Date): void {
+    this.infoGapCandidates = this.infoGapCandidates.filter((item) => item.windowEnd > windowStart);
   }
 }
