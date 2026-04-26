@@ -1066,6 +1066,7 @@ onUnmounted(() => {
                 <el-table-column prop="push_content" label="推送内容" min-width="280" show-overflow-tooltip />
                 <el-table-column prop="push_channel" label="渠道" min-width="90" />
                 <el-table-column prop="delivery_status" label="投递状态" min-width="100" />
+                <el-table-column prop="delivery_reason" label="投递说明" min-width="160" show-overflow-tooltip />
                 <el-table-column label="触发时间" min-width="160" show-overflow-tooltip>
                   <template #default="{ row }">{{ formatDisplayTime(row.triggered_at) }}</template>
                 </el-table-column>

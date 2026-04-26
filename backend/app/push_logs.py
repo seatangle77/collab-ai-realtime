@@ -19,7 +19,7 @@ from .ws_protocol import build_group_notification, build_push_notification
 router = APIRouter(prefix="/api", tags=["push-logs"])
 
 VALID_PUSH_CHANNELS = {"web", "app", "glasses", "info_gap"}
-VALID_DELIVERY_STATUSES = {"pending", "delivered", "failed"}
+VALID_DELIVERY_STATUSES = {"pending", "delivered", "failed", "skipped", "deferred"}
 
 
 async def _jpush_safe(device_token: str, content: str, title: str) -> None:
@@ -104,8 +104,14 @@ async def push_notify(
     insert_result = await db.execute(
         text(
             """
-            INSERT INTO push_logs (id, session_id, state_id, target_user_id, push_content, push_channel, delivery_status, triggered_at)
-            VALUES (:id, :session_id, :state_id, :target_user_id, :content, 'web', 'pending', NOW())
+            INSERT INTO push_logs (
+                id, session_id, state_id, target_user_id, push_content,
+                push_channel, delivery_status, delivery_reason, triggered_at
+            )
+            VALUES (
+                :id, :session_id, :state_id, :target_user_id, :content,
+                'web', 'pending', 'ws_pending', NOW()
+            )
             RETURNING triggered_at
             """
         ),
@@ -121,6 +127,7 @@ async def push_notify(
     await db.commit()
 
     # 2. 定向 WebSocket 推送
+    target_online = body.target_user_id in ws_manager.get_online_user_ids(session_id)
     sent = await ws_manager.send_to_user(
         session_id,
         body.target_user_id,
@@ -135,13 +142,16 @@ async def push_notify(
 
     # 3. 更新投递状态
     new_status = "delivered" if sent else "failed"
+    delivery_reason = "ws_delivered" if sent else (
+        "ws_send_error" if target_online else "ws_user_not_connected"
+    )
     await db.execute(
         text(
-            "UPDATE push_logs SET delivery_status = :s, delivered_at = NOW() WHERE id = :id"
+            "UPDATE push_logs SET delivery_status = :s, delivery_reason = :r, delivered_at = NOW() WHERE id = :id"
             if sent else
-            "UPDATE push_logs SET delivery_status = :s WHERE id = :id"
+            "UPDATE push_logs SET delivery_status = :s, delivery_reason = :r WHERE id = :id"
         ),
-        {"s": new_status, "id": log_id},
+        {"s": new_status, "r": delivery_reason, "id": log_id},
     )
     await db.commit()
 
@@ -192,8 +202,14 @@ async def group_notify(
         insert_result = await db.execute(
             text(
                 """
-                INSERT INTO push_logs (id, session_id, state_id, target_user_id, push_content, push_channel, delivery_status, triggered_at)
-                VALUES (:id, :session_id, NULL, :target_user_id, :content, 'web', 'pending', NOW())
+                INSERT INTO push_logs (
+                    id, session_id, state_id, target_user_id, push_content,
+                    push_channel, delivery_status, delivery_reason, triggered_at
+                )
+                VALUES (
+                    :id, :session_id, NULL, :target_user_id, :content,
+                    'web', 'pending', 'group_ws_pending', NOW()
+                )
                 RETURNING id, triggered_at
                 """
             ),
@@ -218,14 +234,15 @@ async def group_notify(
     active_conn_count = len(online_user_ids)
     delivered = active_conn_count > 0
     new_status = "delivered" if delivered else "failed"
+    delivery_reason = "group_ws_delivered" if delivered else "group_ws_no_online_users"
     for row in inserted_logs:
         await db.execute(
             text(
-                "UPDATE push_logs SET delivery_status = :s, delivered_at = NOW() WHERE id = :id"
+                "UPDATE push_logs SET delivery_status = :s, delivery_reason = :r, delivered_at = NOW() WHERE id = :id"
                 if delivered else
-                "UPDATE push_logs SET delivery_status = :s WHERE id = :id"
+                "UPDATE push_logs SET delivery_status = :s, delivery_reason = :r WHERE id = :id"
             ),
-            {"s": new_status, "id": row["id"]},
+            {"s": new_status, "r": delivery_reason, "id": row["id"]},
         )
     await db.commit()
 
@@ -268,6 +285,7 @@ class PushLogOut(BaseModel):
     push_channel: str
     jpush_message_id: str | None = None
     delivery_status: str
+    delivery_reason: str | None = None
     triggered_at: Any
     delivered_at: Any = None
 
@@ -323,7 +341,32 @@ async def get_session_push_logs(
     if not membership_result.first():
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅群组成员可以查看推送日志")
 
-    # 3. 查询当前用户的推送记录
+    # Web 推送有两条到达路径：实时 WebSocket 和前端轮询。
+    # push_notify 中的 failed 只表示实时 WS 未命中在线连接；如果用户已经通过
+    # 本接口拉到了自己的日志，就说明 Web 端已补偿送达，避免后台长期显示“失败”。
+    if delivery_status is None:
+        await db.execute(
+            text(
+                """
+                UPDATE push_logs
+                SET delivery_status = 'delivered',
+                    delivery_reason = 'polling_delivered',
+                    delivered_at = COALESCE(delivered_at, NOW())
+                WHERE session_id = :session_id
+                  AND target_user_id = :user_id
+                  AND push_channel = 'web'
+                  AND delivery_status = 'failed'
+                """
+            ),
+            {
+                "session_id": session_id,
+                "user_id": current_user["id"],
+            },
+        )
+        await db.commit()
+
+    # 3. 查询当前用户的推送记录。用户端只展示真正已送达/已补达的推送；
+    # skipped/deferred/failed 留给后台管理排查，不打扰用户端时间线。
     where: list[str] = [
         "pl.session_id = :session_id",
         "pl.target_user_id = :user_id",
@@ -339,6 +382,8 @@ async def get_session_push_logs(
     if delivery_status is not None:
         where.append("pl.delivery_status = :delivery_status")
         params["delivery_status"] = delivery_status
+    else:
+        where.append("pl.delivery_status = 'delivered'")
 
     where_sql = " AND ".join(where)
 
@@ -350,7 +395,7 @@ async def get_session_push_logs(
                 pl.target_user_id,
                 ds.window_start AS analysis_window_start,
                 pl.push_content, pl.push_channel,
-                pl.jpush_message_id, pl.delivery_status,
+                pl.jpush_message_id, pl.delivery_status, pl.delivery_reason,
                 pl.triggered_at, pl.delivered_at
             FROM push_logs pl
             LEFT JOIN discussion_states ds ON ds.id = pl.state_id

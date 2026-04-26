@@ -6,8 +6,33 @@ import { listPushLogs, deletePushLog, batchDeletePushLogs } from '../../api/admi
 import { formatDateTimeToCST } from '../../utils/datetime'
 import { exportRowsToCsv } from '../../utils/csv'
 
-const CHANNEL_LABELS: Record<PushChannel, string> = { web: 'Web', app: 'App', glasses: '眼镜' }
-const STATUS_LABELS: Record<DeliveryStatus, string> = { pending: '待送达', delivered: '已送达', failed: '失败' }
+const CHANNEL_LABELS: Record<PushChannel, string> = { web: 'Web', app: 'App', glasses: '眼镜', info_gap: '信息缺口' }
+const STATUS_LABELS: Record<DeliveryStatus, string> = {
+  pending: '待送达',
+  delivered: '已送达',
+  failed: '失败',
+  skipped: '已跳过',
+  deferred: '已暂缓',
+}
+const REASON_LABELS: Record<string, string> = {
+  ws_pending: '等待 WebSocket 实时发送',
+  ws_delivered: 'WebSocket 实时送达',
+  ws_user_not_connected: 'WebSocket 未找到用户连接',
+  ws_send_error: 'WebSocket 发送异常',
+  polling_delivered: '用户端轮询补达',
+  jpush_pending: '等待极光推送',
+  jpush_delivered: '极光推送送达',
+  jpush_no_device_token: '没有极光 device_token',
+  jpush_send_error: '极光发送失败',
+  vad_speaking_deferred: '当前有人说话，暂缓推送',
+  same_round_dedup_skipped: '同轮同用户重复，跳过',
+  recent_exact_content_skipped: '近期完全相同内容，跳过',
+  content_similarity_skipped: '近期相似内容，跳过',
+  group_ws_pending: '等待群组 WebSocket 广播',
+  group_ws_delivered: '群组 WebSocket 广播送达',
+  group_ws_no_online_users: '群组无在线连接',
+  hook_skip: '外部规则跳过',
+}
 
 const loading = ref(false)
 const rows = ref<AdminPushLog[]>([])
@@ -128,6 +153,7 @@ function handleExportCsv() {
       { key: 'push_content', title: '推送内容', format: (r) => r.push_content || '' },
       { key: 'push_channel', title: '推送渠道', format: (r) => CHANNEL_LABELS[r.push_channel] || r.push_channel },
       { key: 'delivery_status', title: '送达状态', format: (r) => STATUS_LABELS[r.delivery_status] || r.delivery_status },
+      { key: 'delivery_reason', title: '送达说明', format: (r) => r.delivery_reason ? (REASON_LABELS[r.delivery_reason] || r.delivery_reason) : '' },
       { key: 'triggered_at', title: '触发时间', format: (r) => formatDateTimeToCST(r.triggered_at) },
       { key: 'delivered_at', title: '送达时间', format: (r) => formatDateTimeToCST(r.delivered_at) },
     ],
@@ -234,9 +260,14 @@ onMounted(() => { fetchData() })
         </el-table-column>
         <el-table-column label="状态" min-width="90">
           <template #default="{ row }">
-            <el-tag :type="row.delivery_status === 'delivered' ? 'success' : row.delivery_status === 'failed' ? 'danger' : 'warning'">
+            <el-tag :type="row.delivery_status === 'delivered' ? 'success' : row.delivery_status === 'failed' ? 'danger' : row.delivery_status === 'skipped' ? 'info' : 'warning'">
               {{ STATUS_LABELS[row.delivery_status as DeliveryStatus] || row.delivery_status }}
             </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="送达说明" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ row.delivery_reason ? (REASON_LABELS[row.delivery_reason] || row.delivery_reason) : '-' }}
           </template>
         </el-table-column>
         <el-table-column label="触发时间" min-width="180" show-overflow-tooltip>

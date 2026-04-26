@@ -411,29 +411,31 @@ export async function writePushQueueItem(row: {
 /** 写入 push_logs */
 export async function writePushLog(row: {
   session_id: string;
-  state_id: string;
+  state_id?: string | null;
   target_user_id: string;
   push_content: string;
   content_embedding: number[];
-  push_channel: 'glasses' | 'app';
-  delivery_status?: 'pending' | 'delivered' | 'failed';
+  push_channel: 'glasses' | 'app' | 'web';
+  delivery_status?: 'pending' | 'delivered' | 'failed' | 'skipped' | 'deferred';
+  delivery_reason?: string | null;
   delivered_at?: Date;
 }): Promise<void> {
   const id = 'pl_' + nanoid(12);
   await pool.query(
     `INSERT INTO push_logs
        (id, session_id, state_id, target_user_id,
-        push_content, content_embedding, push_channel, delivery_status, triggered_at, delivered_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9)`,
+        push_content, content_embedding, push_channel, delivery_status, delivery_reason, triggered_at, delivered_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10)`,
     [
       id,
       row.session_id,
-      row.state_id,
+      row.state_id ?? null,
       row.target_user_id,
       row.push_content,
       row.content_embedding,
       row.push_channel,
       row.delivery_status ?? 'pending',
+      row.delivery_reason ?? null,
       row.delivered_at ? toUtcString(row.delivered_at) : null,
     ],
   );
@@ -569,7 +571,7 @@ export async function getStateTypeCountInWindow(
 /** 更新 push_queue 状态 */
 export async function updatePushQueueStatus(
   id: string,
-  status: 'processing' | 'delivered' | 'skipped' | 'failed',
+  status: 'pending' | 'processing' | 'delivered' | 'skipped' | 'failed',
   deliveredAt?: Date,
 ): Promise<void> {
   if (deliveredAt) {

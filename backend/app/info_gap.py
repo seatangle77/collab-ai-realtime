@@ -323,10 +323,10 @@ async def click_info_gap_button(
             """
             INSERT INTO push_logs
               (id, session_id, target_user_id, push_content,
-               push_channel, delivery_status, triggered_at)
+               push_channel, delivery_status, delivery_reason, triggered_at)
             VALUES
               (:id, :session_id, :user_id, :content,
-               'info_gap', 'pending', NOW())
+               'info_gap', 'pending', 'jpush_pending', NOW())
             """
         ),
         {
@@ -349,13 +349,42 @@ async def click_info_gap_button(
             )
             await db.execute(
                 text(
-                    "UPDATE push_logs SET delivery_status = 'delivered' WHERE id = :id"
+                    """
+                    UPDATE push_logs
+                    SET delivery_status = 'delivered',
+                        delivery_reason = 'jpush_delivered',
+                        delivered_at = NOW()
+                    WHERE id = :id
+                    """
                 ),
                 {"id": log_id},
             )
             await db.commit()
         except Exception:
-            # 推送失败不影响接口返回，日志由 jpush_client 内部记录
-            pass
+            await db.execute(
+                text(
+                    """
+                    UPDATE push_logs
+                    SET delivery_status = 'failed',
+                        delivery_reason = 'jpush_send_error'
+                    WHERE id = :id
+                    """
+                ),
+                {"id": log_id},
+            )
+            await db.commit()
+    else:
+        await db.execute(
+            text(
+                """
+                UPDATE push_logs
+                SET delivery_status = 'failed',
+                    delivery_reason = 'jpush_no_device_token'
+                WHERE id = :id
+                """
+            ),
+            {"id": log_id},
+        )
+        await db.commit()
 
     return ClickResponse(success=True, content=final_content, keyword=str(btn["keyword"]))

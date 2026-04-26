@@ -19,8 +19,8 @@ router = APIRouter(
     dependencies=[Depends(require_admin)],
 )
 
-VALID_PUSH_CHANNELS = {"web", "app", "glasses"}
-VALID_DELIVERY_STATUSES = {"pending", "delivered", "failed"}
+VALID_PUSH_CHANNELS = {"web", "app", "glasses", "info_gap"}
+VALID_DELIVERY_STATUSES = {"pending", "delivered", "failed", "skipped", "deferred"}
 
 
 def _to_utc_naive(dt: datetime) -> datetime:
@@ -41,6 +41,7 @@ class AdminPushLogOut(BaseModel):
     push_channel: str
     jpush_message_id: str | None = None
     delivery_status: str
+    delivery_reason: str | None = None
     triggered_at: Any
     delivered_at: Any = None
 
@@ -53,6 +54,7 @@ class AdminPushLogCreate(BaseModel):
     push_content: str | None = None
     jpush_message_id: str | None = None
     delivery_status: str = "pending"
+    delivery_reason: str | None = None
     triggered_at: datetime | None = None
     delivered_at: datetime | None = None
 
@@ -120,17 +122,17 @@ async def create_push_log(
             INSERT INTO push_logs (
                 id, session_id, state_id, target_user_id,
                 push_content, push_channel, jpush_message_id,
-                delivery_status, triggered_at, delivered_at
+                delivery_status, delivery_reason, triggered_at, delivered_at
             ) VALUES (
                 :id, :session_id, :state_id, :target_user_id,
                 :push_content, :push_channel, :jpush_message_id,
-                :delivery_status,
+                :delivery_status, :delivery_reason,
                 COALESCE(:triggered_at, NOW()),
                 :delivered_at
             )
             RETURNING id, session_id, state_id, target_user_id,
                       push_content, push_channel, jpush_message_id,
-                      delivery_status, triggered_at, delivered_at
+                      delivery_status, delivery_reason, triggered_at, delivered_at
             """
         ),
         {
@@ -142,6 +144,7 @@ async def create_push_log(
             "push_channel": payload.push_channel,
             "jpush_message_id": payload.jpush_message_id,
             "delivery_status": payload.delivery_status,
+            "delivery_reason": payload.delivery_reason,
             "triggered_at": triggered_at,
             "delivered_at": delivered_at,
         },
@@ -226,7 +229,7 @@ async def list_push_logs(
             SELECT
                 pl.id, pl.session_id, pl.state_id,
                 pl.target_user_id, pl.push_content, pl.push_channel,
-                pl.jpush_message_id, pl.delivery_status,
+                pl.jpush_message_id, pl.delivery_status, pl.delivery_reason,
                 pl.triggered_at, pl.delivered_at,
                 cs.session_title,
                 u.name AS target_user_name,

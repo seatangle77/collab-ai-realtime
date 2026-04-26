@@ -144,8 +144,8 @@ export interface AdminDiscussionState {
 }
 
 // ── 推送日志 ──────────────────────────────────────────────────────────
-export type PushChannel = 'web' | 'app' | 'glasses'
-export type DeliveryStatus = 'pending' | 'delivered' | 'failed'
+export type PushChannel = 'web' | 'app' | 'glasses' | 'info_gap'
+export type DeliveryStatus = 'pending' | 'delivered' | 'failed' | 'skipped' | 'deferred'
 
 export interface AdminPushLog {
   id: string
@@ -159,6 +159,7 @@ export interface AdminPushLog {
   push_channel: PushChannel
   jpush_message_id: string | null
   delivery_status: DeliveryStatus
+  delivery_reason: string | null
   triggered_at: string
   delivered_at: string | null
 }

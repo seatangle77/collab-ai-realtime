@@ -79,6 +79,7 @@ interface PushLogItem {
   push_channel: string
   jpush_message_id?: string | null
   delivery_status: string
+  delivery_reason?: string | null
   triggered_at: string
   delivered_at?: string | null
 }
@@ -895,6 +896,7 @@ function handleWsMessage(event: MessageEvent<string>) {
         push_channel: 'web',
         jpush_message_id: null,
         delivery_status: 'delivered',
+        delivery_reason: 'ws_delivered',
         triggered_at: d.triggered_at ?? new Date().toISOString(),
         delivered_at: null,
       })
