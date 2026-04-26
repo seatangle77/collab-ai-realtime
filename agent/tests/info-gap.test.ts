@@ -1,4 +1,4 @@
-import { computeSkw } from '../src/skills/perception/skw';
+import { computeSkw } from '../src/skills/info-gap';
 import * as queries from '../src/db/queries';
 import * as nlp from '../src/http/nlp-client';
 
@@ -71,7 +71,7 @@ function getAllUpdatedRows() {
   return mockUpdateKeywordSkwBatch.mock.calls.flatMap((call) => call[0]);
 }
 
-describe('computeSkw', () => {
+describe('info-gap / computeSkw', () => {
   beforeEach(() => {
     jest.resetAllMocks();
     mockKeywordRecallWithGap.mockResolvedValue({ keywords: [] });

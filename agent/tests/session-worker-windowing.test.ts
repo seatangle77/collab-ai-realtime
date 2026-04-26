@@ -44,7 +44,7 @@ jest.mock('../src/skills/run-push-dispatcher', () => ({
   runPushDispatcher: jest.fn(),
 }));
 
-jest.mock('../src/skills/perception/skw', () => ({
+jest.mock('../src/skills/info-gap', () => ({
   recallInfoGapKeywords: jest.fn(),
   decideInfoGapButtons: jest.fn(),
 }));
@@ -60,7 +60,7 @@ import { runPerceptionPipeline } from '../src/skills/run-perception-pipeline';
 import { runActionLayer } from '../src/skills/run-action-layer';
 import { runSummary } from '../src/skills/run-summary';
 import { runPushDispatcher } from '../src/skills/run-push-dispatcher';
-import { decideInfoGapButtons, recallInfoGapKeywords } from '../src/skills/perception/skw';
+import { decideInfoGapButtons, recallInfoGapKeywords } from '../src/skills/info-gap';
 import * as nlpClient from '../src/http/nlp-client';
 
 const mockGetSessionMembers = queries.getSessionMembers as jest.MockedFunction<typeof queries.getSessionMembers>;

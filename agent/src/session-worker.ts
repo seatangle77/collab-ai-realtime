@@ -15,7 +15,7 @@ import {
   decideInfoGapButtons,
   recallInfoGapKeywords,
   type InfoGapKeywordCandidate,
-} from './skills/perception/skw';
+} from './skills/info-gap';
 import { generateGroupSilence, notifyGroupSilence } from './http/nlp-client';
 
 const logger = createLogger('session-worker');
