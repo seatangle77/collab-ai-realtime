@@ -250,7 +250,7 @@ async def analyze_members_route(
     _: bool = Depends(require_admin),
 ):
     transcripts_text = "\n".join(
-        f"[{t.transcript_id}] {t.speaker_name or t.user_id}：{t.text}"
+        f"[{t.transcript_id}] user_id={t.user_id} speaker_name={t.speaker_name or '未知'}：{t.text}"
         for t in req.transcripts
     )
     members_metrics_text = "\n".join(
@@ -267,4 +267,3 @@ async def analyze_members_route(
         members_metrics_text=members_metrics_text,
     )
     return result
-
