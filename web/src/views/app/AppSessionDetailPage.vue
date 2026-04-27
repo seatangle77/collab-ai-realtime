@@ -138,6 +138,10 @@ function sortPushLogs(items: PushLogItem[]): PushLogItem[] {
   return sortPushLogsByTriggeredAtDesc(items)
 }
 
+function isAiInterventionPushLog(item: PushLogItem): boolean {
+  return item.push_channel === 'web' && Boolean(item.state_id || item.analysis_run_id || item.analysis_window_start)
+}
+
 function mergePushLogs(existing: PushLogItem[], incoming: PushLogItem[]): { merged: PushLogItem[]; newItems: PushLogItem[] } {
   const byKey = new Map<string, PushLogItem>()
   const existingKeys = new Set(existing.map((item) => pushLogMergeKey(item)))
@@ -215,7 +219,7 @@ async function fetchPushLogs(options: { notifyNew?: boolean } = {}) {
     const { merged, newItems } = mergePushLogs(pushLogs.value, normalized)
     pushLogs.value = merged
     if (options.notifyNew) {
-      const latestNew = sortPushLogs(newItems)[0]
+      const latestNew = sortPushLogs(newItems).find((item) => !isAiInterventionPushLog(item))
       if (latestNew) maybeNotifyNewPush(latestNew)
     }
   } catch {
