@@ -256,6 +256,13 @@ async def ws_session_endpoint(
 
     counted_active_ws = False
     await ws_manager.connect_session(session_id, websocket, user_id=user_id)
+    _logger.warning(
+        "[ws_connect] session_id=%s user_id=%s has_token=%s online_user_ids=%s",
+        session_id,
+        user_id or "<empty>",
+        bool(token),
+        ws_manager.get_online_user_ids(session_id),
+    )
     counted_active_ws = await _increment_active_ws_count(session_id)
     if counted_active_ws:
         _cancel_cleanup_task(session_id)

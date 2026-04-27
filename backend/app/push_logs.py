@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from typing import Any, Mapping
 
@@ -17,6 +18,7 @@ from .ws_manager import ws_manager
 from .ws_protocol import build_group_notification, build_push_notification
 
 router = APIRouter(prefix="/api", tags=["push-logs"])
+logger = logging.getLogger(__name__)
 
 VALID_PUSH_CHANNELS = {"web", "app", "glasses", "info_gap"}
 VALID_DELIVERY_STATUSES = {"pending", "delivered", "failed", "skipped", "deferred"}
@@ -127,7 +129,14 @@ async def push_notify(
     await db.commit()
 
     # 2. 定向 WebSocket 推送
-    target_online = body.target_user_id in ws_manager.get_online_user_ids(session_id)
+    online_user_ids = ws_manager.get_online_user_ids(session_id)
+    logger.warning(
+        "[push_notify_check] session_id=%s target_user_id=%s online_user_ids=%s",
+        session_id,
+        body.target_user_id,
+        online_user_ids,
+    )
+    target_online = body.target_user_id in online_user_ids
     sent = await ws_manager.send_to_user(
         session_id,
         body.target_user_id,

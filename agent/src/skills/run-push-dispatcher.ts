@@ -2,6 +2,7 @@ import { createLogger } from '../logger';
 import {
   claimPendingPushQueue,
   findDiscussionStateByQueuedPushId,
+  getPendingPushQueue,
   skipOtherPendingMemberInterventionQueueItems,
   updatePushQueueStatus,
   writeDiscussionState,
@@ -58,10 +59,23 @@ async function writeFilteredPushLog(
 }
 
 export async function runPushDispatcher(sessionId: string): Promise<void> {
+  logger.info('push dispatcher tick', { sessionId });
   const pendingItems = await claimPendingPushQueue(sessionId, PUSH_CLAIM_BATCH_SIZE);
   const reservedUsers = new Set<string>();
 
   if (pendingItems.length === 0) {
+    const pendingSnapshot = await getPendingPushQueue(sessionId);
+    logger.info('push dispatcher claimed=0', {
+      sessionId,
+      pending_count: pendingSnapshot.length,
+      pending_items: pendingSnapshot.slice(0, 5).map((item) => ({
+        id: item.id,
+        target_user_id: item.target_user_id,
+        state_type: item.state_type,
+        analysis_window_start: item.analysis_window_start,
+        created_at: item.created_at,
+      })),
+    });
     return;
   }
 
