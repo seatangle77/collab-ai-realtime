@@ -216,6 +216,47 @@ describe('SessionWorker windowing', () => {
     jest.useRealTimers();
   });
 
+  it('推送调度使用独立 120 秒节奏，不再 5 秒轮询队列', async () => {
+    jest.useFakeTimers();
+    const startedAt = new Date('2026-04-22T10:00:00Z');
+    jest.setSystemTime(startedAt);
+
+    const worker = new SessionWorker('s1', startedAt);
+    jest
+      .spyOn(worker as never, 'checkGroupSilence' as never)
+      .mockResolvedValue(undefined as never);
+    jest
+      .spyOn(worker as never, 'runAnalysisPipeline' as never)
+      .mockResolvedValue(undefined as never);
+    jest
+      .spyOn(worker as never, 'runSummaryPipeline' as never)
+      .mockResolvedValue(undefined as never);
+    jest
+      .spyOn(worker as never, 'runInfoGapPipeline' as never)
+      .mockResolvedValue(undefined as never);
+
+    worker.start();
+
+    await jest.advanceTimersByTimeAsync(5_000);
+    expect(mockRunPushDispatcher).not.toHaveBeenCalled();
+
+    await jest.advanceTimersByTimeAsync(114_999);
+    expect(mockRunPushDispatcher).not.toHaveBeenCalled();
+
+    await jest.advanceTimersByTimeAsync(1);
+    expect(mockRunPushDispatcher).toHaveBeenCalledTimes(1);
+    expect(mockRunPushDispatcher).toHaveBeenLastCalledWith('s1');
+
+    await jest.advanceTimersByTimeAsync(119_999);
+    expect(mockRunPushDispatcher).toHaveBeenCalledTimes(1);
+
+    await jest.advanceTimersByTimeAsync(1);
+    expect(mockRunPushDispatcher).toHaveBeenCalledTimes(2);
+
+    worker.stop();
+    jest.useRealTimers();
+  });
+
   it('信息缺口每 60 秒召回关键词，每 120 秒基于最近两轮候选词决策', async () => {
     const startedAt = new Date('2026-04-22T10:00:00Z');
     const worker = new SessionWorker('s1', startedAt);

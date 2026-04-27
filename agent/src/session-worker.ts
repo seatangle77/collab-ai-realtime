@@ -32,12 +32,12 @@ export class SessionWorker {
   private analysisTimer: ReturnType<typeof setTimeout> | null = null;
   private infoGapTimer: ReturnType<typeof setTimeout> | null = null;
   private summaryTimer: ReturnType<typeof setTimeout> | null = null;
-  private dispatchTimer: ReturnType<typeof setInterval> | null = null;
+  private dispatchTimer: ReturnType<typeof setTimeout> | null = null;
   private infoGapCandidates: InfoGapKeywordCandidate[] = [];
   private lastGroupSilenceTriggerAt: number | null = null;
   private running = false;
   private static readonly SUMMARY_LEAD_MS = 15_000;
-  private static readonly DISPATCH_INTERVAL_MS = 5_000;
+  private static readonly DISPATCH_INTERVAL_MS = 120_000;
 
   constructor(sessionId: string, sessionStartedAt: Date) {
     this.sessionId = sessionId;
@@ -56,7 +56,7 @@ export class SessionWorker {
     this.scheduleSummaryTimer();
     this.scheduleAnalysisTimer();
     this.scheduleInfoGapTimer();
-    this.startDispatchLoop();
+    this.scheduleDispatchTimer();
   }
 
   private scheduleSilenceTimer(nextScheduledFor?: Date): void {
@@ -116,6 +116,29 @@ export class SessionWorker {
     }, Math.max(0, scheduledFor.getTime() - Date.now()));
   }
 
+  private scheduleDispatchTimer(nextScheduledFor?: Date): void {
+    if (!this.running) return;
+    const scheduledFor = nextScheduledFor
+      ?? this.nextAlignedAt(
+        SessionWorker.DISPATCH_INTERVAL_MS,
+        SessionWorker.DISPATCH_INTERVAL_MS,
+      );
+    this.dispatchTimer = setTimeout(() => {
+      void runPushDispatcher(this.sessionId)
+        .catch((err) => {
+          logger.error('runPushDispatcher failed', {
+            sessionId: this.sessionId,
+            message: (err as Error).message,
+          });
+        })
+        .finally(() => {
+          this.scheduleDispatchTimer(
+            new Date(scheduledFor.getTime() + SessionWorker.DISPATCH_INTERVAL_MS),
+          );
+        });
+    }, Math.max(0, scheduledFor.getTime() - Date.now()));
+  }
+
   private nextAlignedAt(firstOffsetMs: number, intervalMs: number): Date {
     const baseMs = this.sessionStartedAt.getTime() + firstOffsetMs;
     const nowMs = Date.now();
@@ -149,24 +172,11 @@ export class SessionWorker {
       this.summaryTimer = null;
     }
     if (this.dispatchTimer !== null) {
-      clearInterval(this.dispatchTimer);
+      clearTimeout(this.dispatchTimer);
       this.dispatchTimer = null;
     }
 
     logger.info('Worker stopped', { sessionId: this.sessionId });
-  }
-
-  private startDispatchLoop(): void {
-    if (!this.running || this.dispatchTimer !== null) return;
-
-    this.dispatchTimer = setInterval(() => {
-      void runPushDispatcher(this.sessionId).catch((err) => {
-        logger.error('runPushDispatcher failed', {
-          sessionId: this.sessionId,
-          message: (err as Error).message,
-        });
-      });
-    }, SessionWorker.DISPATCH_INTERVAL_MS);
   }
 
   // ── 群体沉默检测：默认每 30s 检查一次 ───────────────────────────────────────────
