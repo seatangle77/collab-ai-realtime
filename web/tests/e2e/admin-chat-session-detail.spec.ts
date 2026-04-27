@@ -372,7 +372,7 @@ test.describe.serial('AdminChatSessionDetail - 删除会话', () => {
 })
 
 test.describe('AdminChatSessionDetail - 新布局', () => {
-  test('F-1: 顶部显示实时状态卡和三个 Tab', async ({ page }) => {
+  test('F-1: 顶部显示实时状态卡和四个 Tab', async ({ page }) => {
     const leader = await registerAndLogin('f1')
     const groupId = await createGroup(leader.accessToken, `Admin-SD-F1群-${Date.now()}`)
     const sessionId = await createSession(leader.accessToken, groupId, `F1布局测试-${Date.now()}`)
@@ -382,6 +382,7 @@ test.describe('AdminChatSessionDetail - 新布局', () => {
     await expect(page.getByText('实时状态')).toBeVisible()
     await expect(page.getByRole('tab', { name: '讨论实录' })).toBeVisible()
     await expect(page.getByRole('tab', { name: 'AI 分析' })).toBeVisible()
+    await expect(page.getByRole('tab', { name: '推送记录' })).toBeVisible()
     await expect(page.getByRole('tab', { name: '原始数据' })).toBeVisible()
   })
 
@@ -404,6 +405,26 @@ test.describe('AdminChatSessionDetail - 新布局', () => {
     await expect(page.locator('.timeline-bubble--transcript')).toContainText('先聊一下成本')
     await expect(page.locator('.timeline-bubble--push')).toContainText('AI 建议')
     await expect(page.locator('.timeline-bubble--push')).toContainText('建议你主动提出风险与成本优先级')
+  })
+
+  test('F-4: 推送记录 Tab 展示 push log 内容和投递状态', async ({ page }) => {
+    const leader = await registerAndLogin('f4-leader')
+    const member = await registerAndLogin('f4-member')
+    const groupId = await createGroup(leader.accessToken, `Admin-SD-F4群-${Date.now()}`)
+    const joinRes = await fetch(`${API_BASE}/api/groups/${groupId}/join`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${member.accessToken}` },
+    })
+    if (!joinRes.ok) throw new Error(`加入群组失败: ${await joinRes.text()}`)
+    const sessionId = await createSession(leader.accessToken, groupId, `F4推送记录测试-${Date.now()}`)
+    await addPushLog(sessionId, member.userId, '这是一条测试推送内容')
+
+    await loginAsAdminAndGoToDetail(page, sessionId)
+    await page.getByRole('tab', { name: '推送记录' }).click()
+
+    const pushPanel = page.getByLabel('推送记录')
+    await expect(pushPanel.getByText('这是一条测试推送内容')).toBeVisible()
+    await expect(pushPanel.getByText('已送达')).toBeVisible()
   })
 
   test('F-3: 同秒重复 push log 在讨论实录中折叠为一条', async ({ page }) => {

@@ -285,6 +285,7 @@ let appStateListener: PluginListenerHandle | null = null
 let ws: WebSocket | null = null
 let pingTimer: ReturnType<typeof setInterval> | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+let pushLogsPollTimer: ReturnType<typeof setInterval> | null = null
 let unmounted = false
 /** 为 true 时不自动重连（页面卸载、主动关闭） */
 let wsIntentionalClose = false
@@ -1194,6 +1195,13 @@ function scheduleReconnect() {
     if (unmounted || wsIntentionalClose) return
     openWebSocket()
   }, delay)
+}
+
+function clearPushLogsPollTimer() {
+  if (pushLogsPollTimer != null) {
+    clearInterval(pushLogsPollTimer)
+    pushLogsPollTimer = null
+  }
 }
 
 function closeWsForUnmount() {

@@ -79,7 +79,7 @@ const error = ref('')
 const refreshing = ref(false)
 const transcriptTimelineLoading = ref(false)
 const lastRefreshedAt = ref<string | null>(null)
-const activeTab = ref<'timeline' | 'analysis' | 'raw'>('timeline')
+const activeTab = ref<'timeline' | 'analysis' | 'push' | 'raw'>('timeline')
 const elapsedNow = ref(Date.now())
 
 const allTranscripts = ref<AdminTranscript[]>([])
@@ -196,6 +196,40 @@ function statusType(s: string | null | undefined) {
 
 function stateTypeLabel(value: string | null | undefined): string {
   return getDiscussionStateLabel(value)
+}
+
+function deliveryStatusLabel(value: string | null | undefined): string {
+  const map: Record<string, string> = {
+    pending:   '待投递',
+    delivered: '已送达',
+    failed:    '失败',
+    skipped:   '已跳过',
+    deferred:  '已延迟',
+  }
+  return (value && map[value]) ? map[value] : (value ?? '-')
+}
+
+function deliveryReasonLabel(value: string | null | undefined): string {
+  const map: Record<string, string> = {
+    ws_delivered:            'WebSocket 实时送达',
+    ws_send_error:           'WebSocket 发送失败',
+    ws_user_not_connected:   '用户未连接 WebSocket',
+    ws_pending:              '等待 WebSocket',
+    polling_delivered:       '用户端轮询补达',
+    group_ws_delivered:      '群组广播送达',
+    group_ws_pending:        '群组广播等待',
+    group_ws_no_online_users:'群组无在线用户',
+    same_round_dedup_skipped:'同轮去重跳过',
+    recent_exact_content_skipped: '近期相同内容跳过',
+    content_similarity_skipped:   '内容相似度过高跳过',
+    vad_speaking_deferred:   '用户正在说话，延迟',
+    needs_prompt_false:      '模型判定无需干预',
+    content_empty:           '生成内容为空',
+    anchor_invalid:          'anchor 校验失败',
+    passed:                  '通过，已入队',
+    hook_skip:               'hook 跳过',
+  }
+  return (value && map[value]) ? map[value] : (value ?? '-')
 }
 
 function summarizeMetrics(metrics: Record<string, unknown> | null | undefined): string[] {
@@ -973,6 +1007,59 @@ onUnmounted(() => {
               </div>
             </el-card>
           </div>
+        </el-tab-pane>
+
+        <el-tab-pane label="推送记录" name="push">
+          <el-card shadow="never">
+            <template #header>
+              <div class="admin-tab-header">
+                <div>
+                  <div class="admin-tab-header__title">推送记录</div>
+                  <div class="admin-tab-header__sub">记录 Agent 对每位成员的 AI 建议投递情况</div>
+                </div>
+                <div class="admin-tab-header__actions">
+                  <el-tag type="info" size="small">共 {{ pushLogs.length }} 条</el-tag>
+                </div>
+              </div>
+            </template>
+            <div v-if="!pushLogs.length" class="admin-session-detail-empty">暂无推送记录</div>
+            <el-table v-else :data="pushLogs" border size="small" style="width: 100%" row-key="id">
+              <el-table-column prop="id" label="ID" min-width="160" show-overflow-tooltip />
+              <el-table-column label="收件人" min-width="120" show-overflow-tooltip>
+                <template #default="{ row }">{{ row.target_user_name || row.target_user_id }}</template>
+              </el-table-column>
+              <el-table-column label="干预类型" min-width="110">
+                <template #default="{ row }">
+                  <el-tag
+                    size="small"
+                    :type="row.state_type === 'stagnation' ? 'warning' : row.state_type === 'shallow' ? 'primary' : row.state_type === 'group_silence' ? 'success' : 'info'"
+                  >
+                    {{ stateTypeLabel(row.state_type) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="push_content" label="推送内容" min-width="300" show-overflow-tooltip />
+              <el-table-column label="投递状态" min-width="100">
+                <template #default="{ row }">
+                  <el-tag
+                    size="small"
+                    :type="row.delivery_status === 'delivered' ? 'success' : row.delivery_status === 'failed' ? 'danger' : row.delivery_status === 'skipped' ? 'info' : 'warning'"
+                  >
+                    {{ deliveryStatusLabel(row.delivery_status) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="投递说明" min-width="180" show-overflow-tooltip>
+                <template #default="{ row }">{{ deliveryReasonLabel(row.delivery_reason) }}</template>
+              </el-table-column>
+              <el-table-column label="触发时间" min-width="160" show-overflow-tooltip>
+                <template #default="{ row }">{{ formatDisplayTime(row.triggered_at) }}</template>
+              </el-table-column>
+              <el-table-column label="送达时间" min-width="160" show-overflow-tooltip>
+                <template #default="{ row }">{{ formatDisplayTime(row.delivered_at) }}</template>
+              </el-table-column>
+            </el-table>
+          </el-card>
         </el-tab-pane>
 
         <el-tab-pane label="原始数据" name="raw">
