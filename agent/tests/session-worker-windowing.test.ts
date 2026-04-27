@@ -117,7 +117,7 @@ describe('SessionWorker windowing', () => {
     mockNotifyGroupSilence.mockResolvedValue(true);
   });
 
-  it('稳定阶段使用 60 秒成员级窗口和 120 秒组级窗口', async () => {
+  it('稳定阶段使用 120 秒统一判断窗口，调度仍为 60 秒', async () => {
     const startedAt = new Date('2026-04-22T10:00:00Z');
     const scheduledFor = new Date('2026-04-22T10:03:00Z');
     const worker = new SessionWorker('s1', startedAt);
@@ -127,7 +127,7 @@ describe('SessionWorker windowing', () => {
     expect(mockRunPerceptionPipeline).toHaveBeenCalledWith({
       sessionId: 's1',
       memberIds: ['u1'],
-      windowStart: new Date('2026-04-22T10:02:00Z'),
+      windowStart: new Date('2026-04-22T10:01:00Z'),
       windowEnd: scheduledFor,
     });
     expect(mockGetTranscriptsInWindowPreferCache).toHaveBeenCalledWith(
@@ -144,7 +144,7 @@ describe('SessionWorker windowing', () => {
     );
   });
 
-  it('冷启动阶段组级窗口从会话开始时间起算', async () => {
+  it('冷启动阶段统一判断窗口从会话开始时间起算', async () => {
     const startedAt = new Date('2026-04-22T10:00:00Z');
     const scheduledFor = new Date('2026-04-22T10:01:30Z');
     const worker = new SessionWorker('s1', startedAt);
@@ -154,7 +154,7 @@ describe('SessionWorker windowing', () => {
     expect(mockRunPerceptionPipeline).toHaveBeenCalledWith({
       sessionId: 's1',
       memberIds: ['u1'],
-      windowStart: new Date('2026-04-22T10:00:30Z'),
+      windowStart: startedAt,
       windowEnd: scheduledFor,
     });
     expect(mockGetTranscriptsInWindowPreferCache).toHaveBeenCalledWith(

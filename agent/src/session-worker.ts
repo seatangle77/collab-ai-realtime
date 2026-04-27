@@ -260,7 +260,7 @@ export class SessionWorker {
     }
   }
 
-  // ── 成员分析链：默认每 60s 触发一次；成员窗 60s，组级深度分析窗 120s ─────────────
+  // ── 成员分析链：默认每 60s 触发一次；指标与行动层上下文均使用 120s 窗口 ─────────────
 
   private async runAnalysisPipeline(scheduledFor: Date): Promise<void> {
     try {
@@ -269,29 +269,27 @@ export class SessionWorker {
       if (memberIds.length === 0) return;
 
       const windowEnd = scheduledFor;
-      // 成员窗口（60s）：基础指标 + 论证结构判定
-      const shortWindowStart = new Date(windowEnd.getTime() - config.agent.analysisIntervalMs);
-      // 长窗口（120s）：深度分析，会话前两分钟内用 sessionStartedAt 兜底
+      // 触发频率仍为 60s；判断依据统一使用 120s 窗口，会话前两分钟内用 sessionStartedAt 兜底
       const longWindowStart = new Date(
         Math.max(this.sessionStartedAt.getTime(), windowEnd.getTime() - config.agent.longIntervalMs),
       );
 
       const startedAt = Date.now();
-      const runId = buildRunId('reasoning', this.sessionId, shortWindowStart);
+      const runId = buildRunId('reasoning', this.sessionId, longWindowStart);
       logger.info('===== reasoning run begin =====', {
         run_id: runId,
         sessionId: this.sessionId,
         scheduled_for: scheduledFor.toISOString(),
-        short_window_start: shortWindowStart.toISOString(),
-        long_window_start: longWindowStart.toISOString(),
+        metrics_window_start: longWindowStart.toISOString(),
+        context_window_start: longWindowStart.toISOString(),
         window_end: windowEnd.toISOString(),
       });
 
-      // Step1：感知层（含论证结构批量判定，成员窗口 60s，同步 await）
+      // Step1：感知层（含论证结构批量判定，120s 窗口，同步 await）
       const perceptionResult = await runPerceptionPipeline({
         sessionId: this.sessionId,
         memberIds,
-        windowStart: shortWindowStart,
+        windowStart: longWindowStart,
         windowEnd,
       });
 
