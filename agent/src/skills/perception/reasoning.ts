@@ -45,7 +45,10 @@ export async function computeHasReasoning(
   }
 
   const batchInput = memberIds
-    .map((uid) => ({ user_id: uid, text: textByUser[uid].join(' ').trim() }))
+    .map((uid) => ({
+      user_id: uid,
+      text: textByUser[uid].map((t, i) => `${i + 1}. ${t.trim()}`).join('\n'),
+    }))
     .filter((m) => m.text.length > 0);
 
   if (batchInput.length === 0) {

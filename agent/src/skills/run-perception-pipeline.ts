@@ -2,8 +2,7 @@ import { createLogger } from '../logger';
 import { writeWindowMetrics, writeWindowMetricsBatchReasoning } from '../db/queries';
 import { computeSpeakingRatio } from './perception/speaking-ratio';
 import { computeSilence } from './perception/silence';
-import { computeTtr } from './perception/ttr';
-import { computeArgDensity } from './perception/arg-density';
+import { computeTtrAndArgDensity } from './perception/ttr-and-arg-density';
 import { computeSrep } from './perception/srep';
 import { computeInfoGain } from './perception/info-gain';
 import { computeHasReasoning } from './perception/reasoning';
@@ -64,25 +63,24 @@ export async function runPerceptionPipeline(input: PipelineInput): Promise<Pipel
   });
 
   // ── Step 1：并行执行互不依赖的 5 个纯计算 skill ──────────────────────────────
-  logger.info('[Step 1] 并行执行：发言比例 / 静默检测 / TTR / 论证密度 / 语义重复', { sessionId });
+  logger.info('[Step 1] 并行执行：发言比例 / 静默检测 / TTR+论证密度 / 语义重复', { sessionId });
   const [
     speakingRatioRes,
     silenceRes,
-    ttrRes,
-    argDensityRes,
+    ttrAndArgRes,
     srepRes,
   ] = await Promise.allSettled([
     computeSpeakingRatio(sessionId, windowStart, windowEnd, memberIds),
     computeSilence(sessionId, windowStart, windowEnd, memberIds),
-    computeTtr(sessionId, windowStart, windowEnd, memberIds),
-    computeArgDensity(sessionId, windowStart, windowEnd, memberIds),
+    computeTtrAndArgDensity(sessionId, windowStart, windowEnd, memberIds),
     computeSrep(sessionId, windowStart, windowEnd, memberIds),
   ]);
 
   const speakingRatios = settledValue(speakingRatioRes, '发言比例')?.ratios ?? {};
   const silenceSeconds = settledValue(silenceRes, '静默检测')?.silenceSeconds ?? {};
-  const ttrs = settledValue(ttrRes, '词汇多样性TTR')?.ttrs ?? {};
-  const argDensities = settledValue(argDensityRes, '论证密度')?.argDensities ?? {};
+  const ttrAndArg = settledValue(ttrAndArgRes, 'TTR+论证密度');
+  const ttrs = ttrAndArg?.ttrs ?? {};
+  const argDensities = ttrAndArg?.argDensities ?? {};
   const sreps = settledValue(srepRes, '语义重复度Srep')?.sreps ?? {};
 
   // ── Step 2：论证结构批量判定（fast_model，同窗口，await 阻塞，硬前置）───────

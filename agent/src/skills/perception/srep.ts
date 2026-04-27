@@ -35,27 +35,38 @@ export async function computeSrep(
 
   await Promise.allSettled(
     memberIds.map(async (uid) => {
-      const utterances = utterancesByUser[uid];
+      let utterances = utterancesByUser[uid];
       if (utterances.length < 2) {
-        sreps[uid] = null;
-        return;
+        const sentences = utterances.join('')
+          .split(/[。！？…]+/)
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0);
+        if (sentences.length >= 2) {
+          utterances = sentences;
+          logger.info(`[语义重复度 Srep] 用户 ${uid} 发言不足2条，按标点切分为 ${sentences.length} 句`, { sessionId });
+        } else {
+          sreps[uid] = null;
+          return;
+        }
       }
 
       logger.info(`[语义重复度 Srep] 正在向量化用户 ${uid} 的 ${utterances.length} 条发言`, { sessionId });
       const embeddings = await embed(utterances);
-      logger.info(`[语义重复度 Srep] 向量化完成，计算相邻发言间余弦相似度`, { sessionId, uid });
+      logger.info(`[语义重复度 Srep] 向量化完成，计算两两全组合余弦相似度`, { sessionId, uid });
 
-      // 构建所有相邻 pair
+      // 构建两两全组合 pair
       const pairs: Array<{ vec_a: number[]; vec_b: number[] }> = [];
       for (let i = 0; i < embeddings.length - 1; i++) {
-        pairs.push({ vec_a: embeddings[i], vec_b: embeddings[i + 1] });
+        for (let j = i + 1; j < embeddings.length; j++) {
+          pairs.push({ vec_a: embeddings[i], vec_b: embeddings[j] });
+        }
       }
 
       const scores = await similarity(pairs);
       const avg = scores.reduce((sum, s) => sum + s, 0) / scores.length;
       sreps[uid] = avg;
       const level = avg >= 0.85 ? '高（内容重复）' : avg >= 0.6 ? '中' : '低（内容多样）';
-      logger.info(`[语义重复度 Srep] 用户 ${uid} 结果：Srep=${avg.toFixed(3)}（${level}），基于 ${scores.length} 对相邻发言`, { sessionId });
+      logger.info(`[语义重复度 Srep] 用户 ${uid} 结果：Srep=${avg.toFixed(3)}（${level}），基于 ${scores.length} 对两两组合`, { sessionId });
     }),
   );
 

@@ -163,7 +163,7 @@ export async function getTranscriptsInWindow(
             ON u.id = COALESCE(NULLIF(t.user_id, ''), NULLIF(t.speaker, ''))
      WHERE t.session_id = $1
        AND t.start >= $2
-       AND t."end" <= $3
+       AND t.start < $3
        AND t.text IS NOT NULL
        AND t.text != ''
      ORDER BY t.start ASC`,
@@ -245,35 +245,40 @@ export async function getLastSpeakEndGlobal(
   return res.rows[0]?.last_end ?? null;
 }
 
-/** 写入当前窗口的宽松 TF-IDF 关键词（供 info_gain 历史对比使用） */
+/** 写入当前窗口的宽松 TF-IDF 关键词（供 info_gain 历史对比使用，按成员存储） */
 export async function writeWindowMetricsKeywords(
   sessionId: string,
+  userId: string,
   windowStart: Date,
   keywords: string[],
 ): Promise<void> {
   if (keywords.length === 0) return;
   const values = keywords
-    .map((_, i) => `('wmk_' || substr(md5(random()::text), 1, 12), $1, $2, $${i + 3}, NOW())`)
+    .map((_, i) => `('wmk_' || substr(md5(random()::text), 1, 12), $1, $2, $3, $${i + 4}, NOW())`)
     .join(', ');
   await pool.query(
-    `INSERT INTO window_metrics_keywords (id, session_id, window_start, keyword, created_at)
+    `INSERT INTO window_metrics_keywords (id, session_id, user_id, window_start, keyword, created_at)
      VALUES ${values}
      ON CONFLICT DO NOTHING`,
-    [sessionId, toUtcString(windowStart), ...keywords],
+    [sessionId, userId, toUtcString(windowStart), ...keywords],
   );
 }
 
-/** 获取历史窗口中的宽松关键词（info_gain 对比用，来源是 window_metrics_keywords） */
+/** 获取历史窗口中的宽松关键词（info_gain 对比用，只取指定成员最近2个窗口内的关键词） */
 export async function getHistoricalWindowMetricsKeywords(
   sessionId: string,
+  userId: string,
   before: Date,
+  historyStart: Date,
 ): Promise<HistoricalKeyword[]> {
   const res = await pool.query<HistoricalKeyword>(
     `SELECT DISTINCT keyword
      FROM window_metrics_keywords
      WHERE session_id = $1
-       AND window_start < $2`,
-    [sessionId, toUtcString(before)],
+       AND user_id = $2
+       AND window_start >= $3
+       AND window_start < $4`,
+    [sessionId, userId, toUtcString(historyStart), toUtcString(before)],
   );
   return res.rows;
 }
