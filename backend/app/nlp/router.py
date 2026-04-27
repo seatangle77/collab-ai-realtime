@@ -244,6 +244,54 @@ class AnalyzeMembersResponse(BaseModel):
     members: list[MemberAnalysisItem]
 
 
+def _format_metric(value: float | None, level_fn) -> str:
+    if value is None:
+        return "数据不足"
+    return f"{round(value, 3)}（{level_fn(value)}）"
+
+
+def _speaking_ratio_level(value: float) -> str:
+    if value < 0.15:
+        return "极低"
+    if value < 0.25:
+        return "偏低"
+    return "正常"
+
+
+def _silence_level(value: float) -> str:
+    return "较长时间未发言" if value > 90 else "正常"
+
+
+def _info_gain_level(value: float) -> str:
+    return "低" if value < 0.3 else "正常或较高"
+
+
+def _ttr_level(value: float) -> str:
+    if value < 0.3:
+        return "低"
+    if value < 0.6:
+        return "中"
+    return "高"
+
+
+def _arg_density_level(value: float) -> str:
+    if value < 0.1:
+        return "低"
+    if value < 0.3:
+        return "中"
+    return "高"
+
+
+def _srep_level(value: float) -> str:
+    return "高/重复" if value > 0.65 else "正常"
+
+
+def _format_status(value: bool | None) -> str:
+    if value is None:
+        return "数据不足"
+    return "有" if value else "无"
+
+
 @router.post("/analyze_members", response_model=AnalyzeMembersResponse)
 async def analyze_members_route(
     req: AnalyzeMembersRequest,
@@ -254,11 +302,15 @@ async def analyze_members_route(
         for t in req.transcripts
     )
     members_metrics_text = "\n".join(
-        f"- {m.user_id}：发言比例={round(m.speaking_ratio * 100, 1)}%"
-        f" 静默={round(m.silence_s)}s TTR={m.ttr} 论证密度={m.arg_density}"
-        f" Srep={m.srep} 信息增益={m.info_gain}"
-        f"\n  论证结构={m.reasoning_status}（{m.reasoning_source or '无说明'}）"
-        f" 支撑依据={m.evidence_status}（{m.evidence_source or '无说明'}）"
+        f"- {m.user_id}：\n"
+        f"  发言比例 speaking_ratio = {round(m.speaking_ratio, 3)}（{_speaking_ratio_level(m.speaking_ratio)}）\n"
+        f"  静默时长 silence_s = {round(m.silence_s)}s（{_silence_level(m.silence_s)}）\n"
+        f"  信息增益 info_gain = {_format_metric(m.info_gain, _info_gain_level)}\n"
+        f"  TTR = {_format_metric(m.ttr, _ttr_level)}\n"
+        f"  论证密度 arg_density = {_format_metric(m.arg_density, _arg_density_level)}\n"
+        f"  语义重复 Srep = {_format_metric(m.srep, _srep_level)}\n"
+        f"  论证结构 reasoning_status = {_format_status(m.reasoning_status)}（{m.reasoning_source or '无说明'}）\n"
+        f"  支撑依据 evidence_status = {_format_status(m.evidence_status)}（{m.evidence_source or '无说明'}）"
         for m in req.members
     )
     result = await push_content.analyze_members_batch(
