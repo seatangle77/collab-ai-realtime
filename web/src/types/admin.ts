@@ -165,7 +165,7 @@ export interface AdminPushLog {
 }
 
 // ── 推送队列 ──────────────────────────────────────────────────────────
-export type PushQueueStatus = 'pending' | 'delivered'
+export type PushQueueStatus = 'pending' | 'processing' | 'delivered' | 'skipped' | 'failed' | 'deferred'
 
 export interface AdminPushQueue {
   id: string

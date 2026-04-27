@@ -106,7 +106,7 @@ export async function runPushDispatcher(sessionId: string): Promise<void> {
       }
 
       if (outcome.action === 'defer') {
-        await updatePushQueueStatus(item.id, 'pending');
+        await updatePushQueueStatus(item.id, 'deferred');
         await writeFilteredPushLog(item, 'deferred', outcome.reasonCode);
         logger.info(
           `push deferred queue_id=${item.id} user=${item.target_user_id} by=${outcome.by} reason=${outcome.reasonCode}`,
@@ -128,8 +128,7 @@ export async function runPushDispatcher(sessionId: string): Promise<void> {
         window_start: item.analysis_window_start,
       });
 
-      const deliveredAt = new Date();
-      await notifyPush(
+      const notifyResult = await notifyPush(
         item.session_id,
         item.target_user_id,
         item.push_content,
@@ -138,6 +137,23 @@ export async function runPushDispatcher(sessionId: string): Promise<void> {
         item.id,
       );
 
+      if (!notifyResult.ws_sent) {
+        const retryable = notifyResult.delivery_reason === 'ws_user_not_connected'
+          || notifyResult.delivery_reason === 'ws_send_error';
+        await updatePushQueueStatus(item.id, retryable ? 'pending' : 'failed');
+        logger.warn(
+          `push not delivered queue_id=${item.id} user=${item.target_user_id} reason=${notifyResult.delivery_reason}`,
+          {
+            sessionId,
+            delivery_status: notifyResult.delivery_status,
+            retryable,
+            log_id: notifyResult.id,
+          },
+        );
+        continue;
+      }
+
+      const deliveredAt = new Date();
       reservedUsers.add(item.target_user_id);
       await updatePushQueueStatus(item.id, 'delivered', deliveredAt);
       if (item.state_type === 'stagnation' || item.state_type === 'shallow') {

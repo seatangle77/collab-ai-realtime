@@ -67,7 +67,7 @@ export interface PushQueueRow {
   push_content: string;
   content_embedding: number[];
   analysis_window_start: Date;
-  status: 'pending' | 'processing' | 'delivered' | 'skipped' | 'failed';
+  status: 'pending' | 'processing' | 'delivered' | 'skipped' | 'failed' | 'deferred';
   created_at: Date;
   delivered_at: Date | null;
 }
@@ -501,7 +501,7 @@ export async function getPendingPushQueue(sessionId: string): Promise<PushQueueR
             analysis_window_start, status, created_at, delivered_at
      FROM push_queue
      WHERE session_id = $1
-       AND status = 'pending'
+       AND status IN ('pending', 'deferred')
      ORDER BY created_at ASC`,
     [sessionId],
   );
@@ -524,9 +524,9 @@ export async function claimPendingPushQueue(
   >(
     `WITH picked AS (
        SELECT id
-       FROM push_queue
-       WHERE session_id = $1
-         AND status = 'pending'
+     FROM push_queue
+     WHERE session_id = $1
+         AND status IN ('pending', 'deferred')
          AND (
            state_type != ALL($3::text[])
            OR NOT EXISTS (
@@ -639,7 +639,7 @@ export async function getStateTypeCountInWindow(
 /** 更新 push_queue 状态 */
 export async function updatePushQueueStatus(
   id: string,
-  status: 'pending' | 'processing' | 'delivered' | 'skipped' | 'failed',
+  status: 'pending' | 'processing' | 'delivered' | 'skipped' | 'failed' | 'deferred',
   deliveredAt?: Date,
 ): Promise<void> {
   if (deliveredAt) {

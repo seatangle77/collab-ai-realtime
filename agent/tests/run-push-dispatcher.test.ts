@@ -47,7 +47,12 @@ describe('runPushDispatcher', () => {
     mockGetRecentDeliveredEmbeddings.mockResolvedValue([]);
     mockFindDiscussionStateByQueuedPushId.mockResolvedValue(null);
     mockWriteDiscussionState.mockResolvedValue('ds_1');
-    mockNotifyPush.mockResolvedValue(undefined);
+    mockNotifyPush.mockResolvedValue({
+      id: 'pl_1',
+      delivery_status: 'delivered',
+      delivery_reason: 'ws_delivered',
+      ws_sent: true,
+    });
     mockUpdatePushQueueStatus.mockResolvedValue(undefined);
   });
 
@@ -115,6 +120,21 @@ describe('runPushDispatcher', () => {
     await dispatcher.runPushDispatcher(SESSION);
 
     expect(mockUpdatePushQueueStatus).toHaveBeenCalledWith('pq_1', 'failed');
+  });
+
+  it('WebSocket 未命中用户连接时回到 pending 等待下轮重试', async () => {
+    jest.spyOn(dispatcher.pushDispatcherHooks, 'shouldSkipPushQueueItem').mockResolvedValue(false);
+    mockNotifyPush.mockResolvedValue({
+      id: 'pl_failed',
+      delivery_status: 'failed',
+      delivery_reason: 'ws_user_not_connected',
+      ws_sent: false,
+    });
+
+    await dispatcher.runPushDispatcher(SESSION);
+
+    expect(mockNotifyPush).toHaveBeenCalledTimes(1);
+    expect(mockUpdatePushQueueStatus).toHaveBeenCalledWith('pq_1', 'pending');
   });
 
   it('最近短时间已发送相同文案时跳过', async () => {

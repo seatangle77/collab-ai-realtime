@@ -24,7 +24,7 @@ VALID_STATE_TYPES = {
     "deadlock", "topic_drift", "low_depth", "homogeneous",
 }
 
-VALID_STATUSES = {"pending", "delivered"}
+VALID_STATUSES = {"pending", "processing", "delivered", "skipped", "failed", "deferred"}
 
 
 def _to_utc_naive(dt: datetime) -> datetime:

@@ -9,7 +9,20 @@ import { exportRowsToCsv } from '../../utils/csv'
 
 const STATUS_LABELS: Record<PushQueueStatus, string> = {
   pending: '待发送',
+  processing: '发送中',
   delivered: '已发送',
+  skipped: '已跳过',
+  failed: '发送失败',
+  deferred: '暂缓发送',
+}
+
+const STATUS_TAGS: Record<PushQueueStatus, 'success' | 'warning' | 'info' | 'danger' | 'primary'> = {
+  pending: 'warning',
+  processing: 'primary',
+  delivered: 'success',
+  skipped: 'info',
+  failed: 'danger',
+  deferred: 'warning',
 }
 
 const loading = ref(false)
@@ -241,7 +254,7 @@ onMounted(() => { fetchData() })
         </el-table-column>
         <el-table-column label="队列状态" min-width="100">
           <template #default="{ row }">
-            <el-tag :type="row.status === 'pending' ? 'warning' : 'success'">
+            <el-tag :type="STATUS_TAGS[row.status as PushQueueStatus]">
               {{ STATUS_LABELS[row.status as PushQueueStatus] }}
             </el-tag>
           </template>

@@ -98,7 +98,12 @@ async def push_notify(
         )
         queue_row = queue_result.mappings().first()
         if queue_row and queue_row["status"] in {"delivered", "skipped", "failed"}:
-            return {"id": None, "delivery_status": queue_row["status"], "ws_sent": False}
+            return {
+                "id": None,
+                "delivery_status": queue_row["status"],
+                "delivery_reason": "queue_already_final",
+                "ws_sent": False,
+            }
 
     log_id = "pl" + uuid.uuid4().hex[:8]
 
@@ -154,6 +159,16 @@ async def push_notify(
     delivery_reason = "ws_delivered" if sent else (
         "ws_send_error" if target_online else "ws_user_not_connected"
     )
+    logger.warning(
+        "[push_notify_result] session_id=%s target_user_id=%s log_id=%s target_online=%s ws_sent=%s delivery_reason=%s online_user_ids=%s",
+        session_id,
+        body.target_user_id,
+        log_id,
+        target_online,
+        sent,
+        delivery_reason,
+        online_user_ids,
+    )
     await db.execute(
         text(
             "UPDATE push_logs SET delivery_status = :s, delivery_reason = :r, delivered_at = NOW() WHERE id = :id"
@@ -174,7 +189,12 @@ async def push_notify(
     if device_token:
         await _jpush_safe(device_token, body.content, "")
 
-    return {"id": log_id, "delivery_status": new_status, "ws_sent": sent}
+    return {
+        "id": log_id,
+        "delivery_status": new_status,
+        "delivery_reason": delivery_reason,
+        "ws_sent": sent,
+    }
 
 
 @router.post(

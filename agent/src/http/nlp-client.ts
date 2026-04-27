@@ -236,6 +236,13 @@ export interface AnalyzeMembersResult {
   members: MemberAnalysisItem[];
 }
 
+export interface NotifyPushResult {
+  id: string | null;
+  delivery_status: 'pending' | 'delivered' | 'failed' | 'skipped' | 'deferred';
+  delivery_reason: string | null;
+  ws_sent: boolean;
+}
+
 /** fast_model：为群体沉默生成一句破冰话题 */
 export async function generateGroupSilence(params: {
   summary: string;
@@ -282,17 +289,19 @@ export async function notifyPush(
   stateId?: string,
   triggerType?: string,
   queueId?: string,
-): Promise<void> {
+): Promise<NotifyPushResult> {
   try {
-    await client.post(`/api/internal/sessions/${sessionId}/push-notify`, {
+    const res = await client.post<NotifyPushResult>(`/api/internal/sessions/${sessionId}/push-notify`, {
       target_user_id: targetUserId,
       content,
       state_id: stateId ?? null,
       trigger_type: triggerType ?? '',
       queue_id: queueId ?? null,
     });
+    return res.data;
   } catch (err) {
     logger.error('notify_push failed', { message: (err as Error).message });
+    throw err;
   }
 }
 
