@@ -35,6 +35,7 @@ MAX_AUDIO_B64_LENGTH = 1_500_000
 HEARTBEAT_TIMEOUT = 30  # 秒：发起者超过此时间无 ping 则自动结束会话
 CLEANUP_GRACE_SECONDS = 60  # 所有人断线后等待多少秒再兜底清理
 _logger = logging.getLogger(__name__)
+WS_TRACE = "[WS_TRACE]"
 _cleanup_tasks: dict[str, asyncio.Task] = {}
 
 
@@ -257,10 +258,12 @@ async def ws_session_endpoint(
     counted_active_ws = False
     await ws_manager.connect_session(session_id, websocket, user_id=user_id)
     _logger.warning(
-        "[ws_connect] session_id=%s user_id=%s has_token=%s online_user_ids=%s",
+        "%s [ws_connect] session_id=%s user_id=%s has_token=%s is_host=%s online_user_ids=%s",
+        WS_TRACE,
         session_id,
         user_id or "<empty>",
         bool(token),
+        is_host,
         ws_manager.get_online_user_ids(session_id),
     )
     counted_active_ws = await _increment_active_ws_count(session_id)
@@ -372,14 +375,34 @@ async def ws_session_endpoint(
 
             await websocket.send_json(build_error("UNKNOWN_TYPE", f"不支持的消息类型: {msg_type}"))
     except WebSocketDisconnect:
+        _logger.warning(
+            "%s [ws_disconnect] session_id=%s user_id=%s reason=websocket_disconnect online_user_ids=%s",
+            WS_TRACE,
+            session_id,
+            user_id or "<empty>",
+            ws_manager.get_online_user_ids(session_id),
+        )
         pass
     except Exception:
+        _logger.exception(
+            "%s [ws_disconnect] session_id=%s user_id=%s reason=endpoint_exception",
+            WS_TRACE,
+            session_id,
+            user_id or "<empty>",
+        )
         try:
             await websocket.send_json(build_error("INTERNAL_ERROR", "服务内部异常"))
         except Exception:
             pass
     finally:
         await ws_manager.disconnect_session(session_id, websocket)
+        _logger.warning(
+            "%s [ws_disconnect_final] session_id=%s user_id=%s online_user_ids=%s",
+            WS_TRACE,
+            session_id,
+            user_id or "<empty>",
+            ws_manager.get_online_user_ids(session_id),
+        )
         if counted_active_ws:
             await _decrement_active_ws_count(session_id)
             await _schedule_cleanup_if_empty(session_id)

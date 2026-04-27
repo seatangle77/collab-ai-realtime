@@ -1,8 +1,9 @@
-import axios, { AxiosInstance } from 'axios';
+import axios, { AxiosError, AxiosInstance } from 'axios';
 import { config } from '../config';
 import { createLogger } from '../logger';
 
 const logger = createLogger('nlp-client');
+const WS_TRACE = '[WS_TRACE]';
 
 // ── 响应类型 ──────────────────────────────────────────────────────────────────
 
@@ -291,6 +292,14 @@ export async function notifyPush(
   queueId?: string,
 ): Promise<NotifyPushResult> {
   try {
+    logger.info(`${WS_TRACE} notify_push request`, {
+      session_id: sessionId,
+      target_user_id: targetUserId,
+      state_id: stateId ?? null,
+      trigger_type: triggerType ?? '',
+      queue_id: queueId ?? null,
+      content_length: content.length,
+    });
     const res = await client.post<NotifyPushResult>(`/api/internal/sessions/${sessionId}/push-notify`, {
       target_user_id: targetUserId,
       content,
@@ -298,9 +307,26 @@ export async function notifyPush(
       trigger_type: triggerType ?? '',
       queue_id: queueId ?? null,
     });
+    logger.info(`${WS_TRACE} notify_push response`, {
+      session_id: sessionId,
+      target_user_id: targetUserId,
+      queue_id: queueId ?? null,
+      ws_sent: res.data.ws_sent,
+      delivery_status: res.data.delivery_status,
+      delivery_reason: res.data.delivery_reason,
+      log_id: res.data.id,
+    });
     return res.data;
   } catch (err) {
-    logger.error('notify_push failed', { message: (err as Error).message });
+    const axiosErr = err as AxiosError;
+    logger.error(`${WS_TRACE} notify_push failed`, {
+      session_id: sessionId,
+      target_user_id: targetUserId,
+      queue_id: queueId ?? null,
+      message: (err as Error).message,
+      status: axiosErr.response?.status,
+      response_data: axiosErr.response?.data,
+    });
     throw err;
   }
 }

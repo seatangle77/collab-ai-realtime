@@ -19,6 +19,7 @@ from .ws_protocol import build_group_notification, build_push_notification
 
 router = APIRouter(prefix="/api", tags=["push-logs"])
 logger = logging.getLogger(__name__)
+WS_TRACE = "[WS_TRACE]"
 
 VALID_PUSH_CHANNELS = {"web", "app", "glasses", "info_gap"}
 VALID_DELIVERY_STATUSES = {"pending", "delivered", "failed", "skipped", "deferred"}
@@ -72,6 +73,11 @@ async def push_notify(
     2. 尝试 WebSocket 定向推送
     3. 更新 delivery_status
     """
+    logger.warning(
+        "%s [push_notify] >>> 收到推送请求 session_id=%s target_user_id=%s queue_id=%s",
+        WS_TRACE,
+        session_id, body.target_user_id, body.queue_id,
+    )
     analysis_window_start = None
     analysis_run_id = None
     if body.state_id:
@@ -98,6 +104,11 @@ async def push_notify(
         )
         queue_row = queue_result.mappings().first()
         if queue_row and queue_row["status"] in {"delivered", "skipped", "failed"}:
+            logger.warning(
+                "%s [push_notify] 队列已是终态 queue_id=%s status=%s，跳过",
+                WS_TRACE,
+                body.queue_id, queue_row["status"],
+            )
             return {
                 "id": None,
                 "delivery_status": queue_row["status"],
@@ -136,7 +147,8 @@ async def push_notify(
     # 2. 定向 WebSocket 推送
     online_user_ids = ws_manager.get_online_user_ids(session_id)
     logger.warning(
-        "[push_notify_check] session_id=%s target_user_id=%s online_user_ids=%s",
+        "%s [push_notify_check] session_id=%s target_user_id=%s online_user_ids=%s",
+        WS_TRACE,
         session_id,
         body.target_user_id,
         online_user_ids,
@@ -159,8 +171,20 @@ async def push_notify(
     delivery_reason = "ws_delivered" if sent else (
         "ws_send_error" if target_online else "ws_user_not_connected"
     )
+    if delivery_reason == "ws_user_not_connected":
+        logger.warning(
+            "%s [push_notify_ws_user_not_connected] session_id=%s target_user_id=%s log_id=%s online_user_ids=%s queue_id=%s trigger_type=%s",
+            WS_TRACE,
+            session_id,
+            body.target_user_id,
+            log_id,
+            online_user_ids,
+            body.queue_id,
+            body.trigger_type,
+        )
     logger.warning(
-        "[push_notify_result] session_id=%s target_user_id=%s log_id=%s target_online=%s ws_sent=%s delivery_reason=%s online_user_ids=%s",
+        "%s [push_notify_result] session_id=%s target_user_id=%s log_id=%s target_online=%s ws_sent=%s delivery_reason=%s online_user_ids=%s",
+        WS_TRACE,
         session_id,
         body.target_user_id,
         log_id,

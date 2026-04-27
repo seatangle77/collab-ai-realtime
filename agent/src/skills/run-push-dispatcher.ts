@@ -17,6 +17,7 @@ import { vadCheckFilter } from './push/filters/vad-check';
 import type { PushFilter } from './push/types';
 
 const logger = createLogger('push-dispatcher');
+const WS_TRACE = '[WS_TRACE]';
 
 const PUSH_FILTERS: PushFilter[] = [
   sameRoundDedupFilter,    // 1. 同轮去重（纯内存，最快）
@@ -65,6 +66,19 @@ export async function runPushDispatcher(sessionId: string): Promise<void> {
 
   if (pendingItems.length === 0) {
     const pendingSnapshot = await getPendingPushQueue(sessionId);
+    if (pendingSnapshot.length > 0) {
+      logger.warn(`${WS_TRACE} push dispatcher claimed=0 but pending exists`, {
+        sessionId,
+        pending_count: pendingSnapshot.length,
+        pending_items: pendingSnapshot.slice(0, 10).map((item) => ({
+          id: item.id,
+          target_user_id: item.target_user_id,
+          state_type: item.state_type,
+          analysis_window_start: item.analysis_window_start,
+          created_at: item.created_at,
+        })),
+      });
+    }
     logger.info('push dispatcher claimed=0', {
       sessionId,
       pending_count: pendingSnapshot.length,
@@ -140,6 +154,17 @@ export async function runPushDispatcher(sessionId: string): Promise<void> {
       if (!notifyResult.ws_sent) {
         const retryable = notifyResult.delivery_reason === 'ws_user_not_connected'
           || notifyResult.delivery_reason === 'ws_send_error';
+        if (notifyResult.delivery_reason === 'ws_user_not_connected') {
+          logger.warn(
+            `${WS_TRACE} push ws_user_not_connected queue_id=${item.id} user=${item.target_user_id}`,
+            {
+              sessionId,
+              state_id: stateId,
+              trigger_type: item.state_type,
+              log_id: notifyResult.id,
+            },
+          );
+        }
         await updatePushQueueStatus(item.id, retryable ? 'pending' : 'failed');
         logger.warn(
           `push not delivered queue_id=${item.id} user=${item.target_user_id} reason=${notifyResult.delivery_reason}`,

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import WebSocket
+
+logger = logging.getLogger(__name__)
+WS_TRACE = "[WS_TRACE]"
 
 
 class SessionWebSocketManager:
@@ -59,14 +63,36 @@ class SessionWebSocketManager:
         user_conns = self._user_connections.get(session_id, {})
         ws = user_conns.get(user_id)
         if ws is None:
+            logger.warning(
+                "%s [ws_send_to_user_miss] session_id=%s user_id=%s online_user_ids=%s",
+                WS_TRACE,
+                session_id,
+                user_id,
+                list(user_conns.keys()),
+            )
             return False
         try:
             await ws.send_json(message)
+            logger.info(
+                "%s [ws_send_to_user_ok] session_id=%s user_id=%s message_type=%s",
+                WS_TRACE,
+                session_id,
+                user_id,
+                message.get("type"),
+            )
             return True
-        except Exception:
+        except Exception as exc:
             # 连接已断开，清理
             user_conns.pop(user_id, None)
             self.session_connections.get(session_id, set()).discard(ws)
+            logger.warning(
+                "%s [ws_send_to_user_error] session_id=%s user_id=%s message_type=%s error=%s",
+                WS_TRACE,
+                session_id,
+                user_id,
+                message.get("type"),
+                str(exc),
+            )
             return False
 
     def get_online_user_ids(self, session_id: str) -> list[str]:
