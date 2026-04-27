@@ -112,7 +112,6 @@ const summaryVersion = ref(0)
 const summaryHistory = ref<SummaryHistoryItem[]>([])
 const pushLogs = ref<PushLogItem[]>([])
 const seenPushNotificationKeys = new Set<string>()
-const PUSH_LOGS_POLL_INTERVAL_MS = 5000
 
 function normalizeInfoGapButton(button: InfoGapButton): InfoGapButton {
   return {
@@ -286,7 +285,6 @@ let appStateListener: PluginListenerHandle | null = null
 let ws: WebSocket | null = null
 let pingTimer: ReturnType<typeof setInterval> | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-let pushLogsPollTimer: ReturnType<typeof setInterval> | null = null
 let unmounted = false
 /** 为 true 时不自动重连（页面卸载、主动关闭） */
 let wsIntentionalClose = false
@@ -449,7 +447,6 @@ async function handleLaunchSession() {
     // 3. 标记待录音，建立 WS（connected 后自动开始录音）
     pendingRecordingStart.value = true
     wsIntentionalClose = false
-    startPushLogsPolling()
     openWebSocket()
   } finally {
     launching.value = false
@@ -1176,21 +1173,6 @@ function clearReconnectTimer() {
   }
 }
 
-function clearPushLogsPollTimer() {
-  if (pushLogsPollTimer != null) {
-    clearInterval(pushLogsPollTimer)
-    pushLogsPollTimer = null
-  }
-}
-
-function startPushLogsPolling() {
-  clearPushLogsPollTimer()
-  if (session.value?.status !== 'ongoing') return
-  pushLogsPollTimer = setInterval(() => {
-    void fetchPushLogs({ notifyNew: true })
-  }, PUSH_LOGS_POLL_INTERVAL_MS)
-}
-
 function scheduleReconnect() {
   clearReconnectTimer()
   if (unmounted || wsIntentionalClose) return
@@ -1268,7 +1250,6 @@ onMounted(async () => {
   unmounted = false
   wsIntentionalClose = false
   reconnectAttempt.value = 0
-  clearPushLogsPollTimer()
   attachTestMessageInjector()
   debugAudioEnabled.value = true
   currentUser.value = loadCurrentUser()
@@ -1279,7 +1260,6 @@ onMounted(async () => {
   // 仅会话已「进行中」时才自动连接 WS（如刷新页面场景）
   if (session.value?.status === 'ongoing') {
     openWebSocket()
-    startPushLogsPolling()
     void fetchInfoGapButtons()
     void fetchLatestSummary()
     void fetchSummaryHistory()
