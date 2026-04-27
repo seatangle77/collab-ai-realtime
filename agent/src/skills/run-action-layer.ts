@@ -4,6 +4,7 @@ import {
   writePushQueueItem,
   writeDiscussionState,
   writeAiPushAnalysis,
+  trimPendingMemberInterventionQueue,
 } from '../db/queries';
 import { embed, analyzeMembers } from '../http/nlp-client';
 import type { PipelineResult } from './run-perception-pipeline';
@@ -209,6 +210,17 @@ export async function runActionLayer(params: {
         content_embedding: contentEmbedding,
         analysis_window_start: windowStart,
       });
+
+      if (item.challenge_type === 'stagnation' || item.challenge_type === 'shallow') {
+        const skippedCount = await trimPendingMemberInterventionQueue({
+          sessionId,
+          targetUserId: item.user_id,
+          keepLatest: 2,
+        });
+        if (skippedCount > 0) {
+          logger.info(`成员干预队列已保留最新2条，跳过旧 pending 数量=${skippedCount} user=${item.user_id}`, { sessionId });
+        }
+      }
 
       await writeDiscussionState({
         session_id: sessionId,

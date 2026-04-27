@@ -2,6 +2,7 @@ import { createLogger } from '../logger';
 import {
   claimPendingPushQueue,
   findDiscussionStateByQueuedPushId,
+  skipOtherPendingMemberInterventionQueueItems,
   updatePushQueueStatus,
   writeDiscussionState,
   writePushLog,
@@ -125,6 +126,16 @@ export async function runPushDispatcher(sessionId: string): Promise<void> {
 
       reservedUsers.add(item.target_user_id);
       await updatePushQueueStatus(item.id, 'delivered', deliveredAt);
+      if (item.state_type === 'stagnation' || item.state_type === 'shallow') {
+        const skippedCount = await skipOtherPendingMemberInterventionQueueItems({
+          sessionId: item.session_id,
+          targetUserId: item.target_user_id,
+          deliveredQueueId: item.id,
+        });
+        if (skippedCount > 0) {
+          logger.info(`push delivered; skipped older member-intervention buffers count=${skippedCount} user=${item.target_user_id}`, { sessionId });
+        }
+      }
       logger.info(`push delivered queue_id=${item.id} user=${item.target_user_id}`, { sessionId });
     } catch (err) {
       logger.error(`push dispatch failed queue_id=${item.id}`, {

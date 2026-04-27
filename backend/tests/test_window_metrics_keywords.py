@@ -79,6 +79,12 @@ async def exec_sql(sql: str, params: dict | None = None) -> None:
         await engine.dispose()
 
 
+def reset_counters() -> None:
+    global _pass, _fail
+    _pass = 0
+    _fail = 0
+
+
 def cleanup_seed_rows() -> None:
     if not SEEDED_IDS:
         return
@@ -141,162 +147,174 @@ def assert_items_all(data: dict, predicate, label: str) -> None:
     assert all(predicate(item) for item in items), label
 
 
-require_db()
-atexit.register(cleanup_seed_rows)
-cleanup_seed_rows()
-seed_rows()
+def run_window_metrics_keywords_flow() -> None:
+    reset_counters()
+    require_db()
+    atexit.register(cleanup_seed_rows)
+    cleanup_seed_rows()
+    seed_rows()
 
-section("1. 认证鉴权")
+    section("1. 认证鉴权")
 
-check("无 Token → 403", requests.get(f"{URL}/"), 403)
-check("错误 Token → 403", requests.get(f"{URL}/", headers={"X-Admin-Token": "wrong"}), 403)
-check("正确 Token → 200", requests.get(f"{URL}/", headers=HEADERS), 200)
+    check("无 Token → 403", requests.get(f"{URL}/"), 403)
+    check("错误 Token → 403", requests.get(f"{URL}/", headers={"X-Admin-Token": "wrong"}), 403)
+    check("正确 Token → 200", requests.get(f"{URL}/", headers=HEADERS), 200)
 
-section("2. 基本列表查询")
+    section("2. 基本列表查询")
 
-data = check("GET 全量列表", requests.get(f"{URL}/?session_id={SESSION_PREFIX}", headers=HEADERS))
-if data:
-    assert data["meta"]["total"] >= 5, "seed 数据数量异常"
-    assert len(data["items"]) >= 5, "seed 数据未查到"
-    sample = data["items"][0]
-    for field in ["id", "session_id", "window_start", "keyword", "created_at"]:
-        assert field in sample, f"缺少字段: {field}"
-
-data = check("GET + session_id 过滤", requests.get(f"{URL}/?session_id={SESSION_PREFIX}", headers=HEADERS))
-if data:
-    assert_items_all(data, lambda item: item["session_id"] == SESSION_PREFIX, "session_id 过滤错误")
-
-section("3. 过滤条件")
-
-data = check("filter: session_id 精确匹配",
-             requests.get(f"{URL}/?session_id={SESSION_PREFIX}", headers=HEADERS))
-if data:
-    assert_items_all(data, lambda item: item["session_id"] == SESSION_PREFIX, "session_id 精确匹配错误")
-
-for keyword in ["机器学习", "MVP", "A", "关键词", "特殊%字符"]:
-    data = check(f"filter: keyword 模糊匹配={keyword}",
-                 requests.get(f"{URL}/?session_id={SESSION_PREFIX}&keyword={keyword}", headers=HEADERS))
+    data = check("GET 全量列表", requests.get(f"{URL}/?session_id={SESSION_PREFIX}", headers=HEADERS))
     if data:
-        assert data["items"], f"keyword={keyword} 应命中 seed 数据"
+        assert data["meta"]["total"] >= 5, "seed 数据数量异常"
+        assert len(data["items"]) >= 5, "seed 数据未查到"
+        sample = data["items"][0]
+        for field in ["id", "session_id", "window_start", "keyword", "created_at"]:
+            assert field in sample, f"缺少字段: {field}"
 
-data = check("filter: window_start_from / window_start_to 时间范围",
-             requests.get(
-                 f"{URL}/?session_id={SESSION_PREFIX}"
-                 "&window_start_from=2025-01-01T13:01:00Z&window_start_to=2025-01-01T13:03:00Z",
-                 headers=HEADERS,
-             ))
-if data:
-    assert_items_all(
-        data,
-        lambda item: "2025-01-01T13:01:00" <= item["window_start"] <= "2025-01-01T13:03:00",
-        "window_start 范围过滤错误",
-    )
+    data = check("GET + session_id 过滤", requests.get(f"{URL}/?session_id={SESSION_PREFIX}", headers=HEADERS))
+    if data:
+        assert_items_all(data, lambda item: item["session_id"] == SESSION_PREFIX, "session_id 过滤错误")
 
-data = check("filter: 组合=session_id + keyword + window_start_from",
-             requests.get(
-                 f"{URL}/?session_id={SESSION_PREFIX}&keyword=关键词&window_start_from=2025-01-01T13:02:00Z",
-                 headers=HEADERS,
-             ))
-if data:
-    assert_items_all(data, lambda item: item["session_id"] == SESSION_PREFIX, "组合过滤 session_id 错误")
+    section("3. 过滤条件")
 
-data = check("filter: window_start_from = window_start_to（精确时间点）",
-             requests.get(
-                 f"{URL}/?session_id={SESSION_PREFIX}"
-                 "&window_start_from=2025-01-01T13:03:00Z&window_start_to=2025-01-01T13:03:00Z",
-                 headers=HEADERS,
-             ))
-if data:
-    assert len(data["items"]) == 1, "精确时间点应命中 1 条"
+    data = check("filter: session_id 精确匹配",
+                 requests.get(f"{URL}/?session_id={SESSION_PREFIX}", headers=HEADERS))
+    if data:
+        assert_items_all(data, lambda item: item["session_id"] == SESSION_PREFIX, "session_id 精确匹配错误")
 
-data = check("filter: window_start_from > window_start_to（时间倒置）",
-             requests.get(
-                 f"{URL}/?session_id={SESSION_PREFIX}"
-                 "&window_start_from=2099-01-01T00:00:00Z&window_start_to=2024-01-01T00:00:00Z",
-                 headers=HEADERS,
-             ))
-if data:
-    assert data["items"] == [], "时间倒置应返回空列表"
+    for keyword in ["机器学习", "MVP", "A", "关键词", "特殊%字符"]:
+        data = check(f"filter: keyword 模糊匹配={keyword}",
+                     requests.get(f"{URL}/?session_id={SESSION_PREFIX}&keyword={keyword}", headers=HEADERS))
+        if data:
+            assert data["items"], f"keyword={keyword} 应命中 seed 数据"
 
-check("filter: window_start_from 非法格式 → 422",
-      requests.get(f"{URL}/?window_start_from=not-a-date", headers=HEADERS), 422)
+    data = check("filter: window_start_from / window_start_to 时间范围",
+                 requests.get(
+                     f"{URL}/?session_id={SESSION_PREFIX}"
+                     "&window_start_from=2025-01-01T13:01:00Z&window_start_to=2025-01-01T13:03:00Z",
+                     headers=HEADERS,
+                 ))
+    if data:
+        assert_items_all(
+            data,
+            lambda item: "2025-01-01T13:01:00" <= item["window_start"] <= "2025-01-01T13:03:00",
+            "window_start 范围过滤错误",
+        )
 
-section("4. 边界分页")
+    data = check("filter: 组合=session_id + keyword + window_start_from",
+                 requests.get(
+                     f"{URL}/?session_id={SESSION_PREFIX}&keyword=关键词&window_start_from=2025-01-01T13:02:00Z",
+                     headers=HEADERS,
+                 ))
+    if data:
+        assert_items_all(data, lambda item: item["session_id"] == SESSION_PREFIX, "组合过滤 session_id 错误")
 
-data = check("page=1, page_size=1",
-             requests.get(f"{URL}/?session_id={SESSION_PREFIX}&page=1&page_size=1", headers=HEADERS))
-if data:
-    assert len(data["items"]) == 1, "page_size=1 应只返回 1 条"
+    data = check("filter: window_start_from = window_start_to（精确时间点）",
+                 requests.get(
+                     f"{URL}/?session_id={SESSION_PREFIX}"
+                     "&window_start_from=2025-01-01T13:03:00Z&window_start_to=2025-01-01T13:03:00Z",
+                     headers=HEADERS,
+                 ))
+    if data:
+        assert len(data["items"]) == 1, "精确时间点应命中 1 条"
 
-check("page_size=200（最大合法）",
-      requests.get(f"{URL}/?session_id={SESSION_PREFIX}&page_size=200", headers=HEADERS))
-data = check("page=999999",
-             requests.get(f"{URL}/?session_id={SESSION_PREFIX}&page=999999", headers=HEADERS))
-if data:
-    assert data["items"] == [], "超大页码应返回空列表"
+    data = check("filter: window_start_from > window_start_to（时间倒置）",
+                 requests.get(
+                     f"{URL}/?session_id={SESSION_PREFIX}"
+                     "&window_start_from=2099-01-01T00:00:00Z&window_start_to=2024-01-01T00:00:00Z",
+                     headers=HEADERS,
+                 ))
+    if data:
+        assert data["items"] == [], "时间倒置应返回空列表"
 
-check("page=0 → 422", requests.get(f"{URL}/?page=0", headers=HEADERS), 422)
-check("page_size=0 → 422", requests.get(f"{URL}/?page_size=0", headers=HEADERS), 422)
-check("page_size=201 → 422", requests.get(f"{URL}/?page_size=201", headers=HEADERS), 422)
-check("page=-1 → 422", requests.get(f"{URL}/?page=-1", headers=HEADERS), 422)
-check("page=abc → 422", requests.get(f"{URL}/?page=abc", headers=HEADERS), 422)
+    check("filter: window_start_from 非法格式 → 422",
+          requests.get(f"{URL}/?window_start_from=not-a-date", headers=HEADERS), 422)
 
-section("5. DELETE 单条")
+    section("4. 边界分页")
 
-check("DELETE 不存在 id → 404",
-      requests.delete(f"{URL}/nonexistent_id_xyz", headers=HEADERS), 404)
-check("DELETE 路径为空 → 405",
-      requests.delete(f"{URL}/", headers=HEADERS), 405)
+    data = check("page=1, page_size=1",
+                 requests.get(f"{URL}/?session_id={SESSION_PREFIX}&page=1&page_size=1", headers=HEADERS))
+    if data:
+        assert len(data["items"]) == 1, "page_size=1 应只返回 1 条"
 
-delete_id = SEEDED_IDS.pop()
-resp = requests.delete(f"{URL}/{delete_id}", headers=HEADERS)
-check(f"DELETE 真实记录 id={delete_id[:16]}... → 204", resp, 204)
-check("二次 DELETE 同一 id → 404",
-      requests.delete(f"{URL}/{delete_id}", headers=HEADERS), 404)
+    check("page_size=200（最大合法）",
+          requests.get(f"{URL}/?session_id={SESSION_PREFIX}&page_size=200", headers=HEADERS))
+    data = check("page=999999",
+                 requests.get(f"{URL}/?session_id={SESSION_PREFIX}&page=999999", headers=HEADERS))
+    if data:
+        assert data["items"] == [], "超大页码应返回空列表"
 
-section("6. batch-delete")
+    check("page=0 → 422", requests.get(f"{URL}/?page=0", headers=HEADERS), 422)
+    check("page_size=0 → 422", requests.get(f"{URL}/?page_size=0", headers=HEADERS), 422)
+    check("page_size=201 → 422", requests.get(f"{URL}/?page_size=201", headers=HEADERS), 422)
+    check("page=-1 → 422", requests.get(f"{URL}/?page=-1", headers=HEADERS), 422)
+    check("page=abc → 422", requests.get(f"{URL}/?page=abc", headers=HEADERS), 422)
 
-check("空 ids → 422",
-      requests.post(f"{URL}/batch-delete", json={"ids": []}, headers=HEADERS), 422)
-check("101 条（超限）→ 422",
-      requests.post(f"{URL}/batch-delete", json={"ids": [f'fake_{i}' for i in range(101)]}, headers=HEADERS), 422)
-r_bd = check("100 条不存在 id → 200，deleted=0",
-             requests.post(f"{URL}/batch-delete",
-                           json={"ids": [f"fake_{i}" for i in range(100)]},
-                           headers=HEADERS))
-if r_bd:
-    assert r_bd.get("deleted") == 0, f"deleted 应为 0，实际={r_bd.get('deleted')}"
+    section("5. DELETE 单条")
 
-batch_ids = SEEDED_IDS[:2]
-r_bd2 = check("真实 2 条 → 200，deleted=2",
-              requests.post(f"{URL}/batch-delete", json={"ids": batch_ids}, headers=HEADERS))
-if r_bd2:
-    assert r_bd2.get("deleted") == 2, f"deleted 应为 2，实际={r_bd2.get('deleted')}"
-    SEEDED_IDS[:] = [row_id for row_id in SEEDED_IDS if row_id not in batch_ids]
+    check("DELETE 不存在 id → 404",
+          requests.delete(f"{URL}/nonexistent_id_xyz", headers=HEADERS), 404)
+    check("DELETE 路径为空 → 405",
+          requests.delete(f"{URL}/", headers=HEADERS), 405)
 
-check("缺少 ids 字段 → 422",
-      requests.post(f"{URL}/batch-delete", json={}, headers=HEADERS), 422)
-check("ids 含 null → 422",
-      requests.post(f"{URL}/batch-delete", json={"ids": [None]}, headers=HEADERS), 422)
-check("ids 含整数 → 422",
-      requests.post(f"{URL}/batch-delete", json={"ids": [1, 2]}, headers=HEADERS), 422)
-check("ids 不是数组 → 422",
-      requests.post(f"{URL}/batch-delete", json={"ids": "abc"}, headers=HEADERS), 422)
-check("body 为空 → 422",
-      requests.post(f"{URL}/batch-delete", data="", headers=HEADERS), 422)
+    delete_id = SEEDED_IDS.pop()
+    resp = requests.delete(f"{URL}/{delete_id}", headers=HEADERS)
+    check(f"DELETE 真实记录 id={delete_id[:16]}... → 204", resp, 204)
+    check("二次 DELETE 同一 id → 404",
+          requests.delete(f"{URL}/{delete_id}", headers=HEADERS), 404)
 
-section("7. 极端参数")
+    section("6. batch-delete")
 
-check("session_id 超长 1000 字符 → 200（不崩溃）",
-      requests.get(f"{URL}/?session_id={'x' * 1000}", headers=HEADERS))
-check("keyword SQL 注入尝试 → 200（数据不受影响）",
-      requests.get(f"{URL}/?keyword='; DROP TABLE window_metrics_keywords; --", headers=HEADERS))
-check("keyword 空字符串 → 200（被忽略，返回全量）",
-      requests.get(f"{URL}/?keyword=", headers=HEADERS))
+    check("空 ids → 422",
+          requests.post(f"{URL}/batch-delete", json={"ids": []}, headers=HEADERS), 422)
+    check("101 条（超限）→ 422",
+          requests.post(f"{URL}/batch-delete", json={"ids": [f'fake_{i}' for i in range(101)]}, headers=HEADERS), 422)
+    r_bd = check("100 条不存在 id → 200，deleted=0",
+                 requests.post(f"{URL}/batch-delete",
+                               json={"ids": [f"fake_{i}" for i in range(100)]},
+                               headers=HEADERS))
+    if r_bd:
+        assert r_bd.get("deleted") == 0, f"deleted 应为 0，实际={r_bd.get('deleted')}"
 
-print(f"\n{'=' * 60}")
-print(f"  结果汇总：通过 {_pass}，失败 {_fail}")
-print(f"{'=' * 60}\n")
+    batch_ids = SEEDED_IDS[:2]
+    r_bd2 = check("真实 2 条 → 200，deleted=2",
+                  requests.post(f"{URL}/batch-delete", json={"ids": batch_ids}, headers=HEADERS))
+    if r_bd2:
+        assert r_bd2.get("deleted") == 2, f"deleted 应为 2，实际={r_bd2.get('deleted')}"
+        SEEDED_IDS[:] = [row_id for row_id in SEEDED_IDS if row_id not in batch_ids]
 
-if _fail > 0:
-    sys.exit(1)
+    check("缺少 ids 字段 → 422",
+          requests.post(f"{URL}/batch-delete", json={}, headers=HEADERS), 422)
+    check("ids 含 null → 422",
+          requests.post(f"{URL}/batch-delete", json={"ids": [None]}, headers=HEADERS), 422)
+    check("ids 含整数 → 422",
+          requests.post(f"{URL}/batch-delete", json={"ids": [1, 2]}, headers=HEADERS), 422)
+    check("ids 不是数组 → 422",
+          requests.post(f"{URL}/batch-delete", json={"ids": "abc"}, headers=HEADERS), 422)
+    check("body 为空 → 422",
+          requests.post(f"{URL}/batch-delete", data="", headers=HEADERS), 422)
+
+    section("7. 极端参数")
+
+    check("session_id 超长 1000 字符 → 200（不崩溃）",
+          requests.get(f"{URL}/?session_id={'x' * 1000}", headers=HEADERS))
+    check("keyword SQL 注入尝试 → 200（数据不受影响）",
+          requests.get(f"{URL}/?keyword='; DROP TABLE window_metrics_keywords; --", headers=HEADERS))
+    check("keyword 空字符串 → 200（被忽略，返回全量）",
+          requests.get(f"{URL}/?keyword=", headers=HEADERS))
+
+    print(f"\n{'=' * 60}")
+    print(f"  结果汇总：通过 {_pass}，失败 {_fail}")
+    print(f"{'=' * 60}\n")
+
+    assert _fail == 0
+
+
+def test_window_metrics_keywords_flow() -> None:
+    run_window_metrics_keywords_flow()
+
+
+if __name__ == "__main__":
+    try:
+        run_window_metrics_keywords_flow()
+    except AssertionError:
+        sys.exit(1)

@@ -81,6 +81,8 @@ export interface DiscussionStateRow {
   window_start: Date | null;
 }
 
+const MEMBER_INTERVENTION_STATE_TYPES = ['stagnation', 'shallow'] as const;
+
 // ── 工具函数 ──────────────────────────────────────────────────────────────────
 
 /**
@@ -408,6 +410,51 @@ export async function writePushQueueItem(row: {
   return id;
 }
 
+export async function trimPendingMemberInterventionQueue(params: {
+  sessionId: string;
+  targetUserId: string;
+  keepLatest: number;
+}): Promise<number> {
+  const res = await pool.query<{ id: string }>(
+    `WITH stale AS (
+       SELECT id
+       FROM push_queue
+       WHERE session_id = $1
+         AND target_user_id = $2
+         AND state_type = ANY($3::text[])
+         AND status = 'pending'
+       ORDER BY analysis_window_start DESC, created_at DESC
+       OFFSET $4
+     )
+     UPDATE push_queue pq
+     SET status = 'skipped'
+     FROM stale
+     WHERE pq.id = stale.id
+     RETURNING pq.id`,
+    [params.sessionId, params.targetUserId, MEMBER_INTERVENTION_STATE_TYPES, params.keepLatest],
+  );
+  return res.rowCount ?? 0;
+}
+
+export async function skipOtherPendingMemberInterventionQueueItems(params: {
+  sessionId: string;
+  targetUserId: string;
+  deliveredQueueId: string;
+}): Promise<number> {
+  const res = await pool.query<{ id: string }>(
+    `UPDATE push_queue
+     SET status = 'skipped'
+     WHERE session_id = $1
+       AND target_user_id = $2
+       AND state_type = ANY($3::text[])
+       AND status = 'pending'
+       AND id != $4
+     RETURNING id`,
+    [params.sessionId, params.targetUserId, MEMBER_INTERVENTION_STATE_TYPES, params.deliveredQueueId],
+  );
+  return res.rowCount ?? 0;
+}
+
 /** 写入 push_logs */
 export async function writePushLog(row: {
   session_id: string;
@@ -475,7 +522,23 @@ export async function claimPendingPushQueue(
        FROM push_queue
        WHERE session_id = $1
          AND status = 'pending'
-       ORDER BY created_at ASC
+         AND (
+           state_type != ALL($3::text[])
+           OR NOT EXISTS (
+             SELECT 1
+             FROM push_queue delivered
+             WHERE delivered.session_id = push_queue.session_id
+               AND delivered.target_user_id = push_queue.target_user_id
+               AND delivered.state_type = ANY($3::text[])
+               AND delivered.status = 'delivered'
+               AND delivered.delivered_at >= NOW() - INTERVAL '120 seconds'
+           )
+         )
+       ORDER BY
+         CASE WHEN state_type = ANY($3::text[]) THEN 0 ELSE 1 END,
+         CASE WHEN state_type = ANY($3::text[]) THEN analysis_window_start END DESC,
+         CASE WHEN state_type = ANY($3::text[]) THEN created_at END DESC,
+         created_at ASC
        LIMIT $2
        FOR UPDATE SKIP LOCKED
      )
@@ -487,7 +550,7 @@ export async function claimPendingPushQueue(
        pq.id, pq.session_id, pq.target_user_id, pq.state_type, pq.push_content,
        array_to_json(pq.content_embedding)::text AS content_embedding_raw,
        pq.analysis_window_start, pq.status, pq.created_at, pq.delivered_at`,
-    [sessionId, limit],
+    [sessionId, limit, MEMBER_INTERVENTION_STATE_TYPES],
   );
 
   return res.rows.map((row) => {

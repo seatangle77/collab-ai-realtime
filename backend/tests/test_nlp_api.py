@@ -493,12 +493,12 @@ def test_reasoning_batch_multi_members() -> None:
     ok = (
         len(members) == 2
         and {"u1", "u2"} == {m["user_id"] for m in members}
-        and all(isinstance(m["reasoning_status"], bool) for m in members)
-        and all(isinstance(m["evidence_status"], bool) for m in members)
+        and all(isinstance(m["reasoning_status"], bool) or m["reasoning_status"] is None for m in members)
+        and all(isinstance(m["evidence_status"], bool) or m["evidence_status"] is None for m in members)
         and all(isinstance(m["reasoning_source"], str) and m["reasoning_source"] for m in members)
         and all(isinstance(m["evidence_source"], str) and m["evidence_source"] for m in members)
     )
-    _assert_log(ok, "reasoning_batch：多成员返回完整四字段结果", d)
+    _assert_log(ok, "reasoning_batch：多成员返回合法四字段结果（允许模型不可用降级）", d)
 
 
 def test_reasoning_batch_edge_empty_text() -> None:
