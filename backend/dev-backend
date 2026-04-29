@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BACKEND_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$BACKEND_DIR/.." && pwd)"
+LOG_DIR="$ROOT_DIR/logs"
+LOG_FILE="$LOG_DIR/backend-$(date +%Y%m%d-%H%M%S).log"
+
+mkdir -p "$LOG_DIR"
+cd "$BACKEND_DIR"
+
+if [ -f "venv/bin/activate" ]; then
+  # shellcheck disable=SC1091
+  source "venv/bin/activate"
+fi
+
+echo "Backend log: $LOG_FILE"
+uvicorn app.main:app --reload --port "${BACKEND_PORT:-8000}" 2>&1 | tee "$LOG_FILE"

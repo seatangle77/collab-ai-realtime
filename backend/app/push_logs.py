@@ -143,14 +143,28 @@ async def push_notify(
     )
     inserted_row = insert_result.mappings().one()
     await db.commit()
+    logger.warning(
+        "%s [PUSH_LOG_CREATE] source=push_notify session_id=%s queue_id=%s log_id=%s target_user_id=%s status=pending reason=ws_pending trigger_type=%s content_len=%s",
+        WS_TRACE,
+        session_id,
+        body.queue_id,
+        log_id,
+        body.target_user_id,
+        body.trigger_type,
+        len(body.content),
+    )
 
     # 2. 定向 WebSocket 推送
     online_user_ids = ws_manager.get_online_user_ids(session_id)
+    session_conn_count = ws_manager.get_session_connection_count(session_id)
+    user_conn_count = ws_manager.get_user_connection_count(session_id)
     logger.warning(
-        "%s [push_notify_check] session_id=%s target_user_id=%s online_user_ids=%s",
+        "%s [push_notify_check] session_id=%s target_user_id=%s session_conn_count=%s user_conn_count=%s online_user_ids=%s",
         WS_TRACE,
         session_id,
         body.target_user_id,
+        session_conn_count,
+        user_conn_count,
         online_user_ids,
     )
     target_online = body.target_user_id in online_user_ids
@@ -173,17 +187,19 @@ async def push_notify(
     )
     if delivery_reason == "ws_user_not_connected":
         logger.warning(
-            "%s [push_notify_ws_user_not_connected] session_id=%s target_user_id=%s log_id=%s online_user_ids=%s queue_id=%s trigger_type=%s",
+            "%s [push_notify_ws_user_not_connected] session_id=%s target_user_id=%s log_id=%s session_conn_count=%s user_conn_count=%s online_user_ids=%s queue_id=%s trigger_type=%s",
             WS_TRACE,
             session_id,
             body.target_user_id,
             log_id,
+            session_conn_count,
+            user_conn_count,
             online_user_ids,
             body.queue_id,
             body.trigger_type,
         )
     logger.warning(
-        "%s [push_notify_result] session_id=%s target_user_id=%s log_id=%s target_online=%s ws_sent=%s delivery_reason=%s online_user_ids=%s",
+        "%s [push_notify_result] session_id=%s target_user_id=%s log_id=%s target_online=%s ws_sent=%s delivery_reason=%s session_conn_count=%s user_conn_count=%s online_user_ids=%s",
         WS_TRACE,
         session_id,
         body.target_user_id,
@@ -191,6 +207,8 @@ async def push_notify(
         target_online,
         sent,
         delivery_reason,
+        session_conn_count,
+        user_conn_count,
         online_user_ids,
     )
     await db.execute(
@@ -202,6 +220,21 @@ async def push_notify(
         {"s": new_status, "r": delivery_reason, "id": log_id},
     )
     await db.commit()
+    logger.warning(
+        "%s [PUSH_LOG_UPDATE] source=push_notify session_id=%s queue_id=%s log_id=%s target_user_id=%s from_status=pending to_status=%s reason=%s target_online=%s ws_sent=%s session_conn_count=%s user_conn_count=%s online_user_ids=%s",
+        WS_TRACE,
+        session_id,
+        body.queue_id,
+        log_id,
+        body.target_user_id,
+        new_status,
+        delivery_reason,
+        target_online,
+        sent,
+        session_conn_count,
+        user_conn_count,
+        online_user_ids,
+    )
 
     # 4. JPush：目标用户有 device_token 时额外推送，离线也通知
     token_result = await db.execute(

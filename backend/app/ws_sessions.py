@@ -245,25 +245,33 @@ async def ws_session_endpoint(
     # 解析 token，判断是否为发起者
     is_host = False
     user_id: str = ""
+    token_status = "missing"
     if token:
+        token_status = "present"
         try:
             payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
             user_id = payload.get("sub", "")
             if user_id:
+                token_status = "valid"
                 created_by = await _get_session_created_by(session_id)
                 is_host = (created_by is not None and user_id == created_by)
-        except JWTError:
-            pass  # token 无效，降级为非发起者
+            else:
+                token_status = "valid_no_sub"
+        except JWTError as exc:
+            token_status = f"invalid:{exc.__class__.__name__}"
 
     counted_active_ws = False
     await ws_manager.connect_session(session_id, websocket, user_id=user_id)
     _logger.warning(
-        "%s [ws_connect] session_id=%s user_id=%s has_token=%s is_host=%s online_user_ids=%s",
+        "%s [ws_connect] session_id=%s user_id=%s token_status=%s token_len=%s is_host=%s session_conn_count=%s user_conn_count=%s online_user_ids=%s",
         WS_TRACE,
         session_id,
         user_id or "<empty>",
-        bool(token),
+        token_status,
+        len(token) if token else 0,
         is_host,
+        ws_manager.get_session_connection_count(session_id),
+        ws_manager.get_user_connection_count(session_id),
         ws_manager.get_online_user_ids(session_id),
     )
     counted_active_ws = await _increment_active_ws_count(session_id)

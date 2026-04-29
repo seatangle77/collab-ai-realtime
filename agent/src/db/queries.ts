@@ -642,6 +642,14 @@ export async function updatePushQueueStatus(
   status: 'pending' | 'processing' | 'delivered' | 'skipped' | 'failed' | 'deferred',
   deliveredAt?: Date,
 ): Promise<void> {
+  const before = await pool.query<{ status: string; session_id: string; target_user_id: string; state_type: string }>(
+    `SELECT status, session_id, target_user_id, state_type
+     FROM push_queue
+     WHERE id = $1`,
+    [id],
+  );
+  const beforeRow = before.rows[0];
+
   if (deliveredAt) {
     await pool.query(
       `UPDATE push_queue
@@ -649,6 +657,15 @@ export async function updatePushQueueStatus(
        WHERE id = $1`,
       [id, status, toUtcString(deliveredAt)],
     );
+    logger.warn('[QUEUE_UPDATE] push_queue status changed', {
+      queue_id: id,
+      session_id: beforeRow?.session_id ?? null,
+      target_user_id: beforeRow?.target_user_id ?? null,
+      state_type: beforeRow?.state_type ?? null,
+      from_status: beforeRow?.status ?? null,
+      to_status: status,
+      delivered_at: deliveredAt.toISOString(),
+    });
     return;
   }
 
@@ -658,6 +675,15 @@ export async function updatePushQueueStatus(
      WHERE id = $1`,
     [id, status],
   );
+  logger.warn('[QUEUE_UPDATE] push_queue status changed', {
+    queue_id: id,
+    session_id: beforeRow?.session_id ?? null,
+    target_user_id: beforeRow?.target_user_id ?? null,
+    state_type: beforeRow?.state_type ?? null,
+    from_status: beforeRow?.status ?? null,
+    to_status: status,
+    delivered_at: null,
+  });
 }
 
 /** 写入 info_gap_buttons（静默按钮，等待用户点击）。

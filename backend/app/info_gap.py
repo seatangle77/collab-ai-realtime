@@ -337,6 +337,14 @@ async def click_info_gap_button(
         },
     )
     await db.commit()
+    logger.warning(
+        "[PUSH_LOG_CREATE] source=info_gap session_id=%s button_id=%s log_id=%s target_user_id=%s status=pending reason=jpush_pending content_len=%s",
+        session_id,
+        body.button_id,
+        log_id,
+        current_user["id"],
+        len(final_content),
+    )
 
     # 5) JPush 推送（如果用户有 device_token）
     if device_token:
@@ -360,6 +368,13 @@ async def click_info_gap_button(
                 {"id": log_id},
             )
             await db.commit()
+            logger.warning(
+                "[PUSH_LOG_UPDATE] source=info_gap session_id=%s button_id=%s log_id=%s target_user_id=%s from_status=pending to_status=delivered reason=jpush_delivered",
+                session_id,
+                body.button_id,
+                log_id,
+                current_user["id"],
+            )
         except Exception:
             await db.execute(
                 text(
@@ -373,6 +388,13 @@ async def click_info_gap_button(
                 {"id": log_id},
             )
             await db.commit()
+            logger.warning(
+                "[PUSH_LOG_UPDATE] source=info_gap session_id=%s button_id=%s log_id=%s target_user_id=%s from_status=pending to_status=failed reason=jpush_send_error",
+                session_id,
+                body.button_id,
+                log_id,
+                current_user["id"],
+            )
     else:
         await db.execute(
             text(
@@ -386,5 +408,12 @@ async def click_info_gap_button(
             {"id": log_id},
         )
         await db.commit()
+        logger.warning(
+            "[PUSH_LOG_UPDATE] source=info_gap session_id=%s button_id=%s log_id=%s target_user_id=%s from_status=pending to_status=failed reason=jpush_no_device_token",
+            session_id,
+            body.button_id,
+            log_id,
+            current_user["id"],
+        )
 
     return ClickResponse(success=True, content=final_content, keyword=str(btn["keyword"]))

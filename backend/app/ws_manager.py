@@ -64,10 +64,12 @@ class SessionWebSocketManager:
         ws = user_conns.get(user_id)
         if ws is None:
             logger.warning(
-                "%s [ws_send_to_user_miss] session_id=%s user_id=%s online_user_ids=%s",
+                "%s [ws_send_to_user_miss] session_id=%s user_id=%s session_conn_count=%s user_conn_count=%s online_user_ids=%s",
                 WS_TRACE,
                 session_id,
                 user_id,
+                self.get_session_connection_count(session_id),
+                self.get_user_connection_count(session_id),
                 list(user_conns.keys()),
             )
             return False
@@ -97,6 +99,12 @@ class SessionWebSocketManager:
 
     def get_online_user_ids(self, session_id: str) -> list[str]:
         return list(self._user_connections.get(session_id, {}).keys())
+
+    def get_session_connection_count(self, session_id: str) -> int:
+        return len(self.session_connections.get(session_id, set()))
+
+    def get_user_connection_count(self, session_id: str) -> int:
+        return len(self._user_connections.get(session_id, {}))
 
     async def close_session_connections(self, session_id: str, *, code: int, reason: str) -> None:
         conns = self.session_connections.get(session_id)
