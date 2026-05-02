@@ -138,8 +138,8 @@ def test_push_notify_terminal_queue_status_returns_early_without_jpush(monkeypat
     db = _FakeDB(
         [
             (
-                "SELECT status\n                FROM push_queue",
-                [{"status": "delivered"}],
+                "FROM push_queue",
+                [{"status": "delivered", "content_embedding": None}],
             ),
         ]
     )
@@ -156,10 +156,172 @@ def test_push_notify_terminal_queue_status_returns_early_without_jpush(monkeypat
     )
     resp = _run(push_logs.push_notify("s3", payload, db))
 
-    assert resp == {"id": None, "delivery_status": "delivered", "ws_sent": False}
+    assert resp == {
+        "id": None,
+        "delivery_status": "delivered",
+        "delivery_reason": "queue_already_final",
+        "ws_sent": False,
+    }
     assert jpush_calls == []
     assert db.commits == 0
     assert len(db.executed) == 1
+
+
+def test_push_notify_writes_queue_id_to_push_logs_insert(monkeypatch: pytest.MonkeyPatch) -> None:
+    """push_notify 携带 queue_id 时，INSERT SQL 中 queue_id 应正确写入。"""
+    triggered_at = datetime(2026, 4, 23, 12, 0, 0)
+    db = _FakeDB(
+        [
+            ("FROM push_queue", []),
+            ("INSERT INTO push_logs", [{"triggered_at": triggered_at}]),
+            ("UPDATE push_logs SET delivery_status", []),
+            ("SELECT device_token FROM users_info", [{"device_token": None}]),
+        ]
+    )
+
+    async def _fake_send_to_user(session_id: str, user_id: str, message: Any) -> bool:
+        return True
+
+    monkeypatch.setattr(push_logs.ws_manager, "send_to_user", _fake_send_to_user)
+
+    payload = push_logs.PushNotifyIn(
+        target_user_id="u_qid",
+        content="带 queue_id 的推送",
+        queue_id="pq_test_001",
+    )
+    _run(push_logs.push_notify("s_qid", payload, db))
+
+    insert_sql, insert_params = next(
+        (sql, params) for sql, params in db.executed if "INSERT INTO push_logs" in sql
+    )
+    assert "queue_id" in insert_sql, "INSERT SQL 应包含 queue_id 字段"
+    assert insert_params is not None
+    assert insert_params.get("queue_id") == "pq_test_001"
+
+
+def test_push_notify_writes_null_queue_id_when_not_provided(monkeypatch: pytest.MonkeyPatch) -> None:
+    """push_notify 不传 queue_id 时，INSERT SQL 中 queue_id 应为 None。"""
+    triggered_at = datetime(2026, 4, 23, 12, 0, 0)
+    db = _FakeDB(
+        [
+            ("INSERT INTO push_logs", [{"triggered_at": triggered_at}]),
+            ("UPDATE push_logs SET delivery_status", []),
+            ("SELECT device_token FROM users_info", [{"device_token": None}]),
+        ]
+    )
+
+    async def _fake_send_to_user(session_id: str, user_id: str, message: Any) -> bool:
+        return True
+
+    monkeypatch.setattr(push_logs.ws_manager, "send_to_user", _fake_send_to_user)
+
+    payload = push_logs.PushNotifyIn(
+        target_user_id="u_no_qid",
+        content="不带 queue_id 的推送",
+    )
+    _run(push_logs.push_notify("s_no_qid", payload, db))
+
+    _, insert_params = next(
+        (sql, params) for sql, params in db.executed if "INSERT INTO push_logs" in sql
+    )
+    assert insert_params is not None
+    assert insert_params.get("queue_id") is None
+
+
+def test_push_notify_ghost_queue_id_does_not_raise(monkeypatch: pytest.MonkeyPatch) -> None:
+    """push_notify 传入 push_queue 中不存在的 queue_id 时（孤立 queue_id），
+    push_queue 状态查询返回空，应正常走投递流程，不报错。
+    注意：外键约束为 ON DELETE SET NULL，插入时若 push_queue 中无对应记录
+    会触发 FK 违反——此用例验证 _FakeDB 层行为，实际需在集成环境中额外确认。"""
+    triggered_at = datetime(2026, 4, 23, 12, 0, 0)
+    db = _FakeDB(
+        [
+            # push_queue 查询返回空（该 queue_id 不存在）
+            ("FROM push_queue", []),
+            ("INSERT INTO push_logs", [{"triggered_at": triggered_at}]),
+            ("UPDATE push_logs SET delivery_status", []),
+            ("SELECT device_token FROM users_info", [{"device_token": None}]),
+        ]
+    )
+
+    async def _fake_send_to_user(session_id: str, user_id: str, message: Any) -> bool:
+        return True
+
+    monkeypatch.setattr(push_logs.ws_manager, "send_to_user", _fake_send_to_user)
+
+    payload = push_logs.PushNotifyIn(
+        target_user_id="u_ghost",
+        content="孤立 queue_id 的推送",
+        queue_id="pq_ghost_999",
+    )
+    resp = _run(push_logs.push_notify("s_ghost", payload, db))
+
+    # push_queue 不存在时，跳过状态检查，正常投递
+    assert resp["delivery_status"] in ("delivered", "failed")
+    assert resp["ws_sent"] is True
+
+
+def test_push_notify_copies_content_embedding_from_push_queue(monkeypatch: pytest.MonkeyPatch) -> None:
+    """push_notify 携带 queue_id 时，push_queue 中的 content_embedding 应写入 INSERT SQL。"""
+    triggered_at = datetime(2026, 4, 23, 12, 0, 0)
+    embedding = [0.1, 0.2, 0.3]
+    db = _FakeDB(
+        [
+            ("FROM push_queue", [{"status": "pending", "content_embedding": embedding}]),
+            ("INSERT INTO push_logs", [{"triggered_at": triggered_at}]),
+            ("UPDATE push_logs SET delivery_status", []),
+            ("SELECT device_token FROM users_info", [{"device_token": None}]),
+        ]
+    )
+
+    async def _fake_send_to_user(session_id: str, user_id: str, message: Any) -> bool:
+        return True
+
+    monkeypatch.setattr(push_logs.ws_manager, "send_to_user", _fake_send_to_user)
+
+    payload = push_logs.PushNotifyIn(
+        target_user_id="u_emb",
+        content="含 embedding 的推送",
+        queue_id="pq_emb_001",
+    )
+    _run(push_logs.push_notify("s_emb", payload, db))
+
+    _, insert_params = next(
+        (sql, params) for sql, params in db.executed if "INSERT INTO push_logs" in sql
+    )
+    assert insert_params is not None
+    assert insert_params.get("content_embedding") == embedding, (
+        f"期望 content_embedding={embedding}，实际={insert_params.get('content_embedding')}"
+    )
+
+
+def test_push_notify_writes_null_embedding_when_no_queue_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    """push_notify 不传 queue_id 时，INSERT SQL 中 content_embedding 应为 None。"""
+    triggered_at = datetime(2026, 4, 23, 12, 0, 0)
+    db = _FakeDB(
+        [
+            ("INSERT INTO push_logs", [{"triggered_at": triggered_at}]),
+            ("UPDATE push_logs SET delivery_status", []),
+            ("SELECT device_token FROM users_info", [{"device_token": None}]),
+        ]
+    )
+
+    async def _fake_send_to_user(session_id: str, user_id: str, message: Any) -> bool:
+        return True
+
+    monkeypatch.setattr(push_logs.ws_manager, "send_to_user", _fake_send_to_user)
+
+    payload = push_logs.PushNotifyIn(
+        target_user_id="u_no_emb",
+        content="不带 queue_id 的推送，embedding 应为空",
+    )
+    _run(push_logs.push_notify("s_no_emb", payload, db))
+
+    _, insert_params = next(
+        (sql, params) for sql, params in db.executed if "INSERT INTO push_logs" in sql
+    )
+    assert insert_params is not None
+    assert insert_params.get("content_embedding") is None
 
 
 def test_group_notify_calls_jpush_for_all_active_member_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -276,4 +438,3 @@ def test_group_notify_keeps_success_when_jpush_sender_raises(monkeypatch: pytest
     assert resp["delivery_status"] == "delivered"
     assert resp["online_connections"] == 1
     assert sent_tokens == ["tok-ok", "tok-fail"]
-

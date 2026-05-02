@@ -50,6 +50,7 @@ async function writeFilteredPushLog(
   await writePushLog({
     session_id: item.session_id,
     state_id: null,
+    queue_id: item.id,
     target_user_id: item.target_user_id,
     push_content: item.push_content,
     content_embedding: item.content_embedding,
@@ -98,7 +99,7 @@ export async function runPushDispatcher(sessionId: string): Promise<void> {
   for (const item of pendingItems) {
     try {
       if (await pushDispatcherHooks.shouldSkipPushQueueItem()) {
-        await updatePushQueueStatus(item.id, 'skipped');
+        await updatePushQueueStatus(item.id, 'skipped', undefined, 'filter_hook');
         await writeFilteredPushLog(item, 'skipped', 'hook_skip');
         logger.info(`push skipped by hook queue_id=${item.id} user=${item.target_user_id}`, { sessionId });
         continue;
@@ -110,7 +111,13 @@ export async function runPushDispatcher(sessionId: string): Promise<void> {
       );
 
       if (outcome.action === 'skip') {
-        await updatePushQueueStatus(item.id, 'skipped');
+        const skipReasonMap: Record<string, string> = {
+          same_round_dedup: 'filter_same_round',
+          recent_exact_content: 'filter_exact_content',
+          content_similarity: 'filter_similar_content',
+          hook_skip: 'filter_hook',
+        };
+        await updatePushQueueStatus(item.id, 'skipped', undefined, skipReasonMap[outcome.reasonCode] ?? outcome.reasonCode);
         await writeFilteredPushLog(item, 'skipped', outcome.reasonCode);
         logger.info(
           `push skipped queue_id=${item.id} user=${item.target_user_id} by=${outcome.by} reason=${outcome.reasonCode}`,
@@ -120,7 +127,11 @@ export async function runPushDispatcher(sessionId: string): Promise<void> {
       }
 
       if (outcome.action === 'defer') {
-        await updatePushQueueStatus(item.id, 'deferred');
+        const deferReasonMap: Record<string, string> = {
+          vad_speaking: 'filter_vad_speaking',
+          hook_skip: 'filter_error',
+        };
+        await updatePushQueueStatus(item.id, 'deferred', undefined, deferReasonMap[outcome.reasonCode] ?? 'filter_error');
         await writeFilteredPushLog(item, 'deferred', outcome.reasonCode);
         logger.info(
           `push deferred queue_id=${item.id} user=${item.target_user_id} by=${outcome.by} reason=${outcome.reasonCode}`,

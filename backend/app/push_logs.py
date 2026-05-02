@@ -23,6 +23,7 @@ WS_TRACE = "[WS_TRACE]"
 
 VALID_PUSH_CHANNELS = {"web", "app", "glasses", "info_gap"}
 VALID_DELIVERY_STATUSES = {"pending", "delivered", "failed", "skipped", "deferred"}
+JPUSH_NOTIFICATION_TITLE = "AI 讨论建议"
 
 
 async def _jpush_safe(device_token: str, content: str, title: str) -> None:
@@ -90,11 +91,12 @@ async def push_notify(
             analysis_window_start = state_row["window_start"]
             analysis_run_id = _build_reasoning_run_id(session_id, analysis_window_start)
 
+    content_embedding = None
     if body.queue_id:
         queue_result = await db.execute(
             text(
                 """
-                SELECT status
+                SELECT status, content_embedding
                 FROM push_queue
                 WHERE id = :queue_id
                   AND session_id = :session_id
@@ -115,6 +117,8 @@ async def push_notify(
                 "delivery_reason": "queue_already_final",
                 "ws_sent": False,
             }
+        if queue_row:
+            content_embedding = queue_row["content_embedding"]
 
     log_id = "pl" + uuid.uuid4().hex[:8]
 
@@ -123,12 +127,12 @@ async def push_notify(
         text(
             """
             INSERT INTO push_logs (
-                id, session_id, state_id, target_user_id, push_content,
-                push_channel, delivery_status, delivery_reason, triggered_at
+                id, session_id, state_id, queue_id, target_user_id, push_content,
+                content_embedding, push_channel, delivery_status, delivery_reason, triggered_at
             )
             VALUES (
-                :id, :session_id, :state_id, :target_user_id, :content,
-                'web', 'pending', 'ws_pending', NOW()
+                :id, :session_id, :state_id, :queue_id, :target_user_id, :content,
+                :content_embedding, 'web', 'pending', 'ws_pending', NOW()
             )
             RETURNING triggered_at
             """
@@ -137,8 +141,10 @@ async def push_notify(
             "id": log_id,
             "session_id": session_id,
             "state_id": body.state_id,
+            "queue_id": body.queue_id,
             "target_user_id": body.target_user_id,
             "content": body.content,
+            "content_embedding": content_embedding,
         },
     )
     inserted_row = insert_result.mappings().one()
@@ -244,7 +250,7 @@ async def push_notify(
     token_row = token_result.mappings().first()
     device_token = token_row["device_token"] if token_row else None
     if device_token:
-        await _jpush_safe(device_token, body.content, "")
+        await _jpush_safe(device_token, body.content, JPUSH_NOTIFICATION_TITLE)
 
     return {
         "id": log_id,
@@ -350,7 +356,7 @@ async def group_notify(
     device_tokens = [row["device_token"] for row in member_token_result.mappings().all()]
     if device_tokens:
         await asyncio.gather(
-            *[_jpush_safe(token, body.content, "") for token in device_tokens]
+            *[_jpush_safe(token, body.content, JPUSH_NOTIFICATION_TITLE) for token in device_tokens]
         )
 
     return {
@@ -365,6 +371,7 @@ class PushLogOut(BaseModel):
     session_id: str
     target_user_id: str | None = None
     state_id: str | None = None
+    queue_id: str | None = None
     analysis_run_id: str | None = None
     analysis_window_start: Any = None
     push_content: str | None = None
@@ -477,7 +484,7 @@ async def get_session_push_logs(
         text(
             f"""
             SELECT
-                pl.id, pl.session_id, pl.state_id,
+                pl.id, pl.session_id, pl.state_id, pl.queue_id,
                 pl.target_user_id,
                 ds.window_start AS analysis_window_start,
                 pl.push_content, pl.push_channel,

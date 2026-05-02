@@ -432,7 +432,7 @@ export async function trimPendingMemberInterventionQueue(params: {
        OFFSET $4
      )
      UPDATE push_queue pq
-     SET status = 'skipped'
+     SET status = 'skipped', skip_reason = 'queue_trimmed'
      FROM stale
      WHERE pq.id = stale.id
      RETURNING pq.id`,
@@ -448,7 +448,7 @@ export async function skipOtherPendingMemberInterventionQueueItems(params: {
 }): Promise<number> {
   const res = await pool.query<{ id: string }>(
     `UPDATE push_queue
-     SET status = 'skipped'
+     SET status = 'skipped', skip_reason = 'delivered_cleanup'
      WHERE session_id = $1
        AND target_user_id = $2
        AND state_type = ANY($3::text[])
@@ -464,6 +464,7 @@ export async function skipOtherPendingMemberInterventionQueueItems(params: {
 export async function writePushLog(row: {
   session_id: string;
   state_id?: string | null;
+  queue_id?: string | null;
   target_user_id: string;
   push_content: string;
   content_embedding: number[];
@@ -475,13 +476,14 @@ export async function writePushLog(row: {
   const id = 'pl_' + nanoid(12);
   await pool.query(
     `INSERT INTO push_logs
-       (id, session_id, state_id, target_user_id,
+       (id, session_id, state_id, queue_id, target_user_id,
         push_content, content_embedding, push_channel, delivery_status, delivery_reason, triggered_at, delivered_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10)`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), $11)`,
     [
       id,
       row.session_id,
       row.state_id ?? null,
+      row.queue_id ?? null,
       row.target_user_id,
       row.push_content,
       row.content_embedding,
@@ -641,6 +643,7 @@ export async function updatePushQueueStatus(
   id: string,
   status: 'pending' | 'processing' | 'delivered' | 'skipped' | 'failed' | 'deferred',
   deliveredAt?: Date,
+  skipReason?: string,
 ): Promise<void> {
   const before = await pool.query<{ status: string; session_id: string; target_user_id: string; state_type: string }>(
     `SELECT status, session_id, target_user_id, state_type
@@ -664,6 +667,7 @@ export async function updatePushQueueStatus(
       state_type: beforeRow?.state_type ?? null,
       from_status: beforeRow?.status ?? null,
       to_status: status,
+      skip_reason: null,
       delivered_at: deliveredAt.toISOString(),
     });
     return;
@@ -671,9 +675,9 @@ export async function updatePushQueueStatus(
 
   await pool.query(
     `UPDATE push_queue
-     SET status = $2
+     SET status = $2, skip_reason = $3
      WHERE id = $1`,
-    [id, status],
+    [id, status, skipReason ?? null],
   );
   logger.warn('[QUEUE_UPDATE] push_queue status changed', {
     queue_id: id,
@@ -682,6 +686,7 @@ export async function updatePushQueueStatus(
     state_type: beforeRow?.state_type ?? null,
     from_status: beforeRow?.status ?? null,
     to_status: status,
+    skip_reason: skipReason ?? null,
     delivered_at: null,
   });
 }
