@@ -638,6 +638,23 @@ export async function getStateTypeCountInWindow(
   return Number(res.rows[0]?.count ?? '0');
 }
 
+/** 将超时卡在 processing 状态的条目重置回 pending，返回恢复条数 */
+export async function recoverStaleProcessingItems(
+  sessionId: string,
+  timeoutMs: number,
+): Promise<number> {
+  const res = await pool.query<{ id: string }>(
+    `UPDATE push_queue
+     SET status = 'pending'
+     WHERE session_id = $1
+       AND status = 'processing'
+       AND created_at <= NOW() - ($2 * INTERVAL '1 millisecond')
+     RETURNING id`,
+    [sessionId, timeoutMs],
+  );
+  return res.rowCount ?? 0;
+}
+
 /** 更新 push_queue 状态 */
 export async function updatePushQueueStatus(
   id: string,

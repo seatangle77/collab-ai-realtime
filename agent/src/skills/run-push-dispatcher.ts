@@ -3,6 +3,7 @@ import {
   claimPendingPushQueue,
   findDiscussionStateByQueuedPushId,
   getPendingPushQueue,
+  recoverStaleProcessingItems,
   skipOtherPendingMemberInterventionQueueItems,
   updatePushQueueStatus,
   writeDiscussionState,
@@ -33,6 +34,7 @@ export const pushDispatcherHooks = {
 };
 
 const PUSH_CLAIM_BATCH_SIZE = 20;
+const PROCESSING_STALE_TIMEOUT_MS = 5 * 60 * 1000; // 5 分钟
 
 const FILTER_REASON_TO_DELIVERY_REASON: Record<string, string> = {
   same_round_dedup: 'same_round_dedup_skipped',
@@ -62,6 +64,12 @@ async function writeFilteredPushLog(
 
 export async function runPushDispatcher(sessionId: string): Promise<void> {
   logger.info('push dispatcher tick', { sessionId });
+
+  const recovered = await recoverStaleProcessingItems(sessionId, PROCESSING_STALE_TIMEOUT_MS);
+  if (recovered > 0) {
+    logger.warn(`push dispatcher recovered stale processing items count=${recovered}`, { sessionId });
+  }
+
   const pendingItems = await claimPendingPushQueue(sessionId, PUSH_CLAIM_BATCH_SIZE);
   const reservedUsers = new Set<string>();
 
@@ -176,7 +184,8 @@ export async function runPushDispatcher(sessionId: string): Promise<void> {
             },
           );
         }
-        await updatePushQueueStatus(item.id, retryable ? 'pending' : 'failed');
+        await updatePushQueueStatus(item.id, retryable ? 'pending' : 'failed', undefined,
+          retryable ? undefined : (notifyResult.delivery_reason ?? 'ws_failed'));
         logger.warn(
           `push not delivered queue_id=${item.id} user=${item.target_user_id} reason=${notifyResult.delivery_reason}`,
           {
@@ -208,7 +217,7 @@ export async function runPushDispatcher(sessionId: string): Promise<void> {
         sessionId,
         message: (err as Error).message,
       });
-      await updatePushQueueStatus(item.id, 'failed');
+      await updatePushQueueStatus(item.id, 'failed', undefined, 'dispatch_exception');
     }
   }
 }

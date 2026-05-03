@@ -22,6 +22,7 @@ const mockHasRecentDeliveredPushWithExactContent =
 const mockGetRecentDeliveredEmbeddings =
   queries.getRecentDeliveredEmbeddings as jest.MockedFunction<typeof queries.getRecentDeliveredEmbeddings>;
 const mockUpdatePushQueueStatus = queries.updatePushQueueStatus as jest.MockedFunction<typeof queries.updatePushQueueStatus>;
+const mockRecoverStaleProcessingItems = queries.recoverStaleProcessingItems as jest.MockedFunction<typeof queries.recoverStaleProcessingItems>;
 const mockWritePushLog = queries.writePushLog as jest.MockedFunction<typeof queries.writePushLog>;
 const mockWriteDiscussionState = queries.writeDiscussionState as jest.MockedFunction<typeof queries.writeDiscussionState>;
 const mockFindDiscussionStateByQueuedPushId =
@@ -61,6 +62,7 @@ describe('runPushDispatcher', () => {
       ws_sent: true,
     });
     mockUpdatePushQueueStatus.mockResolvedValue(undefined);
+    mockRecoverStaleProcessingItems.mockResolvedValue(0);
   });
 
   // ─── 已有用例 ──────────────────────────────────────────────────────────────
@@ -128,7 +130,7 @@ describe('runPushDispatcher', () => {
 
     await dispatcher.runPushDispatcher(SESSION);
 
-    expect(mockUpdatePushQueueStatus).toHaveBeenCalledWith('pq_1', 'failed');
+    expect(mockUpdatePushQueueStatus).toHaveBeenCalledWith('pq_1', 'failed', undefined, 'dispatch_exception');
   });
 
   it('WebSocket 未命中用户连接时回到 pending 等待下轮重试', async () => {
@@ -143,7 +145,7 @@ describe('runPushDispatcher', () => {
     await dispatcher.runPushDispatcher(SESSION);
 
     expect(mockNotifyPush).toHaveBeenCalledTimes(1);
-    expect(mockUpdatePushQueueStatus).toHaveBeenCalledWith('pq_1', 'pending');
+    expect(mockUpdatePushQueueStatus).toHaveBeenCalledWith('pq_1', 'pending', undefined, undefined);
   });
 
   it('最近短时间已发送相同文案时跳过，skip_reason=filter_exact_content', async () => {
@@ -237,6 +239,32 @@ describe('runPushDispatcher', () => {
     const callArg = mockWritePushLog.mock.calls[0][0];
     expect(callArg.queue_id).toBe('pq_1');
     expect(callArg.delivery_status).toBe('skipped');
+  });
+
+  it('投递返回 queue_already_final 时写 failed + skip_reason=queue_already_final', async () => {
+    jest.spyOn(dispatcher.pushDispatcherHooks, 'shouldSkipPushQueueItem').mockResolvedValue(false);
+    mockNotifyPush.mockResolvedValue({
+      id: null,
+      delivery_status: 'failed',
+      delivery_reason: 'queue_already_final',
+      ws_sent: false,
+    });
+
+    await dispatcher.runPushDispatcher(SESSION);
+
+    expect(mockNotifyPush).toHaveBeenCalledTimes(1);
+    expect(mockUpdatePushQueueStatus).toHaveBeenCalledWith('pq_1', 'failed', undefined, 'queue_already_final');
+  });
+
+  it('启动时调用僵尸条目恢复，超时阈值为 5 分钟', async () => {
+    jest.spyOn(dispatcher.pushDispatcherHooks, 'shouldSkipPushQueueItem').mockResolvedValue(false);
+    mockClaimPendingPushQueue.mockResolvedValue([]);
+    mockGetPendingPushQueue.mockResolvedValue([]);
+    mockRecoverStaleProcessingItems.mockResolvedValue(2);
+
+    await dispatcher.runPushDispatcher(SESSION);
+
+    expect(mockRecoverStaleProcessingItems).toHaveBeenCalledWith(SESSION, 5 * 60 * 1000);
   });
 
   it('队列为空时，不写任何状态和日志', async () => {
