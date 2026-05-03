@@ -273,8 +273,7 @@ async def group_notify(
     """
     Agent 触发群组通知：
     1. 找到会话内在线用户
-    2. 对每个在线用户写入一条 push_logs（真实 target_user_id）
-    3. 广播 group_notification，并批量更新 delivery_status
+    2. 对每个在线用户单独发送，根据实际发送结果写各自的 push_log 状态
     """
     # 连接管理里可能存在脏 user_id（None/空串），先过滤，避免触发表约束。
     online_user_ids = [
@@ -288,57 +287,55 @@ async def group_notify(
             "online_connections": 0,
         }
 
-    inserted_logs: list[dict[str, Any]] = []
+    message = build_group_notification(body.content, None)
+    delivered_count = 0
+    failed_count = 0
+    first_log_id: str | None = None
+
     for uid in online_user_ids:
+        sent = await ws_manager.send_to_user(session_id, uid, message)
         log_id = "pl" + uuid.uuid4().hex[:8]
-        insert_result = await db.execute(
-            text(
-                """
-                INSERT INTO push_logs (
-                    id, session_id, state_id, target_user_id, push_content,
-                    push_channel, delivery_status, delivery_reason, triggered_at
-                )
-                VALUES (
-                    :id, :session_id, NULL, :target_user_id, :content,
-                    'web', 'pending', 'group_ws_pending', NOW()
-                )
-                RETURNING id, triggered_at
-                """
-            ),
-            {
-                "id": log_id,
-                "session_id": session_id,
-                "target_user_id": uid,
-                "content": body.content,
-            },
-        )
-        inserted_logs.append(dict(insert_result.mappings().one()))
+        if first_log_id is None:
+            first_log_id = log_id
+
+        if sent:
+            await db.execute(
+                text(
+                    """
+                    INSERT INTO push_logs (
+                        id, session_id, state_id, target_user_id, push_content,
+                        push_channel, delivery_status, delivery_reason, triggered_at, delivered_at
+                    )
+                    VALUES (
+                        :id, :session_id, NULL, :target_user_id, :content,
+                        'web', 'delivered', 'group_ws_delivered', NOW(), NOW()
+                    )
+                    """
+                ),
+                {"id": log_id, "session_id": session_id, "target_user_id": uid, "content": body.content},
+            )
+            delivered_count += 1
+        else:
+            await db.execute(
+                text(
+                    """
+                    INSERT INTO push_logs (
+                        id, session_id, state_id, target_user_id, push_content,
+                        push_channel, delivery_status, delivery_reason, triggered_at
+                    )
+                    VALUES (
+                        :id, :session_id, NULL, :target_user_id, :content,
+                        'web', 'failed', 'group_ws_send_error', NOW()
+                    )
+                    """
+                ),
+                {"id": log_id, "session_id": session_id, "target_user_id": uid, "content": body.content},
+            )
+            failed_count += 1
+
     await db.commit()
 
-    await ws_manager.broadcast_to_session(
-        session_id,
-        build_group_notification(
-            body.content,
-            inserted_logs[0]["triggered_at"].isoformat() if inserted_logs[0]["triggered_at"] else None,
-        ),
-    )
-
-    active_conn_count = len(online_user_ids)
-    delivered = active_conn_count > 0
-    new_status = "delivered" if delivered else "failed"
-    delivery_reason = "group_ws_delivered" if delivered else "group_ws_no_online_users"
-    for row in inserted_logs:
-        await db.execute(
-            text(
-                "UPDATE push_logs SET delivery_status = :s, delivery_reason = :r, delivered_at = NOW() WHERE id = :id"
-                if delivered else
-                "UPDATE push_logs SET delivery_status = :s, delivery_reason = :r WHERE id = :id"
-            ),
-            {"s": new_status, "r": delivery_reason, "id": row["id"]},
-        )
-    await db.commit()
-
-    # 4. JPush：群组全部 active 成员并发推送，离线也通知
+    # JPush：群组全部 active 成员并发推送，离线也通知
     member_token_result = await db.execute(
         text(
             """
@@ -360,9 +357,10 @@ async def group_notify(
         )
 
     return {
-        "id": inserted_logs[0]["id"],
-        "delivery_status": new_status,
-        "online_connections": active_conn_count,
+        "id": first_log_id,
+        "delivered_count": delivered_count,
+        "failed_count": failed_count,
+        "online_connections": len(online_user_ids),
     }
 
 

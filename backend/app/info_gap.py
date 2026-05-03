@@ -400,7 +400,7 @@ async def click_info_gap_button(
             text(
                 """
                 UPDATE push_logs
-                SET delivery_status = 'failed',
+                SET delivery_status = 'skipped',
                     delivery_reason = 'jpush_no_device_token'
                 WHERE id = :id
                 """

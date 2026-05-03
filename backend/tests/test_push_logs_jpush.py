@@ -326,18 +326,11 @@ def test_push_notify_writes_null_embedding_when_no_queue_id(monkeypatch: pytest.
 
 def test_group_notify_calls_jpush_for_all_active_member_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
     jpush_calls: list[tuple[str, str, str]] = []
-    broadcast_calls: list[tuple[str, dict[str, Any]]] = []
+    ws_send_calls: list[tuple[str, str]] = []
     online_user_ids = ["u-online-1", "u-online-2"]
-    inserted_rows = iter(
-        [
-            [{"id": "pl1", "triggered_at": datetime(2026, 4, 23, 13, 0, 0)}],
-            [{"id": "pl2", "triggered_at": datetime(2026, 4, 23, 13, 0, 1)}],
-        ]
-    )
     db = _FakeDB(
         [
-            ("INSERT INTO push_logs", lambda _sql, _params: next(inserted_rows)),
-            ("UPDATE push_logs SET delivery_status", []),
+            ("INSERT INTO push_logs", []),
             (
                 "SELECT u.device_token",
                 [
@@ -351,54 +344,56 @@ def test_group_notify_calls_jpush_for_all_active_member_tokens(monkeypatch: pyte
 
     monkeypatch.setattr(push_logs.ws_manager, "get_online_user_ids", lambda _session_id: online_user_ids)
 
-    async def _fake_broadcast(session_id: str, message: dict[str, Any]) -> None:
-        broadcast_calls.append((session_id, message))
+    async def _fake_send_to_user(session_id: str, user_id: str, message: dict[str, Any]) -> bool:
+        ws_send_calls.append((session_id, user_id))
+        return True
 
     async def _fake_jpush(device_token: str, content: str, title: str) -> None:
         jpush_calls.append((device_token, content, title))
 
-    monkeypatch.setattr(push_logs.ws_manager, "broadcast_to_session", _fake_broadcast)
+    monkeypatch.setattr(push_logs.ws_manager, "send_to_user", _fake_send_to_user)
     monkeypatch.setattr(push_logs, "_jpush_safe", _fake_jpush)
 
     payload = push_logs.GroupNotifyIn(content="大家先对齐一下当前的目标")
     resp = _run(push_logs.group_notify("s-group", payload, db))
 
-    assert resp["delivery_status"] == "delivered"
+    assert resp["delivered_count"] == 2
+    assert resp["failed_count"] == 0
     assert resp["online_connections"] == 2
-    assert broadcast_calls and broadcast_calls[0][0] == "s-group"
+    assert ws_send_calls == [("s-group", "u-online-1"), ("s-group", "u-online-2")]
     assert jpush_calls == [
         ("tok-online-1", "大家先对齐一下当前的目标", "AI 讨论建议"),
         ("tok-offline-1", "大家先对齐一下当前的目标", "AI 讨论建议"),
         ("tok-online-2", "大家先对齐一下当前的目标", "AI 讨论建议"),
     ]
-    assert db.commits == 2
+    assert db.commits == 1
 
 
 def test_group_notify_skips_jpush_when_no_active_member_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
     jpush_calls: list[tuple[str, str, str]] = []
     db = _FakeDB(
         [
-            ("INSERT INTO push_logs", [{"id": "pl1", "triggered_at": datetime(2026, 4, 23, 13, 10, 0)}]),
-            ("UPDATE push_logs SET delivery_status", []),
+            ("INSERT INTO push_logs", []),
             ("SELECT u.device_token", []),
         ]
     )
 
     monkeypatch.setattr(push_logs.ws_manager, "get_online_user_ids", lambda _session_id: ["u1"])
 
-    async def _fake_broadcast(session_id: str, message: dict[str, Any]) -> None:
-        return None
+    async def _fake_send_to_user(session_id: str, user_id: str, message: dict[str, Any]) -> bool:
+        return True
 
     async def _fake_jpush(device_token: str, content: str, title: str) -> None:
         jpush_calls.append((device_token, content, title))
 
-    monkeypatch.setattr(push_logs.ws_manager, "broadcast_to_session", _fake_broadcast)
+    monkeypatch.setattr(push_logs.ws_manager, "send_to_user", _fake_send_to_user)
     monkeypatch.setattr(push_logs, "_jpush_safe", _fake_jpush)
 
     payload = push_logs.GroupNotifyIn(content="测试群发")
     resp = _run(push_logs.group_notify("s-no-token", payload, db))
 
-    assert resp["delivery_status"] == "delivered"
+    assert resp["delivered_count"] == 1
+    assert resp["failed_count"] == 0
     assert resp["online_connections"] == 1
     assert jpush_calls == []
 
@@ -407,8 +402,7 @@ def test_group_notify_keeps_success_when_jpush_sender_raises(monkeypatch: pytest
     sent_tokens: list[str] = []
     db = _FakeDB(
         [
-            ("INSERT INTO push_logs", [{"id": "pl9", "triggered_at": datetime(2026, 4, 23, 13, 20, 0)}]),
-            ("UPDATE push_logs SET delivery_status", []),
+            ("INSERT INTO push_logs", []),
             (
                 "SELECT u.device_token",
                 [
@@ -421,20 +415,50 @@ def test_group_notify_keeps_success_when_jpush_sender_raises(monkeypatch: pytest
 
     monkeypatch.setattr(push_logs.ws_manager, "get_online_user_ids", lambda _session_id: ["u1"])
 
-    async def _fake_broadcast(session_id: str, message: dict[str, Any]) -> None:
-        return None
+    async def _fake_send_to_user(session_id: str, user_id: str, message: dict[str, Any]) -> bool:
+        return True
 
     def _fake_sender(device_token: str, content: str, title: str) -> None:
         sent_tokens.append(device_token)
         if device_token == "tok-fail":
             raise RuntimeError("boom")
 
-    monkeypatch.setattr(push_logs.ws_manager, "broadcast_to_session", _fake_broadcast)
+    monkeypatch.setattr(push_logs.ws_manager, "send_to_user", _fake_send_to_user)
     monkeypatch.setattr(push_logs, "send_push_to_registration_id", _fake_sender)
 
     payload = push_logs.GroupNotifyIn(content="异常时也不应影响主流程")
     resp = _run(push_logs.group_notify("s-jpush-error", payload, db))
 
-    assert resp["delivery_status"] == "delivered"
+    assert resp["delivered_count"] == 1
+    assert resp["failed_count"] == 0
     assert resp["online_connections"] == 1
     assert sent_tokens == ["tok-ok", "tok-fail"]
+
+
+def test_group_notify_tracks_per_user_delivery_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    """u1 发送成功，u2 发送失败，两条 push_log 状态应各自独立记录。"""
+    db = _FakeDB(
+        [
+            ("INSERT INTO push_logs", []),
+            ("SELECT u.device_token", []),
+        ]
+    )
+
+    monkeypatch.setattr(push_logs.ws_manager, "get_online_user_ids", lambda _session_id: ["u1", "u2"])
+
+    async def _fake_send_to_user(session_id: str, user_id: str, message: dict[str, Any]) -> bool:
+        return user_id == "u1"
+
+    monkeypatch.setattr(push_logs.ws_manager, "send_to_user", _fake_send_to_user)
+
+    payload = push_logs.GroupNotifyIn(content="测试逐用户投递状态")
+    resp = _run(push_logs.group_notify("s-per-user", payload, db))
+
+    assert resp["delivered_count"] == 1
+    assert resp["failed_count"] == 1
+    assert resp["online_connections"] == 2
+
+    insert_calls = [(sql, params) for sql, params in db.executed if "INSERT INTO push_logs" in sql]
+    assert len(insert_calls) == 2
+    assert any("group_ws_delivered" in sql for sql, _ in insert_calls)
+    assert any("group_ws_send_error" in sql for sql, _ in insert_calls)
