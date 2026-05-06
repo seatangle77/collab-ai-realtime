@@ -44,6 +44,10 @@ from .admin.test_seed import router as test_seed_router
 from .vad import router as vad_router
 from .admin.ai_push_analysis import router as admin_ai_push_analysis_router
 from .admin.info_gap_recall_analysis import router as admin_info_gap_recall_analysis_router
+from .audio_segments import (
+    ensure_offline_audio_segments_table,
+    router as offline_audio_segments_router,
+)
 
 app = FastAPI()
 
@@ -99,6 +103,7 @@ app.include_router(discussion_summary_router)
 app.include_router(window_metrics_router)
 app.include_router(test_seed_router)
 app.include_router(vad_router)
+app.include_router(offline_audio_segments_router)
 
 # 本地开发环境下直接通过 FastAPI 提供音频静态访问能力，
 # 与生产环境中通过 Nginx 映射 /audio/voice-profiles 到挂载目录的行为保持一致。
@@ -138,6 +143,8 @@ async def _startup():
             )
         )
         await db.commit()
+
+    await ensure_offline_audio_segments_table()
 
     # 预加载 NLP sentence-transformers 模型，避免第一个请求冷启动延迟
     nlp_embedder.load_model(nlp_settings.embed_model)

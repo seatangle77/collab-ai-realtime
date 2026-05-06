@@ -112,3 +112,35 @@ export async function listSessionTranscripts(
   return appHttp.get<AppTranscript[]>(`/api/sessions/${sessionId}/transcripts`, config)
 }
 
+export interface OfflineAudioSegmentUpload {
+  segmentId: string
+  startedAt: string
+  endedAt: string
+  mimeType: string
+  audio: Blob
+}
+
+export interface OfflineAudioSegmentUploadResult {
+  status: 'processed' | 'processing'
+  segment_id: string
+  transcript_id?: string | null
+  duplicate?: boolean
+}
+
+export async function uploadOfflineAudioSegment(
+  sessionId: string,
+  payload: OfflineAudioSegmentUpload,
+): Promise<OfflineAudioSegmentUploadResult> {
+  const form = new FormData()
+  form.set('segment_id', payload.segmentId)
+  form.set('started_at', payload.startedAt)
+  form.set('ended_at', payload.endedAt)
+  form.set('mime_type', payload.mimeType)
+  form.set('audio', payload.audio, `${payload.segmentId}.${payload.mimeType.includes('aac') ? 'aac' : 'webm'}`)
+
+  return appHttp.post<OfflineAudioSegmentUploadResult>(
+    `/api/sessions/${sessionId}/audio-segments`,
+    form,
+    { noRedirectOn401: true },
+  )
+}

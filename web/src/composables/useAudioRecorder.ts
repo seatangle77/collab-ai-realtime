@@ -30,9 +30,15 @@ export function useAudioRecorder() {
 
   // ── 回调注册 ─────────────────────────────────────────────────
   let chunkCallback: ChunkCallback | null = null
+  let suppressChunks = false
 
   function onChunk(cb: ChunkCallback) {
     chunkCallback = cb
+  }
+
+  function emitChunk(blob: Blob, mimeType: string) {
+    if (suppressChunks) return
+    chunkCallback?.(blob, mimeType)
   }
 
   // ── 工具函数 ─────────────────────────────────────────────────
@@ -64,7 +70,7 @@ export function useAudioRecorder() {
 
     recorder.ondataavailable = (event) => {
       if (!event.data || event.data.size === 0) return
-      chunkCallback?.(event.data, event.data.type || 'audio/webm')
+      emitChunk(event.data, event.data.type || 'audio/webm')
     }
 
     recorder.onstop = () => {
@@ -148,14 +154,25 @@ export function useAudioRecorder() {
       await audioContext.resume()
       await audio.play()
     } catch (error) {
-      stopBrowser()
+      await stopBrowser()
       throw error instanceof Error ? error : new Error('文件注入启动失败')
     }
   }
 
-  function stopBrowser(): void {
-    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-      mediaRecorder.stop()
+  async function stopBrowser(options: { emitFinal?: boolean } = {}): Promise<void> {
+    const emitFinal = options.emitFinal ?? true
+    const previousSuppress = suppressChunks
+    if (!emitFinal) suppressChunks = true
+    const recorder = mediaRecorder
+    if (recorder && recorder.state !== 'inactive') {
+      await new Promise<void>((resolve) => {
+        const previousOnStop = recorder.onstop
+        recorder.onstop = (event) => {
+          previousOnStop?.call(recorder, event)
+          resolve()
+        }
+        recorder.stop()
+      })
     }
     mediaRecorder = null
     if (mediaStream) {
@@ -163,6 +180,7 @@ export function useAudioRecorder() {
       mediaStream = null
     }
     cleanupInjectedAudio()
+    suppressChunks = previousSuppress
   }
 
   // ── App 模式实现 ──────────────────────────────────────────────
@@ -194,13 +212,21 @@ export function useAudioRecorder() {
     await VoiceRecorder.startRecording()
 
     // 定时分块：每 1s 停录 → 取数据 → 触发回调 → 继续录
+    startNativeChunkTimer(VoiceRecorder)
+  }
+
+  function startNativeChunkTimer(VoiceRecorder: any) {
+    if (nativeChunkTimer) {
+      clearInterval(nativeChunkTimer)
+      nativeChunkTimer = null
+    }
     nativeChunkTimer = setInterval(async () => {
       try {
         const result = await VoiceRecorder.stopRecording()
         const { recordDataBase64, mimeType } = result.value
         if (recordDataBase64) {
           const blob = base64ToBlob(recordDataBase64, mimeType || 'audio/aac')
-          chunkCallback?.(blob, mimeType || 'audio/aac')
+          emitChunk(blob, mimeType || 'audio/aac')
         }
         // 继续录下一块
         await VoiceRecorder.startRecording()
@@ -210,9 +236,11 @@ export function useAudioRecorder() {
     }, NATIVE_CHUNK_INTERVAL_MS)
   }
 
-  async function stopNative(): Promise<void> {
+  async function stopNative(options: { emitFinal?: boolean; allowSleep?: boolean } = {}): Promise<void> {
     const { VoiceRecorder } = await import('capacitor-voice-recorder')
     const { KeepAwake } = await import('@capacitor-community/keep-awake')
+    const emitFinal = options.emitFinal ?? true
+    const allowSleep = options.allowSleep ?? true
 
     // 清除定时器
     if (nativeChunkTimer) {
@@ -224,16 +252,34 @@ export function useAudioRecorder() {
     try {
       const result = await VoiceRecorder.stopRecording()
       const { recordDataBase64, mimeType } = result.value
-      if (recordDataBase64) {
+      if (recordDataBase64 && emitFinal) {
         const blob = base64ToBlob(recordDataBase64, mimeType || 'audio/aac')
-        chunkCallback?.(blob, mimeType || 'audio/aac')
+        emitChunk(blob, mimeType || 'audio/aac')
       }
     } catch {
       // 若录音已结束则忽略
     }
 
     // 释放屏幕常亮
-    await KeepAwake.allowSleep()
+    if (allowSleep) await KeepAwake.allowSleep()
+  }
+
+  async function restartSegment(): Promise<void> {
+    if (!isRecording.value) return
+    if (recordingSource.value === 'file') {
+      throw new Error('文件注入模式不支持断线录音补传')
+    }
+
+    if (Capacitor.isNativePlatform()) {
+      const { VoiceRecorder } = await import('capacitor-voice-recorder')
+      await stopNative({ emitFinal: false, allowSleep: false })
+      await VoiceRecorder.startRecording()
+      startNativeChunkTimer(VoiceRecorder)
+      return
+    }
+
+    await stopBrowser({ emitFinal: false })
+    await startBrowser()
   }
 
   // ── 统一对外接口 ──────────────────────────────────────────────
@@ -264,7 +310,7 @@ export function useAudioRecorder() {
     if (Capacitor.isNativePlatform()) {
       await stopNative()
     } else {
-      stopBrowser()
+      await stopBrowser()
     }
     isRecording.value = false
     recordingSource.value = null
@@ -276,6 +322,7 @@ export function useAudioRecorder() {
     onChunk,
     startRecording,
     startFileInjection,
+    restartSegment,
     stopRecording,
   }
 }

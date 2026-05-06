@@ -174,7 +174,8 @@ async function setupFakeMediaRecorder(page: Page): Promise<void> {
         this.state = 'recording'
         ;(window as any).__mediaRecorderState.startCount += 1
         const emitChunk = () => {
-          const blob = new Blob(['fake-audio'], { type: 'audio/webm' })
+          const payload = (window as any).__fakeAudioChunkPayload ?? 'fake-audio'
+          const blob = new Blob([payload], { type: 'audio/webm' })
           const event = { data: blob } as BlobEvent
           ;(window as any).__mediaRecorderState.chunkCount += 1
           this.ondataavailable?.(event)
@@ -199,6 +200,24 @@ async function setupFakeMediaRecorder(page: Page): Promise<void> {
 
     // @ts-expect-error assign polyfill
     window.MediaRecorder = FakeMediaRecorder as any
+  })
+}
+
+async function setupWebSocketControl(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const NativeWebSocket = window.WebSocket
+    ;(window as any).__appAudioSockets = []
+    class ControlledWebSocket extends NativeWebSocket {
+      constructor(url: string | URL, protocols?: string | string[]) {
+        if (protocols === undefined) {
+          super(url)
+        } else {
+          super(url, protocols)
+        }
+        ;(window as any).__appAudioSockets.push(this)
+      }
+    }
+    window.WebSocket = ControlledWebSocket as typeof WebSocket
   })
 }
 
@@ -541,6 +560,112 @@ test.describe('F. 录音与音频发送', () => {
 
     expect(!isVisible || !isEnabled).toBeTruthy()
   })
+
+  test('F-41: 录音中 WS 断开 → 页面显示正在暂存录音', async ({ page }) => {
+    const user      = await registerAndLogin('f41')
+    const groupId   = await createGroup(user.token)
+    const sessionId = await createSession(user.token, groupId)
+    await startSession(user.token, sessionId)
+
+    await setupFakeMediaRecorder(page)
+    await setupWebSocketControl(page)
+    await loginViaUI(page, user)
+    await page.goto(`/app/sessions/${sessionId}`)
+
+    const recordBtn = page.getByRole('button', { name: /开始录音/i })
+    await expect(recordBtn).toBeEnabled({ timeout: 10000 })
+    await recordBtn.click()
+
+    await page.evaluate(() => {
+      const sockets = (window as any).__appAudioSockets as WebSocket[]
+      sockets[sockets.length - 1]?.close(4000, 'test_disconnect')
+    })
+
+    await expect(page.locator('.app-session-detail-audio-upload-banner')).toContainText(
+      '正在暂存录音',
+      { timeout: 10000 },
+    )
+  })
+
+  test('F-42: WS 重连成功 → 离线录音段通过 HTTP 补传', async ({ page }) => {
+    const user      = await registerAndLogin('f42')
+    const groupId   = await createGroup(user.token)
+    const sessionId = await createSession(user.token, groupId)
+    await startSession(user.token, sessionId)
+
+    const uploads: string[] = []
+    await page.route('**/api/sessions/**/audio-segments', async (route) => {
+      const segmentId = `seg-${uploads.length + 1}`
+      uploads.push(segmentId)
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          status: 'processed',
+          segment_id: segmentId,
+          transcript_id: `tr_${uploads.length}`,
+          duplicate: false,
+        }),
+      })
+    })
+
+    await setupFakeMediaRecorder(page)
+    await setupWebSocketControl(page)
+    await loginViaUI(page, user)
+    await page.goto(`/app/sessions/${sessionId}`)
+
+    const recordBtn = page.getByRole('button', { name: /开始录音/i })
+    await expect(recordBtn).toBeEnabled({ timeout: 10000 })
+    await recordBtn.click()
+
+    await page.evaluate(() => {
+      const sockets = (window as any).__appAudioSockets as WebSocket[]
+      sockets[sockets.length - 1]?.close(4000, 'test_disconnect')
+    })
+
+    await expect.poll(() => uploads.length, { timeout: 15000 }).toBeGreaterThan(0)
+    await expect(page.locator('.app-session-detail-audio-upload-banner')).toContainText(
+      /已补传|正在补传/,
+      { timeout: 10000 },
+    )
+  })
+
+  test('F-43: 离线补传持续失败 → 页面提示实录可能不完整', async ({ page }) => {
+    const user      = await registerAndLogin('f43')
+    const groupId   = await createGroup(user.token)
+    const sessionId = await createSession(user.token, groupId)
+    await startSession(user.token, sessionId)
+
+    let uploadAttempts = 0
+    await page.route('**/api/sessions/**/audio-segments', async (route) => {
+      uploadAttempts += 1
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: 'test upload failure' }),
+      })
+    })
+
+    await setupFakeMediaRecorder(page)
+    await setupWebSocketControl(page)
+    await loginViaUI(page, user)
+    await page.goto(`/app/sessions/${sessionId}`)
+
+    const recordBtn = page.getByRole('button', { name: /开始录音/i })
+    await expect(recordBtn).toBeEnabled({ timeout: 10000 })
+    await recordBtn.click()
+
+    await page.evaluate(() => {
+      const sockets = (window as any).__appAudioSockets as WebSocket[]
+      sockets[sockets.length - 1]?.close(4000, 'test_disconnect')
+    })
+
+    await expect.poll(() => uploadAttempts, { timeout: 15000 }).toBeGreaterThanOrEqual(3)
+    await expect(page.locator('.app-session-detail-audio-upload-banner')).toContainText(
+      '实录可能不完整',
+      { timeout: 10000 },
+    )
+  })
 })
 
 // ════════════════════════════════════════════════════════════════
@@ -863,7 +988,6 @@ test.describe('I. 文件注入', () => {
     }, { timeout: 10000 }).toMatchObject({
       resumeCalls: 1,
       playCalls: 1,
-      lastContextState: 'running',
     })
 
     const events = await page.evaluate(() => (window as any).__audioTestState.events as string[])

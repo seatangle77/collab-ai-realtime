@@ -18,6 +18,7 @@ import {
   listGroupSessions,
   listSessionTranscripts,
   endSessionBeacon,
+  uploadOfflineAudioSegment,
 } from '../../api/appSessions'
 import { listMyGroups } from '../../api/appGroups'
 import { extractErrorMessage } from '../../utils/error'
@@ -59,6 +60,7 @@ const {
   onChunk,
   startRecording,
   startFileInjection,
+  restartSegment,
   stopRecording,
 } = useAudioRecorder()
 const transcriptsListEl = ref<HTMLElement | null>(null)
@@ -93,6 +95,20 @@ interface SummaryHistoryItem {
   window_start?: string | null
   window_end?: string | null
   created_at?: string | null
+}
+
+type AudioUploadNoticeKind = 'info' | 'success' | 'warning' | 'error'
+type OfflineAudioSegmentStatus = 'buffering' | 'pending_upload' | 'uploading' | 'uploaded' | 'failed'
+
+interface OfflineAudioSegment {
+  id: string
+  mimeType: string
+  startedAt: number
+  endedAt: number
+  chunks: Blob[]
+  sizeBytes: number
+  status: OfflineAudioSegmentStatus
+  retryCount: number
 }
 
 // ── 推送通知 ──────────────────────────────────────────────────────────────────
@@ -280,6 +296,9 @@ const wsStatusLabel = computed(() => {
 const BASE_RECONNECT_DELAY_MS = 1000
 const MAX_RECONNECT_DELAY_MS = 30_000
 const MAX_RECONNECT_TRIES = 5
+const OFFLINE_AUDIO_MAX_MS = 60_000
+const OFFLINE_AUDIO_MAX_BYTES = 20 * 1024 * 1024
+const OFFLINE_AUDIO_MAX_RETRIES = 2
 
 let appStateListener: PluginListenerHandle | null = null
 let ws: WebSocket | null = null
@@ -290,6 +309,15 @@ let unmounted = false
 /** 为 true 时不自动重连（页面卸载、主动关闭） */
 let wsIntentionalClose = false
 let chunkSeq = 0
+let activeOfflineAudioSegment: OfflineAudioSegment | null = null
+let offlineAudioTransitioning = false
+let audioNoticeTimer: ReturnType<typeof setTimeout> | null = null
+
+const offlineAudioSegments = ref<OfflineAudioSegment[]>([])
+const audioUploadNotice = ref('')
+const audioUploadNoticeKind = ref<AudioUploadNoticeKind>('info')
+const offlineAudioPartialLost = ref(false)
+const offlineAudioFlushing = ref(false)
 
 const statusLabel = computed(() => {
   const s = session.value?.status
@@ -488,8 +516,10 @@ async function handleEnd() {
   try {
     // 先停止录音、关闭 WS
     clearPushLogsPollTimer()
+    await flushOfflineAudioSegments()
     await stopRecording()
     resetDebugInjectionState()
+    resetOfflineAudioState()
     wsIntentionalClose = true
     ws?.close(1000, 'host_ended')
     // 再通知后端
@@ -505,6 +535,7 @@ async function handleEnd() {
 async function handleStartRecording() {
   if (!canStartRecording.value) return
   chunkSeq = 0
+  resetOfflineAudioState()
   try {
     await startRecording()
   } catch (err) {
@@ -515,6 +546,7 @@ async function handleStartRecording() {
 async function handleStopRecording() {
   if (!canStopRecording.value) return
   try {
+    await flushOfflineAudioSegments()
     await stopRecording()
     resetDebugInjectionState()
   } catch (err) {
@@ -651,6 +683,195 @@ function clearPingTimer() {
   }
 }
 
+function setAudioUploadNotice(
+  message: string,
+  kind: AudioUploadNoticeKind,
+  options: { autoClearMs?: number } = {},
+) {
+  if (audioNoticeTimer) {
+    clearTimeout(audioNoticeTimer)
+    audioNoticeTimer = null
+  }
+  audioUploadNotice.value = message
+  audioUploadNoticeKind.value = kind
+  if (options.autoClearMs) {
+    audioNoticeTimer = setTimeout(() => {
+      audioUploadNotice.value = ''
+      audioNoticeTimer = null
+    }, options.autoClearMs)
+  }
+}
+
+function clearAudioUploadNotice() {
+  if (audioNoticeTimer) {
+    clearTimeout(audioNoticeTimer)
+    audioNoticeTimer = null
+  }
+  audioUploadNotice.value = ''
+}
+
+function buildOfflineSegmentId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return `offline-${crypto.randomUUID()}`
+  }
+  return `offline-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+function totalOfflineAudioBytes(): number {
+  return offlineAudioSegments.value.reduce((sum, segment) => sum + segment.sizeBytes, 0)
+    + (activeOfflineAudioSegment?.sizeBytes ?? 0)
+}
+
+function totalOfflineAudioMs(now = Date.now()): number {
+  const queuedMs = offlineAudioSegments.value.reduce(
+    (sum, segment) => sum + Math.max(0, segment.endedAt - segment.startedAt),
+    0,
+  )
+  const activeMs = activeOfflineAudioSegment
+    ? Math.max(0, now - activeOfflineAudioSegment.startedAt)
+    : 0
+  return queuedMs + activeMs
+}
+
+function markOfflineAudioPartialLost(message = '网络中断时间较长，部分录音未能保存，实录可能不完整') {
+  offlineAudioPartialLost.value = true
+  setAudioUploadNotice(message, 'warning')
+}
+
+function shouldBufferOfflineAudio(): boolean {
+  return isHost.value
+    && isRecording.value
+    && recordingSource.value === 'microphone'
+    && session.value?.status === 'ongoing'
+}
+
+async function beginOfflineAudioBuffering() {
+  if (!shouldBufferOfflineAudio()) return
+  if (activeOfflineAudioSegment || offlineAudioTransitioning) return
+
+  offlineAudioTransitioning = true
+  setAudioUploadNotice('网络中断，正在暂存录音', offlineAudioPartialLost.value ? 'warning' : 'info')
+  try {
+    await restartSegment()
+    const now = Date.now()
+    activeOfflineAudioSegment = {
+      id: buildOfflineSegmentId(),
+      mimeType: 'audio/webm',
+      startedAt: now,
+      endedAt: now,
+      chunks: [],
+      sizeBytes: 0,
+      status: 'buffering',
+      retryCount: 0,
+    }
+  } catch (err) {
+    console.warn('beginOfflineAudioBuffering failed:', err)
+    markOfflineAudioPartialLost('网络中断期间录音暂存启动失败，实录可能不完整')
+  } finally {
+    offlineAudioTransitioning = false
+  }
+}
+
+function queueActiveOfflineAudioSegment() {
+  if (!activeOfflineAudioSegment) return
+  const segment = activeOfflineAudioSegment
+  activeOfflineAudioSegment = null
+  if (!segment.chunks.length || segment.sizeBytes <= 0) return
+  offlineAudioSegments.value = [
+    ...offlineAudioSegments.value,
+    { ...segment, status: 'pending_upload' },
+  ]
+}
+
+function bufferOfflineAudioChunk(blob: Blob, mimeType: string) {
+  if (!activeOfflineAudioSegment) {
+    void beginOfflineAudioBuffering()
+    return
+  }
+
+  const now = Date.now()
+  const nextBytes = totalOfflineAudioBytes() + blob.size
+  const nextMs = totalOfflineAudioMs(now)
+  if (nextBytes > OFFLINE_AUDIO_MAX_BYTES || nextMs > OFFLINE_AUDIO_MAX_MS) {
+    markOfflineAudioPartialLost()
+    return
+  }
+
+  activeOfflineAudioSegment.mimeType = mimeType || activeOfflineAudioSegment.mimeType
+  activeOfflineAudioSegment.endedAt = now
+  activeOfflineAudioSegment.chunks.push(blob)
+  activeOfflineAudioSegment.sizeBytes += blob.size
+}
+
+async function prepareOfflineAudioForReplay() {
+  if (!activeOfflineAudioSegment || offlineAudioTransitioning) {
+    queueActiveOfflineAudioSegment()
+    return
+  }
+
+  offlineAudioTransitioning = true
+  try {
+    await restartSegment()
+  } catch (err) {
+    console.warn('prepareOfflineAudioForReplay restart failed:', err)
+    markOfflineAudioPartialLost('网络恢复时录音分段失败，部分实录可能不完整')
+  } finally {
+    offlineAudioTransitioning = false
+    queueActiveOfflineAudioSegment()
+  }
+}
+
+async function flushOfflineAudioSegments() {
+  await prepareOfflineAudioForReplay()
+  if (!offlineAudioSegments.value.length || offlineAudioFlushing.value) return
+
+  offlineAudioFlushing.value = true
+  setAudioUploadNotice('网络已恢复，正在补传刚才的录音', offlineAudioPartialLost.value ? 'warning' : 'info')
+  try {
+    while (offlineAudioSegments.value.length) {
+      const segment = offlineAudioSegments.value[0]
+      if (!segment) break
+      segment.status = 'uploading'
+      const audio = new Blob(segment.chunks, { type: segment.mimeType })
+      try {
+        await uploadOfflineAudioSegment(sessionId, {
+          segmentId: segment.id,
+          startedAt: new Date(segment.startedAt).toISOString(),
+          endedAt: new Date(segment.endedAt).toISOString(),
+          mimeType: segment.mimeType,
+          audio,
+        })
+        segment.status = 'uploaded'
+        offlineAudioSegments.value = offlineAudioSegments.value.slice(1)
+      } catch (err) {
+        segment.retryCount += 1
+        if (segment.retryCount <= OFFLINE_AUDIO_MAX_RETRIES) {
+          segment.status = 'pending_upload'
+          continue
+        }
+        segment.status = 'failed'
+        markOfflineAudioPartialLost('部分录音补传失败，实录可能不完整')
+        console.warn('offline audio upload failed:', err)
+        break
+      }
+    }
+    if (!offlineAudioSegments.value.length && !offlineAudioPartialLost.value) {
+      setAudioUploadNotice('刚才的录音已补传', 'success', { autoClearMs: 3000 })
+    }
+  } finally {
+    offlineAudioFlushing.value = false
+  }
+}
+
+function resetOfflineAudioState() {
+  activeOfflineAudioSegment = null
+  offlineAudioSegments.value = []
+  offlineAudioPartialLost.value = false
+  offlineAudioFlushing.value = false
+  offlineAudioTransitioning = false
+  clearAudioUploadNotice()
+}
+
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -672,8 +893,17 @@ function blobToBase64(blob: Blob): Promise<string> {
   })
 }
 
-async function sendAudioChunk(blob: Blob) {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return
+async function sendAudioChunk(blob: Blob, mimeType = blob.type || 'audio/webm') {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    if (shouldBufferOfflineAudio()) {
+      if (!activeOfflineAudioSegment) {
+        void beginOfflineAudioBuffering()
+      } else if (!offlineAudioTransitioning) {
+        bufferOfflineAudioChunk(blob, mimeType)
+      }
+    }
+    return
+  }
   chunkSeq += 1
   const audioB64 = await blobToBase64(blob)
   ws.send(
@@ -681,7 +911,7 @@ async function sendAudioChunk(blob: Blob) {
       type: 'audio_chunk',
       data: {
         seq: chunkSeq,
-        mime_type: blob.type || 'audio/webm',
+        mime_type: mimeType,
         audio_b64: audioB64,
         duration_ms: 1000,
         sent_at: Date.now(),
@@ -691,9 +921,19 @@ async function sendAudioChunk(blob: Blob) {
 }
 
 // 注册音频分块回调，每块数据直接发送 WS
-onChunk((blob) => {
-  void sendAudioChunk(blob).catch((err) => {
+onChunk((blob, mimeType) => {
+  if (offlineAudioTransitioning) return
+  if (activeOfflineAudioSegment || (!ws || ws.readyState !== WebSocket.OPEN)) {
+    if (shouldBufferOfflineAudio()) {
+      bufferOfflineAudioChunk(blob, mimeType)
+    }
+    return
+  }
+  void sendAudioChunk(blob, mimeType).catch((err) => {
     console.warn('sendAudioChunk failed:', err)
+    if (shouldBufferOfflineAudio()) {
+      void beginOfflineAudioBuffering()
+    }
   })
 })
 
@@ -740,6 +980,7 @@ function handleWsMessage(event: MessageEvent<string>) {
     clearReconnectTimer()
     wsStatus.value = 'connected'
     sendPingNow()
+    void flushOfflineAudioSegments()
     void refetchTranscriptsAndMerge()
     void fetchPushLogs()
     if (pendingRecordingStart.value) {
@@ -857,6 +1098,7 @@ function handleWsMessage(event: MessageEvent<string>) {
     clearPushLogsPollTimer()
     void stopRecording().finally(() => {
       resetDebugInjectionState()
+      resetOfflineAudioState()
     })
     wsIntentionalClose = true
     ws?.close(1000, 'session_ended')
@@ -1269,6 +1511,7 @@ function openWebSocket() {
       wsStatus.value = 'disconnected'
       return
     }
+    void beginOfflineAudioBuffering()
     scheduleReconnect()
   }
 }
@@ -1315,6 +1558,7 @@ onUnmounted(() => {
   unmounted = true
   void stopRecording().finally(() => {
     resetDebugInjectionState()
+    resetOfflineAudioState()
   })
   closeWsForUnmount()
   clearPushLogsPollTimer()
@@ -1514,6 +1758,14 @@ onUnmounted(() => {
           >
             重新连接
           </button>
+        </div>
+        <div
+          v-if="audioUploadNotice"
+          class="app-session-detail-audio-upload-banner"
+          :class="`is-${audioUploadNoticeKind}`"
+        >
+          <span class="app-session-detail-audio-upload-dot" aria-hidden="true"></span>
+          <span>{{ audioUploadNotice }}</span>
         </div>
 
         <div v-if="transcriptsLoading" class="app-session-detail-loading">正在加载讨论实录...</div>
@@ -1857,6 +2109,48 @@ onUnmounted(() => {
 
 .app-session-detail-ws-banner-retry:hover {
   opacity: 0.75;
+}
+
+.app-session-detail-audio-upload-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.app-session-detail-audio-upload-banner.is-info {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+
+.app-session-detail-audio-upload-banner.is-success {
+  background: #f0fdf4;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+.app-session-detail-audio-upload-banner.is-warning {
+  background: #fffbeb;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+.app-session-detail-audio-upload-banner.is-error {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+.app-session-detail-audio-upload-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+  flex-shrink: 0;
 }
 
 .app-session-detail-ws-status {
