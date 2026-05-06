@@ -32,7 +32,7 @@ from .ws_protocol import (
 
 router = APIRouter(tags=["ws-sessions"])
 MAX_AUDIO_B64_LENGTH = 1_500_000
-HEARTBEAT_TIMEOUT = 30  # 秒：发起者超过此时间无 ping 则自动结束会话
+HEARTBEAT_TIMEOUT = 150  # 秒：发起者超过此时间无 ping 则自动结束会话
 CLEANUP_GRACE_SECONDS = 60  # 所有人断线后等待多少秒再兜底清理
 _logger = logging.getLogger(__name__)
 WS_TRACE = "[WS_TRACE]"

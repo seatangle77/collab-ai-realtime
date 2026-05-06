@@ -1,25 +1,28 @@
 """
 WS 主机识别 + 心跳超时 + session_ended 广播 集成测试
 
-测试用例（快速）：
-  T3-1: 有效 token（created_by 用户）→ connected，后续行为验证 is_host=True（通过 T4 超时间接验证）
-  T3-2: 有效 token（非 created_by 成员）→ connected，长时间静默不超时
+测试用例（快速，约 60s）：
+  T3-1: 有效 token（created_by 用户）→ connected，无错误
+  T3-2: 有效 token（非 created_by 成员）→ connected，静默 6s 不超时
   T3-3: 无 token 参数 → connected，不报错
   T3-4: 非法 token 字符串 → connected（降级），不断连
+  T4-5: host 快速连发多个 ping → 不崩溃，均收到 pong
+  T4-6: host 干净断线后重连 → 会话继续，仍能 ping/pong
 
-测试用例（慢速，需 --include-slow，每条约 31-60s）：
-  T4-1: 发起人 31s 无消息 → session_ended{reason: host_timeout}，DB status=ended
-  T4-2: 发起人第 25s 发 ping → 不超时，连接保持
-  T4-3: 参与者静默 35s → 不超时，ping 仍有 pong
-  T5-1: 发起人超时 → host + guest 两端均收到 session_ended
-  T5-2: 超时时只有 host 在线 → session_ended 正常广播，不崩溃
-  T5-3: 超时时 host + 2 个 guest → 三端均收到 session_ended
+测试用例（慢速，需 --include-slow）：
+  T4-1: host 151s 无消息 → session_ended{reason: host_timeout}，DB status=ended（约 155s）
+  T4-2: host 分两段 ping，总计 50s → 不超时，两次均得到 pong（约 55s）
+  T4-3: 参与者静默 35s → 不超时，host 无需频繁 ping 保活（约 40s）
+  T4-4: host 在第 30s 发 ping（旧超时边界）→ 会话继续（约 35s）
+  T5-1: host 超时 → host + guest 两端均收到 session_ended（约 155s）
+  T5-2: 超时时只有 host 在线 → session_ended 正常，不崩溃（约 155s）
+  T5-3: host + 2 个 guest → 三端均收到 session_ended（约 155s）
 
 运行：
-  # 快速测试（T3，约 30s）
+  # 快速测试（T3 + T4-5/6，约 60s）
   python tests/test_ws_host_and_timeout.py
 
-  # 含慢速测试（T3 + T4 + T5，约 5-8 分钟）
+  # 含慢速测试（全部，约 15-20 分钟）
   python tests/test_ws_host_and_timeout.py --include-slow
 
 运行前提：后端已启动（uvicorn backend.app.main:app --reload --port 8000）
@@ -40,9 +43,9 @@ BASE_URL = "http://127.0.0.1:8000"
 WS_BASE = "ws://127.0.0.1:8000"
 RUN_ID = uuid.uuid4().hex[:6]
 
-HEARTBEAT_TIMEOUT = 30   # 与后端 ws_sessions.py 保持一致
+HEARTBEAT_TIMEOUT = 150  # 与后端 ws_sessions.py 保持一致
 FAST_WS_TIMEOUT = 5      # 快速用例等待消息超时
-SLOW_WS_TIMEOUT = 40     # 慢速用例等待超时消息
+SLOW_WS_TIMEOUT = 160    # 慢速用例等待超时消息（须 > HEARTBEAT_TIMEOUT）
 
 
 def _log(ok: bool, msg: str, extra: Any = None) -> bool:
@@ -120,17 +123,22 @@ def _create_ongoing_session(leader_token: str, group_id: str, title: str) -> str
     return session_id
 
 
-def _verify_session_ended(session_id: str, leader_token: str, group_id: str) -> bool:
+def _verify_session_status(session_id: str, leader_token: str, group_id: str) -> str | None:
+    """返回会话当前 status 字符串，查询失败返回 None。"""
     r = requests.get(
         f"{BASE_URL}/api/groups/{group_id}/sessions",
         params={"include_ended": "true"},
         headers=_auth(leader_token),
     )
     if r.status_code != 200:
-        return False
+        return None
     sessions = r.json()
     target = next((s for s in sessions if s["id"] == session_id), None)
-    return target is not None and target.get("status") == "ended"
+    return target["status"] if target else None
+
+
+def _verify_session_ended(session_id: str, leader_token: str, group_id: str) -> bool:
+    return _verify_session_status(session_id, leader_token, group_id) == "ended"
 
 
 # ─────────────────────── setup ───────────────────────────────────────────────
@@ -187,7 +195,6 @@ def t3_1_host_token_connects(ctx: Dict[str, Any]) -> bool:
                 ws.close()
             except Exception:
                 pass
-        # 结束会话避免影响其他用例
         requests.post(f"{BASE_URL}/api/sessions/{session_id}/end",
                       headers=_auth(ctx["leader_token"]))
 
@@ -204,10 +211,8 @@ def t3_2_member_token_no_timeout(ctx: Dict[str, Any]) -> bool:
         if msg.get("type") != "connected":
             return _log(False, "T3-2: 未收到 connected", msg)
 
-        # 静默 6s（大于 FAST_WS_TIMEOUT=5 的话用内部计时即可）
         time.sleep(6)
 
-        # 发 ping 验证连接还活着
         _send(ws, "ping", {})
         ws.settimeout(FAST_WS_TIMEOUT)
         pong = _recv(ws)
@@ -272,13 +277,107 @@ def t3_4_invalid_token_connects(ctx: Dict[str, Any]) -> bool:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+#  快速用例：T4-5 T4-6（新增，不需等待超时）
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def t4_5_rapid_ping_no_crash(ctx: Dict[str, Any]) -> bool:
+    """host 短时间内连发 10 个 ping → 均收到 pong，后端不崩溃"""
+    session_id = _create_ongoing_session(
+        ctx["leader_token"], ctx["group_id"], f"T4-5 {RUN_ID}"
+    )
+    ws = None
+    try:
+        ws = _ws_connect(session_id, ctx["leader_token"])
+        msg = _recv(ws)
+        if msg.get("type") != "connected":
+            return _log(False, "T4-5: 未收到 connected", msg)
+
+        pong_count = 0
+        for _ in range(10):
+            _send(ws, "ping", {})
+        ws.settimeout(FAST_WS_TIMEOUT)
+        for _ in range(10):
+            resp = _recv(ws)
+            if resp.get("type") == "pong":
+                pong_count += 1
+
+        ok = pong_count == 10
+        return _log(ok, f"T4-5: 连发 10 个 ping → 收到 {pong_count}/10 个 pong", None)
+    except Exception as e:
+        return _log(False, "T4-5: 异常", str(e))
+    finally:
+        if ws:
+            try:
+                ws.close()
+            except Exception:
+                pass
+        requests.post(f"{BASE_URL}/api/sessions/{session_id}/end",
+                      headers=_auth(ctx["leader_token"]))
+
+
+def t4_6_host_reconnect_session_continues(ctx: Dict[str, Any]) -> bool:
+    """host 干净断线后重连 → 会话仍为 ongoing，重连后能正常 ping/pong"""
+    session_id = _create_ongoing_session(
+        ctx["leader_token"], ctx["group_id"], f"T4-6 {RUN_ID}"
+    )
+    ws1 = ws2 = None
+    try:
+        ws1 = _ws_connect(session_id, ctx["leader_token"])
+        msg = _recv(ws1)
+        if msg.get("type") != "connected":
+            return _log(False, "T4-6: 初次连接未收到 connected", msg)
+
+        # 干净断开（模拟刷新页面）
+        ws1.close()
+        ws1 = None
+        time.sleep(1)
+
+        # 重连
+        ws2 = _ws_connect(session_id, ctx["leader_token"])
+        msg2 = _recv(ws2)
+        if msg2.get("type") != "connected":
+            return _log(False, "T4-6: 重连后未收到 connected", msg2)
+
+        # 重连后 ping/pong 正常
+        _send(ws2, "ping", {})
+        ws2.settimeout(FAST_WS_TIMEOUT)
+        pong = _recv(ws2)
+        pong_ok = pong.get("type") == "pong"
+
+        # DB 确认会话仍为 ongoing
+        status = _verify_session_status(session_id, ctx["leader_token"], ctx["group_id"])
+        status_ok = status == "ongoing"
+
+        ok = pong_ok and status_ok
+        return _log(ok, "T4-6: host 重连后 ping/pong 正常，会话仍为 ongoing",
+                    {"pong": pong, "db_status": status})
+    except Exception as e:
+        return _log(False, "T4-6: 异常", str(e))
+    finally:
+        if ws1:
+            try:
+                ws1.close()
+            except Exception:
+                pass
+        if ws2:
+            try:
+                ws2.close()
+            except Exception:
+                pass
+        requests.post(f"{BASE_URL}/api/sessions/{session_id}/end",
+                      headers=_auth(ctx["leader_token"]))
+
+
+# ═══════════════════════════════════════════════════════════════════════
 #  慢速用例：T4 心跳超时
 # ═══════════════════════════════════════════════════════════════════════
 
 
 def t4_1_host_timeout_ends_session(ctx: Dict[str, Any]) -> bool:
-    """发起人 31s 无消息 → session_ended{reason: host_timeout}，DB status=ended"""
-    print(f"   ⏳ T4-1 等待 {HEARTBEAT_TIMEOUT + 1}s（host 超时）...")
+    """host 超过 150s 无 ping → session_ended{reason: host_timeout}，DB status=ended"""
+    wait = HEARTBEAT_TIMEOUT + 1
+    print(f"   ⏳ T4-1 等待 {wait}s（host 超时）...")
     session_id = _create_ongoing_session(
         ctx["leader_token"], ctx["group_id"], f"T4-1 {RUN_ID}"
     )
@@ -289,15 +388,13 @@ def t4_1_host_timeout_ends_session(ctx: Dict[str, Any]) -> bool:
         if msg.get("type") != "connected":
             return _log(False, "T4-1: 未收到 connected", msg)
 
-        # 静默，等待超时
-        time.sleep(HEARTBEAT_TIMEOUT + 1)
+        time.sleep(wait)
 
         ws.settimeout(SLOW_WS_TIMEOUT)
         ended_msg = _recv(ws)
         ok = ended_msg.get("type") == "session_ended"
         ok &= ended_msg.get("data", {}).get("reason") == "host_timeout"
 
-        # 验证 DB
         db_ended = _verify_session_ended(session_id, ctx["leader_token"], ctx["group_id"])
         ok &= db_ended
 
@@ -314,8 +411,8 @@ def t4_1_host_timeout_ends_session(ctx: Dict[str, Any]) -> bool:
 
 
 def t4_2_host_ping_resets_timer(ctx: Dict[str, Any]) -> bool:
-    """发起人第 25s 发 ping → 不超时，连接保持；再等 25s 发 ping 仍存活"""
-    print("   ⏳ T4-2 等待约 55s（ping 重置计时器）...")
+    """host 在 25s、50s 各 ping 一次 → 两次均得到 pong，计时器每次重置，连接不中断"""
+    print("   ⏳ T4-2 等待约 55s（ping 重置计时器验证）...")
     session_id = _create_ongoing_session(
         ctx["leader_token"], ctx["group_id"], f"T4-2 {RUN_ID}"
     )
@@ -326,7 +423,7 @@ def t4_2_host_ping_resets_timer(ctx: Dict[str, Any]) -> bool:
         if msg.get("type") != "connected":
             return _log(False, "T4-2: 未收到 connected", msg)
 
-        # 第 25s 发 ping
+        # 第 25s ping
         time.sleep(25)
         _send(ws, "ping", {})
         ws.settimeout(FAST_WS_TIMEOUT)
@@ -334,13 +431,13 @@ def t4_2_host_ping_resets_timer(ctx: Dict[str, Any]) -> bool:
         if pong1.get("type") != "pong":
             return _log(False, "T4-2: 第 25s ping 未收到 pong", pong1)
 
-        # 再等 25s（总计 50s，跨越了一个 30s 窗口），再 ping
+        # 第 50s ping（每次 ping 后计时器重置，不会在第 150s 处累计超时）
         time.sleep(25)
         _send(ws, "ping", {})
         ws.settimeout(FAST_WS_TIMEOUT)
         pong2 = _recv(ws)
         ok = pong2.get("type") == "pong"
-        return _log(ok, "T4-2: 25s ping 重置计时器，连接 50s 后仍活跃", pong2)
+        return _log(ok, "T4-2: 25s/50s ping 均收到 pong，计时器正确重置", pong2)
     except Exception as e:
         return _log(False, "T4-2: 异常", str(e))
     finally:
@@ -354,31 +451,24 @@ def t4_2_host_ping_resets_timer(ctx: Dict[str, Any]) -> bool:
 
 
 def t4_3_member_no_timeout(ctx: Dict[str, Any]) -> bool:
-    """参与者（非发起人）静默 35s → 不超时，ping 仍得到 pong"""
-    print("   ⏳ T4-3 等待约 36s（参与者无超时）...")
+    """参与者静默 35s → 不超时；host 在 150s 窗口内无需频繁 ping 保活"""
+    print("   ⏳ T4-3 等待约 36s（参与者无超时验证）...")
     session_id = _create_ongoing_session(
         ctx["leader_token"], ctx["group_id"], f"T4-3 {RUN_ID}"
     )
-    ws_member = None
-    ws_host_keep = None
+    ws_member = ws_host = None
     try:
-        # host 需要持续 ping 防止会话被 host 自己的超时结束
-        ws_host_keep = _ws_connect(session_id, ctx["leader_token"], timeout=SLOW_WS_TIMEOUT)
-        _recv(ws_host_keep)  # connected
+        # host 连接（35s < 150s，不会触发超时，无需中途 ping）
+        ws_host = _ws_connect(session_id, ctx["leader_token"], timeout=SLOW_WS_TIMEOUT)
+        _recv(ws_host)  # connected
 
         ws_member = _ws_connect(session_id, ctx["member_token"], timeout=SLOW_WS_TIMEOUT)
         msg = _recv(ws_member)
         if msg.get("type") != "connected":
             return _log(False, "T4-3: member 未收到 connected", msg)
 
-        # member 静默 35s（每 25s host ping 一次保活）
-        time.sleep(25)
-        _send(ws_host_keep, "ping", {})
-        ws_host_keep.settimeout(FAST_WS_TIMEOUT)
-        _recv(ws_host_keep)  # pong
-        time.sleep(10)  # 再等 10s，总共 35s
+        time.sleep(35)
 
-        # member 发 ping 验证连接
         _send(ws_member, "ping", {})
         ws_member.settimeout(FAST_WS_TIMEOUT)
         pong = _recv(ws_member)
@@ -387,12 +477,53 @@ def t4_3_member_no_timeout(ctx: Dict[str, Any]) -> bool:
     except Exception as e:
         return _log(False, "T4-3: 异常", str(e))
     finally:
-        for ws in [ws_member, ws_host_keep]:
+        for ws in [ws_member, ws_host]:
             if ws:
                 try:
                     ws.close()
                 except Exception:
                     pass
+        requests.post(f"{BASE_URL}/api/sessions/{session_id}/end",
+                      headers=_auth(ctx["leader_token"]))
+
+
+def t4_4_host_ping_at_old_boundary(ctx: Dict[str, Any]) -> bool:
+    """host 在第 30s 发 ping（旧超时边界）→ 不超时，会话继续（验证 150s 修复效果）"""
+    print("   ⏳ T4-4 等待约 35s（旧 30s 边界回归验证）...")
+    session_id = _create_ongoing_session(
+        ctx["leader_token"], ctx["group_id"], f"T4-4 {RUN_ID}"
+    )
+    ws = None
+    try:
+        ws = _ws_connect(session_id, ctx["leader_token"], timeout=SLOW_WS_TIMEOUT)
+        msg = _recv(ws)
+        if msg.get("type") != "connected":
+            return _log(False, "T4-4: 未收到 connected", msg)
+
+        # 在旧 30s 超时点发 ping，期望仍得到 pong（而非 session_ended）
+        time.sleep(30)
+        _send(ws, "ping", {})
+        ws.settimeout(FAST_WS_TIMEOUT)
+        resp = _recv(ws)
+
+        pong_ok = resp.get("type") == "pong"
+        not_ended = resp.get("type") != "session_ended"
+
+        # 额外确认 DB 状态
+        status = _verify_session_status(session_id, ctx["leader_token"], ctx["group_id"])
+        db_ongoing = status == "ongoing"
+
+        ok = pong_ok and db_ongoing
+        return _log(ok, "T4-4: 第 30s ping → 收到 pong，会话仍为 ongoing（旧超时边界已修复）",
+                    {"resp": resp, "db_status": status, "not_ended": not_ended})
+    except Exception as e:
+        return _log(False, "T4-4: 异常", str(e))
+    finally:
+        if ws:
+            try:
+                ws.close()
+            except Exception:
+                pass
         requests.post(f"{BASE_URL}/api/sessions/{session_id}/end",
                       headers=_auth(ctx["leader_token"]))
 
@@ -404,7 +535,8 @@ def t4_3_member_no_timeout(ctx: Dict[str, Any]) -> bool:
 
 def t5_1_timeout_broadcast_to_all(ctx: Dict[str, Any]) -> bool:
     """host 超时 → host + guest 两端均收到 session_ended{reason: host_timeout}"""
-    print(f"   ⏳ T5-1 等待 {HEARTBEAT_TIMEOUT + 1}s（广播验证）...")
+    wait = HEARTBEAT_TIMEOUT + 1
+    print(f"   ⏳ T5-1 等待 {wait}s（广播验证）...")
     session_id = _create_ongoing_session(
         ctx["leader_token"], ctx["group_id"], f"T5-1 {RUN_ID}"
     )
@@ -416,7 +548,7 @@ def t5_1_timeout_broadcast_to_all(ctx: Dict[str, Any]) -> bool:
         ws_guest = _ws_connect(session_id, ctx["member_token"], timeout=SLOW_WS_TIMEOUT)
         _recv(ws_guest)  # connected
 
-        time.sleep(HEARTBEAT_TIMEOUT + 1)
+        time.sleep(wait)
 
         ws_host.settimeout(SLOW_WS_TIMEOUT)
         host_msg = _recv(ws_host)
@@ -442,7 +574,8 @@ def t5_1_timeout_broadcast_to_all(ctx: Dict[str, Any]) -> bool:
 
 def t5_2_timeout_only_host_online(ctx: Dict[str, Any]) -> bool:
     """超时时只有 host 在线 → session_ended 正常，后端不崩溃"""
-    print(f"   ⏳ T5-2 等待 {HEARTBEAT_TIMEOUT + 1}s（单 host 超时）...")
+    wait = HEARTBEAT_TIMEOUT + 1
+    print(f"   ⏳ T5-2 等待 {wait}s（单 host 超时）...")
     session_id = _create_ongoing_session(
         ctx["leader_token"], ctx["group_id"], f"T5-2 {RUN_ID}"
     )
@@ -451,7 +584,7 @@ def t5_2_timeout_only_host_online(ctx: Dict[str, Any]) -> bool:
         ws = _ws_connect(session_id, ctx["leader_token"], timeout=SLOW_WS_TIMEOUT)
         _recv(ws)  # connected
 
-        time.sleep(HEARTBEAT_TIMEOUT + 1)
+        time.sleep(wait)
 
         ws.settimeout(SLOW_WS_TIMEOUT)
         msg = _recv(ws)
@@ -473,7 +606,8 @@ def t5_2_timeout_only_host_online(ctx: Dict[str, Any]) -> bool:
 
 def t5_3_timeout_three_clients(ctx: Dict[str, Any]) -> bool:
     """host + 2 个 guest 同时在线，host 超时 → 三端均收到 session_ended"""
-    print(f"   ⏳ T5-3 等待 {HEARTBEAT_TIMEOUT + 1}s（三端广播）...")
+    wait = HEARTBEAT_TIMEOUT + 1
+    print(f"   ⏳ T5-3 等待 {wait}s（三端广播）...")
     session_id = _create_ongoing_session(
         ctx["leader_token"], ctx["group_id"], f"T5-3 {RUN_ID}"
     )
@@ -484,7 +618,7 @@ def t5_3_timeout_three_clients(ctx: Dict[str, Any]) -> bool:
             _recv(ws)  # connected
             connections.append(ws)
 
-        time.sleep(HEARTBEAT_TIMEOUT + 1)
+        time.sleep(wait)
 
         ok = True
         for i, ws in enumerate(connections):
@@ -527,6 +661,12 @@ def run_all(include_slow: bool = False) -> bool:
         t3_4_invalid_token_connects(ctx),
     ]
 
+    print("\n─── 快速用例：T4-5/6 补 ping 行为 ───")
+    fast_results += [
+        t4_5_rapid_ping_no_crash(ctx),
+        t4_6_host_reconnect_session_continues(ctx),
+    ]
+
     slow_results: List[bool] = []
     if include_slow:
         print("\n─── 慢速用例：T4 心跳超时 ───")
@@ -534,6 +674,7 @@ def run_all(include_slow: bool = False) -> bool:
             t4_1_host_timeout_ends_session(ctx),
             t4_2_host_ping_resets_timer(ctx),
             t4_3_member_no_timeout(ctx),
+            t4_4_host_ping_at_old_boundary(ctx),
         ]
         print("\n─── 慢速用例：T5 session_ended 广播 ───")
         slow_results += [

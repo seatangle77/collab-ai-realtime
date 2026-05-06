@@ -698,6 +698,15 @@ onChunk((blob) => {
 })
 
 
+function sendPingNow() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return
+  try {
+    ws.send(JSON.stringify({ type: 'ping', data: {} }))
+  } catch {
+    // ignore，close handler 会处理重连
+  }
+}
+
 function startPingTimer() {
   clearPingTimer()
   pingTimer = setInterval(() => {
@@ -730,6 +739,7 @@ function handleWsMessage(event: MessageEvent<string>) {
     reconnectAttempt.value = 0
     clearReconnectTimer()
     wsStatus.value = 'connected'
+    sendPingNow()
     void refetchTranscriptsAndMerge()
     void fetchPushLogs()
     if (pendingRecordingStart.value) {
@@ -1204,6 +1214,14 @@ function clearPushLogsPollTimer() {
   }
 }
 
+function handleVisibilityChange() {
+  if (document.visibilityState === 'visible') sendPingNow()
+}
+
+function handleDeviceChange() {
+  sendPingNow()
+}
+
 function closeWsForUnmount() {
   wsIntentionalClose = true
   clearReconnectTimer()
@@ -1233,6 +1251,7 @@ function openWebSocket() {
   socket.onopen = () => {
     if (unmounted || wsIntentionalClose) return
     startPingTimer()
+    sendPingNow()
   }
   socket.onmessage = (event) => {
     if (unmounted) return
@@ -1277,17 +1296,19 @@ onMounted(async () => {
     void fetchInfoGapButtons()
   }
   window.addEventListener('beforeunload', handleBeforeUnload)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  navigator.mediaDevices?.addEventListener('devicechange', handleDeviceChange)
   if (Capacitor.isNativePlatform()) {
     appStateListener = await CapApp.addListener('appStateChange', ({ isActive }) => {
-      if (!isActive && isHost.value && session.value?.status === 'ongoing') {
-        endSessionBeacon(sessionId)
-      }
+      if (isActive) sendPingNow()
     })
   }
 })
 
 onUnmounted(() => {
   window.removeEventListener('beforeunload', handleBeforeUnload)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  navigator.mediaDevices?.removeEventListener('devicechange', handleDeviceChange)
   appStateListener?.remove()
   appStateListener = null
   detachTestMessageInjector()
