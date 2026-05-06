@@ -154,6 +154,21 @@ async function patchWsForCapture(page: import('@playwright/test').Page) {
   })
 }
 
+async function openOngoingSessionDetail(
+  page: import('@playwright/test').Page,
+  user: TestUser,
+  label: string,
+): Promise<string> {
+  const gid = await createGroup(user.token, `${label}group-${Date.now()}`)
+  const sessionId = await createSession(user.token, gid, `${label}session-${Date.now()}`)
+  await startSessionViaApi(user.token, sessionId)
+  await patchWsForCapture(page)
+  await loginViaUI(page, user)
+  await page.goto(`/app/sessions/${sessionId}`)
+  await expect(page.locator('.app-session-detail-title')).toBeVisible({ timeout: 15000 })
+  return sessionId
+}
+
 // ─── Group E: isHost / created_by 权限控制 ────────────────────────────────────
 
 test.describe('E: isHost 权限控制', () => {
@@ -178,8 +193,9 @@ test.describe('E: isHost 权限控制', () => {
     await page.goto(`/app/sessions/${sessionId}`)
 
     await expect(page.getByRole('button', { name: '发起' })).toBeVisible()
-    await expect(page.getByRole('button', { name: '取消会话' })).toBeVisible()
-    await expect(page.getByRole('button', { name: '修改标题' })).toBeVisible()
+    await page.getByRole('button', { name: '更多操作' }).click()
+    await expect(page.locator('.el-dropdown-menu__item', { hasText: '取消会话' })).toBeVisible()
+    await expect(page.locator('.el-dropdown-menu__item', { hasText: '修改标题' })).toBeVisible()
     await expect(page.getByRole('button', { name: '离开会话' })).not.toBeVisible()
     await expect(page.locator('.app-session-detail-readonly-badge')).not.toBeVisible()
   })
@@ -460,6 +476,67 @@ test.describe('H: 断线横幅', () => {
   })
 })
 
+// ─── Group H2: live transcript segment cleanup ───────────────────────────────
+
+test.describe('H2: 临时识别气泡清理', () => {
+  test.describe.configure({ timeout: 90000 })
+
+  let user: TestUser
+
+  test.beforeAll(async () => {
+    test.setTimeout(60000)
+    user = await registerAndLogin('h2-live')
+  })
+
+  test('H2-1: transcript_segment 超过 TTL 后自动清理', async ({ page }) => {
+    await page.addInitScript(() => {
+      ;(window as any).__APP_LIVE_SEGMENT_TTL_MS = 500
+    })
+    await openOngoingSessionDetail(page, user, 'H2ttl')
+
+    await injectWsMessage(page, {
+      type: 'transcript_segment',
+      data: {
+        session_id: 'ignored',
+        segment_key: 'ttl-seg-1',
+        text: 'H2 临时识别文本',
+        speaker: 'unknown',
+        is_final: false,
+      },
+    })
+
+    await expect(page.locator('.app-session-detail-transcript-group--live')).toContainText('H2 临时识别文本')
+    await expect(page.locator('.app-session-detail-transcript-group--live')).toHaveCount(0, {
+      timeout: 7000,
+    })
+  })
+
+  test('H2-2: WS 重连 connected 后清空旧 liveSegments', async ({ page }) => {
+    await openOngoingSessionDetail(page, user, 'H2reconnect')
+
+    await injectWsMessage(page, {
+      type: 'transcript_segment',
+      data: {
+        session_id: 'ignored',
+        segment_key: 'reconnect-seg-1',
+        text: 'H2 重连前临时文本',
+        speaker: 'unknown',
+        is_final: false,
+      },
+    })
+    await expect(page.locator('.app-session-detail-transcript-group--live')).toContainText('H2 重连前临时文本')
+
+    await injectWsMessage(page, {
+      type: 'connected',
+      data: { session_id: 'ignored' },
+    })
+
+    await expect(page.locator('.app-session-detail-transcript-group--live')).toHaveCount(0, {
+      timeout: 7000,
+    })
+  })
+})
+
 // ─── Group I: beforeunload Beacon（Step 10）───────────────────────────────────
 
 test.describe('I: beforeunload Beacon', () => {
@@ -496,8 +573,13 @@ test.describe('I: beforeunload Beacon', () => {
     await page.goto(`/app/sessions/${sessionId}`)
     await expect(page.locator('.app-session-detail-title')).toBeVisible()
 
+    await page.waitForFunction(
+      () => typeof (window as any).__appSessionDetailTriggerBeforeUnload === 'function',
+      undefined,
+      { timeout: 10000 },
+    )
     await page.evaluate(() => {
-      window.dispatchEvent(new Event('beforeunload'))
+      ;(window as any).__appSessionDetailTriggerBeforeUnload()
     })
 
     await page.waitForFunction(

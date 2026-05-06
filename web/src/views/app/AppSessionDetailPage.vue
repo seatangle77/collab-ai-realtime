@@ -299,12 +299,18 @@ const MAX_RECONNECT_TRIES = 5
 const OFFLINE_AUDIO_MAX_MS = 60_000
 const OFFLINE_AUDIO_MAX_BYTES = 20 * 1024 * 1024
 const OFFLINE_AUDIO_MAX_RETRIES = 2
+const LIVE_SEGMENT_TTL_MS =
+  typeof window !== 'undefined' && typeof (window as any).__APP_LIVE_SEGMENT_TTL_MS === 'number'
+    ? (window as any).__APP_LIVE_SEGMENT_TTL_MS
+    : 30_000
+const LIVE_SEGMENT_CLEANUP_INTERVAL_MS = 5_000
 
 let appStateListener: PluginListenerHandle | null = null
 let ws: WebSocket | null = null
 let pingTimer: ReturnType<typeof setInterval> | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let pushLogsPollTimer: ReturnType<typeof setInterval> | null = null
+let liveSegmentCleanupTimer: ReturnType<typeof setInterval> | null = null
 let unmounted = false
 /** 为 true 时不自动重连（页面卸载、主动关闭） */
 let wsIntentionalClose = false
@@ -981,7 +987,7 @@ function handleWsMessage(event: MessageEvent<string>) {
     wsStatus.value = 'connected'
     sendPingNow()
     void flushOfflineAudioSegments()
-    void refetchTranscriptsAndMerge()
+    void refetchTranscriptsAndMerge().finally(clearLiveSegments)
     void fetchPushLogs()
     if (pendingRecordingStart.value) {
       pendingRecordingStart.value = false
@@ -1073,6 +1079,7 @@ function handleWsMessage(event: MessageEvent<string>) {
           text: finalText,
           speaker: d.speaker ?? existing?.speaker,
           status: 'pending_final',
+          updatedAt: Date.now(),
         },
       }
       return
@@ -1085,6 +1092,7 @@ function handleWsMessage(event: MessageEvent<string>) {
         text: d.text,
         speaker: d.speaker,
         status: 'live',
+        updatedAt: Date.now(),
       },
     }
     scrollTranscriptsToBottom()
@@ -1099,6 +1107,7 @@ function handleWsMessage(event: MessageEvent<string>) {
     void stopRecording().finally(() => {
       resetDebugInjectionState()
       resetOfflineAudioState()
+      clearLiveSegments()
     })
     wsIntentionalClose = true
     ws?.close(1000, 'session_ended')
@@ -1180,11 +1189,15 @@ function attachTestMessageInjector() {
       // Test hook only; ignore malformed payloads.
     }
   }
+  ;(window as any).__appSessionDetailTriggerBeforeUnload = () => {
+    handleBeforeUnload()
+  }
 }
 
 function detachTestMessageInjector() {
   if (typeof window === 'undefined') return
   delete (window as any).__appSessionDetailInjectWsMessage
+  delete (window as any).__appSessionDetailTriggerBeforeUnload
 }
 
 function speakerInitial(speaker: string | null | undefined): string {
@@ -1285,6 +1298,7 @@ interface LiveTranscriptSegment {
   text: string
   speaker?: string
   status: 'live' | 'pending_final'
+  updatedAt: number
 }
 
 function transcriptSortTimestamp(item: AppTranscript): number {
@@ -1372,6 +1386,38 @@ function buildTranscriptItems(transcriptItems: AppTranscript[], pushItems: PushL
 const transcriptItems = computed(() => buildTranscriptItems(transcripts.value, pushLogs.value))
 const liveSegments = ref<Record<string, LiveTranscriptSegment>>({})
 const liveSegmentList = computed(() => Object.values(liveSegments.value))
+
+function clearLiveSegments() {
+  liveSegments.value = {}
+}
+
+function cleanupExpiredLiveSegments() {
+  const now = Date.now()
+  const next: Record<string, LiveTranscriptSegment> = {}
+  for (const [key, segment] of Object.entries(liveSegments.value)) {
+    if (now - segment.updatedAt <= LIVE_SEGMENT_TTL_MS) {
+      next[key] = segment
+    }
+  }
+  if (Object.keys(next).length !== Object.keys(liveSegments.value).length) {
+    liveSegments.value = next
+  }
+}
+
+function startLiveSegmentCleanupTimer() {
+  clearLiveSegmentCleanupTimer()
+  liveSegmentCleanupTimer = setInterval(
+    cleanupExpiredLiveSegments,
+    LIVE_SEGMENT_CLEANUP_INTERVAL_MS,
+  )
+}
+
+function clearLiveSegmentCleanupTimer() {
+  if (liveSegmentCleanupTimer != null) {
+    clearInterval(liveSegmentCleanupTimer)
+    liveSegmentCleanupTimer = null
+  }
+}
 
 function scrollTranscriptsToBottom() {
   nextTick(() => {
@@ -1521,6 +1567,7 @@ onMounted(async () => {
   wsIntentionalClose = false
   reconnectAttempt.value = 0
   attachTestMessageInjector()
+  startLiveSegmentCleanupTimer()
   debugAudioEnabled.value = true
   currentUser.value = loadCurrentUser()
   await loadData()
@@ -1559,9 +1606,11 @@ onUnmounted(() => {
   void stopRecording().finally(() => {
     resetDebugInjectionState()
     resetOfflineAudioState()
+    clearLiveSegments()
   })
   closeWsForUnmount()
   clearPushLogsPollTimer()
+  clearLiveSegmentCleanupTimer()
   wsStatus.value = 'disconnected'
 })
 </script>
