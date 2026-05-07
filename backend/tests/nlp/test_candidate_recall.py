@@ -197,6 +197,93 @@ def test_validate_keywords_extra_word_in_response_ignored(monkeypatch: pytest.Mo
     assert "量化宽松" in result
 
 
+# ── _dedupe_semantic_keywords ────────────────────────────────────────────────
+
+def test_dedupe_semantic_keywords_empty_or_single() -> None:
+    assert candidate_recall._dedupe_semantic_keywords([], {}) == []
+
+    keywords = [{"word": "MBTI", "needs_prompt": True, "target_user_id": "u1", "reason": ""}]
+    assert candidate_recall._dedupe_semantic_keywords(keywords, {"u1": "MBTI"}) == keywords
+
+
+def test_dedupe_semantic_keywords_merges_similar_terms() -> None:
+    keywords = [
+        {"word": "搞抽象", "needs_prompt": True, "target_user_id": "u1", "reason": ""},
+        {"word": "玩抽象", "needs_prompt": False, "target_user_id": "", "reason": ""},
+        {"word": "MBTI", "needs_prompt": True, "target_user_id": "u2", "reason": ""},
+    ]
+
+    with (
+        patch.object(candidate_recall.embedder, "encode") as mock_encode,
+        patch.object(candidate_recall.similarity, "cosine_similarity") as mock_similarity,
+    ):
+        mock_encode.return_value = [[1, 0], [0.99, 0.01], [0, 1]]
+        mock_similarity.side_effect = [0.92, 0.12, 0.08]
+
+        result = candidate_recall._dedupe_semantic_keywords(
+            keywords,
+            {"u1": "我觉得这里是在搞抽象，不是玩抽象。MBTI 也能解释"},
+        )
+
+    words = [item["word"] for item in result]
+    assert words == ["搞抽象", "MBTI"]
+
+
+def test_dedupe_semantic_keywords_keeps_distinct_terms() -> None:
+    keywords = [
+        {"word": "MBTI", "needs_prompt": True, "target_user_id": "u1", "reason": ""},
+        {"word": "量化宽松", "needs_prompt": True, "target_user_id": "u2", "reason": ""},
+    ]
+
+    with (
+        patch.object(candidate_recall.embedder, "encode") as mock_encode,
+        patch.object(candidate_recall.similarity, "cosine_similarity") as mock_similarity,
+    ):
+        mock_encode.return_value = [[1, 0], [0, 1]]
+        mock_similarity.return_value = 0.2
+
+        result = candidate_recall._dedupe_semantic_keywords(
+            keywords,
+            {"u1": "MBTI", "u2": "量化宽松"},
+        )
+
+    assert [item["word"] for item in result] == ["MBTI", "量化宽松"]
+
+
+def test_dedupe_semantic_keywords_prefers_needs_prompt_and_longer_term() -> None:
+    keywords = [
+        {"word": "抽象", "needs_prompt": False, "target_user_id": "", "reason": ""},
+        {"word": "搞抽象", "needs_prompt": True, "target_user_id": "u1", "reason": "需要提示"},
+    ]
+
+    with (
+        patch.object(candidate_recall.embedder, "encode") as mock_encode,
+        patch.object(candidate_recall.similarity, "cosine_similarity") as mock_similarity,
+    ):
+        mock_encode.return_value = [[1, 0], [0.99, 0.01]]
+        mock_similarity.return_value = 0.93
+
+        result = candidate_recall._dedupe_semantic_keywords(
+            keywords,
+            {"u1": "这里真的很抽象，或者说是在搞抽象"},
+        )
+
+    assert [item["word"] for item in result] == ["搞抽象"]
+    assert result[0]["needs_prompt"] is True
+
+
+def test_dedupe_semantic_keywords_embedding_exception_fail_open() -> None:
+    keywords = [
+        {"word": "搞抽象", "needs_prompt": True, "target_user_id": "u1", "reason": ""},
+        {"word": "玩抽象", "needs_prompt": False, "target_user_id": "", "reason": ""},
+    ]
+
+    with patch.object(candidate_recall.embedder, "encode", side_effect=RuntimeError("model not loaded")):
+        result = candidate_recall._dedupe_semantic_keywords(keywords, {"u1": "搞抽象 玩抽象"})
+
+    assert result == keywords
+
+
 # ── recall_with_gap（含验证步骤的集成测试） ──────────────────────────────────
 
 def test_recall_with_gap_empty_input() -> None:
@@ -281,6 +368,46 @@ def test_recall_with_gap_validation_filters_noise(monkeypatch: pytest.MonkeyPatc
     assert result["keywords"][0]["word"] == "量化宽松"
     words = [kw["word"] for kw in result["keywords"]]
     assert "八子" not in words
+
+
+def test_recall_with_gap_semantic_dedupe_after_validation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """验证通过后，再用 embedding 合并同轮语义重复词。"""
+    monkeypatch.setattr(candidate_recall.nlp_settings, "qwen_api_key", "fake-key")
+
+    recall_response = MagicMock()
+    recall_response.choices[0].message.content = """{
+  "keywords": [
+    {"word": "搞抽象", "needs_prompt": true, "target_user_id": "u1", "reason": "u1 可能不懂"},
+    {"word": "玩抽象", "needs_prompt": false, "target_user_id": "", "reason": "语义相近"},
+    {"word": "MBTI", "needs_prompt": true, "target_user_id": "u2", "reason": "u2 可能不懂"}
+  ]
+}"""
+
+    validate_response = MagicMock()
+    validate_response.choices[0].message.content = (
+        '{"results": ['
+        '{"word": "搞抽象", "is_valid": true},'
+        '{"word": "玩抽象", "is_valid": true},'
+        '{"word": "MBTI", "is_valid": true}'
+        ']}'
+    )
+
+    with (
+        patch.object(candidate_recall, "_get_client") as mock_get_client,
+        patch.object(candidate_recall.embedder, "encode") as mock_encode,
+        patch.object(candidate_recall.similarity, "cosine_similarity") as mock_similarity,
+    ):
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.side_effect = [recall_response, validate_response]
+        mock_get_client.return_value = mock_client
+        mock_encode.return_value = [[1, 0], [0.99, 0.01], [0, 1]]
+        mock_similarity.side_effect = [0.91, 0.1, 0.08]
+
+        result = candidate_recall.recall_with_gap(
+            {"u1": "这个表达有点搞抽象，也像玩抽象", "u2": "MBTI 是另一个概念"},
+        )
+
+    assert [item["word"] for item in result["keywords"]] == ["搞抽象", "MBTI"]
 
 
 def test_recall_with_gap_validation_filters_all(monkeypatch: pytest.MonkeyPatch) -> None:

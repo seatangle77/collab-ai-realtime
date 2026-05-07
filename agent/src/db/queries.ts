@@ -821,6 +821,30 @@ export async function hasClickedInfoGapKeywordInRecentWindows(
   return Boolean(res.rows[0]?.exists);
 }
 
+/** 最近 N 个分析窗口内，该用户已有的 info_gap 关键词（用于语义去重）。 */
+export async function getRecentInfoGapKeywordsForUser(
+  sessionId: string,
+  userId: string,
+  currentWindowStart: Date,
+  recentWindowCount: number,
+  windowMs: number,
+): Promise<string[]> {
+  const since = new Date(currentWindowStart.getTime() - recentWindowCount * windowMs);
+  const res = await pool.query<{ keyword: string }>(
+    `SELECT DISTINCT keyword
+     FROM info_gap_buttons
+     WHERE session_id = $1
+       AND user_id = $2
+       AND status IN ('pending', 'clicked')
+       AND window_start >= $3
+       AND window_start <= $4
+       AND keyword IS NOT NULL
+       AND keyword != ''`,
+    [sessionId, userId, toUtcString(since), toUtcString(currentWindowStart)],
+  );
+  return res.rows.map((row) => row.keyword);
+}
+
 /** 读取最近一条摘要 */
 export async function getLastSummary(
   sessionId: string,

@@ -30,6 +30,10 @@ const mockHasClickedInfoGapKeywordInRecentWindows =
   queries.hasClickedInfoGapKeywordInRecentWindows as jest.MockedFunction<
     typeof queries.hasClickedInfoGapKeywordInRecentWindows
   >;
+const mockGetRecentInfoGapKeywordsForUser =
+  queries.getRecentInfoGapKeywordsForUser as jest.MockedFunction<
+    typeof queries.getRecentInfoGapKeywordsForUser
+  >;
 const mockKeywordRecallWithGap = nlp.keywordRecallWithGap as jest.MockedFunction<
   typeof nlp.keywordRecallWithGap
 >;
@@ -82,6 +86,7 @@ describe('info-gap / computeSkw', () => {
     mockWriteInfoGapButton.mockResolvedValue('igb_mock');
     mockHasPendingInfoGapKeyword.mockResolvedValue(false);
     mockHasClickedInfoGapKeywordInRecentWindows.mockResolvedValue(false);
+    mockGetRecentInfoGapKeywordsForUser.mockResolvedValue([]);
     mockNotifyInfoGapButton.mockResolvedValue(undefined);
   });
 
@@ -454,6 +459,65 @@ describe('info-gap / computeSkw', () => {
 
       expect(mockWriteInfoGapButton).not.toHaveBeenCalled();
       expect(mockNotifyInfoGapButton).not.toHaveBeenCalled();
+    });
+
+    it('近期已有语义相似关键词：跳过，不写不推', async () => {
+      mockGetTranscripts.mockResolvedValue([
+        makeTranscript('u1', '我们聊玩抽象'),
+        makeTranscript('u2', '我也聊玩抽象'),
+      ]);
+      mockKeywordRecallWithGap.mockResolvedValue(makeRecall([
+        { word: '玩抽象', needs_prompt: true, target_user_id: 'u1', reason: '需要追问' },
+      ]));
+      mockEmbed
+        .mockResolvedValueOnce([[1, 0], [0.8, 0.2]])
+        .mockResolvedValueOnce([[0.95, 0.05], [0.94, 0.06]]);
+      mockSimilarity
+        .mockResolvedValueOnce([0.75])
+        .mockResolvedValueOnce([0.91]);
+      mockGetRecentInfoGapKeywordsForUser.mockResolvedValue(['搞抽象']);
+
+      await computeSkw(SESSION, WIN_START, WIN_END, MEMBERS);
+
+      expect(mockGetRecentInfoGapKeywordsForUser).toHaveBeenCalledWith(
+        SESSION,
+        'u1',
+        WIN_START,
+        3,
+        2 * 60 * 1000,
+      );
+      expect(mockWriteInfoGapButton).not.toHaveBeenCalled();
+      expect(mockNotifyInfoGapButton).not.toHaveBeenCalled();
+    });
+
+    it('近期相似关键词检查失败：fail open，继续写入并推送', async () => {
+      mockGetTranscripts.mockResolvedValue([
+        makeTranscript('u1', '我们聊玩抽象'),
+        makeTranscript('u2', '我也聊玩抽象'),
+      ]);
+      mockKeywordRecallWithGap.mockResolvedValue(makeRecall([
+        { word: '玩抽象', needs_prompt: true, target_user_id: 'u1', reason: '需要追问' },
+      ]));
+      mockEmbed
+        .mockResolvedValueOnce([[1, 0], [0.8, 0.2]])
+        .mockRejectedValueOnce(new Error('embed failed'));
+      mockSimilarity.mockResolvedValueOnce([0.75]);
+      mockGetRecentInfoGapKeywordsForUser.mockResolvedValue(['搞抽象']);
+      mockWriteInfoGapButton.mockResolvedValue('igb_similar_fail_open');
+
+      await computeSkw(SESSION, WIN_START, WIN_END, MEMBERS);
+
+      expect(mockWriteInfoGapButton).toHaveBeenCalledWith(expect.objectContaining({
+        session_id: SESSION,
+        user_id: 'u1',
+        keyword: '玩抽象',
+      }));
+      expect(mockNotifyInfoGapButton).toHaveBeenCalledWith(expect.objectContaining({
+        session_id: SESSION,
+        user_id: 'u1',
+        button_id: 'igb_similar_fail_open',
+        keyword: '玩抽象',
+      }));
     });
 
     it('writeInfoGapButton 返回 null（ON CONFLICT）：不调 notifyInfoGapButton', async () => {

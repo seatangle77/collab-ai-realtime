@@ -7,6 +7,7 @@ import {
   writeKeywordRecallAnalysis,
   hasPendingInfoGapKeyword,
   hasClickedInfoGapKeywordInRecentWindows,
+  getRecentInfoGapKeywordsForUser,
   dismissPendingInfoGapButtonsBeforeWindow,
 } from '../db/queries';
 import { keywordRecallWithGap, embed, similarity, notifyInfoGapButton } from '../http/nlp-client';
@@ -17,6 +18,7 @@ const logger = createLogger('skill:info-gap');
 
 const WINDOW_MS = 2 * 60 * 1000;
 const RECENT_WINDOW_COUNT = 3;
+const RECENT_SIMILAR_KEYWORD_THRESHOLD = 0.87;
 
 export interface SkwResult {
   keywords: string[];
@@ -103,6 +105,55 @@ function mergeCandidates(candidates: InfoGapKeywordCandidate[]): InfoGapKeywordC
   }
 
   return [...byWord.values()];
+}
+
+async function hasSimilarRecentInfoGapKeyword(
+  sessionId: string,
+  userId: string,
+  keyword: string,
+  windowStart: Date,
+): Promise<boolean> {
+  try {
+    const historyKeywords = await getRecentInfoGapKeywordsForUser(
+      sessionId,
+      userId,
+      windowStart,
+      RECENT_WINDOW_COUNT,
+      WINDOW_MS,
+    );
+    const uniqueHistory = [...new Set(historyKeywords)].filter((item) => item && item !== keyword);
+    if (uniqueHistory.length === 0) return false;
+
+    const embeddings = await embed([keyword, ...uniqueHistory]);
+    const currentEmbedding = embeddings[0];
+    if (!currentEmbedding) return false;
+
+    const pairs = uniqueHistory
+      .map((_, idx) => embeddings[idx + 1])
+      .filter((vec): vec is number[] => Array.isArray(vec) && vec.length > 0)
+      .map((vec) => ({ vec_a: currentEmbedding, vec_b: vec }));
+
+    if (pairs.length === 0) return false;
+
+    const scores = await similarity(pairs);
+    const matchedIndex = scores.findIndex((score) => score >= RECENT_SIMILAR_KEYWORD_THRESHOLD);
+    if (matchedIndex < 0) return false;
+
+    logger.info(`[SKW] 「${keyword}」与近期历史关键词「${uniqueHistory[matchedIndex]}」语义相似，跳过`, {
+      sessionId,
+      targetUserId: userId,
+      similarity: scores[matchedIndex],
+    });
+    return true;
+  } catch (err) {
+    logger.warn('[SKW] 近期相似关键词检查失败，fail open', {
+      sessionId,
+      targetUserId: userId,
+      keyword,
+      message: (err as Error).message,
+    });
+    return false;
+  }
 }
 
 export async function recallInfoGapKeywords(
@@ -342,6 +393,14 @@ export async function decideInfoGapButtons(input: InfoGapDecisionInput): Promise
       logger.info(`[SKW] 「${item.word}」用户 ${item.target_user_id} 近期已点击，跳过`, { sessionId });
       continue;
     }
+
+    const recentlySimilar = await hasSimilarRecentInfoGapKeyword(
+      sessionId,
+      item.target_user_id,
+      item.word,
+      windowStart,
+    );
+    if (recentlySimilar) continue;
 
     const skwScore = skwScoreByWordUser[item.word]?.[item.target_user_id] ?? 0.1;
     const buttonId = await writeInfoGapButton({

@@ -13,8 +13,11 @@ from typing import Any
 from openai import OpenAI
 
 from ..settings import nlp_settings
+from . import embedder, similarity
 
 logger = logging.getLogger(__name__)
+
+_SEMANTIC_DEDUP_THRESHOLD = 0.87
 
 _SYSTEM_PROMPT = (
     "你是一个对话分析助手，负责从多人对话中提取关键词并判断成员间的理解差异。"
@@ -38,6 +41,7 @@ _USER_TEMPLATE = """\
      · 缩写或简称（可能有人不知道全称）
      · 新梗、网络用语、地域性说法
      · 某成员反复提及但其他成员没有回应或跟进的概念
+   - 如果多个候选词语义高度相近，只保留最有代表性的一个，不要同时返回
    - 排除：日常口语、通用名词、全员都在使用的词（说明大家都懂）
    - 没有符合条件的词时，返回空数组，不要凑数
 2. 对每个词判断成员间是否存在理解差异
@@ -156,6 +160,86 @@ def _validate_keywords(
         return {item["word"] for item in keywords}
 
 
+def _keyword_mention_count(word: str, member_texts: dict[str, str]) -> int:
+    return sum((text or "").count(word) for text in member_texts.values())
+
+
+def _choose_representative_keyword(
+    group: list[dict[str, Any]],
+    member_texts: dict[str, str],
+    original_index: dict[str, int],
+) -> dict[str, Any]:
+    return max(
+        group,
+        key=lambda item: (
+            bool(item.get("needs_prompt")),
+            len(str(item.get("word", ""))),
+            _keyword_mention_count(str(item.get("word", "")), member_texts),
+            -original_index.get(str(item.get("word", "")), 0),
+        ),
+    )
+
+
+def _dedupe_semantic_keywords(
+    keywords: list[dict[str, Any]],
+    member_texts: dict[str, str],
+    threshold: float = _SEMANTIC_DEDUP_THRESHOLD,
+) -> list[dict[str, Any]]:
+    """
+    用本地 embedding 对当前窗口候选词做语义去重。
+    失败时 fail open：返回原始列表，不阻断主流程。
+    """
+    if len(keywords) < 2:
+        return keywords
+
+    words = [str(item.get("word", "")).strip() for item in keywords]
+    try:
+        embeddings = embedder.encode(words)
+        parent = list(range(len(words)))
+
+        def find(i: int) -> int:
+            while parent[i] != i:
+                parent[i] = parent[parent[i]]
+                i = parent[i]
+            return i
+
+        def union(i: int, j: int) -> None:
+            root_i = find(i)
+            root_j = find(j)
+            if root_i != root_j:
+                parent[root_j] = root_i
+
+        for i in range(len(words)):
+            for j in range(i + 1, len(words)):
+                score = similarity.cosine_similarity(embeddings[i], embeddings[j])
+                if score >= threshold:
+                    union(i, j)
+
+        groups_by_root: dict[int, list[dict[str, Any]]] = {}
+        for idx, item in enumerate(keywords):
+            groups_by_root.setdefault(find(idx), []).append(item)
+
+        if all(len(group) == 1 for group in groups_by_root.values()):
+            return keywords
+
+        original_index = {word: idx for idx, word in enumerate(words)}
+        result: list[dict[str, Any]] = []
+        for group in groups_by_root.values():
+            result.append(_choose_representative_keyword(group, member_texts, original_index))
+
+        dropped = [item["word"] for item in keywords if item not in result]
+        logger.info(
+            "[candidate_recall] 语义去重完成，剩余关键词数=%d（原=%d），合并掉: %s",
+            len(result),
+            len(keywords),
+            dropped,
+        )
+        return result
+    except Exception as e:
+        logger.warning("[candidate_recall] 语义去重失败，fail open: %s", e)
+        return keywords
+
+
 def _get_client() -> OpenAI:
     return OpenAI(
         api_key=nlp_settings.qwen_api_key,
@@ -240,6 +324,9 @@ def recall_with_gap(member_texts: dict[str, str]) -> dict[str, Any]:
                     len(keywords),
                     before_count,
                 )
+
+        if keywords:
+            keywords = _dedupe_semantic_keywords(keywords, texts)
 
         return {"keywords": keywords}
 
