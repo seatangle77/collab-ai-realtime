@@ -13,7 +13,7 @@ import {
   type CreateAdminChatSessionPayload,
 } from '../../api/admin/chat-sessions'
 import { listAdminGroups } from '../../api/admin/groups'
-import { formatDateTimeToCST } from '../../utils/datetime'
+import { formatDateTimeToCST, parseUtcApiDate } from '../../utils/datetime'
 import { exportRowsToCsv } from '../../utils/csv'
 
 interface Filters {
@@ -167,8 +167,8 @@ function openEditDialog(row: AdminChatSession) {
   editForm.id = row.id
   editForm.session_title = row.session_title
   editForm.status = row.status
-  editForm.created_at = row.created_at ? new Date(row.created_at) : null
-  editForm.ended_at = row.ended_at ? new Date(row.ended_at) : null
+  editForm.created_at = parseUtcApiDate(row.created_at)
+  editForm.ended_at = parseUtcApiDate(row.ended_at)
   editDialogVisible.value = true
 }
 

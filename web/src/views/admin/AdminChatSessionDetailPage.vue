@@ -28,7 +28,7 @@ import { listDiscussionSummaries } from '../../api/admin/discussion-summaries'
 import { listInfoGapButtons } from '../../api/admin/info-gap-buttons'
 import { listDiscussionStates } from '../../api/admin/discussion-states'
 import { listWindowMetrics } from '../../api/admin/window-metrics'
-import { formatDateTimeToCST } from '../../utils/datetime'
+import { formatDateTimeToCST, formatTimeToCST, parseUtcApiDate } from '../../utils/datetime'
 import { getDiscussionStateLabel } from '../../utils/discussion'
 import { dedupePushLogs, parsePushLogTime } from '../../utils/pushLogs'
 
@@ -157,13 +157,7 @@ function formatDisplayTime(value: string | null | undefined): string {
 }
 
 function formatClock(value: string | null | undefined): string {
-  const ts = parseTime(value)
-  if (ts == null) return '--:--'
-  return new Date(ts).toLocaleTimeString('zh-CN', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  })
+  return formatTimeToCST(value, { seconds: false })
 }
 
 function formatDuration(ms: number | null): string {
@@ -583,7 +577,7 @@ function openEditSession() {
   if (!session.value) return
   editSessionForm.session_title = session.value.session_title
   editSessionForm.status = session.value.status ?? 'not_started'
-  editSessionForm.ended_at = session.value.ended_at ? new Date(session.value.ended_at) : null
+  editSessionForm.ended_at = parseUtcApiDate(session.value.ended_at)
   editSessionVisible.value = true
 }
 

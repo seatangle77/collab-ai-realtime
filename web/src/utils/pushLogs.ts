@@ -1,3 +1,5 @@
+import { parseUtcApiDate } from './datetime'
+
 export interface PushLogLike {
   id: string
   target_user_id?: string | null
@@ -7,9 +9,8 @@ export interface PushLogLike {
 }
 
 export function parsePushLogTime(value: string | undefined | null): number | null {
-  if (!value) return null
-  const ts = new Date(value).getTime()
-  return Number.isNaN(ts) ? null : ts
+  const date = parseUtcApiDate(value)
+  return date ? date.getTime() : null
 }
 
 function normalizeContent(value: string | null | undefined): string {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import InfoGapButtons, { type InfoGapButton } from './InfoGapButtons.vue'
+import { formatMonthDayTimeToCST } from '../utils/datetime'
 
 const props = defineProps<{
   sessionId: string
@@ -42,16 +43,7 @@ function toggleHistoryExpanded() {
 }
 
 function formatHistoryTime(value?: string | null): string {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-  return date.toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  })
+  return formatMonthDayTimeToCST(value, '')
 }
 </script>
 

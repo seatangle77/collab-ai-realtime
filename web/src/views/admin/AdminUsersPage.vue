@@ -5,7 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { AdminUser } from '../../types/admin'
 import { listAdminUsers, deleteAdminUser, deleteAdminUsersBatch, updateAdminUser } from '../../api/admin/users'
 import { registerUser } from '../../api/auth'
-import { formatDateTimeToCST } from '../../utils/datetime'
+import { formatDateTimeToCST, parseUtcApiDate } from '../../utils/datetime'
 import { exportRowsToCsv } from '../../utils/csv'
 
 interface Filters {
@@ -140,14 +140,9 @@ function handleSearch() {
     const endInput = cardEl.querySelector<HTMLInputElement>('[placeholder="结束"]')
     if (startInput?.value?.trim() && endInput?.value?.trim()) {
       try {
-        const parseAsUtcIfNeeded = (s: string): Date => {
-          const t = s.trim().replace(' ', 'T')
-          const withTz = /Z|[+-]\d{2}:?\d{2}$/.test(t) ? t : `${t}Z`
-          return new Date(withTz)
-        }
-        const start = parseAsUtcIfNeeded(startInput.value)
-        const end = parseAsUtcIfNeeded(endInput.value)
-        if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
+        const start = parseUtcApiDate(startInput.value)
+        const end = parseUtcApiDate(endInput.value)
+        if (start && end) {
           filters.createdAtRange = [start, end]
         }
       } catch {

@@ -4,6 +4,7 @@ import { getRedisClient } from './redis-client';
 
 const logger = createLogger('transcript-cache');
 const TRANSCRIPT_CACHE_KEY_PREFIX = 'transcript:session';
+const TIMEZONE_SUFFIX_RE = /(?:Z|[+-]\d{2}:?\d{2})$/i;
 
 interface CachedTranscript {
   transcript_id?: string;
@@ -23,8 +24,23 @@ function toTimestampMs(value: Date): number {
   return value.getTime();
 }
 
+function parseUtcDateString(value: string): Date | null {
+  const normalized = value.trim().replace(' ', 'T');
+  if (!normalized) return null;
+
+  const withTimezone = TIMEZONE_SUFFIX_RE.test(normalized) ? normalized : `${normalized}Z`;
+  const date = new Date(withTimezone);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function toTranscript(item: CachedTranscript): Transcript | null {
   if (!item.transcript_id || !item.start || !item.end) {
+    return null;
+  }
+
+  const start = parseUtcDateString(item.start);
+  const end = parseUtcDateString(item.end);
+  if (!start || !end) {
     return null;
   }
 
@@ -33,8 +49,8 @@ function toTranscript(item: CachedTranscript): Transcript | null {
     user_id: item.user_id ?? null,
     speaker_name: item.speaker_name ?? null,
     text: item.text ?? '',
-    start: new Date(item.start),
-    end: new Date(item.end),
+    start,
+    end,
     duration: item.duration ?? null,
   };
 }

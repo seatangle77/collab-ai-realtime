@@ -27,6 +27,7 @@ import { type InfoGapButton } from '../../components/InfoGapButtons.vue'
 import AiInsightSheet from '../../components/AiInsightSheet.vue'
 import { appHttp } from '../../api/appHttp'
 import { buildPushLogDedupeKey, parsePushLogTime, sortPushLogsByTriggeredAtDesc } from '../../utils/pushLogs'
+import { formatTimeToCST } from '../../utils/datetime'
 
 interface AppUser {
   id: string
@@ -1220,14 +1221,7 @@ function speakerDisplayLabel(t: AppTranscript): string {
 }
 
 function pushDisplayTime(value: string | null | undefined): string {
-  const parsed = parsePushLogTime(value)
-  if (parsed == null) return ''
-  return new Date(parsed).toLocaleTimeString('zh-CN', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  })
+  return formatTimeToCST(value, { fallback: '' })
 }
 
 const AVATAR_CLASS_BY_HASH = [
@@ -1255,15 +1249,8 @@ function avatarClassForKey(key: string): string {
 
 function transcriptTimeLabel(item: AppTranscript): string {
   if (item.created_at) {
-    const d = new Date(item.created_at)
-    if (!Number.isNaN(d.getTime())) {
-      return d.toLocaleTimeString('zh-CN', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false,
-      })
-    }
+    const label = formatTimeToCST(item.created_at, { fallback: '' })
+    if (label) return label
   }
   const s = item.start != null ? String(item.start) : ''
   const e = item.end != null ? String(item.end) : ''
