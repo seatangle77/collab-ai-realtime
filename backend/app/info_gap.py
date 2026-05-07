@@ -235,6 +235,7 @@ async def click_info_gap_button(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="按钮已被点击或已过期")
 
     await db.commit()
+    keyword = str(btn["keyword"])
 
     # 2) 检查同 session + 同 keyword 是否已有缓存的 explanation
     cached_result = await db.execute(
@@ -247,13 +248,13 @@ async def click_info_gap_button(
             LIMIT 1
             """
         ),
-        {"session_id": session_id, "keyword": str(btn["keyword"])},
+        {"session_id": session_id, "keyword": keyword},
     )
     cached_row = cached_result.mappings().first()
     if cached_row:
         final_content = str(cached_row["explanation"])
-        logger.info("[info_gap] 命中缓存 keyword=%s", btn["keyword"])
-        return ClickResponse(success=True, content=final_content, keyword=str(btn["keyword"]))
+        logger.info("[info_gap] 命中缓存 keyword=%s", keyword)
+        return ClickResponse(success=True, content=final_content, keyword=keyword)
 
     # 3) 组装上下文并生成真实推送文案
     summary_result = await db.execute(
@@ -307,10 +308,11 @@ async def click_info_gap_button(
         summary=summary_text,
         transcripts=transcript_text,
         username=username,
-        keyword=str(btn["keyword"]),
+        keyword=keyword,
         skw_score=float(btn.get("skw_score") or 0.0),
     )
     final_content = generated_content or "可先从讨论语境里看定义和例子。"
+    display_content = f"{keyword}：{final_content}"
 
     # 写回 explanation 缓存
     await db.execute(
@@ -335,7 +337,7 @@ async def click_info_gap_button(
             "id": log_id,
             "session_id": session_id,
             "user_id": current_user["id"],
-            "content": final_content,
+            "content": display_content,
         },
     )
     await db.commit()
@@ -345,7 +347,7 @@ async def click_info_gap_button(
         body.button_id,
         log_id,
         current_user["id"],
-        len(final_content),
+        len(display_content),
     )
 
     # 5) JPush 推送（如果用户有 device_token）
@@ -354,7 +356,7 @@ async def click_info_gap_button(
             await asyncio.to_thread(
                 send_push_to_registration_id,
                 device_token,
-                final_content,
+                display_content,
                 "",
             )
             await db.execute(
@@ -418,4 +420,4 @@ async def click_info_gap_button(
             current_user["id"],
         )
 
-    return ClickResponse(success=True, content=final_content, keyword=str(btn["keyword"]))
+    return ClickResponse(success=True, content=final_content, keyword=keyword)
