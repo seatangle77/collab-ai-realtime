@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Any, Mapping
 import json
 from pathlib import Path
 import shutil
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
-from pydantic import BaseModel
+from ..api_model import ApiModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,7 +35,7 @@ router = APIRouter(
 )
 
 
-class AdminVoiceProfileSummary(BaseModel):
+class AdminVoiceProfileSummary(ApiModel):
     id: str
     user_id: str
     user_name: str | None = None
@@ -43,7 +44,7 @@ class AdminVoiceProfileSummary(BaseModel):
     primary_group_name: str | None = None
     sample_count: int
     has_embedding: bool
-    created_at: Any
+    created_at: datetime
 
 
 @router.get("/", response_model=Page[AdminVoiceProfileSummary])
@@ -145,7 +146,7 @@ async def list_voice_profiles(
     )
 
 
-class AdminVoiceProfileDetail(BaseModel):
+class AdminVoiceProfileDetail(ApiModel):
     profile: VoiceProfileOut
     user_name: str | None = None
     user_email: str | None = None
@@ -153,7 +154,7 @@ class AdminVoiceProfileDetail(BaseModel):
     primary_group_name: str | None = None
 
 
-class AdminUploadAudioResponse(BaseModel):
+class AdminUploadAudioResponse(ApiModel):
     url: str
 
 
@@ -232,7 +233,7 @@ async def get_voice_profile_detail(
     )
 
 
-class AdminUpdateSamplesRequest(BaseModel):
+class AdminUpdateSamplesRequest(ApiModel):
     sample_audio_urls: list[str]
 
 

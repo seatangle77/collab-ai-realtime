@@ -5,23 +5,24 @@ from datetime import datetime
 from typing import Any, Mapping
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from .api_model import ApiModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import get_current_user
 from .db import get_db
+from .time_utils import normalize_datetimes
 
 router = APIRouter(prefix="/api/groups", tags=["groups"])
 
 MAX_GROUP_MEMBERS = 3
 
 
-class GroupCreate(BaseModel):
+class GroupCreate(ApiModel):
     name: str
 
 
-class GroupSummary(BaseModel):
+class GroupSummary(ApiModel):
     id: str
     name: str
     created_at: datetime
@@ -30,7 +31,7 @@ class GroupSummary(BaseModel):
     my_role: str
 
 
-class GroupDiscoverItem(BaseModel):
+class GroupDiscoverItem(ApiModel):
     id: str
     name: str
     created_at: datetime
@@ -38,7 +39,7 @@ class GroupDiscoverItem(BaseModel):
     member_count: int
 
 
-class GroupMember(BaseModel):
+class GroupMember(ApiModel):
     user_id: str
     role: str
     status: str
@@ -46,14 +47,14 @@ class GroupMember(BaseModel):
     device_token: str | None = None
 
 
-class GroupDetail(BaseModel):
+class GroupDetail(ApiModel):
     group: dict[str, Any]
     member_count: int
     members: list[GroupMember]
     my_role: str | None = None
 
 
-class GroupUpdate(BaseModel):
+class GroupUpdate(ApiModel):
     name: str
 
 
@@ -93,7 +94,7 @@ async def _get_group_detail(group_id: str, user_id: str, db: AsyncSession) -> Gr
     my_role = next((m.role for m in members_rows if m.user_id == user_id), None)
 
     return GroupDetail(
-        group=dict(group_row),
+        group=normalize_datetimes(dict(group_row)),
         member_count=member_count,
         members=members_rows,
         my_role=my_role,
@@ -430,4 +431,3 @@ async def kick_member(
 
     await db.commit()
     return await _get_group_detail(group_id, current_user["id"], db)
-

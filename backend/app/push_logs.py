@@ -3,10 +3,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from datetime import datetime
 from typing import Any, Mapping
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from .api_model import ApiModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +15,7 @@ from .admin.deps import require_admin
 from .auth import get_current_user
 from .db import get_db
 from .jpush_client import send_push_to_registration_id
+from .time_utils import utc_iso
 from .ws_manager import ws_manager
 from .ws_protocol import build_group_notification, build_push_notification
 
@@ -39,7 +41,7 @@ async def _jpush_safe(device_token: str, content: str, title: str) -> None:
         pass
 
 
-class PushNotifyIn(BaseModel):
+class PushNotifyIn(ApiModel):
     target_user_id: str
     content: str
     state_id: str | None = None
@@ -47,7 +49,7 @@ class PushNotifyIn(BaseModel):
     queue_id: str | None = None
 
 
-class GroupNotifyIn(BaseModel):
+class GroupNotifyIn(ApiModel):
     content: str
 
 
@@ -180,9 +182,9 @@ async def push_notify(
         build_push_notification(
             body.content,
             body.target_user_id,
-            inserted_row["triggered_at"].isoformat() if inserted_row["triggered_at"] else None,
+            utc_iso(inserted_row["triggered_at"]),
             analysis_run_id=analysis_run_id,
-            analysis_window_start=analysis_window_start.isoformat() if analysis_window_start else None,
+            analysis_window_start=utc_iso(analysis_window_start),
         ),
     )
 
@@ -364,21 +366,21 @@ async def group_notify(
     }
 
 
-class PushLogOut(BaseModel):
+class PushLogOut(ApiModel):
     id: str
     session_id: str
     target_user_id: str | None = None
     state_id: str | None = None
     queue_id: str | None = None
     analysis_run_id: str | None = None
-    analysis_window_start: Any = None
+    analysis_window_start: datetime | None = None
     push_content: str | None = None
     push_channel: str
     jpush_message_id: str | None = None
     delivery_status: str
     delivery_reason: str | None = None
-    triggered_at: Any
-    delivered_at: Any = None
+    triggered_at: datetime
+    delivered_at: datetime | None = None
 
 
 @router.get(

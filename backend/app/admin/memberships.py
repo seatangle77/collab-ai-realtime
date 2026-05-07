@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from ..api_model import ApiModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,7 +23,7 @@ def _to_utc_naive(dt: datetime) -> datetime:
         return dt
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
-class AdminMembershipOut(BaseModel):
+class AdminMembershipOut(ApiModel):
     id: str
     group_id: str
     user_id: str
@@ -34,12 +34,12 @@ class AdminMembershipOut(BaseModel):
     user_name: str | None = None
 
 
-class AdminMembershipUpdate(BaseModel):
+class AdminMembershipUpdate(ApiModel):
     role: str | None = None
     status: str | None = None
 
 
-class AdminMembershipCreate(BaseModel):
+class AdminMembershipCreate(ApiModel):
     group_id: str
     user_id: str
     role: str = "member"

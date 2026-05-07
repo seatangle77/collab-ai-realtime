@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from ..api_model import ApiModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,17 +25,17 @@ def _to_utc_naive(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
-class AdminSpeechTranscriptOut(BaseModel):
+class AdminSpeechTranscriptOut(ApiModel):
     transcript_id: str
     group_id: str
     session_id: str
     user_id: str | None = None
     speaker: str | None = None
     text: str | None = None
-    start: Any = None
-    end: Any = None
+    start: datetime | None = None
+    end: datetime | None = None
     duration: float | None = None
-    created_at: Any = None
+    created_at: datetime | None = None
     audio_url: str | None = None
     confidence: float | None = None
     speaker_confidence: float | None = None

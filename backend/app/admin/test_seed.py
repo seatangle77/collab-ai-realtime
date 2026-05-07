@@ -8,7 +8,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from ..api_model import ApiModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,7 +24,7 @@ router = APIRouter(
 
 # ── info_gap_buttons ──────────────────────────────────────────────────────────
 
-class InfoGapButtonSeed(BaseModel):
+class InfoGapButtonSeed(ApiModel):
     session_id: str
     user_id: str
     keyword: str
@@ -62,7 +62,7 @@ async def seed_info_gap_button(
 
 # ── discussion_summaries ──────────────────────────────────────────────────────
 
-class DiscussionSummarySeed(BaseModel):
+class DiscussionSummarySeed(ApiModel):
     session_id: str
     content: str
     version: int = 1
@@ -97,7 +97,7 @@ async def seed_discussion_summary(
 
 # ── window_metrics ────────────────────────────────────────────────────────────
 
-class WindowMetricsSeed(BaseModel):
+class WindowMetricsSeed(ApiModel):
     session_id: str
     user_id: str
     speaking_ratio: float = 0.4

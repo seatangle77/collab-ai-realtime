@@ -1,6 +1,8 @@
 from typing import Generic, List, TypeVar
 
-from pydantic import BaseModel, field_validator
+from pydantic import field_validator
+
+from ..api_model import ApiModel
 
 
 T = TypeVar("T")
@@ -9,7 +11,7 @@ T = TypeVar("T")
 BATCH_DELETE_MAX_IDS = 100
 
 
-class BatchDeleteRequest(BaseModel):
+class BatchDeleteRequest(ApiModel):
     ids: List[str]
 
     @field_validator("ids")
@@ -22,17 +24,16 @@ class BatchDeleteRequest(BaseModel):
         return v
 
 
-class BatchDeleteResponse(BaseModel):
+class BatchDeleteResponse(ApiModel):
     deleted: int
 
 
-class PageMeta(BaseModel):
+class PageMeta(ApiModel):
     total: int
     page: int
     page_size: int
 
 
-class Page(BaseModel, Generic[T]):
+class Page(ApiModel, Generic[T]):
     items: List[T]
     meta: PageMeta
-

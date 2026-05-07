@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from ..api_model import ApiModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,18 +25,18 @@ def _to_utc_naive(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
-class AdminDiscussionSummaryOut(BaseModel):
+class AdminDiscussionSummaryOut(ApiModel):
     id: str
     session_id: str
     session_title: str | None = None
     version: int
     content: str
-    window_start: Any
-    window_end: Any
-    created_at: Any = None
+    window_start: datetime
+    window_end: datetime
+    created_at: datetime | None = None
 
 
-class AdminDiscussionSummaryUpdate(BaseModel):
+class AdminDiscussionSummaryUpdate(ApiModel):
     content: str
 
 

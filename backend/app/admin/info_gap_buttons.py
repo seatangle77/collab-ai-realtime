@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from ..api_model import ApiModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,7 +27,7 @@ def _to_utc_naive(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
-class AdminInfoGapButtonOut(BaseModel):
+class AdminInfoGapButtonOut(ApiModel):
     id: str
     session_id: str
     user_id: str
@@ -35,9 +35,9 @@ class AdminInfoGapButtonOut(BaseModel):
     keyword: str
     skw_score: float | None = None
     status: str | None = None
-    window_start: Any
-    created_at: Any = None
-    clicked_at: Any = None
+    window_start: datetime
+    created_at: datetime | None = None
+    clicked_at: datetime | None = None
 
 
 @router.get("/", response_model=Page[AdminInfoGapButtonOut])

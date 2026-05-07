@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from ..api_model import ApiModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,13 +25,13 @@ def _to_utc_naive(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
-class AdminWindowMetricOut(BaseModel):
+class AdminWindowMetricOut(ApiModel):
     id: str
     session_id: str
     user_id: str
     user_name: str | None = None
-    window_start: Any
-    window_end: Any
+    window_start: datetime
+    window_end: datetime
     speaking_ratio: float | None = None
     silence_s: float | None = None
     ttr: float | None = None
@@ -40,7 +40,7 @@ class AdminWindowMetricOut(BaseModel):
     info_gain: float | None = None
     has_reasoning: bool | None = None
     has_evidence: bool | None = None
-    created_at: Any = None
+    created_at: datetime | None = None
 
 
 @router.get("/", response_model=Page[AdminWindowMetricOut])

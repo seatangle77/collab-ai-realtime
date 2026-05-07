@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from jose import JWTError, jwt
 from .audio.audio_service import destroy_audio_service
 from .auth import JWT_SECRET_KEY, JWT_ALGORITHM
-from pydantic import BaseModel
+from .api_model import ApiModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,7 +21,7 @@ from .ws_protocol import build_session_ended
 router = APIRouter(prefix="/api", tags=["sessions"])
 
 
-class SessionCreate(BaseModel):
+class SessionCreate(ApiModel):
     session_title: str
     created_at: datetime | None = None
     last_updated: datetime | None = None
@@ -29,7 +29,7 @@ class SessionCreate(BaseModel):
     status: str | None = None
 
 
-class ChatSessionOut(BaseModel):
+class ChatSessionOut(ApiModel):
     id: str
     group_id: str
     created_at: datetime
@@ -201,7 +201,7 @@ async def list_group_sessions(
     return [ChatSessionOut.model_validate(dict(row)) for row in rows]
 
 
-class TranscriptOut(BaseModel):
+class TranscriptOut(ApiModel):
     transcript_id: str
     group_id: str
     session_id: str
@@ -209,14 +209,14 @@ class TranscriptOut(BaseModel):
     speaker: str | None = None
     speaker_name: str | None = None  # 展示用：JOIN users.name 得到，原始 uid 保留在 speaker
     text: str | None = None
-    start: Any
-    end: Any
+    start: datetime
+    end: datetime
     duration: float | None = None
     confidence: float | None = None
     created_at: datetime
 
 
-class SessionUpdate(BaseModel):
+class SessionUpdate(ApiModel):
     session_title: str | None = None
     created_at: datetime | None = None
     last_updated: datetime | None = None

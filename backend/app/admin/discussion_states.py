@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from ..api_model import ApiModel
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,10 +34,10 @@ def _to_utc_naive(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
-class AdminDiscussionStateOut(BaseModel):
+class AdminDiscussionStateOut(ApiModel):
     id: str
     session_id: str
-    triggered_at: Any
+    triggered_at: datetime
     state_type: str
     target_user_id: str | None = None
     target_user_name: str | None = None
@@ -46,7 +46,7 @@ class AdminDiscussionStateOut(BaseModel):
     push_sent: bool
 
 
-class AdminDiscussionStateCreate(BaseModel):
+class AdminDiscussionStateCreate(ApiModel):
     session_id: str
     state_type: str
     target_user_id: str | None = None

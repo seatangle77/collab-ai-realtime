@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from ..api_model import ApiModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,19 +24,19 @@ def _to_utc_naive(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
-class AdminChatSessionOut(BaseModel):
+class AdminChatSessionOut(ApiModel):
     id: str
     group_id: str
     group_name: str | None = None
     session_title: str
-    created_at: Any
-    last_updated: Any
+    created_at: datetime
+    last_updated: datetime
     status: str | None = None
     started_at: datetime | None = None
     ended_at: datetime | None = None
 
 
-class AdminChatSessionUpdate(BaseModel):
+class AdminChatSessionUpdate(ApiModel):
     session_title: str | None = None
     status: str | None = None
     ended_at: datetime | None = None
@@ -44,7 +44,7 @@ class AdminChatSessionUpdate(BaseModel):
     last_updated: datetime | None = None
 
 
-class AdminChatSessionCreate(BaseModel):
+class AdminChatSessionCreate(ApiModel):
     group_id: str
     session_title: str
     status: str | None = None

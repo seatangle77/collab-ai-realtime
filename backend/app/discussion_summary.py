@@ -10,31 +10,32 @@ from datetime import UTC, datetime
 from typing import Any, Mapping
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from .api_model import ApiModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .admin.deps import require_admin
 from .auth import get_current_user
 from .db import get_db
+from .time_utils import utc_iso
 from .ws_manager import ws_manager
 from .ws_protocol import build_summary_update
 
 router = APIRouter(prefix="/api", tags=["discussion-summary"])
 
 
-class DiscussionSummaryOut(BaseModel):
+class DiscussionSummaryOut(ApiModel):
     id: str
     session_id: str
     version: int
     content: str
     analysis_run_id: str
-    window_start: Any
-    window_end: Any
-    created_at: Any
+    window_start: datetime
+    window_end: datetime
+    created_at: datetime
 
 
-class SummaryNotifyIn(BaseModel):
+class SummaryNotifyIn(ApiModel):
     content: str
     window_start: datetime
     window_end: datetime
@@ -104,9 +105,9 @@ async def notify_summary(
             session_id,
             summary_id=inserted_row["id"],
             analysis_run_id=_build_summary_run_id(session_id, inserted_row["window_start"]),
-            window_start=inserted_row["window_start"].isoformat() if inserted_row["window_start"] else None,
-            window_end=inserted_row["window_end"].isoformat() if inserted_row["window_end"] else None,
-            created_at=inserted_row["created_at"].isoformat() if inserted_row["created_at"] else None,
+            window_start=utc_iso(inserted_row["window_start"]),
+            window_end=utc_iso(inserted_row["window_end"]),
+            created_at=utc_iso(inserted_row["created_at"]),
         ),
     )
 

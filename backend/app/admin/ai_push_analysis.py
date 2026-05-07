@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from ..api_model import ApiModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,19 +31,19 @@ def _to_utc_naive(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
-class AiPushAnalysisOut(BaseModel):
+class AiPushAnalysisOut(ApiModel):
     id: str
     session_id: str
     target_user_id: str
     target_user_name: str | None = None
     state_type: str
-    window_start: Any
+    window_start: datetime
     ai_needs_prompt: bool
     ai_anchor: Any = None
     ai_content: str | None = None
     ai_analysis: str | None = None
     drop_reason: str | None = None
-    created_at: Any = None
+    created_at: datetime | None = None
 
 
 @router.get("/", response_model=Page[AiPushAnalysisOut])

@@ -15,6 +15,7 @@ from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .db import DBNotConfiguredError, get_sessionmaker
+from .time_utils import utc_iso
 from .transcript_cache import append_transcript_to_cache
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ def _row_to_ws_payload(row: Mapping[str, Any]) -> dict[str, Any]:
             continue
         v = d[key]
         if isinstance(v, datetime):
-            out[key] = v.isoformat()
+            out[key] = utc_iso(v)
         else:
             out[key] = v
     return out

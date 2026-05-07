@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from ..api_model import ApiModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,7 +29,7 @@ def _to_utc_naive(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
-class AdminPushLogOut(BaseModel):
+class AdminPushLogOut(ApiModel):
     id: str
     session_id: str
     session_title: str | None = None
@@ -42,11 +42,11 @@ class AdminPushLogOut(BaseModel):
     jpush_message_id: str | None = None
     delivery_status: str
     delivery_reason: str | None = None
-    triggered_at: Any
-    delivered_at: Any = None
+    triggered_at: datetime
+    delivered_at: datetime | None = None
 
 
-class AdminPushLogCreate(BaseModel):
+class AdminPushLogCreate(ApiModel):
     session_id: str
     target_user_id: str
     push_channel: str

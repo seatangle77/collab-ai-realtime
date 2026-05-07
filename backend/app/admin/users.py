@@ -8,12 +8,13 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from ..api_model import ApiModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import _hash_password
 from ..db import get_db
+from ..time_utils import utc_iso
 from .deps import require_admin
 from .schemas import BatchDeleteRequest, BatchDeleteResponse, Page, PageMeta
 
@@ -27,7 +28,7 @@ def _to_utc_naive(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
-class AdminUserOut(BaseModel):
+class AdminUserOut(ApiModel):
     id: str
     name: str
     email: str
@@ -38,14 +39,14 @@ class AdminUserOut(BaseModel):
     password_needs_reset: bool = False
 
 
-class AdminUserCreate(BaseModel):
+class AdminUserCreate(ApiModel):
     name: str
     email: str
     password: str
     device_token: str | None = None
 
 
-class AdminUserUpdate(BaseModel):
+class AdminUserUpdate(ApiModel):
     name: str | None = None
     device_token: str | None = None
 
@@ -204,7 +205,7 @@ async def export_users_csv(
             row["device_token"] or "",
             "|".join(extra["group_names"]),
             row.get("password_needs_reset", False),
-            row["created_at"].isoformat() if row["created_at"] else "",
+            utc_iso(row["created_at"]) if row["created_at"] else "",
         ])
 
     output.seek(0)

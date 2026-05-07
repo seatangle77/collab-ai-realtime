@@ -4,10 +4,11 @@
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from .api_model import ApiModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,12 +18,12 @@ from .db import get_db
 router = APIRouter(prefix="/api", tags=["window-metrics"])
 
 
-class WindowMetricsOut(BaseModel):
+class WindowMetricsOut(ApiModel):
     id: str
     session_id: str
     user_id: str
-    window_start: Any
-    window_end: Any
+    window_start: datetime
+    window_end: datetime
     speaking_ratio: float | None = None
     silence_s: int | None = None
     ttr: float | None = None
@@ -33,7 +34,7 @@ class WindowMetricsOut(BaseModel):
     has_evidence: bool | None = None
     reasoning_source: str | None = None
     evidence_source: str | None = None
-    created_at: Any
+    created_at: datetime
 
 
 @router.get(

@@ -12,7 +12,8 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from pydantic import BaseModel, Field, field_validator
+from pydantic import Field, field_validator
+from .api_model import ApiModel
 from resemblyzer import VoiceEncoder, preprocess_wav
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,7 +28,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/voice-profile", tags=["voice-profile"])
 
 
-class VoiceProfileOut(BaseModel):
+class VoiceProfileOut(ApiModel):
     id: str
     user_id: str
     sample_audio_urls: list[str] = Field(default_factory=list)
@@ -37,7 +38,7 @@ class VoiceProfileOut(BaseModel):
     embedding_updated_at: datetime | None = None
 
 
-class UpdateSamplesRequest(BaseModel):
+class UpdateSamplesRequest(ApiModel):
     sample_audio_urls: list[str]
 
     @field_validator("sample_audio_urls")
@@ -49,7 +50,7 @@ class UpdateSamplesRequest(BaseModel):
         return v
 
 
-class UploadAudioResponse(BaseModel):
+class UploadAudioResponse(ApiModel):
     url: str
 
 

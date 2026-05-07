@@ -8,12 +8,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from datetime import datetime
 from typing import Any, Mapping
 
 logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from .api_model import ApiModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +23,7 @@ from .auth import get_current_user
 from .db import get_db
 from .jpush_client import send_push_to_registration_id
 from .nlp import push_content as nlp_push_content
+from .time_utils import utc_iso
 from .ws_manager import ws_manager
 from .ws_protocol import build_info_gap_button
 
@@ -30,21 +32,21 @@ router = APIRouter(prefix="/api", tags=["info-gap"])
 
 # ── Pydantic 模型 ─────────────────────────────────────────────────────────────
 
-class InfoGapButtonOut(BaseModel):
+class InfoGapButtonOut(ApiModel):
     id: str
     keyword: str
     skw_score: float
     status: str
     analysis_run_id: str
-    window_start: Any
-    created_at: Any
+    window_start: datetime
+    created_at: datetime
 
 
-class ClickRequest(BaseModel):
+class ClickRequest(ApiModel):
     button_id: str
 
 
-class ClickResponse(BaseModel):
+class ClickResponse(ApiModel):
     success: bool
     content: str = ""
     keyword: str = ""
@@ -84,7 +86,7 @@ async def _assert_session_member(
 
 # ── 接口 ──────────────────────────────────────────────────────────────────────
 
-class InfoGapNotifyIn(BaseModel):
+class InfoGapNotifyIn(ApiModel):
     user_id: str
     button_id: str
     keyword: str
@@ -113,7 +115,7 @@ async def notify_info_gap_button(
         {"id": body.button_id},
     )
     row = result.mappings().first()
-    created_at = row["created_at"].isoformat() if row and row["created_at"] else None
+    created_at = utc_iso(row["created_at"]) if row else None
 
     button_payload = {
         "id": body.button_id,

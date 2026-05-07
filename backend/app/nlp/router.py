@@ -9,7 +9,8 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import Field
+from ..api_model import ApiModel
 
 from ..admin.deps import require_admin
 from . import (
@@ -28,11 +29,11 @@ router = APIRouter(prefix="/api/nlp", tags=["nlp"])
 
 # ── 1. segment ────────────────────────────────────────────────────────────────
 
-class SegmentRequest(BaseModel):
+class SegmentRequest(ApiModel):
     text: str
 
 
-class SegmentResponse(BaseModel):
+class SegmentResponse(ApiModel):
     tokens: list[str]
     token_count: int
     unique_count: int
@@ -47,11 +48,11 @@ def segment(req: SegmentRequest, _: bool = Depends(require_admin)):
 
 # ── 2. embed ─────────────────────────────────────────────────────────────────
 
-class EmbedRequest(BaseModel):
+class EmbedRequest(ApiModel):
     texts: list[str]
 
 
-class EmbedResponse(BaseModel):
+class EmbedResponse(ApiModel):
     embeddings: list[list[float]]
 
 
@@ -62,16 +63,16 @@ def embed(req: EmbedRequest, _: bool = Depends(require_admin)):
 
 # ── 3. similarity ─────────────────────────────────────────────────────────────
 
-class SimilarityPair(BaseModel):
+class SimilarityPair(ApiModel):
     vec_a: list[float]
     vec_b: list[float]
 
 
-class SimilarityRequest(BaseModel):
+class SimilarityRequest(ApiModel):
     pairs: list[SimilarityPair]
 
 
-class SimilarityResponse(BaseModel):
+class SimilarityResponse(ApiModel):
     scores: list[float]
 
 
@@ -83,18 +84,18 @@ def compute_similarity(req: SimilarityRequest, _: bool = Depends(require_admin))
 
 # ── 4. keyword_recall_with_gap ────────────────────────────────────────────────
 
-class KeywordRecallItem(BaseModel):
+class KeywordRecallItem(ApiModel):
     word: str
     needs_prompt: bool
     target_user_id: str
     reason: str
 
 
-class KeywordRecallWithGapRequest(BaseModel):
+class KeywordRecallWithGapRequest(ApiModel):
     member_texts: dict[str, str]
 
 
-class KeywordRecallWithGapResponse(BaseModel):
+class KeywordRecallWithGapResponse(ApiModel):
     keywords: list[KeywordRecallItem]
 
 
@@ -105,12 +106,12 @@ def keyword_recall_with_gap(req: KeywordRecallWithGapRequest, _: bool = Depends(
 
 # ── 5. extract_keywords_broad ────────────────────────────────────────────────
 
-class ExtractKeywordsBroadRequest(BaseModel):
+class ExtractKeywordsBroadRequest(ApiModel):
     texts: list[str]
     top_n: int = Field(default=10, ge=1, le=50)
 
 
-class ExtractKeywordsBroadResponse(BaseModel):
+class ExtractKeywordsBroadResponse(ApiModel):
     keywords: list[str]
 
 
@@ -122,16 +123,16 @@ def extract_keywords_broad(req: ExtractKeywordsBroadRequest, _: bool = Depends(r
 
 # ── 6. reasoning_batch（全员批量，主分析链路用）──────────────────────────────
 
-class BatchReasoningMemberInput(BaseModel):
+class BatchReasoningMemberInput(ApiModel):
     user_id: str
     text: str
 
 
-class BatchReasoningRequest(BaseModel):
+class BatchReasoningRequest(ApiModel):
     members: list[BatchReasoningMemberInput]
 
 
-class MemberReasoningResultOut(BaseModel):
+class MemberReasoningResultOut(ApiModel):
     user_id: str
     reasoning_status: bool | None
     evidence_status: bool | None
@@ -139,7 +140,7 @@ class MemberReasoningResultOut(BaseModel):
     evidence_source: str
 
 
-class BatchReasoningResponse(BaseModel):
+class BatchReasoningResponse(ApiModel):
     members: list[MemberReasoningResultOut]
 
 
@@ -154,17 +155,17 @@ def reasoning_batch(req: BatchReasoningRequest, _: bool = Depends(require_admin)
 
 # ── 9. generate_summary ──────────────────────────────────────────────────────
 
-class TranscriptItem(BaseModel):
+class TranscriptItem(ApiModel):
     user_id: str
     text: str
 
 
-class GenerateSummaryRequest(BaseModel):
+class GenerateSummaryRequest(ApiModel):
     transcripts: list[TranscriptItem]
     prev_summary: str = ""
 
 
-class GenerateSummaryResponse(BaseModel):
+class GenerateSummaryResponse(ApiModel):
     summary: str
 
 
@@ -179,13 +180,13 @@ def generate_summary_route(req: GenerateSummaryRequest, _: bool = Depends(requir
 
 # ── 10. generate_group_silence（fast_model，实时沉默破冰）────────────────────
 
-class GenerateGroupSilenceRequest(BaseModel):
+class GenerateGroupSilenceRequest(ApiModel):
     summary: str = ""
     transcripts: str = ""
     silence_s: int = 0
 
 
-class GenerateGroupSilenceResponse(BaseModel):
+class GenerateGroupSilenceResponse(ApiModel):
     content: str
 
 
@@ -204,7 +205,7 @@ async def generate_group_silence_route(
 
 # ── 11. analyze_members（heavy_model，2分钟全员分析）─────────────────────────
 
-class MemberMetricsItem(BaseModel):
+class MemberMetricsItem(ApiModel):
     user_id: str
     speaking_ratio: float = 0.0
     silence_s: float = 0.0
@@ -218,20 +219,20 @@ class MemberMetricsItem(BaseModel):
     evidence_source: str | None = None
 
 
-class AnalyzeMembersTranscriptItem(BaseModel):
+class AnalyzeMembersTranscriptItem(ApiModel):
     transcript_id: str
     user_id: str
     speaker_name: str = ""
     text: str
 
 
-class AnalyzeMembersRequest(BaseModel):
+class AnalyzeMembersRequest(ApiModel):
     summary: str = ""
     transcripts: list[AnalyzeMembersTranscriptItem] = Field(default_factory=list)
     members: list[MemberMetricsItem] = Field(default_factory=list)
 
 
-class MemberAnalysisItem(BaseModel):
+class MemberAnalysisItem(ApiModel):
     user_id: str
     challenge_type: str
     needs_prompt: bool
@@ -240,7 +241,7 @@ class MemberAnalysisItem(BaseModel):
     anchor: dict[str, Any] | None = None
 
 
-class AnalyzeMembersResponse(BaseModel):
+class AnalyzeMembersResponse(ApiModel):
     members: list[MemberAnalysisItem]
 
 

@@ -10,7 +10,7 @@ import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from pydantic import BaseModel
+from .api_model import ApiModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,19 +27,19 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 小时
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
-class RegisterRequest(BaseModel):
+class RegisterRequest(ApiModel):
     name: str
     email: str
     password: str
     device_token: str | None = None
 
 
-class LoginRequest(BaseModel):
+class LoginRequest(ApiModel):
     email: str
     password: str
 
 
-class UserOut(BaseModel):
+class UserOut(ApiModel):
     id: str
     name: str
     email: str
@@ -48,13 +48,13 @@ class UserOut(BaseModel):
     password_needs_reset: bool = False
 
 
-class TokenResponse(BaseModel):
+class TokenResponse(ApiModel):
     access_token: str
     token_type: str = "bearer"
     user: UserOut
 
 
-class ChangePasswordRequest(BaseModel):
+class ChangePasswordRequest(ApiModel):
     old_password: str
     new_password: str
 

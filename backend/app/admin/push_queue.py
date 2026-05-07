@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from ..api_model import ApiModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,7 +33,7 @@ def _to_utc_naive(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
-class AdminPushQueueOut(BaseModel):
+class AdminPushQueueOut(ApiModel):
     id: str
     session_id: str
     session_title: str | None = None
@@ -41,10 +41,10 @@ class AdminPushQueueOut(BaseModel):
     target_user_name: str | None = None
     state_type: str
     push_content: str
-    analysis_window_start: Any
+    analysis_window_start: datetime
     status: str
-    created_at: Any
-    delivered_at: Any = None
+    created_at: datetime
+    delivered_at: datetime | None = None
 
 
 @router.get("/", response_model=Page[AdminPushQueueOut])
