@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from openai import OpenAI
@@ -62,6 +63,97 @@ _USER_TEMPLATE = """\
   ]
 }}\
 """
+
+
+_VALIDATE_SYSTEM_PROMPT = (
+    "你是一个语言质量检测助手。严格按 JSON 返回，不输出任何解释文字和 markdown。"
+)
+
+_VALIDATE_USER_TEMPLATE = """\
+以下词语提取自语音转文本对话，每个词附带其在对话中出现的原句上下文。
+请判断每个词是否是有明确语义的真实词语（含专业术语、网络用语、英文缩写等），还是语音识别产生的乱码或残片。
+
+判断标准：
+- is_valid=true：有明确词义，无论常见或罕见（如"量化宽松""搭子""MBTI""内卷"）
+- is_valid=false：无实际意义，看起来像语音识别错误（如"八子""哦的""嗯然"）
+
+词语列表：
+{word_list}
+
+返回严格 JSON（不含任何其他内容）：
+{{
+  "results": [
+    {{"word": "搭子", "is_valid": true}},
+    {{"word": "八子", "is_valid": false}}
+  ]
+}}\
+"""
+
+_SENTENCE_SPLIT_RE = re.compile(r"[。！？.!?\n]+")
+
+
+def _find_word_context(word: str, member_texts: dict[str, str]) -> str:
+    """在所有成员文本里找到包含该词的第一个句子作为上下文。"""
+    for text in member_texts.values():
+        for sentence in _SENTENCE_SPLIT_RE.split(text):
+            sentence = sentence.strip()
+            if sentence and word in sentence:
+                return sentence
+    return ""
+
+
+def _validate_keywords(
+    keywords: list[dict[str, Any]],
+    member_texts: dict[str, str],
+) -> set[str]:
+    """
+    用轻模型批量验证候选词是否是有语义的真实词语。
+    失败时 fail open：返回所有词都有效，不阻断主流程。
+    """
+    if not keywords:
+        return set()
+
+    if not nlp_settings.qwen_api_key:
+        return {item["word"] for item in keywords}
+
+    word_list = [
+        {"word": item["word"], "context": _find_word_context(item["word"], member_texts)}
+        for item in keywords
+    ]
+    prompt = _VALIDATE_USER_TEMPLATE.format(word_list=json.dumps(word_list, ensure_ascii=False))
+
+    try:
+        client = _get_client()
+        response = client.chat.completions.create(
+            model=nlp_settings.fast_model,
+            max_tokens=300,
+            messages=[
+                {"role": "system", "content": _VALIDATE_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+        )
+        content = (response.choices[0].message.content or "").strip()
+        parsed = json.loads(content)
+        results = parsed.get("results", [])
+        valid_words: set[str] = set()
+        for r in results:
+            if isinstance(r, dict) and r.get("is_valid"):
+                word = str(r.get("word", "")).strip()
+                if word:
+                    valid_words.add(word)
+        logger.info(
+            "[candidate_recall] 验证完成，有效词=%d / 候选词=%d，过滤掉: %s",
+            len(valid_words),
+            len(keywords),
+            [item["word"] for item in keywords if item["word"] not in valid_words],
+        )
+        return valid_words
+    except json.JSONDecodeError as e:
+        logger.warning("[candidate_recall] 验证 JSON 解析失败，fail open: %s", e)
+        return {item["word"] for item in keywords}
+    except Exception as e:
+        logger.warning("[candidate_recall] 验证调用失败，fail open: %s", e)
+        return {item["word"] for item in keywords}
 
 
 def _get_client() -> OpenAI:
@@ -137,6 +229,18 @@ def recall_with_gap(member_texts: dict[str, str]) -> dict[str, Any]:
                 keywords.append(normalized)
 
         logger.info("[candidate_recall] 召回完成，关键词数=%d", len(keywords))
+
+        if keywords:
+            valid_words = _validate_keywords(keywords, texts)
+            before_count = len(keywords)
+            keywords = [kw for kw in keywords if kw["word"] in valid_words]
+            if len(keywords) < before_count:
+                logger.info(
+                    "[candidate_recall] 验证过滤后剩余关键词数=%d（原=%d）",
+                    len(keywords),
+                    before_count,
+                )
+
         return {"keywords": keywords}
 
     except json.JSONDecodeError as e:
