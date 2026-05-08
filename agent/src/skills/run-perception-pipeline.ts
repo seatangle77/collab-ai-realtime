@@ -62,19 +62,41 @@ export async function runPerceptionPipeline(input: PipelineInput): Promise<Pipel
     窗口结束: windowEnd.toISOString(),
   });
 
-  // ── Step 1：并行执行互不依赖的 5 个纯计算 skill ──────────────────────────────
-  logger.info('[Step 1] 并行执行：发言比例 / 静默检测 / TTR+论证密度 / 语义重复', { sessionId });
-  const [
-    speakingRatioRes,
-    silenceRes,
-    ttrAndArgRes,
-    srepRes,
-  ] = await Promise.allSettled([
+  // ── Step 1~3：启动所有互不依赖的分析任务，避免 reasoning 与 info_gain 串行等待 ───
+  logger.info('[Step 1~3] 并行启动：基础指标 / 论证结构 / 信息增益', { sessionId });
+  const baseMetricsPromise = Promise.allSettled([
     computeSpeakingRatio(sessionId, windowStart, windowEnd, memberIds),
     computeSilence(sessionId, windowStart, windowEnd, memberIds),
     computeTtrAndArgDensity(sessionId, windowStart, windowEnd, memberIds),
     computeSrep(sessionId, windowStart, windowEnd, memberIds),
   ]);
+  const reasoningSettledPromise = toSettled(computeHasReasoning(sessionId, windowStart, windowEnd, memberIds));
+  const infoGainSettledPromise = toSettled(computeInfoGain(sessionId, windowStart, windowEnd, memberIds));
+
+  logger.info('[Step 5] 统一等待分析结果：基础指标 / 论证结构 / 信息增益', { sessionId });
+  const [baseMetricsSettled, reasoningSettled, igSettled] = await Promise.all([
+    toSettled(baseMetricsPromise),
+    reasoningSettledPromise,
+    infoGainSettledPromise,
+  ]);
+
+  if (baseMetricsSettled.status === 'rejected') {
+    logger.error('基础指标并行计算失败', { sessionId, message: (baseMetricsSettled.reason as Error)?.message });
+  }
+
+  const [
+    speakingRatioRes,
+    silenceRes,
+    ttrAndArgRes,
+    srepRes,
+  ] = baseMetricsSettled.status === 'fulfilled'
+    ? baseMetricsSettled.value
+    : [
+        { status: 'rejected', reason: baseMetricsSettled.reason } as PromiseRejectedResult,
+        { status: 'rejected', reason: baseMetricsSettled.reason } as PromiseRejectedResult,
+        { status: 'rejected', reason: baseMetricsSettled.reason } as PromiseRejectedResult,
+        { status: 'rejected', reason: baseMetricsSettled.reason } as PromiseRejectedResult,
+      ];
 
   const speakingRatios = settledValue(speakingRatioRes, '发言比例')?.ratios ?? {};
   const silenceSeconds = settledValue(silenceRes, '静默检测')?.silenceSeconds ?? {};
@@ -83,13 +105,28 @@ export async function runPerceptionPipeline(input: PipelineInput): Promise<Pipel
   const argDensities = ttrAndArg?.argDensities ?? {};
   const sreps = settledValue(srepRes, '语义重复度Srep')?.sreps ?? {};
 
-  // ── Step 2：论证结构批量判定（fast_model，同窗口，await 阻塞，硬前置）───────
-  logger.info('[Step 2] 论证结构批量判定（fast_model）', { sessionId });
-  const reasoningResult = await computeHasReasoning(sessionId, windowStart, windowEnd, memberIds);
-  const hasReasoningMap = reasoningResult.hasReasoningMap;
-  const hasEvidenceMap = reasoningResult.hasEvidenceMap;
-  const reasoningSourceMap = reasoningResult.reasoningSourceMap;
-  const evidenceSourceMap = reasoningResult.evidenceSourceMap;
+  // ── Step 2：读取已启动的论证结构判定结果（fast_model）────────────────────────
+  logger.info('[Step 6] 处理论证结构结果（fast_model，失败则兜底为空）', { sessionId });
+  const hasReasoningMap: Record<string, boolean | null> = {};
+  const hasEvidenceMap: Record<string, boolean | null> = {};
+  const reasoningSourceMap: Record<string, string | null> = {};
+  const evidenceSourceMap: Record<string, string | null> = {};
+
+  for (const uid of memberIds) {
+    hasReasoningMap[uid] = null;
+    hasEvidenceMap[uid] = null;
+    reasoningSourceMap[uid] = null;
+    evidenceSourceMap[uid] = null;
+  }
+
+  if (reasoningSettled.status === 'fulfilled') {
+    Object.assign(hasReasoningMap, reasoningSettled.value.hasReasoningMap);
+    Object.assign(hasEvidenceMap, reasoningSettled.value.hasEvidenceMap);
+    Object.assign(reasoningSourceMap, reasoningSettled.value.reasoningSourceMap);
+    Object.assign(evidenceSourceMap, reasoningSettled.value.evidenceSourceMap);
+  } else {
+    logger.error('论证结构批量判定失败', { sessionId, message: (reasoningSettled.reason as Error)?.message });
+  }
 
   // 写入 window_metrics_batch_reasoning（batch_has_reasoning 完整原始输出）
   void writeWindowMetricsBatchReasoning({
@@ -108,13 +145,9 @@ export async function runPerceptionPipeline(input: PipelineInput): Promise<Pipel
     logger.error('写入 window_metrics_batch_reasoning 失败', { sessionId, message: (err as Error).message });
   });
 
-  // ── Step 3：信息增益计算。信息缺口已拆到独立调度链，不在成员分析链内执行。───────
-  logger.info('[Step 3] 信息增益计算（InfoGain）', { sessionId });
+  // ── Step 3：读取已启动的信息增益计算结果。信息缺口已拆到独立调度链。────────
+  logger.info('[Step 6] 处理信息增益结果（InfoGain，失败则兜底为空）', { sessionId });
   let infoGains: Record<string, number | null> = {};
-
-  const [igSettled] = await Promise.allSettled([
-    computeInfoGain(sessionId, windowStart, windowEnd, memberIds),
-  ]);
 
   if (igSettled.status === 'fulfilled') {
     infoGains = igSettled.value.infoGains;
@@ -197,4 +230,12 @@ function settledValue<T>(
   if (result.status === 'fulfilled') return result.value;
   logger.error(`${label} 技能执行失败`, { message: (result.reason as Error)?.message });
   return null;
+}
+
+async function toSettled<T>(promise: Promise<T>): Promise<PromiseSettledResult<T>> {
+  try {
+    return { status: 'fulfilled', value: await promise };
+  } catch (reason) {
+    return { status: 'rejected', reason };
+  }
 }
