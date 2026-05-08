@@ -1,5 +1,5 @@
 import { getTranscriptsInWindow, getHistoricalWindowMetricsKeywords, writeWindowMetricsKeywords } from '../../db/queries';
-import { extractKeywordsBroad, embed, similarity } from '../../http/nlp-client';
+import { extractKeywordsBroad, embed } from '../../http/nlp-client';
 import { createLogger } from '../../logger';
 import { config } from '../../config';
 
@@ -97,7 +97,7 @@ export async function computeInfoGain(
         }
       }
 
-      const scores = await similarity(pairs);
+      const scores = pairs.map((pair) => cosineSimilarity(pair.vec_a, pair.vec_b));
 
       const maxSimByCur: number[] = new Array(currentKeywords.length).fill(0);
       scores.forEach((score, idx) => {
@@ -124,4 +124,21 @@ export async function computeInfoGain(
   }
 
   return { infoGains };
+}
+
+function cosineSimilarity(vecA: number[], vecB: number[]): number {
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+  const len = Math.min(vecA.length, vecB.length);
+
+  for (let i = 0; i < len; i++) {
+    dot += vecA[i] * vecB[i];
+    normA += vecA[i] * vecA[i];
+    normB += vecB[i] * vecB[i];
+  }
+
+  if (normA === 0 || normB === 0) return 0;
+  const raw = dot / (Math.sqrt(normA) * Math.sqrt(normB));
+  return Math.max(-1, Math.min(1, raw));
 }

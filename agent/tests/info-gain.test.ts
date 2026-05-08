@@ -74,7 +74,7 @@ describe('computeInfoGain', () => {
     expect(mockWriteWindowMetricsKeywords).not.toHaveBeenCalled();
   });
 
-  it('第一个窗口（无历史）：info_gain = 1.0', async () => {
+  it('第一个窗口（无历史）：info_gain = null，并写入本轮关键词', async () => {
     mockGetTranscriptsInWindow.mockResolvedValue([
       makeTranscript('u1', '人工智能技术很重要'),
       makeTranscript('u2', '机器学习是核心'),
@@ -84,14 +84,11 @@ describe('computeInfoGain', () => {
 
     const { infoGains } = await computeInfoGain(SESSION, WIN_START, WIN_END, MEMBERS);
 
-    expect(infoGains['u1']).toBe(1.0);
-    expect(infoGains['u2']).toBe(1.0);
+    expect(infoGains['u1']).toBeNull();
+    expect(infoGains['u2']).toBeNull();
     expect(mockEmbed).not.toHaveBeenCalled();
-    expect(mockWriteWindowMetricsKeywords).toHaveBeenCalledWith(
-      SESSION,
-      WIN_START,
-      ['人工智能', '机器学习'],
-    );
+    expect(mockWriteWindowMetricsKeywords).toHaveBeenCalledWith(SESSION, 'u1', WIN_START, ['人工智能', '机器学习']);
+    expect(mockWriteWindowMetricsKeywords).toHaveBeenCalledWith(SESSION, 'u2', WIN_START, ['人工智能', '机器学习']);
   });
 
   it('所有关键词与历史高度相似（>= 0.75）：info_gain = 0', async () => {
@@ -105,12 +102,12 @@ describe('computeInfoGain', () => {
       { keyword: '机器学习' },
     ] as Awaited<ReturnType<typeof queries.getHistoricalWindowMetricsKeywords>>);
     mockEmbed.mockResolvedValue([[1, 0], [0, 1], [1, 0], [0, 1]]);
-    mockSimilarity.mockResolvedValue([0.9, 0.9, 0.9, 0.9]);
 
     const { infoGains } = await computeInfoGain(SESSION, WIN_START, WIN_END, MEMBERS);
 
     expect(infoGains['u1']).toBe(0);
     expect(infoGains['u2']).toBe(0);
+    expect(mockSimilarity).not.toHaveBeenCalled();
   });
 
   it('所有关键词与历史低相似（< 0.75）：info_gain = 1.0', async () => {
@@ -123,12 +120,12 @@ describe('computeInfoGain', () => {
       { keyword: '历史词' },
     ] as Awaited<ReturnType<typeof queries.getHistoricalWindowMetricsKeywords>>);
     mockEmbed.mockResolvedValue([[1, 0], [0, 1], [0.5, 0.5]]);
-    mockSimilarity.mockResolvedValue([0.1, 0.2]);
 
     const { infoGains } = await computeInfoGain(SESSION, WIN_START, WIN_END, MEMBERS);
 
     expect(infoGains['u1']).toBe(1.0);
     expect(infoGains['u2']).toBe(1.0);
+    expect(mockSimilarity).not.toHaveBeenCalled();
   });
 
   it('部分新词：info_gain = 新词数 / 总词数', async () => {
@@ -140,13 +137,13 @@ describe('computeInfoGain', () => {
     mockGetHistoricalWindowMetricsKeywords.mockResolvedValue([
       { keyword: '旧词' },
     ] as Awaited<ReturnType<typeof queries.getHistoricalWindowMetricsKeywords>>);
-    mockEmbed.mockResolvedValue([[1, 0], [0, 1], [0.5, 0.5]]);
-    mockSimilarity.mockResolvedValue([0.9, 0.1]);
+    mockEmbed.mockResolvedValue([[1, 0], [0, 1], [1, 0]]);
 
     const { infoGains } = await computeInfoGain(SESSION, WIN_START, WIN_END, MEMBERS);
 
     expect(infoGains['u1']).toBeCloseTo(0.5);
     expect(infoGains['u2']).toBeCloseTo(0.5);
+    expect(mockSimilarity).not.toHaveBeenCalled();
   });
 
   it('info_gain 对所有成员相同（session 级别指标）', async () => {
@@ -171,13 +168,13 @@ describe('computeInfoGain', () => {
     mockGetHistoricalWindowMetricsKeywords.mockResolvedValue([
       { keyword: '旧词' },
     ] as Awaited<ReturnType<typeof queries.getHistoricalWindowMetricsKeywords>>);
-    mockEmbed.mockResolvedValue([[1, 0], [0.9, 0.1]]);
-    mockSimilarity.mockResolvedValue([0.75]);
+    mockEmbed.mockResolvedValue([[1, 0], [0.75, Math.sqrt(1 - 0.75 ** 2)]]);
 
     const { infoGains } = await computeInfoGain(SESSION, WIN_START, WIN_END, MEMBERS);
 
     expect(infoGains['u1']).toBe(0);
     expect(infoGains['u2']).toBe(0);
+    expect(mockSimilarity).not.toHaveBeenCalled();
   });
 
   it('边界值：相似度 = 0.749，视为新词', async () => {
@@ -189,16 +186,16 @@ describe('computeInfoGain', () => {
     mockGetHistoricalWindowMetricsKeywords.mockResolvedValue([
       { keyword: '旧词' },
     ] as Awaited<ReturnType<typeof queries.getHistoricalWindowMetricsKeywords>>);
-    mockEmbed.mockResolvedValue([[1, 0], [0.9, 0.1]]);
-    mockSimilarity.mockResolvedValue([0.749]);
+    mockEmbed.mockResolvedValue([[1, 0], [0.749, Math.sqrt(1 - 0.749 ** 2)]]);
 
     const { infoGains } = await computeInfoGain(SESSION, WIN_START, WIN_END, MEMBERS);
 
     expect(infoGains['u1']).toBe(1.0);
     expect(infoGains['u2']).toBe(1.0);
+    expect(mockSimilarity).not.toHaveBeenCalled();
   });
 
-  it('embed 失败：向上抛出', async () => {
+  it('embed 失败：对应用户 info_gain = null', async () => {
     mockGetTranscriptsInWindow.mockResolvedValue([
       makeTranscript('u1', '当前词'),
       makeTranscript('u2', '补充内容'),
@@ -209,8 +206,10 @@ describe('computeInfoGain', () => {
     ] as Awaited<ReturnType<typeof queries.getHistoricalWindowMetricsKeywords>>);
     mockEmbed.mockRejectedValue(new Error('embed down'));
 
-    await expect(
-      computeInfoGain(SESSION, WIN_START, WIN_END, MEMBERS),
-    ).rejects.toThrow('embed down');
+    const { infoGains } = await computeInfoGain(SESSION, WIN_START, WIN_END, MEMBERS);
+
+    expect(infoGains['u1']).toBeNull();
+    expect(infoGains['u2']).toBeNull();
+    expect(mockSimilarity).not.toHaveBeenCalled();
   });
 });
