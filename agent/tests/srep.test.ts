@@ -37,27 +37,27 @@ describe('computeSrep', () => {
     expect(sreps['u1']).toBeNull();
   });
 
-  it('2 条话语：srep = 相邻 pair 相似度均值', async () => {
+  it('2 条话语：srep = 唯一 pair 的本地余弦相似度', async () => {
     mockGetTranscripts.mockResolvedValue([
       makeTranscript('u1', '第一句'),
       makeTranscript('u1', '第二句'),
     ]);
-    mockEmbed.mockResolvedValue([[1, 0], [0, 1]]);
-    mockSimilarity.mockResolvedValue([0.6]);
+    mockEmbed.mockResolvedValue([[1, 0], [0.6, 0.8]]);
     const { sreps } = await computeSrep(SESSION, WIN_START, WIN_END, MEMBERS);
     expect(sreps['u1']).toBeCloseTo(0.6);
+    expect(mockSimilarity).not.toHaveBeenCalled();
   });
 
-  it('3 条话语：srep = 2 个相邻 pair 均值', async () => {
+  it('3 条话语：srep = 两两全组合 pair 均值', async () => {
     mockGetTranscripts.mockResolvedValue([
       makeTranscript('u1', 'A'),
       makeTranscript('u1', 'B'),
       makeTranscript('u1', 'C'),
     ]);
     mockEmbed.mockResolvedValue([[1, 0], [0, 1], [1, 1]]);
-    mockSimilarity.mockResolvedValue([0.4, 0.8]); // pair(A,B)=0.4, pair(B,C)=0.8
     const { sreps } = await computeSrep(SESSION, WIN_START, WIN_END, MEMBERS);
-    expect(sreps['u1']).toBeCloseTo(0.6); // (0.4 + 0.8) / 2
+    expect(sreps['u1']).toBeCloseTo((0 + Math.SQRT1_2 + Math.SQRT1_2) / 3);
+    expect(mockSimilarity).not.toHaveBeenCalled();
   });
 
   it('高重复度：srep 接近 1', async () => {
@@ -66,9 +66,9 @@ describe('computeSrep', () => {
       makeTranscript('u1', '我觉得这个方案非常好'),
     ]);
     mockEmbed.mockResolvedValue([[0.9, 0.1], [0.88, 0.12]]);
-    mockSimilarity.mockResolvedValue([0.99]);
     const { sreps } = await computeSrep(SESSION, WIN_START, WIN_END, MEMBERS);
-    expect(sreps['u1']).toBeCloseTo(0.99);
+    expect(sreps['u1']).toBeGreaterThan(0.99);
+    expect(mockSimilarity).not.toHaveBeenCalled();
   });
 
   it('低重复度：srep 接近 0（内容多样）', async () => {
@@ -77,9 +77,9 @@ describe('computeSrep', () => {
       makeTranscript('u1', '接下来聊技术架构'),
     ]);
     mockEmbed.mockResolvedValue([[1, 0], [0, 1]]);
-    mockSimilarity.mockResolvedValue([0.02]);
     const { sreps } = await computeSrep(SESSION, WIN_START, WIN_END, MEMBERS);
-    expect(sreps['u1']).toBeCloseTo(0.02);
+    expect(sreps['u1']).toBeCloseTo(0);
+    expect(mockSimilarity).not.toHaveBeenCalled();
   });
 
   it('embed 抛出异常：对应用户 srep = null', async () => {
@@ -92,21 +92,24 @@ describe('computeSrep', () => {
     expect(sreps['u1']).toBeNull();
   });
 
-  it('多用户并行计算，互不影响', async () => {
+  it('多用户批量向量化一次，再按用户本地计算，互不影响', async () => {
     mockGetTranscripts.mockResolvedValue([
       makeTranscript('u1', 'A'),
       makeTranscript('u1', 'B'),
       makeTranscript('u2', 'C'),
       makeTranscript('u2', 'D'),
     ]);
-    mockEmbed
-      .mockResolvedValueOnce([[1, 0], [0.9, 0.1]])  // u1
-      .mockResolvedValueOnce([[0, 1], [0.1, 0.9]]); // u2
-    mockSimilarity
-      .mockResolvedValueOnce([0.85]) // u1 pair
-      .mockResolvedValueOnce([0.3]); // u2 pair
+    mockEmbed.mockResolvedValue([
+      [1, 0],
+      [0.6, 0.8],
+      [0, 1],
+      [0.953939, 0.3],
+    ]);
     const { sreps } = await computeSrep(SESSION, WIN_START, WIN_END, ['u1', 'u2']);
-    expect(sreps['u1']).toBeCloseTo(0.85);
+    expect(mockEmbed).toHaveBeenCalledTimes(1);
+    expect(mockEmbed).toHaveBeenCalledWith(['A', 'B', 'C', 'D']);
+    expect(mockSimilarity).not.toHaveBeenCalled();
+    expect(sreps['u1']).toBeCloseTo(0.6);
     expect(sreps['u2']).toBeCloseTo(0.3);
   });
 });
