@@ -8,7 +8,6 @@ import {
   hasPendingInfoGapKeyword,
   hasEverPushedInfoGapKeyword,
   getRecentInfoGapKeywordsForUser,
-  dismissPendingInfoGapButtonsBeforeWindow,
 } from '../db/queries';
 import { keywordRecallWithGap, embed, similarity, notifyInfoGapButton } from '../http/nlp-client';
 import { createLogger } from '../logger';
@@ -226,18 +225,6 @@ export async function decideInfoGapButtons(input: InfoGapDecisionInput): Promise
   const { sessionId, windowStart, memberIds } = input;
   const candidates = mergeCandidates(input.candidates);
   const words = candidates.map((item) => item.word);
-
-  try {
-    const dismissed = await dismissPendingInfoGapButtonsBeforeWindow(sessionId, windowStart);
-    if (dismissed > 0) {
-      logger.info(`[SKW] 已过期历史 info_gap 按钮 数量=${dismissed}`, { sessionId });
-    }
-  } catch (err) {
-    logger.warn('[SKW] info_gap 按钮过期处理失败', {
-      sessionId,
-      message: (err as Error).message,
-    });
-  }
 
   if (memberIds.length < 2 || candidates.length === 0) {
     return { keywords: words, scores: {} };

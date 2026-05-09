@@ -15,10 +15,6 @@ jest.mock('../src/logger', () => ({
 jest.mock('../src/db/queries');
 jest.mock('../src/http/nlp-client');
 
-const mockDismissPendingBeforeWindow =
-  queries.dismissPendingInfoGapButtonsBeforeWindow as jest.MockedFunction<
-    typeof queries.dismissPendingInfoGapButtonsBeforeWindow
-  >;
 const mockWritePushQueueItem = queries.writePushQueueItem as jest.MockedFunction<typeof queries.writePushQueueItem>;
 const mockWriteDiscussionState = queries.writeDiscussionState as jest.MockedFunction<typeof queries.writeDiscussionState>;
 const mockWriteAiPushAnalysis = queries.writeAiPushAnalysis as jest.MockedFunction<typeof queries.writeAiPushAnalysis>;
@@ -76,7 +72,6 @@ const TRANSCRIPTS = [
 describe('runActionLayer', () => {
   beforeEach(() => {
     jest.resetAllMocks();
-    mockDismissPendingBeforeWindow.mockResolvedValue(0);
     mockWritePushQueueItem.mockResolvedValue('pq_1');
     mockWriteDiscussionState.mockResolvedValue('ds_1');
     mockWriteAiPushAnalysis.mockResolvedValue(undefined);

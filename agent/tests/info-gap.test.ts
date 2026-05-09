@@ -111,6 +111,23 @@ describe('info-gap / computeSkw', () => {
     expect(mockWriteInfoGapButton).not.toHaveBeenCalled();
   });
 
+  it('历史 pending 按钮不会被自动过期：新窗口仍正常写入并推送按钮', async () => {
+    mockGetTranscripts.mockResolvedValue([
+      makeTranscript('u1', '我们聊 AI'),
+      makeTranscript('u2', '我也聊 AI'),
+    ]);
+    mockKeywordRecallWithGap.mockResolvedValue(makeRecall([
+      { word: 'AI', needs_prompt: true, target_user_id: 'u1', reason: '需要追问' },
+    ]));
+    mockEmbed.mockResolvedValue([[1, 0], [0.8, 0.2]]);
+    mockSimilarity.mockResolvedValue([0.75]);
+
+    await computeSkw(SESSION, WIN_START, WIN_END, MEMBERS);
+
+    expect(mockWriteInfoGapButton).toHaveBeenCalledTimes(1);
+    expect(mockNotifyInfoGapButton).toHaveBeenCalledTimes(1);
+  });
+
   describe('阶段一：关键词召回', () => {
     it('大模型返回空关键词：终止，不写任何 DB', async () => {
       mockGetTranscripts.mockResolvedValue([

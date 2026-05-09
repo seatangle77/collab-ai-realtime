@@ -232,7 +232,7 @@ async def click_info_gap_button(
         exists_row = exists_result.mappings().first()
         if not exists_row:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="按钮不存在")
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="按钮已被点击或已过期")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="按钮已被点击或不可用")
 
     await db.commit()
     keyword = str(btn["keyword"])

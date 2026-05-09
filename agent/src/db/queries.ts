@@ -744,22 +744,6 @@ export async function writeInfoGapButton(row: {
 }
 
 /** 将历史窗口遗留的 pending 按钮标记为 dismissed（视为过期）。 */
-export async function dismissPendingInfoGapButtonsBeforeWindow(
-  sessionId: string,
-  currentWindowStart: Date,
-): Promise<number> {
-  const res = await pool.query<{ id: string }>(
-    `UPDATE info_gap_buttons
-     SET status = 'dismissed'
-     WHERE session_id = $1
-       AND status = 'pending'
-       AND window_start < $2
-     RETURNING id`,
-    [sessionId, toUtcString(currentWindowStart)],
-  );
-  return res.rowCount ?? 0;
-}
-
 /** 是否已存在同 session+user+keyword 的 pending 按钮 */
 export async function hasPendingInfoGapKeyword(
   sessionId: string,
