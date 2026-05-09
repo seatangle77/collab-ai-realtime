@@ -780,6 +780,26 @@ export async function hasPendingInfoGapKeyword(
   return Boolean(res.rows[0]?.exists);
 }
 
+/** 该关键词在本 session 中是否曾经推送过（含 pending/clicked/dismissed/expired 状态）。 */
+export async function hasEverPushedInfoGapKeyword(
+  sessionId: string,
+  userId: string,
+  keyword: string,
+): Promise<boolean> {
+  const res = await pool.query<{ exists: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1
+       FROM info_gap_buttons
+       WHERE session_id = $1
+         AND user_id = $2
+         AND keyword = $3
+         AND status IN ('pending', 'clicked', 'dismissed', 'expired')
+     ) AS exists`,
+    [sessionId, userId, keyword],
+  );
+  return Boolean(res.rows[0]?.exists);
+}
+
 /** 统计当前 pending 按钮数量 */
 export async function getPendingInfoGapButtonCount(
   sessionId: string,
@@ -796,51 +816,20 @@ export async function getPendingInfoGapButtonCount(
   return Number(res.rows[0]?.count ?? '0');
 }
 
-/** 最近 N 个分析窗口内，该词是否已被点击 */
-export async function hasClickedInfoGapKeywordInRecentWindows(
-  sessionId: string,
-  userId: string,
-  keyword: string,
-  currentWindowStart: Date,
-  recentWindowCount: number,
-  windowMs: number,
-): Promise<boolean> {
-  const since = new Date(currentWindowStart.getTime() - recentWindowCount * windowMs);
-  const res = await pool.query<{ exists: boolean }>(
-    `SELECT EXISTS (
-       SELECT 1
-       FROM info_gap_buttons
-       WHERE session_id = $1
-         AND user_id = $2
-         AND keyword = $3
-         AND status = 'clicked'
-         AND window_start >= $4
-     ) AS exists`,
-    [sessionId, userId, keyword, toUtcString(since)],
-  );
-  return Boolean(res.rows[0]?.exists);
-}
-
-/** 最近 N 个分析窗口内，该用户已有的 info_gap 关键词（用于语义去重）。 */
+/** 该会话内该用户已推送过的所有 info_gap 关键词（用于语义去重，覆盖整个会话）。 */
 export async function getRecentInfoGapKeywordsForUser(
   sessionId: string,
   userId: string,
-  currentWindowStart: Date,
-  recentWindowCount: number,
-  windowMs: number,
 ): Promise<string[]> {
-  const since = new Date(currentWindowStart.getTime() - recentWindowCount * windowMs);
   const res = await pool.query<{ keyword: string }>(
     `SELECT DISTINCT keyword
      FROM info_gap_buttons
      WHERE session_id = $1
        AND user_id = $2
-       AND status IN ('pending', 'clicked')
-       AND window_start >= $3
-       AND window_start <= $4
+       AND status IN ('pending', 'clicked', 'dismissed', 'expired')
        AND keyword IS NOT NULL
        AND keyword != ''`,
-    [sessionId, userId, toUtcString(since), toUtcString(currentWindowStart)],
+    [sessionId, userId],
   );
   return res.rows.map((row) => row.keyword);
 }

@@ -6,7 +6,7 @@ import {
   writeInfoGapButton,
   writeKeywordRecallAnalysis,
   hasPendingInfoGapKeyword,
-  hasClickedInfoGapKeywordInRecentWindows,
+  hasEverPushedInfoGapKeyword,
   getRecentInfoGapKeywordsForUser,
   dismissPendingInfoGapButtonsBeforeWindow,
 } from '../db/queries';
@@ -16,8 +16,6 @@ import { nanoid } from 'nanoid';
 
 const logger = createLogger('skill:info-gap');
 
-const WINDOW_MS = 2 * 60 * 1000;
-const RECENT_WINDOW_COUNT = 3;
 const RECENT_SIMILAR_KEYWORD_THRESHOLD = 0.87;
 
 export interface SkwResult {
@@ -117,9 +115,6 @@ async function hasSimilarRecentInfoGapKeyword(
     const historyKeywords = await getRecentInfoGapKeywordsForUser(
       sessionId,
       userId,
-      windowStart,
-      RECENT_WINDOW_COUNT,
-      WINDOW_MS,
     );
     const uniqueHistory = [...new Set(historyKeywords)].filter((item) => item && item !== keyword);
     if (uniqueHistory.length === 0) return false;
@@ -381,16 +376,9 @@ export async function decideInfoGapButtons(input: InfoGapDecisionInput): Promise
       continue;
     }
 
-    const recentlyClicked = await hasClickedInfoGapKeywordInRecentWindows(
-      sessionId,
-      item.target_user_id,
-      item.word,
-      windowStart,
-      RECENT_WINDOW_COUNT,
-      WINDOW_MS,
-    );
-    if (recentlyClicked) {
-      logger.info(`[SKW] 「${item.word}」用户 ${item.target_user_id} 近期已点击，跳过`, { sessionId });
+    const everPushed = await hasEverPushedInfoGapKeyword(sessionId, item.target_user_id, item.word);
+    if (everPushed) {
+      logger.info(`[SKW] 「${item.word}」用户 ${item.target_user_id} 本会话已推送过，跳过`, { sessionId });
       continue;
     }
 

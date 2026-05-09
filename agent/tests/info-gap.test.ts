@@ -26,9 +26,9 @@ const mockWriteInfoGapButton = queries.writeInfoGapButton as jest.MockedFunction
 const mockHasPendingInfoGapKeyword = queries.hasPendingInfoGapKeyword as jest.MockedFunction<
   typeof queries.hasPendingInfoGapKeyword
 >;
-const mockHasClickedInfoGapKeywordInRecentWindows =
-  queries.hasClickedInfoGapKeywordInRecentWindows as jest.MockedFunction<
-    typeof queries.hasClickedInfoGapKeywordInRecentWindows
+const mockHasEverPushedInfoGapKeyword =
+  queries.hasEverPushedInfoGapKeyword as jest.MockedFunction<
+    typeof queries.hasEverPushedInfoGapKeyword
   >;
 const mockGetRecentInfoGapKeywordsForUser =
   queries.getRecentInfoGapKeywordsForUser as jest.MockedFunction<
@@ -85,7 +85,7 @@ describe('info-gap / computeSkw', () => {
     mockWriteKeywordRecallAnalysis.mockResolvedValue(undefined);
     mockWriteInfoGapButton.mockResolvedValue('igb_mock');
     mockHasPendingInfoGapKeyword.mockResolvedValue(false);
-    mockHasClickedInfoGapKeywordInRecentWindows.mockResolvedValue(false);
+    mockHasEverPushedInfoGapKeyword.mockResolvedValue(false);
     mockGetRecentInfoGapKeywordsForUser.mockResolvedValue([]);
     mockNotifyInfoGapButton.mockResolvedValue(undefined);
   });
@@ -443,7 +443,7 @@ describe('info-gap / computeSkw', () => {
       expect(mockNotifyInfoGapButton).not.toHaveBeenCalled();
     });
 
-    it('近期已点击过：跳过，不写不推', async () => {
+    it('本会话已推送过同一关键词：跳过，不写不推', async () => {
       mockGetTranscripts.mockResolvedValue([
         makeTranscript('u1', '我们聊 AI'),
         makeTranscript('u2', '我也聊 AI'),
@@ -453,10 +453,11 @@ describe('info-gap / computeSkw', () => {
       ]));
       mockEmbed.mockResolvedValue([[1, 0], [0.8, 0.2]]);
       mockSimilarity.mockResolvedValue([0.75]);
-      mockHasClickedInfoGapKeywordInRecentWindows.mockResolvedValue(true);
+      mockHasEverPushedInfoGapKeyword.mockResolvedValue(true);
 
       await computeSkw(SESSION, WIN_START, WIN_END, MEMBERS);
 
+      expect(mockHasEverPushedInfoGapKeyword).toHaveBeenCalledWith(SESSION, 'u1', 'AI');
       expect(mockWriteInfoGapButton).not.toHaveBeenCalled();
       expect(mockNotifyInfoGapButton).not.toHaveBeenCalled();
     });
@@ -482,9 +483,6 @@ describe('info-gap / computeSkw', () => {
       expect(mockGetRecentInfoGapKeywordsForUser).toHaveBeenCalledWith(
         SESSION,
         'u1',
-        WIN_START,
-        3,
-        2 * 60 * 1000,
       );
       expect(mockWriteInfoGapButton).not.toHaveBeenCalled();
       expect(mockNotifyInfoGapButton).not.toHaveBeenCalled();
