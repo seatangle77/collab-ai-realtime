@@ -47,7 +47,7 @@ def _log(ok: bool, msg: str, extra: Any = None) -> None:
 def _make_asr(sid: str) -> tuple[TencentASR, asyncio.AbstractEventLoop]:
     loop = asyncio.new_event_loop()
     async def _dummy(text, audio): pass
-    asr = TencentASR(sid, _dummy, loop)
+    asr = TencentASR(sid, _dummy, None, loop)
     return asr, loop
 
 
@@ -172,10 +172,10 @@ def test_34_short_pcm_sentence_frames():
     loop = asyncio.new_event_loop()
     received_audio = []
 
-    async def _on_result(text, audio_bytes):
+    async def _on_result(text, audio_bytes, segment_key=None):
         received_audio.append(len(audio_bytes))
 
-    asr = TencentASR("s_asr_34", _on_result, loop)
+    asr = TencentASR("s_asr_34", _on_result, None, loop)
 
     # 手动向 listener 注入数据并触发 on_sentence_end
     tiny_pcm = b"\x00" * 320  # 10ms
@@ -196,6 +196,16 @@ def test_34_short_pcm_sentence_frames():
     loop.close()
 
 
+def test_35_filter_modal_partial():
+    """35: 创建 TencentASR 时默认启用部分过滤语气词"""
+    asr, loop = _make_asr("s_asr_35")
+
+    ok = asr.recognizer.filter_modal == 1
+    _log(ok, "35: filter_modal == 1（部分过滤语气词）",
+         f"filter_modal={asr.recognizer.filter_modal}")
+    loop.close()
+
+
 # ── 入口 ──────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -208,6 +218,7 @@ if __name__ == "__main__":
     test_32_stopped_flag_prevents_retry()
     test_33_write_before_opened_blocks()
     test_34_short_pcm_sentence_frames()
+    test_35_filter_modal_partial()
 
     print("=" * 60)
     total = PASS + FAIL

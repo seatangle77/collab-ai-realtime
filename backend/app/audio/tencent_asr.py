@@ -197,6 +197,7 @@ class TencentASR:
         )
         self.recognizer.set_need_vad(1)           # 腾讯侧 VAD 自动断句
         self.recognizer.set_vad_silence_time(tencent_asr_settings.vad_silence_time_ms)
+        self.recognizer.set_filter_modal(1)       # 部分过滤语气词，减少“嗯/啊/呃”等低信息转写
         self.recognizer.set_word_info(1)          # 开启词级时间戳，供本地二次切分
         self.recognizer.set_voice_format(1)       # 1 = PCM
 
