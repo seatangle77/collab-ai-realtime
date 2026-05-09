@@ -9,7 +9,7 @@ const logger = createLogger('push-filter-chain');
  * 防止 transient error 误杀推送。
  *
  * 推荐执行顺序（先便宜后昂贵）：
- *   sameRoundDedupFilter → contentSimilarityFilter → vadCheckFilter
+ *   sameRoundDedupFilter → recentExactContentFilter → contentSimilarityFilter → vadCheckFilter
  */
 export async function runPushFilterChain(
   ctx: FilterContext,
