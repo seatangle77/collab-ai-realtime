@@ -138,8 +138,25 @@ export async function runActionLayer(params: {
   logger.info(`行动层：heavy_model 返回 ${analysisItems.length} 条分析`, { sessionId });
 
   let persistedCount = 0;
+  const candidates: Array<{
+    item: (typeof analysisItems)[number];
+    content: string;
+    anchor: NormalizedAnchor | null;
+    baseRow: {
+      id: string;
+      session_id: string;
+      target_user_id: string;
+      state_type: string;
+      window_start: Date;
+      ai_needs_prompt: boolean;
+      ai_anchor: Record<string, string> | null;
+      ai_content: string | null;
+      drop_reason: 'needs_prompt_false';
+    };
+  }> = [];
 
   for (const item of analysisItems) {
+    const content = item.content.trim();
     const baseRow = {
       id: 'apa_' + nanoid(12),
       session_id: sessionId,
@@ -152,7 +169,7 @@ export async function runActionLayer(params: {
       drop_reason: 'needs_prompt_false' as const,
     };
 
-    if (!item.needs_prompt || !item.content.trim()) {
+    if (!item.needs_prompt || !content) {
       void writeAiPushAnalysis({
         ...baseRow,
         ai_analysis: item.analysis ?? null,
@@ -194,9 +211,32 @@ export async function runActionLayer(params: {
       logger.info(`stagnation 低参与/未发言，允许无 anchor 推送 user=${item.user_id}`, { sessionId });
     }
 
+    candidates.push({ item, content, anchor, baseRow });
+  }
+
+  if (candidates.length === 0) {
+    logger.info(`行动层完成，入队数量=${persistedCount}`, { sessionId });
+    return;
+  }
+
+  let embeddings: number[][];
+  try {
+    embeddings = await embed(candidates.map((candidate) => candidate.content));
+  } catch (err) {
+    logger.error('batch embed failed, skip current action candidates', {
+      sessionId,
+      candidate_count: candidates.length,
+      message: (err as Error).message,
+    });
+    logger.info(`行动层完成，入队数量=${persistedCount}`, { sessionId });
+    return;
+  }
+
+  for (const [index, candidate] of candidates.entries()) {
+    const { item, content, anchor, baseRow } = candidate;
+
     try {
-      const embeddings = await embed([item.content.trim()]);
-      const contentEmbedding = embeddings[0];
+      const contentEmbedding = embeddings[index];
       if (!contentEmbedding || contentEmbedding.length === 0) {
         logger.warn('push embedding 为空，跳过入队', { sessionId, targetUserId: item.user_id });
         continue;
@@ -206,7 +246,7 @@ export async function runActionLayer(params: {
         session_id: sessionId,
         target_user_id: item.user_id,
         state_type: item.challenge_type,
-        push_content: item.content.trim(),
+        push_content: content,
         content_embedding: contentEmbedding,
         analysis_window_start: windowStart,
       });
@@ -239,7 +279,7 @@ export async function runActionLayer(params: {
         ...baseRow,
         ai_needs_prompt: true,
         ai_anchor: anchor ? toAnchorRecord(anchor) : null,
-        ai_content: item.content.trim(),
+        ai_content: content,
         ai_analysis: item.analysis ?? null,
         drop_reason: 'passed',
       }).catch((err) => {

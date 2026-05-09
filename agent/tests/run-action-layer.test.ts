@@ -257,4 +257,170 @@ describe('runActionLayer', () => {
       }),
     );
   });
+
+  it('多条有效候选只批量调用一次 embed，并按顺序写入队列', async () => {
+    mockAnalyzeMembers.mockResolvedValueOnce([
+      {
+        user_id: 'uA',
+        challenge_type: 'stagnation',
+        needs_prompt: true,
+        analysis: 'uA 参与不足。',
+        content: '你可以先说说你最担心的是哪一点。',
+        anchor: {
+          transcript_id: 't1',
+          speaker_id: 'uA',
+          speaker_name: '成员A',
+          text: '我觉得这个方案可以。',
+        },
+      },
+      {
+        user_id: 'uB',
+        challenge_type: 'shallow',
+        needs_prompt: true,
+        analysis: 'uB 需要补充依据。',
+        content: '你能补一个具体例子或数据吗？',
+        anchor: {
+          transcript_id: 't2',
+          speaker_id: 'uB',
+          speaker_name: '成员B',
+          text: '我们先限定 MVP 范围，因为这样成本更低。',
+        },
+      },
+    ]);
+    mockEmbed.mockResolvedValueOnce([
+      [0.1, 0.2, 0.3],
+      [0.4, 0.5, 0.6],
+    ]);
+    mockWritePushQueueItem
+      .mockResolvedValueOnce('pq_a')
+      .mockResolvedValueOnce('pq_b');
+
+    await runActionLayer({
+      sessionId: SESSION,
+      perceptionResult: PERCEPTION_RESULT,
+      windowStart: WINDOW_START,
+      memberIds: MEMBERS,
+      summaryText: '当前讨论聚焦 MVP 范围与优先级。',
+      transcripts: TRANSCRIPTS,
+    });
+
+    expect(mockEmbed).toHaveBeenCalledTimes(1);
+    expect(mockEmbed).toHaveBeenCalledWith([
+      '你可以先说说你最担心的是哪一点。',
+      '你能补一个具体例子或数据吗？',
+    ]);
+    expect(mockWritePushQueueItem).toHaveBeenCalledTimes(2);
+    expect(mockWritePushQueueItem).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        target_user_id: 'uA',
+        push_content: '你可以先说说你最担心的是哪一点。',
+        content_embedding: [0.1, 0.2, 0.3],
+      }),
+    );
+    expect(mockWritePushQueueItem).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        target_user_id: 'uB',
+        push_content: '你能补一个具体例子或数据吗？',
+        content_embedding: [0.4, 0.5, 0.6],
+      }),
+    );
+  });
+
+  it('批量 embed 中某条向量为空时只跳过该条，不影响其他候选入队', async () => {
+    mockAnalyzeMembers.mockResolvedValueOnce([
+      {
+        user_id: 'uA',
+        challenge_type: 'stagnation',
+        needs_prompt: true,
+        analysis: 'uA 参与不足。',
+        content: '你可以先说说你最担心的是哪一点。',
+        anchor: {
+          transcript_id: 't1',
+          speaker_id: 'uA',
+          speaker_name: '成员A',
+          text: '我觉得这个方案可以。',
+        },
+      },
+      {
+        user_id: 'uB',
+        challenge_type: 'shallow',
+        needs_prompt: true,
+        analysis: 'uB 需要补充依据。',
+        content: '你能补一个具体例子或数据吗？',
+        anchor: {
+          transcript_id: 't2',
+          speaker_id: 'uB',
+          speaker_name: '成员B',
+          text: '我们先限定 MVP 范围，因为这样成本更低。',
+        },
+      },
+      {
+        user_id: 'uC',
+        challenge_type: 'stagnation',
+        needs_prompt: true,
+        analysis: 'uC 本轮没有发言。',
+        content: '你可以先分享一个初步看法。',
+        anchor: null,
+      },
+    ]);
+    mockEmbed.mockResolvedValueOnce([
+      [0.1, 0.2, 0.3],
+      [],
+      [0.7, 0.8, 0.9],
+    ]);
+    mockWritePushQueueItem
+      .mockResolvedValueOnce('pq_a')
+      .mockResolvedValueOnce('pq_c');
+
+    await runActionLayer({
+      sessionId: SESSION,
+      perceptionResult: PERCEPTION_RESULT,
+      windowStart: WINDOW_START,
+      memberIds: MEMBERS,
+      summaryText: '当前讨论聚焦 MVP 范围与优先级。',
+      transcripts: TRANSCRIPTS,
+    });
+
+    expect(mockEmbed).toHaveBeenCalledTimes(1);
+    expect(mockWritePushQueueItem).toHaveBeenCalledTimes(2);
+    expect(mockWritePushQueueItem).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        target_user_id: 'uA',
+        content_embedding: [0.1, 0.2, 0.3],
+      }),
+    );
+    expect(mockWritePushQueueItem).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        target_user_id: 'uC',
+        content_embedding: [0.7, 0.8, 0.9],
+      }),
+    );
+    expect(mockWritePushQueueItem).not.toHaveBeenCalledWith(
+      expect.objectContaining({ target_user_id: 'uB' }),
+    );
+  });
+
+  it('批量 embed 整体失败时不写入队列和状态', async () => {
+    mockEmbed.mockRejectedValueOnce(new Error('embed service unavailable'));
+
+    await runActionLayer({
+      sessionId: SESSION,
+      perceptionResult: PERCEPTION_RESULT,
+      windowStart: WINDOW_START,
+      memberIds: MEMBERS,
+      summaryText: '当前讨论聚焦 MVP 范围与优先级。',
+      transcripts: TRANSCRIPTS,
+    });
+
+    expect(mockEmbed).toHaveBeenCalledTimes(1);
+    expect(mockWritePushQueueItem).not.toHaveBeenCalled();
+    expect(mockWriteDiscussionState).not.toHaveBeenCalled();
+    expect(mockWriteAiPushAnalysis).not.toHaveBeenCalledWith(
+      expect.objectContaining({ drop_reason: 'passed' }),
+    );
+  });
 });
