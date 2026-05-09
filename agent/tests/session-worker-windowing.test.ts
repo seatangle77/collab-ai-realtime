@@ -223,6 +223,55 @@ describe('SessionWorker windowing', () => {
     expect(mockRunActionLayer).not.toHaveBeenCalled();
   });
 
+  it('成员分析链向行动层传入入队后主动触发分发器的回调', async () => {
+    const startedAt = new Date('2026-04-22T10:00:00Z');
+    const scheduledFor = new Date('2026-04-22T10:03:00Z');
+    const worker = new SessionWorker('s1', startedAt);
+
+    await (worker as any).runAnalysisPipeline(scheduledFor);
+
+    expect(mockRunActionLayer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        onPushQueued: expect.any(Function),
+      }),
+    );
+
+    mockRunPushDispatcher.mockClear();
+    (worker as any).running = true;
+    const actionArgs = mockRunActionLayer.mock.calls[0][0];
+    await actionArgs.onPushQueued?.();
+
+    expect(mockRunPushDispatcher).toHaveBeenCalledTimes(1);
+    expect(mockRunPushDispatcher).toHaveBeenCalledWith('s1');
+  });
+
+  it('分发器运行中时主动触发不会并发启动第二个 dispatcher', async () => {
+    const startedAt = new Date('2026-04-22T10:00:00Z');
+    const worker = new SessionWorker('s1', startedAt);
+    let resolveDispatch: (() => void) | undefined;
+
+    (worker as any).running = true;
+    mockRunPushDispatcher.mockImplementationOnce(
+      () => new Promise<void>((resolve) => {
+        resolveDispatch = resolve;
+      }),
+    );
+
+    const firstDispatch = (worker as any).triggerPushDispatcher('queued');
+    await Promise.resolve();
+
+    await (worker as any).triggerPushDispatcher('timer');
+
+    expect(mockRunPushDispatcher).toHaveBeenCalledTimes(1);
+
+    resolveDispatch?.();
+    await firstDispatch;
+    await (worker as any).triggerPushDispatcher('queued');
+
+    expect(mockRunPushDispatcher).toHaveBeenCalledTimes(2);
+    expect(mockRunPushDispatcher).toHaveBeenLastCalledWith('s1');
+  });
+
   it('群体沉默检测、成员分析和摘要使用独立调度节奏', async () => {
     jest.useFakeTimers();
     const startedAt = new Date('2026-04-22T10:00:00Z');

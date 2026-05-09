@@ -423,4 +423,68 @@ describe('runActionLayer', () => {
       expect.objectContaining({ drop_reason: 'passed' }),
     );
   });
+
+  it('成功入队后在写完 discussion_state 之后触发 onPushQueued 一次', async () => {
+    const onPushQueued = jest.fn().mockResolvedValue(undefined);
+
+    await runActionLayer({
+      sessionId: SESSION,
+      perceptionResult: PERCEPTION_RESULT,
+      windowStart: WINDOW_START,
+      memberIds: MEMBERS,
+      summaryText: '当前讨论聚焦 MVP 范围与优先级。',
+      transcripts: TRANSCRIPTS,
+      onPushQueued,
+    });
+
+    expect(onPushQueued).toHaveBeenCalledTimes(1);
+    expect(mockWriteDiscussionState).toHaveBeenCalledTimes(1);
+    expect(mockWriteDiscussionState.mock.invocationCallOrder[0]).toBeLessThan(
+      onPushQueued.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('没有成功入队时不会触发 onPushQueued', async () => {
+    const onPushQueued = jest.fn().mockResolvedValue(undefined);
+    mockAnalyzeMembers.mockResolvedValueOnce([
+      {
+        user_id: 'uA',
+        challenge_type: 'none',
+        needs_prompt: false,
+        analysis: 'uA 当前无需干预。',
+        content: '',
+        anchor: null,
+      },
+    ]);
+
+    await runActionLayer({
+      sessionId: SESSION,
+      perceptionResult: PERCEPTION_RESULT,
+      windowStart: WINDOW_START,
+      memberIds: MEMBERS,
+      summaryText: '当前讨论聚焦 MVP 范围与优先级。',
+      transcripts: TRANSCRIPTS,
+      onPushQueued,
+    });
+
+    expect(mockWritePushQueueItem).not.toHaveBeenCalled();
+    expect(onPushQueued).not.toHaveBeenCalled();
+  });
+
+  it('onPushQueued 失败时不会让行动层抛错', async () => {
+    const onPushQueued = jest.fn().mockRejectedValue(new Error('dispatcher wakeup failed'));
+
+    await expect(runActionLayer({
+      sessionId: SESSION,
+      perceptionResult: PERCEPTION_RESULT,
+      windowStart: WINDOW_START,
+      memberIds: MEMBERS,
+      summaryText: '当前讨论聚焦 MVP 范围与优先级。',
+      transcripts: TRANSCRIPTS,
+      onPushQueued,
+    })).resolves.toBeUndefined();
+
+    expect(mockWritePushQueueItem).toHaveBeenCalledTimes(1);
+    expect(onPushQueued).toHaveBeenCalledTimes(1);
+  });
 });

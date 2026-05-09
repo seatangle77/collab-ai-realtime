@@ -35,6 +35,7 @@ export class SessionWorker {
   private dispatchTimer: ReturnType<typeof setTimeout> | null = null;
   private infoGapCandidates: InfoGapKeywordCandidate[] = [];
   private lastGroupSilenceTriggerAt: number | null = null;
+  private dispatchInFlight = false;
   private running = false;
   private static readonly SUMMARY_LEAD_MS = 15_000;
   private static readonly DISPATCH_INTERVAL_MS = 120_000;
@@ -124,19 +125,38 @@ export class SessionWorker {
         SessionWorker.DISPATCH_INTERVAL_MS,
       );
     this.dispatchTimer = setTimeout(() => {
-      void runPushDispatcher(this.sessionId)
-        .catch((err) => {
-          logger.error('runPushDispatcher failed', {
-            sessionId: this.sessionId,
-            message: (err as Error).message,
-          });
-        })
+      this.triggerPushDispatcher('timer')
         .finally(() => {
           this.scheduleDispatchTimer(
             new Date(scheduledFor.getTime() + SessionWorker.DISPATCH_INTERVAL_MS),
           );
         });
     }, Math.max(0, scheduledFor.getTime() - Date.now()));
+  }
+
+  private async triggerPushDispatcher(reason: 'timer' | 'queued'): Promise<void> {
+    if (!this.running) return;
+    if (this.dispatchInFlight) {
+      logger.info('runPushDispatcher skipped because previous dispatch is still running', {
+        sessionId: this.sessionId,
+        reason,
+      });
+      return;
+    }
+
+    this.dispatchInFlight = true;
+    try {
+      logger.info('runPushDispatcher triggered', { sessionId: this.sessionId, reason });
+      await runPushDispatcher(this.sessionId);
+    } catch (err) {
+      logger.error('runPushDispatcher failed', {
+        sessionId: this.sessionId,
+        reason,
+        message: (err as Error).message,
+      });
+    } finally {
+      this.dispatchInFlight = false;
+    }
   }
 
   private nextAlignedAt(firstOffsetMs: number, intervalMs: number): Date {
@@ -325,6 +345,7 @@ export class SessionWorker {
         summaryText,
         transcripts,
         onGroupSilenceNotified: () => this.markGroupSilenceTriggered(Date.now()),
+        onPushQueued: () => this.triggerPushDispatcher('queued'),
       }).catch((err) => {
         logger.error('action failed', {
           sessionId: this.sessionId,

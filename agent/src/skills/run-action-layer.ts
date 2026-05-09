@@ -86,8 +86,17 @@ export async function runActionLayer(params: {
   summaryText: string;
   transcripts: Transcript[];
   onGroupSilenceNotified?: () => void;
+  onPushQueued?: () => void | Promise<void>;
 }): Promise<void> {
-  const { sessionId, perceptionResult, windowStart, memberIds, summaryText, transcripts } = params;
+  const {
+    sessionId,
+    perceptionResult,
+    windowStart,
+    memberIds,
+    summaryText,
+    transcripts,
+    onPushQueued,
+  } = params;
 
   if (memberIds.length === 0) {
     logger.info('行动层：成员列表为空，跳过', { sessionId });
@@ -294,4 +303,12 @@ export async function runActionLayer(params: {
   }
 
   logger.info(`行动层完成，入队数量=${persistedCount}`, { sessionId });
+
+  if (persistedCount > 0 && onPushQueued) {
+    try {
+      await onPushQueued();
+    } catch (err) {
+      logger.error('onPushQueued failed', { sessionId, message: (err as Error).message });
+    }
+  }
 }
