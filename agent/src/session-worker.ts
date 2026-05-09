@@ -306,13 +306,15 @@ export class SessionWorker {
       if (!perceptionResult) return;
 
       // Step2：读当前摘要与本轮发言（组级窗口 120s）
-      const summaryRow = await getLastSummary(this.sessionId);
+      const [summaryRow, transcripts] = await Promise.all([
+        getLastSummary(this.sessionId),
+        getTranscriptsInWindowPreferCache(
+          this.sessionId,
+          longWindowStart,
+          windowEnd,
+        ),
+      ]);
       const summaryText = summaryRow?.content ?? '';
-      const transcripts = await getTranscriptsInWindowPreferCache(
-        this.sessionId,
-        longWindowStart,
-        windowEnd,
-      );
 
       // Step3：行动层（heavy_model 单次大 JSON 调用，组级窗口 120s）
       void runActionLayer({

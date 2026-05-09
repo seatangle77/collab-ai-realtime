@@ -169,6 +169,60 @@ describe('SessionWorker windowing', () => {
     );
   });
 
+  it('成员分析链在感知层后并行读取摘要和窗口发言', async () => {
+    const startedAt = new Date('2026-04-22T10:00:00Z');
+    const scheduledFor = new Date('2026-04-22T10:03:00Z');
+    const worker = new SessionWorker('s1', startedAt);
+    let resolveSummary: ((value: { content: string }) => void) | undefined;
+
+    mockGetLastSummary.mockImplementationOnce(
+      () => new Promise((resolve) => {
+        resolveSummary = resolve;
+      }) as never,
+    );
+
+    const runPromise = (worker as any).runAnalysisPipeline(scheduledFor);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mockRunPerceptionPipeline).toHaveBeenCalledTimes(1);
+    expect(mockGetLastSummary).toHaveBeenCalledTimes(1);
+    expect(mockGetTranscriptsInWindowPreferCache).toHaveBeenCalledTimes(1);
+    expect(mockGetTranscriptsInWindowPreferCache).toHaveBeenCalledWith(
+      's1',
+      new Date('2026-04-22T10:01:00Z'),
+      scheduledFor,
+    );
+    expect(mockRunActionLayer).not.toHaveBeenCalled();
+
+    resolveSummary?.({ content: '并行摘要' });
+    await runPromise;
+
+    expect(mockRunActionLayer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        summaryText: '并行摘要',
+        transcripts: expect.arrayContaining([
+          expect.objectContaining({ transcript_id: 't1', text: '发言内容' }),
+        ]),
+      }),
+    );
+  });
+
+  it('成员分析链读取上下文失败时不启动行动层', async () => {
+    const startedAt = new Date('2026-04-22T10:00:00Z');
+    const scheduledFor = new Date('2026-04-22T10:03:00Z');
+    const worker = new SessionWorker('s1', startedAt);
+
+    mockGetLastSummary.mockRejectedValueOnce(new Error('summary db timeout') as never);
+
+    await (worker as any).runAnalysisPipeline(scheduledFor);
+
+    expect(mockGetLastSummary).toHaveBeenCalledTimes(1);
+    expect(mockGetTranscriptsInWindowPreferCache).toHaveBeenCalledTimes(1);
+    expect(mockRunActionLayer).not.toHaveBeenCalled();
+  });
+
   it('群体沉默检测、成员分析和摘要使用独立调度节奏', async () => {
     jest.useFakeTimers();
     const startedAt = new Date('2026-04-22T10:00:00Z');
