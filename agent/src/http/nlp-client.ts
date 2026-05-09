@@ -74,6 +74,12 @@ export interface TranscriptItem {
   text: string;
 }
 
+export interface VadSpeakingResult {
+  is_speaking: boolean;
+  silence_ms?: number | null;
+  last_voice_at_ms?: number | null;
+}
+
 // ── 客户端 ────────────────────────────────────────────────────────────────────
 
 function createNlpClient(): AxiosInstance {
@@ -410,7 +416,7 @@ export async function generateSummary(
  */
 export async function checkVadSpeaking(sessionId: string): Promise<boolean> {
   try {
-    const res = await client.get<{ is_speaking: boolean }>(
+    const res = await client.get<VadSpeakingResult>(
       `/api/internal/sessions/${sessionId}/vad-speaking`,
       { timeout: 2_000 },
     );

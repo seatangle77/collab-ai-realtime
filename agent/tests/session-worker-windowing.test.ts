@@ -272,6 +272,18 @@ describe('SessionWorker windowing', () => {
     expect(mockRunPushDispatcher).toHaveBeenLastCalledWith('s1');
   });
 
+  it('VAD 静默事件会主动触发一次 dispatcher', async () => {
+    const startedAt = new Date('2026-04-22T10:00:00Z');
+    const worker = new SessionWorker('s1', startedAt);
+    (worker as any).running = true;
+
+    worker.onVadSilenceAvailable();
+    await Promise.resolve();
+
+    expect(mockRunPushDispatcher).toHaveBeenCalledTimes(1);
+    expect(mockRunPushDispatcher).toHaveBeenCalledWith('s1');
+  });
+
   it('群体沉默检测、成员分析和摘要使用独立调度节奏', async () => {
     jest.useFakeTimers();
     const startedAt = new Date('2026-04-22T10:00:00Z');

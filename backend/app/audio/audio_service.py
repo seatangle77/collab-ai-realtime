@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import subprocess
 import threading
@@ -33,6 +34,8 @@ PCM_READER_HEARTBEAT_SEC = 5
 VAD_FRAME_BYTES = 320        # 16kHz * 16bit * 10ms = 320 bytes
 VAD_REDIS_TTL_SEC = 2        # is_speaking key 过期时间，超过则认为无人说话
 VAD_REDIS_WRITE_INTERVAL = 0.5  # 最多每 0.5s 写一次 Redis，避免过于频繁
+VAD_SILENCE_NOTIFY_MS = 700
+VAD_SILENCE_CHANNEL = "agent:vad_silence"
 
 
 class AudioService:
@@ -50,6 +53,8 @@ class AudioService:
         self._aac_stop_event = threading.Event()
         self._vad = webrtcvad.Vad(2) if webrtcvad is not None else None
         self._vad_last_redis_write: float = 0.0
+        self._vad_last_voice_at: float | None = None
+        self._vad_silence_notified = True
         self._vad_lock = threading.Lock()
         if self._vad is None:
             logger.warning("[AudioService] session=%s webrtcvad 不可用，VAD is_speaking 检测已禁用", self.session_id)
@@ -256,16 +261,48 @@ class AudioService:
         except Exception as e:
             logger.debug("[AudioService] session=%s 实时片段广播失败: %s", self.session_id, e)
 
-    async def _vad_mark_speaking(self) -> None:
-        """写 Redis is_speaking 信号，TTL=2s，过期即视为无人说话。"""
+    async def _vad_mark_speaking(self, voice_at: float) -> None:
+        """写 Redis VAD 信号，供 agent 推送前判断当前是否适合插入。"""
         client = get_redis_client()
         if client is None:
             return
         key = f"vad:{self.session_id}:is_speaking"
+        last_voice_key = f"vad:{self.session_id}:last_voice_at_ms"
+        last_voice_at_ms = int(voice_at * 1000)
         try:
-            await client.set(key, "1", ex=VAD_REDIS_TTL_SEC)
+            pipe = client.pipeline()
+            pipe.set(key, "1", ex=VAD_REDIS_TTL_SEC)
+            pipe.set(last_voice_key, str(last_voice_at_ms), ex=VAD_REDIS_TTL_SEC * 30)
+            await pipe.execute()
         except Exception as e:
             logger.warning("[AudioService] session=%s vad_redis_write_failed: %s", self.session_id, e)
+
+    async def _vad_publish_silence_if_due(self, voice_at: float) -> None:
+        await asyncio.sleep(VAD_SILENCE_NOTIFY_MS / 1000)
+
+        with self._vad_lock:
+            latest_voice_at = self._vad_last_voice_at
+            if latest_voice_at is None:
+                return
+            silence_ms = int((time.time() - latest_voice_at) * 1000)
+            if self._vad_silence_notified or latest_voice_at != voice_at or silence_ms < VAD_SILENCE_NOTIFY_MS:
+                return
+            self._vad_silence_notified = True
+
+        client = get_redis_client()
+        if client is None:
+            return
+
+        payload = {
+            "session_id": self.session_id,
+            "silence_ms": silence_ms,
+            "last_voice_at_ms": int(voice_at * 1000),
+        }
+        try:
+            await client.publish(VAD_SILENCE_CHANNEL, json.dumps(payload))
+            logger.debug("[AudioService] session=%s vad_silence_published payload=%s", self.session_id, payload)
+        except Exception as e:
+            logger.warning("[AudioService] session=%s vad_silence_publish_failed: %s", self.session_id, e)
 
     def _process_vad_chunk(self, pcm_chunk: bytes, vad_buf: bytearray) -> bytearray:
         """按 10ms 帧执行 VAD；检测到说话则写 Redis is_speaking 信号。"""
@@ -291,12 +328,15 @@ class AudioService:
         now = time.time()
         should_write = False
         with self._vad_lock:
+            self._vad_last_voice_at = now
+            self._vad_silence_notified = False
             if now - self._vad_last_redis_write >= VAD_REDIS_WRITE_INTERVAL:
                 self._vad_last_redis_write = now
                 should_write = True
 
         if should_write:
-            asyncio.run_coroutine_threadsafe(self._vad_mark_speaking(), self._loop)
+            asyncio.run_coroutine_threadsafe(self._vad_mark_speaking(now), self._loop)
+            asyncio.run_coroutine_threadsafe(self._vad_publish_silence_if_due(now), self._loop)
 
         return vad_buf
 

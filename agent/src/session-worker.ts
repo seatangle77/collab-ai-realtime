@@ -134,7 +134,11 @@ export class SessionWorker {
     }, Math.max(0, scheduledFor.getTime() - Date.now()));
   }
 
-  private async triggerPushDispatcher(reason: 'timer' | 'queued'): Promise<void> {
+  onVadSilenceAvailable(): void {
+    void this.triggerPushDispatcher('vad_silence');
+  }
+
+  private async triggerPushDispatcher(reason: 'timer' | 'queued' | 'vad_silence'): Promise<void> {
     if (!this.running) return;
     if (this.dispatchInFlight) {
       logger.info('runPushDispatcher skipped because previous dispatch is still running', {

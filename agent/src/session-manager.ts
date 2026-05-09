@@ -31,6 +31,16 @@ export class SessionManager {
     logger.info('SessionManager stopped');
   }
 
+  triggerVadSilence(sessionId: string): void {
+    const worker = this.workers.get(sessionId);
+    if (!worker) {
+      logger.debug('VAD silence event ignored because worker is not registered', { sessionId });
+      return;
+    }
+
+    worker.onVadSilenceAvailable();
+  }
+
   // ── 同步 ongoing sessions ─────────────────────────────────────────────────
 
   private async sync(): Promise<void> {
