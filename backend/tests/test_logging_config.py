@@ -37,7 +37,7 @@ def test_cst_formatter_formats_app_log_line() -> None:
     formatter = CSTFormatter(LOG_FORMAT)
     record = _record("service started")
 
-    assert formatter.format(record) == "2026-05-07 15:20:00 +08 [INFO] app.test: service started"
+    assert formatter.format(record) == "2026-05-07 15:20:00 +08 [INFO] service started"
 
 
 def test_cst_formatter_formats_uvicorn_access_log_line() -> None:

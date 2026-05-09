@@ -177,7 +177,7 @@ describe('runPushDispatcher', () => {
     expect(mockGetRecentDeliveredEmbeddings).toHaveBeenCalledWith(
       SESSION,
       'uA',
-      'stagnation',
+      ['stagnation', 'shallow'],
       2,
     );
     expect(mockWriteDiscussionState).not.toHaveBeenCalled();

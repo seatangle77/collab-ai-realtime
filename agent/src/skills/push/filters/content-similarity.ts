@@ -39,7 +39,7 @@ export async function contentSimilarityFilter(ctx: FilterContext): Promise<Filte
   const recentEmbeddings = await getRecentDeliveredEmbeddings(
     item.session_id,
     item.target_user_id,
-    item.state_type,
+    ['stagnation', 'shallow'],
     2,
   );
 

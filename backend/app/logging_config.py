@@ -6,7 +6,7 @@ from typing import Optional
 
 
 SHANGHAI_TZ = zoneinfo.ZoneInfo("Asia/Shanghai")
-LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
 ACCESS_LOG_FORMAT = '%(asctime)s [%(levelname)s] %(client_addr)s - "%(request_line)s" %(status_code)s'
 
 

@@ -572,7 +572,7 @@ export async function claimPendingPushQueue(
 export async function getRecentDeliveredEmbeddings(
   sessionId: string,
   userId: string,
-  stateType: string,
+  stateTypes: string[],
   limit = 2,
 ): Promise<Array<{ content_embedding: number[] }>> {
   const res = await pool.query<{ content_embedding_raw: string | null }>(
@@ -581,13 +581,13 @@ export async function getRecentDeliveredEmbeddings(
      JOIN discussion_states ds ON ds.id = pl.state_id
      WHERE pl.session_id = $1
        AND pl.target_user_id = $2
-       AND ds.state_type = $3
+       AND ds.state_type = ANY($3::text[])
        AND pl.push_channel IN ('web', 'app', 'glasses')
        AND pl.delivery_status = 'delivered'
        AND pl.content_embedding IS NOT NULL
      ORDER BY pl.triggered_at DESC
      LIMIT $4`,
-    [sessionId, userId, stateType, limit],
+    [sessionId, userId, stateTypes, limit],
   );
 
   return res.rows.map((row) => ({
