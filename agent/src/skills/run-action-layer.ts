@@ -5,6 +5,7 @@ import {
   writeDiscussionState,
   writeAiPushAnalysis,
   trimPendingMemberInterventionQueue,
+  isSessionOngoing,
 } from '../db/queries';
 import { embed, analyzeMembers } from '../http/nlp-client';
 import type { PipelineResult } from './run-perception-pipeline';
@@ -224,6 +225,24 @@ export async function runActionLayer(params: {
   }
 
   if (candidates.length === 0) {
+    logger.info(`行动层完成，入队数量=${persistedCount}`, { sessionId });
+    return;
+  }
+
+  const sessionStillOngoing = await isSessionOngoing(sessionId);
+  if (!sessionStillOngoing) {
+    logger.info('行动层：session 已结束，丢弃入队候选', { sessionId, candidate_count: candidates.length });
+    for (const { item, anchor, baseRow } of candidates) {
+      void writeAiPushAnalysis({
+        ...baseRow,
+        ai_needs_prompt: true,
+        ai_anchor: anchor ? toAnchorRecord(anchor) : null,
+        ai_analysis: item.analysis ?? null,
+        drop_reason: 'session_not_ongoing',
+      }).catch((err) => {
+        logger.error('writeAiPushAnalysis(session_not_ongoing) failed', { sessionId, message: (err as Error).message });
+      });
+    }
     logger.info(`行动层完成，入队数量=${persistedCount}`, { sessionId });
     return;
   }

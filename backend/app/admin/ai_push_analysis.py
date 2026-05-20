@@ -2,7 +2,7 @@
 """
 AI 推送分析记录管理接口
 每次结构化推送 AI 调用的原始结果，不论是否通过过滤均入库。
-drop_reason 取值：passed / needs_prompt_false / anchor_invalid / content_empty
+drop_reason 取值：passed / needs_prompt_false / anchor_invalid / content_empty / persist_failed / session_not_ongoing
 """
 from __future__ import annotations
 

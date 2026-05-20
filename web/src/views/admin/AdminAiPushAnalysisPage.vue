@@ -45,6 +45,7 @@ const DROP_REASON_OPTIONS = [
   { label: 'Anchor 校验失败', value: 'anchor_invalid' },
   { label: '文案为空', value: 'content_empty' },
   { label: '落库失败', value: 'persist_failed' },
+  { label: '会话已结束', value: 'session_not_ongoing' },
 ]
 
 function formatDropReason(reason: string | null) {
@@ -54,6 +55,7 @@ function formatDropReason(reason: string | null) {
     anchor_invalid: 'Anchor 校验失败',
     content_empty: '文案为空',
     persist_failed: '落库失败',
+    session_not_ongoing: '会话已结束',
   }
   return reason ? (map[reason] ?? reason) : '—'
 }
@@ -64,6 +66,7 @@ function dropReasonTagType(reason: string | null): 'success' | 'warning' | 'dang
   if (reason === 'anchor_invalid') return 'danger'
   if (reason === 'content_empty') return 'warning'
   if (reason === 'persist_failed') return 'danger'
+  if (reason === 'session_not_ongoing') return 'info'
   return ''
 }
 

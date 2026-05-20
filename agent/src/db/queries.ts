@@ -134,6 +134,15 @@ export async function getOngoingSessions(): Promise<Session[]> {
   return res.rows;
 }
 
+/** 检查指定会话是否仍为 ongoing 状态 */
+export async function isSessionOngoing(sessionId: string): Promise<boolean> {
+  const res = await pool.query<{ status: string }>(
+    `SELECT status FROM chat_sessions WHERE id = $1`,
+    [sessionId],
+  );
+  return res.rows[0]?.status === 'ongoing';
+}
+
 /** 获取会话的所有活跃成员 */
 export async function getSessionMembers(sessionId: string): Promise<SessionMember[]> {
   const res = await pool.query<SessionMember>(
@@ -870,7 +879,8 @@ export type AiPushDropReason =
   | 'needs_prompt_false'
   | 'anchor_invalid'
   | 'content_empty'
-  | 'persist_failed';
+  | 'persist_failed'
+  | 'session_not_ongoing';
 
 /** 写入 ai_push_analysis（每次结构化推送 AI 调用的原始结果，不论是否通过过滤） */
 export async function writeAiPushAnalysis(row: {

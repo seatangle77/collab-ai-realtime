@@ -18,6 +18,7 @@ jest.mock('../src/http/nlp-client');
 const mockWritePushQueueItem = queries.writePushQueueItem as jest.MockedFunction<typeof queries.writePushQueueItem>;
 const mockWriteDiscussionState = queries.writeDiscussionState as jest.MockedFunction<typeof queries.writeDiscussionState>;
 const mockWriteAiPushAnalysis = queries.writeAiPushAnalysis as jest.MockedFunction<typeof queries.writeAiPushAnalysis>;
+const mockIsSessionOngoing = queries.isSessionOngoing as jest.MockedFunction<typeof queries.isSessionOngoing>;
 const mockAnalyzeMembers = nlpClient.analyzeMembers as jest.MockedFunction<typeof nlpClient.analyzeMembers>;
 const mockEmbed = nlpClient.embed as jest.MockedFunction<typeof nlpClient.embed>;
 
@@ -75,6 +76,7 @@ describe('runActionLayer', () => {
     mockWritePushQueueItem.mockResolvedValue('pq_1');
     mockWriteDiscussionState.mockResolvedValue('ds_1');
     mockWriteAiPushAnalysis.mockResolvedValue(undefined);
+    mockIsSessionOngoing.mockResolvedValue(true);
     mockEmbed.mockResolvedValue([[0.1, 0.2, 0.3]]);
     mockAnalyzeMembers.mockResolvedValue([
       {
@@ -416,6 +418,37 @@ describe('runActionLayer', () => {
     expect(mockWriteDiscussionState).not.toHaveBeenCalled();
     expect(mockWriteAiPushAnalysis).not.toHaveBeenCalledWith(
       expect.objectContaining({ drop_reason: 'passed' }),
+    );
+  });
+
+  it('session 已结束时丢弃候选，不入队、不 embed、不触发分发', async () => {
+    const onPushQueued = jest.fn().mockResolvedValue(undefined);
+    mockIsSessionOngoing.mockResolvedValueOnce(false);
+
+    await runActionLayer({
+      sessionId: SESSION,
+      perceptionResult: PERCEPTION_RESULT,
+      windowStart: WINDOW_START,
+      memberIds: MEMBERS,
+      summaryText: '当前讨论聚焦 MVP 范围与优先级。',
+      transcripts: TRANSCRIPTS,
+      onPushQueued,
+    });
+
+    expect(mockIsSessionOngoing).toHaveBeenCalledWith(SESSION);
+    expect(mockEmbed).not.toHaveBeenCalled();
+    expect(mockWritePushQueueItem).not.toHaveBeenCalled();
+    expect(mockWriteDiscussionState).not.toHaveBeenCalled();
+    expect(onPushQueued).not.toHaveBeenCalled();
+    expect(mockWriteAiPushAnalysis).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session_id: SESSION,
+        target_user_id: 'uA',
+        state_type: 'stagnation',
+        ai_needs_prompt: true,
+        ai_content: '你可以先说说你最担心的是哪一点。',
+        drop_reason: 'session_not_ongoing',
+      }),
     );
   });
 

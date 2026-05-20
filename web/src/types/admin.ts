@@ -275,6 +275,7 @@ export type AiPushDropReason =
   | 'anchor_invalid'
   | 'content_empty'
   | 'persist_failed'
+  | 'session_not_ongoing'
 
 export interface AdminAiPushAnalysis {
   id: string

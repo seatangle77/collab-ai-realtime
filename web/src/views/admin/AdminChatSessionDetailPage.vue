@@ -221,6 +221,7 @@ function deliveryReasonLabel(value: string | null | undefined): string {
     content_empty:           '生成内容为空',
     anchor_invalid:          'anchor 校验失败',
     passed:                  '通过，已入队',
+    session_not_ongoing:     '会话已结束，未入队',
     hook_skip:               'hook 跳过',
   }
   return (value && map[value]) ? map[value] : (value ?? '-')
