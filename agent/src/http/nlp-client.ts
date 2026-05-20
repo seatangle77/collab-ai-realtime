@@ -260,7 +260,7 @@ export async function generateGroupSilence(params: {
     const res = await client.post<GroupSilenceResult>(
       '/api/nlp/generate_group_silence',
       params,
-      { timeout: 15_000 },
+      { timeout: 30_000 },
     );
     return res.data.content ?? '';
   } catch (err) {

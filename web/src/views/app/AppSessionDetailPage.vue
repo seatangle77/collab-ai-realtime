@@ -279,6 +279,31 @@ function upsertPushEvent(push: PushLogItem) {
   if (latestNew) maybeNotifyNewPush(latestNew)
 }
 
+function upsertLivePushEvent(params: {
+  content: string
+  target_user_id?: string | null
+  triggered_at?: string | null
+  analysis_run_id?: string | null
+  analysis_window_start?: string | null
+  delivery_reason: string
+}) {
+  upsertPushEvent({
+    id: `live-push-${params.triggered_at ?? Date.now()}-${params.content}`,
+    session_id: sessionId,
+    target_user_id: params.target_user_id ?? currentUser.value?.id ?? null,
+    state_id: null,
+    analysis_run_id: params.analysis_run_id ?? null,
+    analysis_window_start: params.analysis_window_start ?? null,
+    push_content: params.content,
+    push_channel: 'web',
+    jpush_message_id: null,
+    delivery_status: 'delivered',
+    delivery_reason: params.delivery_reason,
+    triggered_at: params.triggered_at ?? new Date().toISOString(),
+    delivered_at: null,
+  })
+}
+
 const wsStatusLabel = computed(() => {
   switch (wsStatus.value) {
     case 'connecting':
@@ -1149,20 +1174,25 @@ function handleWsMessage(event: MessageEvent<string>) {
     }
     const isForCurrentUser = !d.target_user_id || !currentUser.value?.id || d.target_user_id === currentUser.value.id
     if (d.content && isForCurrentUser) {
-      upsertPushEvent({
-        id: `live-push-${d.triggered_at ?? Date.now()}-${d.content}`,
-        session_id: sessionId,
-        target_user_id: d.target_user_id ?? currentUser.value?.id ?? null,
-        state_id: null,
+      upsertLivePushEvent({
+        content: d.content,
+        target_user_id: d.target_user_id ?? null,
+        triggered_at: d.triggered_at ?? null,
         analysis_run_id: d.analysis_run_id ?? null,
         analysis_window_start: d.analysis_window_start ?? null,
-        push_content: d.content,
-        push_channel: 'web',
-        jpush_message_id: null,
-        delivery_status: 'delivered',
         delivery_reason: 'ws_delivered',
-        triggered_at: d.triggered_at ?? new Date().toISOString(),
-        delivered_at: null,
+      })
+    }
+    return
+  }
+  if (msgType === 'group_notification') {
+    const d = data as { content?: string; triggered_at?: string | null }
+    if (d.content) {
+      upsertLivePushEvent({
+        content: d.content,
+        target_user_id: null,
+        triggered_at: d.triggered_at ?? null,
+        delivery_reason: 'group_ws_delivered',
       })
     }
     return

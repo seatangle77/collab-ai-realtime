@@ -241,12 +241,17 @@ test.describe('Step 6 - Push and InfoGap behaviors', () => {
       data: { content: '广播消息', target_user_id: null, triggered_at: '2026-03-01T10:00:06.000Z' },
     })
     await emitWs(page, {
+      type: 'group_notification',
+      data: { content: '群体破冰消息', triggered_at: '2026-03-01T10:00:07.000Z' },
+    })
+    await emitWs(page, {
       type: 'push_notification',
       data: { content: '发给别人', target_user_id: 'other-user', triggered_at: '2026-03-01T10:00:08.000Z' },
     })
 
     await expect(page.locator('.app-session-detail-ai-card').filter({ hasText: '发给当前用户' })).toBeVisible()
     await expect(page.locator('.app-session-detail-ai-card').filter({ hasText: '广播消息' })).toBeVisible()
+    await expect(page.locator('.app-session-detail-ai-card').filter({ hasText: '群体破冰消息' })).toBeVisible()
     await expect(page.locator('.app-session-detail-ai-card').filter({ hasText: '发给别人' })).toHaveCount(0)
   })
 
