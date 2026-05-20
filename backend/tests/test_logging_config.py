@@ -42,10 +42,8 @@ def test_cst_formatter_formats_app_log_line() -> None:
 
 def test_cst_formatter_formats_uvicorn_access_log_line() -> None:
     formatter = CSTFormatter(ACCESS_LOG_FORMAT)
-    record = _record()
-    record.client_addr = "127.0.0.1:5173"
-    record.request_line = "GET /db/ping HTTP/1.1"
-    record.status_code = 200
+    record = _record('%s - "%s %s HTTP/%s" %d')
+    record.args = ("127.0.0.1:5173", "GET", "/db/ping", "1.1", 200)
 
     assert (
         formatter.format(record)
