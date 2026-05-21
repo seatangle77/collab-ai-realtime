@@ -495,6 +495,9 @@ async function refreshAdminRealtimeData(options: { silent?: boolean } = {}) {
     ])
     session.value = sessionData
     lastRefreshedAt.value = new Date().toISOString()
+    if (activeTab.value === 'timeline') {
+      scrollTimelineToBottom(true)
+    }
   } catch (e: any) {
     if (!options.silent) {
       ElMessage.error(e?.message || '刷新会话详情失败')
