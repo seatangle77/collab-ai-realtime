@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 推送文案生成模块
-- info_gap               ≤ 40字，用户点击后触发，使用 fast_model
 - generate_group_silence  ≤ 30字，实时沉默检测触发，使用 fast_model
 - analyze_members_batch  全员分析，每2分钟触发，使用 reasoning_model（heavy），返回大JSON
 """
@@ -17,31 +16,7 @@ from ..settings import QWEN_CHAT_EXTRA_BODY, nlp_settings
 
 logger = logging.getLogger(__name__)
 
-# ── Prompt 模板 ───────────────────────────────────────────────────────────────
-
-_PROMPTS: dict[str, str] = {
-    "info_gap": (
-        "以下是当前小组讨论的摘要和最近的发言记录。\n"
-        "讨论摘要：{summary}\n"
-        "最近发言记录：{transcripts}\n"
-        "检测数据：基于讨论语境判断成员{username}对关键词\"{keyword}\"存在理解缺口"
-        "（参考语义相似度得分 {skw_score}）。\n"
-        "请根据当前讨论语境，为\"{keyword}\"生成一个简洁清晰的定义或相关论据，用自然友好的语气呈现，"
-        "帮助该成员更好地理解这个概念。要求：语气自然不说教，像朋友补充信息一样，不超过40字，"
-        "直接给出定义或论据，不要解释原因。"
-    ),
-}
-
-_SYSTEM_PROMPT = "你是一个温暖积极的讨论伙伴，擅长用简短自然的语言引导小组讨论。只输出提示内容本身，不要加任何前缀或解释。"
-
 # ── Qwen 调用 ─────────────────────────────────────────────────────────────────
-
-def _get_client() -> OpenAI:
-    return OpenAI(
-        api_key=nlp_settings.qwen_api_key,
-        base_url=nlp_settings.qwen_base_url,
-    )
-
 
 def _get_async_client() -> AsyncOpenAI:
     return AsyncOpenAI(
@@ -50,65 +25,11 @@ def _get_async_client() -> AsyncOpenAI:
     )
 
 
-async def generate_push_content(
-    trigger_type: str,
-    summary: str,
-    transcripts: str,
-    username: str = "",
-    silence_s: int = 0,
-    speaking_ratio: float = 0.0,
-    triggered_metrics: str = "",
-    keyword: str = "",
-    skw_score: float = 0.0,
-) -> str:
-    """
-    生成信息缺口触发的推送文案（异步）。
-    transcripts 传入格式：各成员发言拼接字符串，调用方负责格式化。
-    当前仅支持 trigger_type="info_gap"。
-    返回 AI 生成的文案字符串，失败时返回空字符串。
-    """
-    template = _PROMPTS.get(trigger_type)
-    if not template:
-        return ""
-
-    prompt = template.format(
-        summary=summary or "（暂无摘要）",
-        transcripts=transcripts or "（暂无发言）",
-        username=username,
-        silence_s=silence_s,
-        speaking_ratio=round(speaking_ratio * 100, 1),
-        triggered_metrics=triggered_metrics,
-        keyword=keyword,
-        skw_score=round(skw_score, 2),
+def _get_client() -> OpenAI:
+    return OpenAI(
+        api_key=nlp_settings.qwen_api_key,
+        base_url=nlp_settings.qwen_base_url,
     )
-
-    if not nlp_settings.qwen_api_key:
-        return ""
-
-    transcript_count = len([l for l in transcripts.splitlines() if l.strip()]) if transcripts else 0
-    logger.info(
-        "[NLP/push] input: trigger=%s user=%s silence_s=%s speaking_ratio=%s transcripts=%d条",
-        trigger_type, username or "—", silence_s, round(speaking_ratio * 100, 1), transcript_count,
-    )
-
-    try:
-        client = _get_async_client()
-        response = await client.chat.completions.create(
-            model=nlp_settings.fast_model,
-            max_tokens=80,
-            extra_body=QWEN_CHAT_EXTRA_BODY,
-            messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT},
-                {"role": "user",   "content": prompt},
-            ],
-        )
-        content = response.choices[0].message.content or ""
-        result = content.strip()
-        logger.info("[NLP/push] output: \"%s\" (%d字)", result, len(result))
-        return result
-    except Exception as e:
-        logger.warning("[NLP/push] 调用失败: %s", e)
-        return ""
 
 
 # ── group_silence：fast_model 生成一句破冰话题 ────────────────────────────────

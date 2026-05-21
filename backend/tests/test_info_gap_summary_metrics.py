@@ -159,108 +159,6 @@ def test_buttons_401_no_token():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# POST /api/sessions/{id}/info-gap/click
-# ══════════════════════════════════════════════════════════════════════════════
-
-def test_click_success():
-    user, token, session_id = _setup_ongoing_session("ClickOK")
-    btn_id = _seed_button(session_id, user["id"])
-    r = requests.post(f"{BASE_URL}/api/sessions/{session_id}/info-gap/click",
-                      headers=_auth(token), json={"button_id": btn_id})
-    if r.status_code != 200:
-        _assert_log(False, "POST click 成功", r.text)
-    data = r.json()
-    if data.get("success") is not True:
-        _assert_log(False, "POST click 返回 success=true", r.text)
-    if not isinstance(data.get("content"), str):
-        _assert_log(False, "POST click 返回 content 字段（str）", r.text)
-    if not isinstance(data.get("keyword"), str):
-        _assert_log(False, "POST click 返回 keyword 字段（str）", r.text)
-
-    # 验证再取一次 buttons 该按钮不出现（已 clicked）
-    r2 = requests.get(f"{BASE_URL}/api/sessions/{session_id}/info-gap/buttons",
-                      headers=_auth(token))
-    ids = [b["id"] for b in r2.json()]
-    if btn_id in ids:
-        _assert_log(False, "POST click 后按钮从 pending 列表消失", {"ids": ids})
-
-    r3 = requests.get(
-        f"{BASE_URL}/api/sessions/{session_id}/info-gap/buttons",
-        headers=_auth(token),
-        params={"include_all": "true"},
-    )
-    data3 = r3.json()
-    clicked = next((item for item in data3 if item["id"] == btn_id), None)
-    ok = r3.status_code == 200 and clicked is not None and clicked["status"] == "clicked"
-    _assert_log(ok, "POST click 后 include_all 列表仍可看到 clicked 按钮", data3 if not ok else None)
-
-
-def test_click_double_submit_second_should_conflict():
-    user, token, session_id = _setup_ongoing_session("ClickDouble")
-    btn_id = _seed_button(session_id, user["id"])
-    r1 = requests.post(
-        f"{BASE_URL}/api/sessions/{session_id}/info-gap/click",
-        headers=_auth(token), json={"button_id": btn_id}
-    )
-    if r1.status_code != 200:
-        _assert_log(False, "POST click 第一次应成功", r1.text)
-
-    r2 = requests.post(
-        f"{BASE_URL}/api/sessions/{session_id}/info-gap/click",
-        headers=_auth(token), json={"button_id": btn_id}
-    )
-    _assert_log(r2.status_code == 409, "POST click 第二次应 409（原子幂等）", r2.text)
-
-
-def test_click_not_found():
-    user, token, session_id = _setup_ongoing_session("ClickNF")
-    r = requests.post(f"{BASE_URL}/api/sessions/{session_id}/info-gap/click",
-                      headers=_auth(token), json={"button_id": "nonexistent_id"})
-    _assert_log(r.status_code == 404, "POST click 不存在 → 404", r.text)
-
-
-def test_click_already_clicked():
-    user, token, session_id = _setup_ongoing_session("ClickDup")
-    btn_id = _seed_button(session_id, user["id"], status="clicked")
-    r = requests.post(f"{BASE_URL}/api/sessions/{session_id}/info-gap/click",
-                      headers=_auth(token), json={"button_id": btn_id})
-    _assert_log(r.status_code == 409, "POST click 已点击 → 409", r.text)
-
-
-def test_click_expired():
-    user, token, session_id = _setup_ongoing_session("ClickExp")
-    btn_id = _seed_button(session_id, user["id"], status="expired")
-    r = requests.post(f"{BASE_URL}/api/sessions/{session_id}/info-gap/click",
-                      headers=_auth(token), json={"button_id": btn_id})
-    _assert_log(r.status_code == 409, "POST click expired → 409", r.text)
-
-
-def test_click_other_users_button():
-    user1, token1, session_id = _setup_ongoing_session("ClickOth1")
-    user2, token2 = _register_and_login("ClickOth2")
-    btn_id = _seed_button(session_id, user1["id"])
-    r = requests.post(f"{BASE_URL}/api/sessions/{session_id}/info-gap/click",
-                      headers=_auth(token2), json={"button_id": btn_id})
-    _assert_log(r.status_code in (403, 404), "POST click 他人按钮 → 403/404", r.text)
-
-
-def test_click_403_non_member():
-    user, token, session_id = _setup_ongoing_session("ClickFb")
-    btn_id = _seed_button(session_id, user["id"])
-    _, outsider_token = _register_and_login("ClickFbOut")
-    r = requests.post(f"{BASE_URL}/api/sessions/{session_id}/info-gap/click",
-                      headers=_auth(outsider_token), json={"button_id": btn_id})
-    _assert_log(r.status_code == 403, "POST click 非成员 → 403", r.text)
-
-
-def test_click_missing_body():
-    user, token, session_id = _setup_ongoing_session("ClickMiss")
-    r = requests.post(f"{BASE_URL}/api/sessions/{session_id}/info-gap/click",
-                      headers=_auth(token), json={})
-    _assert_log(r.status_code == 422, "POST click 缺 button_id → 422", r.text)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
 # GET /api/sessions/{id}/summary
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -400,17 +298,6 @@ def main():
         test_buttons_include_all_returns_pending_and_clicked(),
         test_buttons_403_non_member(),
         test_buttons_401_no_token(),
-    ]
-    print("\n===== POST info-gap/click =====")
-    results += [
-        test_click_success(),
-        test_click_double_submit_second_should_conflict(),
-        test_click_not_found(),
-        test_click_already_clicked(),
-        test_click_expired(),
-        test_click_other_users_button(),
-        test_click_403_non_member(),
-        test_click_missing_body(),
     ]
     print("\n===== GET summary =====")
     results += [
