@@ -48,6 +48,7 @@ interface PushTimelineItem {
   key: string
   sortAt: number
   push: AdminPushLog
+  recipients: string[]
 }
 
 type TimelineItem = TranscriptTimelineItem | PushTimelineItem
@@ -283,6 +284,18 @@ function dedupeTimelinePushLogs(items: AdminPushLog[]): AdminPushLog[] {
   return dedupePushLogs(items)
 }
 
+function buildTimelinePushGroupKey(item: AdminPushLog): string | null {
+  const content = (item.push_content || '').trim()
+  if (!content) return null
+  const triggeredAt = parseTime(item.triggered_at)
+  const timeBucket = triggeredAt == null ? 'na' : String(Math.floor(triggeredAt / 1000))
+  return [content, timeBucket].join('::')
+}
+
+function getPushRecipientLabel(item: AdminPushLog): string | null {
+  return item.target_user_name || item.target_user_id || null
+}
+
 const transcriptTimelineItems = computed<TimelineItem[]>(() => {
   const transcriptItems: TimelineItem[] = allTranscripts.value
     .map((item) => {
@@ -295,16 +308,31 @@ const transcriptTimelineItems = computed<TimelineItem[]>(() => {
       }
     })
 
-  const pushItems: TimelineItem[] = dedupeTimelinePushLogs(pushLogs.value)
-    .map((item) => {
-      const sortAt = parseTime(item.triggered_at) ?? 0
-      return {
-        kind: 'push' as const,
-        key: `push-${item.id}`,
-        sortAt,
-        push: item,
+  const pushGroups = new Map<string, PushTimelineItem>()
+  for (const item of dedupeTimelinePushLogs(pushLogs.value)) {
+    const groupKey = buildTimelinePushGroupKey(item) ?? `id-${item.id}`
+    const sortAt = parseTime(item.triggered_at) ?? 0
+    const recipient = getPushRecipientLabel(item)
+    const existing = pushGroups.get(groupKey)
+    if (existing) {
+      if (recipient && !existing.recipients.includes(recipient)) {
+        existing.recipients.push(recipient)
       }
+      if (sortAt < existing.sortAt) {
+        existing.sortAt = sortAt
+        existing.push = item
+      }
+      continue
+    }
+    pushGroups.set(groupKey, {
+      kind: 'push',
+      key: `push-${groupKey}`,
+      sortAt,
+      push: item,
+      recipients: recipient ? [recipient] : [],
     })
+  }
+  const pushItems: TimelineItem[] = Array.from(pushGroups.values())
 
   return [...transcriptItems, ...pushItems].sort((a, b) => a.sortAt - b.sortAt)
 })
@@ -892,8 +920,8 @@ onUnmounted(() => {
                     <div class="timeline-bubble__meta">
                       <span class="timeline-bubble__speaker">◈ AI 建议</span>
                       <span class="timeline-bubble__time">{{ formatClock(item.push.triggered_at) }}</span>
-                      <span class="timeline-bubble__recipient">
-                        → 发给：{{ item.push.target_user_name || item.push.target_user_id }}
+                      <span v-if="item.recipients.length" class="timeline-bubble__recipient">
+                        → 发给：{{ item.recipients.join('、') }}
                       </span>
                     </div>
                     <div class="timeline-bubble__content">{{ item.push.push_content || '-' }}</div>

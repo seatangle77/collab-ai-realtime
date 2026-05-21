@@ -451,6 +451,36 @@ test.describe('AdminChatSessionDetail - 新布局', () => {
     await expect(page.locator('.timeline-bubble--push')).toHaveCount(1)
     await expect(page.locator('.timeline-bubble--push')).toContainText('后台折叠的重复建议')
   })
+
+  test('F-5: 同一条 AI 建议发给多个成员时讨论实录只显示一个气泡', async ({ page }) => {
+    const leader = await registerAndLogin('f5-leader')
+    const memberA = await registerAndLogin('f5-member-a')
+    const memberB = await registerAndLogin('f5-member-b')
+    const groupId = await createGroup(leader.accessToken, `Admin-SD-F5群-${Date.now()}`)
+    for (const member of [memberA, memberB]) {
+      const joinRes = await fetch(`${API_BASE}/api/groups/${groupId}/join`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${member.accessToken}` },
+      })
+      if (!joinRes.ok) throw new Error(`加入群组失败: ${await joinRes.text()}`)
+    }
+    const sessionId = await createSession(leader.accessToken, groupId, `F5多人推送折叠测试-${Date.now()}`)
+
+    await addPushLog(sessionId, memberA.userId, '同一条多人 AI 建议', {
+      triggeredAt: '2026-02-01T08:00:20.123Z',
+    })
+    await addPushLog(sessionId, memberB.userId, '同一条多人 AI 建议', {
+      triggeredAt: '2026-02-01T08:00:20.789Z',
+    })
+
+    await loginAsAdminAndGoToDetail(page, sessionId)
+    await page.getByRole('tab', { name: '讨论实录' }).click()
+
+    await expect(page.locator('.timeline-bubble--push')).toHaveCount(1)
+    await expect(page.locator('.timeline-bubble--push')).toContainText('同一条多人 AI 建议')
+    await expect(page.locator('.timeline-bubble__recipient')).toContainText('Admin SD f5-member-a')
+    await expect(page.locator('.timeline-bubble__recipient')).toContainText('Admin SD f5-member-b')
+  })
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
