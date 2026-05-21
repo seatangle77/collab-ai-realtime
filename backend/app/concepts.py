@@ -22,7 +22,7 @@ from .auth import get_current_user
 from .db import get_db, get_sessionmaker
 from .jpush_client import send_push_to_registration_id
 from .redis_client import get_redis_client
-from .settings import nlp_settings
+from .settings import QWEN_CHAT_EXTRA_BODY, nlp_settings
 
 router = APIRouter(prefix="/api", tags=["concepts"])
 logger = logging.getLogger(__name__)
@@ -91,6 +91,7 @@ async def _generate_explanation(keyword: str) -> str:
             client.chat.completions.create(
                 model=nlp_settings.fast_model,
                 max_tokens=80,
+                extra_body=QWEN_CHAT_EXTRA_BODY,
                 messages=[
                     {"role": "system", "content": _SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},

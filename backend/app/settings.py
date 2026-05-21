@@ -86,8 +86,8 @@ class NLPSettings(BaseSettings):
     )
 
     embed_model: str = "paraphrase-multilingual-MiniLM-L12-v2"
-    fast_model: str = "qwen-turbo"
-    reasoning_model: str = "qwen-plus"
+    fast_model: str = "qwen3.6-flash"
+    reasoning_model: str = "qwen3.6-plus"
     qwen_api_key: str = Field(default="")
     qwen_api_key_local: str = Field(default="", exclude=True)
     qwen_api_key_production: str = Field(default="", exclude=True)
@@ -100,6 +100,8 @@ class NLPSettings(BaseSettings):
 
 
 nlp_settings = NLPSettings()
+
+QWEN_CHAT_EXTRA_BODY = {"enable_thinking": False}
 
 
 class JPushSettings(BaseSettings):

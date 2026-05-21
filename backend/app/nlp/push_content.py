@@ -13,7 +13,7 @@ from typing import Any
 
 from openai import AsyncOpenAI, OpenAI
 
-from ..settings import nlp_settings
+from ..settings import QWEN_CHAT_EXTRA_BODY, nlp_settings
 
 logger = logging.getLogger(__name__)
 
@@ -62,8 +62,9 @@ async def generate_push_content(
     skw_score: float = 0.0,
 ) -> str:
     """
-    根据触发类型生成推送文案（异步）。
+    生成信息缺口触发的推送文案（异步）。
     transcripts 传入格式：各成员发言拼接字符串，调用方负责格式化。
+    当前仅支持 trigger_type="info_gap"。
     返回 AI 生成的文案字符串，失败时返回空字符串。
     """
     template = _PROMPTS.get(trigger_type)
@@ -93,8 +94,9 @@ async def generate_push_content(
     try:
         client = _get_async_client()
         response = await client.chat.completions.create(
-            model=nlp_settings.fast_model if trigger_type == "info_gap" else nlp_settings.reasoning_model,
+            model=nlp_settings.fast_model,
             max_tokens=80,
+            extra_body=QWEN_CHAT_EXTRA_BODY,
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user",   "content": prompt},
@@ -145,6 +147,7 @@ async def generate_group_silence(
         response = await client.chat.completions.create(
             model=nlp_settings.fast_model,
             max_tokens=60,
+            extra_body=QWEN_CHAT_EXTRA_BODY,
             messages=[
                 {"role": "system", "content": _GROUP_SILENCE_SYSTEM},
                 {"role": "user",   "content": prompt},
@@ -267,6 +270,7 @@ async def analyze_members_batch(
         response = await client.chat.completions.create(
             model=nlp_settings.reasoning_model,
             max_tokens=1024,
+            extra_body=QWEN_CHAT_EXTRA_BODY,
             messages=[
                 {"role": "system", "content": _ANALYZE_MEMBERS_SYSTEM},
                 {"role": "user",   "content": prompt},

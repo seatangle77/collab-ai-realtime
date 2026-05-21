@@ -12,7 +12,7 @@ from typing import Any
 
 from openai import OpenAI
 
-from ..settings import nlp_settings
+from ..settings import QWEN_CHAT_EXTRA_BODY, nlp_settings
 from . import embedder, similarity
 
 logger = logging.getLogger(__name__)
@@ -131,6 +131,7 @@ def _validate_keywords(
         response = client.chat.completions.create(
             model=nlp_settings.fast_model,
             max_tokens=300,
+            extra_body=QWEN_CHAT_EXTRA_BODY,
             messages=[
                 {"role": "system", "content": _VALIDATE_SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
@@ -294,6 +295,7 @@ def recall_with_gap(member_texts: dict[str, str]) -> dict[str, Any]:
         response = client.chat.completions.create(
             model=nlp_settings.reasoning_model,
             max_tokens=600,
+            extra_body=QWEN_CHAT_EXTRA_BODY,
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},

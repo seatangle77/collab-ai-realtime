@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from openai import OpenAI
 
-from ..settings import nlp_settings
+from ..settings import QWEN_CHAT_EXTRA_BODY, nlp_settings
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +78,7 @@ def generate_summary(
         response = client.chat.completions.create(
             model=nlp_settings.reasoning_model,
             max_tokens=300,
+            extra_body=QWEN_CHAT_EXTRA_BODY,
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user",   "content": prompt},

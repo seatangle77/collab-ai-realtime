@@ -10,7 +10,7 @@ from typing import TypedDict
 
 from openai import OpenAI
 
-from ..settings import nlp_settings
+from ..settings import QWEN_CHAT_EXTRA_BODY, nlp_settings
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +129,7 @@ def batch_has_reasoning(members: list[MemberReasoningInput]) -> list[MemberReaso
         response = client.chat.completions.create(
             model=nlp_settings.fast_model,
             max_tokens=512,
+            extra_body=QWEN_CHAT_EXTRA_BODY,
             messages=[
                 {"role": "system", "content": _BATCH_SYSTEM},
                 {"role": "user",   "content": prompt},
