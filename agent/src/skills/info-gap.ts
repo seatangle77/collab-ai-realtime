@@ -161,7 +161,7 @@ export async function recallInfoGapKeywords(
   }
 
   const activeMemberTexts = await buildActiveMemberTexts(sessionId, windowStart, windowEnd, memberIds);
-  if (Object.keys(activeMemberTexts).length < 2) {
+  if (Object.keys(activeMemberTexts).length < 1) {
     return { candidates: [], activeMemberTexts };
   }
 
@@ -233,7 +233,7 @@ export async function decideInfoGapButtons(input: InfoGapDecisionInput): Promise
   const activeMembers = memberIds.filter((uid) =>
     candidates.some((item) => item.activeMemberIds.includes(uid)),
   );
-  if (activeMembers.length < 2) {
+  if (activeMembers.length < 1) {
     return { keywords: words, scores: {} };
   }
 
