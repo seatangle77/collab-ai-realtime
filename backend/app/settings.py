@@ -91,7 +91,7 @@ class NLPSettings(BaseSettings):
     qwen_api_key: str = Field(default="")
     qwen_api_key_local: str = Field(default="", exclude=True)
     qwen_api_key_production: str = Field(default="", exclude=True)
-    qwen_base_url: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    qwen_base_url: str = "https://cn-hongkong.dashscope.aliyuncs.com/compatible-mode/v1"
 
     def model_post_init(self, __context: object) -> None:
         env_key = self.qwen_api_key_production if APP_ENV in {"prod", "production"} else self.qwen_api_key_local
