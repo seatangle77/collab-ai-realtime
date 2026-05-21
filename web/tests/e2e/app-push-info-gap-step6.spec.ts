@@ -189,12 +189,17 @@ async function mockApis(
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
   })
 
-  await page.route(`**/api/sessions/${session.id}/info-gap/click`, async (route) => {
+  await page.route(`**/api/concepts/lookup`, async (route) => {
     if (options.clickShouldFail) {
       await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: 'mock failure' }) })
       return
     }
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) })
+    const body = JSON.parse(route.request().postData() ?? '{}') as { keyword?: string }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ keyword: body.keyword ?? '', content: 'mock概念解释' }),
+    })
   })
 }
 

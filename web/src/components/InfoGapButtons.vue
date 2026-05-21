@@ -30,22 +30,28 @@ async function handleClick(btn: InfoGapButton) {
   try {
     const baseURL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? ''
     const token = window.localStorage.getItem('app_access_token')
-    const res = await fetch(baseURL + `/api/sessions/${props.sessionId}/info-gap/click`, {
+    const res = await fetch(baseURL + `/api/concepts/lookup`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ button_id: btn.id }),
+      body: JSON.stringify({
+        keyword: btn.keyword,
+        button_id: btn.id,
+        session_id: props.sessionId,
+      }),
     })
 
     if (!res.ok) {
-      throw new Error(`click failed: status=${res.status}`)
+      throw new Error(`lookup failed: status=${res.status}`)
     }
 
-    const data = await res.json() as { success: boolean; content?: string; keyword?: string }
+    const data = await res.json() as { keyword: string; content: string }
     const content = data.content ?? ''
-    emit('clicked', btn.id, content, btn.keyword)
+    if (content) {
+      emit('clicked', btn.id, content, btn.keyword)
+    }
   } catch {
     // 静默失败，不打断用户
   } finally {

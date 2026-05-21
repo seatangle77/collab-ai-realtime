@@ -32,6 +32,7 @@ from .nlp import embedder as nlp_embedder
 from .nlp.segmenter import get_pipeline as get_nlp_pipeline
 from .settings import nlp_settings
 from .info_gap import router as info_gap_router
+from .concepts import router as concepts_router
 from .discussion_summary import router as discussion_summary_router
 from .window_metrics_api import router as window_metrics_router
 from .admin.push_queue import router as admin_push_queue_router
@@ -103,6 +104,7 @@ app.include_router(admin_info_gap_recall_analysis_router)
 app.include_router(ws_sessions_router)
 app.include_router(nlp_router)
 app.include_router(info_gap_router)
+app.include_router(concepts_router)
 app.include_router(discussion_summary_router)
 app.include_router(window_metrics_router)
 app.include_router(test_seed_router)

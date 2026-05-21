@@ -334,9 +334,9 @@ test.describe('InfoGapButtons - 信息缺口关键词按钮', () => {
     await page.goto(`/app/sessions/${sessionId}`)
     await page.waitForTimeout(2000)
 
-    // mock API click endpoint
-    await page.route(`**/api/sessions/${sessionId}/info-gap/click`, async (route) => {
-      await route.fulfill({ status: 200, body: JSON.stringify({ success: true }) })
+    // mock concepts lookup endpoint
+    await page.route(`**/api/concepts/lookup`, async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ keyword: '可点击词', content: 'mock概念解释' }) })
     })
 
     await injectWsMessage(page, {
@@ -366,9 +366,9 @@ test.describe('InfoGapButtons - 信息缺口关键词按钮', () => {
     await page.waitForTimeout(2000)
 
     let capturedBody: Record<string, unknown> | null = null
-    await page.route(`**/api/sessions/${sessionId}/info-gap/click`, async (route) => {
+    await page.route(`**/api/concepts/lookup`, async (route) => {
       capturedBody = JSON.parse(route.request().postData() ?? '{}')
-      await route.fulfill({ status: 200, body: JSON.stringify({ success: true }) })
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ keyword: '请求验证', content: 'mock概念解释' }) })
     })
 
     await injectWsMessage(page, {
@@ -380,7 +380,9 @@ test.describe('InfoGapButtons - 信息缺口关键词按钮', () => {
     await page.waitForTimeout(500)
 
     expect(capturedBody).not.toBeNull()
+    expect(capturedBody!['keyword']).toBe('请求验证')
     expect(capturedBody!['button_id']).toBe('btn_req_005')
+    expect(capturedBody!['session_id']).toBe(sessionId)
   })
 
   test('B-5: 点击失败（API 500）→ 按钮不变灰，静默处理', async ({ page }) => {
@@ -391,7 +393,7 @@ test.describe('InfoGapButtons - 信息缺口关键词按钮', () => {
     await page.goto(`/app/sessions/${sessionId}`)
     await page.waitForTimeout(2000)
 
-    await page.route(`**/api/sessions/${sessionId}/info-gap/click`, async (route) => {
+    await page.route(`**/api/concepts/lookup`, async (route) => {
       await route.fulfill({ status: 500, body: 'Internal Server Error' })
     })
 
