@@ -3,6 +3,7 @@
 set -e
 
 export TZ=Asia/Shanghai
+export APP_ENV=production
 
 cd /var/www/collab-ai-realtime/backend
 source /var/www/collab-ai-realtime/venv/bin/activate

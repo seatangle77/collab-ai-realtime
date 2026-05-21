@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -14,13 +15,20 @@ SECRETS_FILE = str(BACKEND_DIR.parent / "secrets.env")
 # 提前加载密钥文件，使 os.getenv() 全局可见（auth.py 等直接读环境变量的地方）
 load_dotenv(SECRETS_FILE, override=False)
 
+APP_ENV = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("NODE_ENV") or "local").lower()
 
-_ENV_FILES = (
-    SECRETS_FILE,                          # 统一密钥（不进git）
-    str(BACKEND_DIR / ".env.production"),  # 生产配置（可进git）
-    "/etc/collab-ai-realtime.env",         # 线上覆盖（不进git）
-    str(BACKEND_DIR / ".env.local"),       # 本地配置（可进git）
-)
+if APP_ENV in {"prod", "production"}:
+    _ENV_FILES = (
+        SECRETS_FILE,                          # 统一密钥（不进git，线上保留自己的文件）
+        str(BACKEND_DIR / ".env.production"),  # 生产配置（可进git）
+        "/etc/collab-ai-realtime.env",         # 线上覆盖（不进git）
+    )
+else:
+    _ENV_FILES = (
+        SECRETS_FILE,                          # 本地密钥（不进git）
+        str(BACKEND_DIR / ".env.production"),  # 默认配置
+        str(BACKEND_DIR / ".env.local"),       # 本地覆盖
+    )
 
 
 class Settings(BaseSettings):
@@ -81,7 +89,14 @@ class NLPSettings(BaseSettings):
     fast_model: str = "qwen-turbo"
     reasoning_model: str = "qwen-plus"
     qwen_api_key: str = Field(default="")
+    qwen_api_key_local: str = Field(default="", exclude=True)
+    qwen_api_key_production: str = Field(default="", exclude=True)
     qwen_base_url: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+
+    def model_post_init(self, __context: object) -> None:
+        env_key = self.qwen_api_key_production if APP_ENV in {"prod", "production"} else self.qwen_api_key_local
+        if env_key:
+            self.qwen_api_key = env_key
 
 
 nlp_settings = NLPSettings()
