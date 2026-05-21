@@ -59,10 +59,12 @@ describe('SessionManager VAD silence events', () => {
     manager.start();
     await Promise.resolve();
 
-    manager.triggerVadSilence('s1');
+    const event = { session_id: 's1', silence_ms: 600, last_voice_at_ms: 1713779970000 };
+    manager.triggerVadSilence(event);
 
     const worker = MockSessionWorker.mock.results[0].value;
     expect(worker.onVadSilenceAvailable).toHaveBeenCalledTimes(1);
+    expect(worker.onVadSilenceAvailable).toHaveBeenCalledWith(event);
 
     manager.stop();
   });
@@ -70,6 +72,6 @@ describe('SessionManager VAD silence events', () => {
   it('未知 session 的 VAD 静默事件会被忽略', () => {
     const manager = new SessionManager();
 
-    expect(() => manager.triggerVadSilence('missing-session')).not.toThrow();
+    expect(() => manager.triggerVadSilence({ session_id: 'missing-session' })).not.toThrow();
   });
 });

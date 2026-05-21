@@ -34,7 +34,7 @@ PCM_READER_HEARTBEAT_SEC = 5
 VAD_FRAME_BYTES = 320        # 16kHz * 16bit * 10ms = 320 bytes
 VAD_REDIS_TTL_SEC = 2        # is_speaking key 过期时间，超过则认为无人说话
 VAD_REDIS_WRITE_INTERVAL = 0.5  # 最多每 0.5s 写一次 Redis，避免过于频繁
-VAD_SILENCE_NOTIFY_MS = 700
+VAD_SILENCE_NOTIFY_MS = 600
 VAD_SILENCE_CHANNEL = "agent:vad_silence"
 
 
@@ -55,6 +55,7 @@ class AudioService:
         self._vad_last_redis_write: float = 0.0
         self._vad_last_voice_at: float | None = None
         self._vad_silence_notified = True
+        self._vad_silence_future: Any = None
         self._vad_lock = threading.Lock()
         if self._vad is None:
             logger.warning("[AudioService] session=%s webrtcvad 不可用，VAD is_speaking 检测已禁用", self.session_id)
@@ -327,16 +328,24 @@ class AudioService:
 
         now = time.time()
         should_write = False
+        previous_silence_future = None
         with self._vad_lock:
             self._vad_last_voice_at = now
             self._vad_silence_notified = False
+            previous_silence_future = self._vad_silence_future
             if now - self._vad_last_redis_write >= VAD_REDIS_WRITE_INTERVAL:
                 self._vad_last_redis_write = now
                 should_write = True
 
+        if previous_silence_future is not None and not previous_silence_future.done():
+            previous_silence_future.cancel()
+
         if should_write:
             asyncio.run_coroutine_threadsafe(self._vad_mark_speaking(now), self._loop)
-            asyncio.run_coroutine_threadsafe(self._vad_publish_silence_if_due(now), self._loop)
+
+        silence_future = asyncio.run_coroutine_threadsafe(self._vad_publish_silence_if_due(now), self._loop)
+        with self._vad_lock:
+            self._vad_silence_future = silence_future
 
         return vad_buf
 

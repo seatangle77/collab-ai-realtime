@@ -226,12 +226,12 @@ def test_30_vad_detects_speech_and_submits_mark_task():
 
     with patch("app.audio.audio_service.asyncio.run_coroutine_threadsafe", side_effect=_submit) as mock_submit:
         remaining = service._process_vad_chunk(b"\x00" * 3200, bytearray())
-        ok = mock_submit.call_count == 1 and remaining == bytearray()
-        _log(ok, "30: VAD 检测到语音后提交 _vad_mark_speaking", f"call_count={mock_submit.call_count}" if not ok else None)
+        ok = mock_submit.call_count == 2 and remaining == bytearray()
+        _log(ok, "30: VAD 检测到语音后提交 speaking 写入和静默定时任务", f"call_count={mock_submit.call_count}" if not ok else None)
 
 
 def test_31_vad_silence_threshold_and_cooldown():
-    """31: VAD Redis 写入满足节流条件前不会重复提交"""
+    """31: VAD Redis 写入节流，但静默定时任务会随最新语音重置"""
     sid = "s_edge_31"
     service = AudioService(sid)
 
@@ -252,8 +252,8 @@ def test_31_vad_silence_threshold_and_cooldown():
          patch("app.audio.audio_service.time.time", side_effect=[100.0, 100.1]):
         service._process_vad_chunk(b"\x00" * 3200, bytearray())
         service._process_vad_chunk(b"\x00" * 3200, bytearray())
-        ok = mock_submit.call_count == 1
-        _log(ok, "31: VAD Redis 写入节流生效", f"call_count={mock_submit.call_count}" if not ok else None)
+        ok = mock_submit.call_count == 3
+        _log(ok, "31: VAD Redis 写入节流，静默定时任务持续重置", f"call_count={mock_submit.call_count}" if not ok else None)
 
 
 # ── 入口 ──────────────────────────────────────────────────────────

@@ -1,7 +1,6 @@
 jest.mock('../src/config', () => ({
   config: {
     agent: {
-      silenceIntervalMs: 30_000,
       analysisIntervalMs: 60_000,
       infoGapIntervalMs: 60_000,
       infoGapDecisionIntervalMs: 120_000,
@@ -22,7 +21,6 @@ jest.mock('../src/logger', () => ({
 
 jest.mock('../src/db/queries', () => ({
   getSessionMembers: jest.fn(),
-  getLastSpeakEndGlobal: jest.fn(),
   getLastSummary: jest.fn(),
   getTranscriptsInWindowPreferCache: jest.fn(),
   writeDiscussionState: jest.fn(),
@@ -51,6 +49,7 @@ jest.mock('../src/skills/info-gap', () => ({
 
 jest.mock('../src/http/nlp-client', () => ({
   generateGroupSilence: jest.fn(),
+  getVadSpeakingState: jest.fn(),
   notifyGroupSilence: jest.fn(),
 }));
 
@@ -73,8 +72,8 @@ const mockRunSummary = runSummary as jest.MockedFunction<typeof runSummary>;
 const mockRunPushDispatcher = runPushDispatcher as jest.MockedFunction<typeof runPushDispatcher>;
 const mockRecallInfoGapKeywords = recallInfoGapKeywords as jest.MockedFunction<typeof recallInfoGapKeywords>;
 const mockDecideInfoGapButtons = decideInfoGapButtons as jest.MockedFunction<typeof decideInfoGapButtons>;
-const mockGetLastSpeakEndGlobal = queries.getLastSpeakEndGlobal as jest.MockedFunction<typeof queries.getLastSpeakEndGlobal>;
 const mockGenerateGroupSilence = nlpClient.generateGroupSilence as jest.MockedFunction<typeof nlpClient.generateGroupSilence>;
+const mockGetVadSpeakingState = nlpClient.getVadSpeakingState as jest.MockedFunction<typeof nlpClient.getVadSpeakingState>;
 const mockNotifyGroupSilence = nlpClient.notifyGroupSilence as jest.MockedFunction<typeof nlpClient.notifyGroupSilence>;
 
 const PERCEPTION_RESULT = {
@@ -98,7 +97,6 @@ describe('SessionWorker windowing', () => {
     jest.resetAllMocks();
     mockGetSessionMembers.mockResolvedValue([{ user_id: 'u1' }] as never);
     mockGetLastSummary.mockResolvedValue({ content: '摘要' } as never);
-    mockGetLastSpeakEndGlobal.mockResolvedValue(null as never);
     mockGetTranscriptsInWindowPreferCache.mockResolvedValue([
       {
         transcript_id: 't1',
@@ -114,6 +112,7 @@ describe('SessionWorker windowing', () => {
     mockRecallInfoGapKeywords.mockResolvedValue({ candidates: [], activeMemberTexts: {} });
     mockDecideInfoGapButtons.mockResolvedValue({ keywords: [], scores: {} });
     mockGenerateGroupSilence.mockResolvedValue('破冰话题');
+    mockGetVadSpeakingState.mockResolvedValue({ is_speaking: false, silence_ms: 30_000, last_voice_at_ms: null });
     mockNotifyGroupSilence.mockResolvedValue(true);
   });
 
@@ -243,6 +242,7 @@ describe('SessionWorker windowing', () => {
 
     expect(mockRunPushDispatcher).toHaveBeenCalledTimes(1);
     expect(mockRunPushDispatcher).toHaveBeenCalledWith('s1');
+    worker.stop();
   });
 
   it('分发器运行中时主动触发不会并发启动第二个 dispatcher', async () => {
@@ -277,14 +277,14 @@ describe('SessionWorker windowing', () => {
     const worker = new SessionWorker('s1', startedAt);
     (worker as any).running = true;
 
-    worker.onVadSilenceAvailable();
+    worker.onVadSilenceAvailable({ session_id: 's1', silence_ms: 600, last_voice_at_ms: Date.now() - 600 });
     await Promise.resolve();
 
     expect(mockRunPushDispatcher).toHaveBeenCalledTimes(1);
     expect(mockRunPushDispatcher).toHaveBeenCalledWith('s1');
   });
 
-  it('群体沉默检测、成员分析和摘要使用独立调度节奏', async () => {
+  it('群体沉默检测由 VAD 静默事件触发倒计时，成员分析和摘要使用独立调度节奏', async () => {
     jest.useFakeTimers();
     const startedAt = new Date('2026-04-22T10:00:00Z');
     jest.setSystemTime(startedAt);
@@ -306,24 +306,46 @@ describe('SessionWorker windowing', () => {
     worker.start();
 
     await jest.advanceTimersByTimeAsync(30_000);
-    expect(checkGroupSilenceSpy).toHaveBeenCalledTimes(1);
+    expect(checkGroupSilenceSpy).toHaveBeenCalledTimes(0);
     expect(runAnalysisPipelineSpy).toHaveBeenCalledTimes(0);
     expect(runInfoGapPipelineSpy).toHaveBeenCalledTimes(0);
     expect(runSummaryPipelineSpy).toHaveBeenCalledTimes(0);
-    expect(checkGroupSilenceSpy).toHaveBeenLastCalledWith(new Date('2026-04-22T10:00:30Z'));
 
-    await jest.advanceTimersByTimeAsync(30_000);
-    expect(checkGroupSilenceSpy).toHaveBeenCalledTimes(2);
+    worker.onVadSilenceAvailable({
+      session_id: 's1',
+      silence_ms: 600,
+      last_voice_at_ms: new Date('2026-04-22T10:00:29.400Z').getTime(),
+    });
+    await jest.advanceTimersByTimeAsync(29_399);
+    expect(checkGroupSilenceSpy).toHaveBeenCalledTimes(0);
+
+    await jest.advanceTimersByTimeAsync(1);
+    expect(checkGroupSilenceSpy).toHaveBeenCalledTimes(1);
+    expect(checkGroupSilenceSpy).toHaveBeenLastCalledWith(
+      new Date('2026-04-22T10:00:59.400Z'),
+      new Date('2026-04-22T10:00:29.400Z').getTime(),
+    );
+    expect(runAnalysisPipelineSpy).toHaveBeenCalledTimes(0);
+    expect(runInfoGapPipelineSpy).toHaveBeenCalledTimes(0);
+    expect(runSummaryPipelineSpy).toHaveBeenCalledTimes(0);
+
+    await jest.advanceTimersByTimeAsync(600);
     expect(runAnalysisPipelineSpy).toHaveBeenCalledTimes(1);
     expect(runInfoGapPipelineSpy).toHaveBeenCalledTimes(1);
     expect(runSummaryPipelineSpy).toHaveBeenCalledTimes(0);
     expect(runAnalysisPipelineSpy).toHaveBeenLastCalledWith(new Date('2026-04-22T10:01:00Z'));
     expect(runInfoGapPipelineSpy).toHaveBeenLastCalledWith(new Date('2026-04-22T10:01:00Z'));
 
-    await jest.advanceTimersByTimeAsync(45_000);
-    expect(checkGroupSilenceSpy).toHaveBeenCalledTimes(3);
+    await jest.advanceTimersByTimeAsync(29_400);
+    expect(checkGroupSilenceSpy).toHaveBeenCalledTimes(1);
     expect(runAnalysisPipelineSpy).toHaveBeenCalledTimes(1);
     expect(runInfoGapPipelineSpy).toHaveBeenCalledTimes(1);
+    expect(runSummaryPipelineSpy).toHaveBeenCalledTimes(0);
+
+    await jest.advanceTimersByTimeAsync(45_000);
+    expect(checkGroupSilenceSpy).toHaveBeenCalledTimes(1);
+    expect(runAnalysisPipelineSpy).toHaveBeenCalledTimes(2);
+    expect(runInfoGapPipelineSpy).toHaveBeenCalledTimes(2);
     expect(runSummaryPipelineSpy).toHaveBeenCalledTimes(1);
     expect(runSummaryPipelineSpy).toHaveBeenLastCalledWith(new Date('2026-04-22T10:01:45Z'));
 

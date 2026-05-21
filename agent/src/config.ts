@@ -26,7 +26,6 @@ export const config = {
     adminToken: requireEnv('ADMIN_API_KEY', ''),
   },
   agent: {
-    silenceIntervalMs: parseInt(process.env.SILENCE_INTERVAL_MS ?? '30000', 10),
     analysisIntervalMs: parseInt(process.env.ANALYSIS_INTERVAL_MS ?? '60000', 10),
     infoGapIntervalMs: parseInt(process.env.INFO_GAP_INTERVAL_MS ?? '60000', 10),
     infoGapDecisionIntervalMs: parseInt(process.env.INFO_GAP_DECISION_INTERVAL_MS ?? '120000', 10),

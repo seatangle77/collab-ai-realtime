@@ -414,15 +414,20 @@ export async function generateSummary(
  * 推送前调用，有人说话时跳过本次推送。
  * 出错时返回 false，不阻塞推送。
  */
-export async function checkVadSpeaking(sessionId: string): Promise<boolean> {
+export async function getVadSpeakingState(sessionId: string): Promise<VadSpeakingResult | null> {
   try {
     const res = await client.get<VadSpeakingResult>(
       `/api/internal/sessions/${sessionId}/vad-speaking`,
       { timeout: 2_000 },
     );
-    return res.data.is_speaking ?? false;
+    return res.data;
   } catch (err) {
-    logger.warn('check_vad_speaking failed, defaulting to false', { message: (err as Error).message });
-    return false;
+    logger.warn('check_vad_speaking failed, defaulting to unknown', { message: (err as Error).message });
+    return null;
   }
+}
+
+export async function checkVadSpeaking(sessionId: string): Promise<boolean> {
+  const state = await getVadSpeakingState(sessionId);
+  return state?.is_speaking ?? false;
 }

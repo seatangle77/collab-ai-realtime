@@ -15,7 +15,7 @@ async function main(): Promise<void> {
   manager.start();
 
   const vadSilenceListener = new VadSilenceListener((event) => {
-    manager.triggerVadSilence(event.session_id);
+    manager.triggerVadSilence(event);
   });
   await vadSilenceListener.start();
 

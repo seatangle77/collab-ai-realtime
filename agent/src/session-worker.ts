@@ -2,7 +2,6 @@ import { createLogger } from './logger';
 import { config } from './config';
 import {
   getSessionMembers,
-  getLastSpeakEndGlobal,
   getLastSummary,
   getTranscriptsInWindowPreferCache,
   writeDiscussionState,
@@ -16,7 +15,8 @@ import {
   recallInfoGapKeywords,
   type InfoGapKeywordCandidate,
 } from './skills/info-gap';
-import { generateGroupSilence, notifyGroupSilence } from './http/nlp-client';
+import { generateGroupSilence, getVadSpeakingState, notifyGroupSilence } from './http/nlp-client';
+import type { VadSilenceEvent } from './vad-silence-listener';
 
 const logger = createLogger('session-worker');
 const GROUP_SILENCE_THRESHOLD_S = 30;
@@ -28,7 +28,7 @@ function buildRunId(kind: 'summary' | 'reasoning', sessionId: string, windowStar
 export class SessionWorker {
   private readonly sessionId: string;
   private readonly sessionStartedAt: Date;
-  private silenceTimer: ReturnType<typeof setTimeout> | null = null;
+  private silenceCountdownTimer: ReturnType<typeof setTimeout> | null = null;
   private analysisTimer: ReturnType<typeof setTimeout> | null = null;
   private infoGapTimer: ReturnType<typeof setTimeout> | null = null;
   private summaryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -53,25 +53,10 @@ export class SessionWorker {
       session_started_at: this.sessionStartedAt.toISOString(),
     });
 
-    this.scheduleSilenceTimer();
     this.scheduleSummaryTimer();
     this.scheduleAnalysisTimer();
     this.scheduleInfoGapTimer();
     this.scheduleDispatchTimer();
-  }
-
-  private scheduleSilenceTimer(nextScheduledFor?: Date): void {
-    if (!this.running) return;
-    const scheduledFor = nextScheduledFor
-      ?? this.nextAlignedAt(config.agent.silenceIntervalMs, config.agent.silenceIntervalMs);
-    this.silenceTimer = setTimeout(() => {
-      void this.checkGroupSilence(scheduledFor)
-        .finally(() => {
-          this.scheduleSilenceTimer(
-            new Date(scheduledFor.getTime() + config.agent.silenceIntervalMs),
-          );
-        });
-    }, Math.max(0, scheduledFor.getTime() - Date.now()));
   }
 
   private scheduleAnalysisTimer(nextScheduledFor?: Date): void {
@@ -134,8 +119,27 @@ export class SessionWorker {
     }, Math.max(0, scheduledFor.getTime() - Date.now()));
   }
 
-  onVadSilenceAvailable(): void {
+  onVadSilenceAvailable(event: VadSilenceEvent): void {
     void this.triggerPushDispatcher('vad_silence');
+    this.scheduleGroupSilenceCountdown(event);
+  }
+
+  private scheduleGroupSilenceCountdown(event: VadSilenceEvent): void {
+    if (this.silenceCountdownTimer !== null) {
+      clearTimeout(this.silenceCountdownTimer);
+    }
+    const eventSilenceMs = Number.isFinite(event.silence_ms) ? Math.max(0, event.silence_ms ?? 0) : 0;
+    const lastVoiceAtMs = Number.isFinite(event.last_voice_at_ms) && (event.last_voice_at_ms ?? 0) > 0
+      ? event.last_voice_at_ms!
+      : Date.now() - eventSilenceMs;
+    const currentSilenceMs = Math.max(eventSilenceMs, Date.now() - lastVoiceAtMs);
+    const delayMs = Math.max(0, GROUP_SILENCE_THRESHOLD_S * 1000 - currentSilenceMs);
+    const scheduledFor = new Date(Date.now() + delayMs);
+
+    this.silenceCountdownTimer = setTimeout(() => {
+      this.silenceCountdownTimer = null;
+      void this.checkGroupSilence(scheduledFor, lastVoiceAtMs);
+    }, delayMs);
   }
 
   private async triggerPushDispatcher(reason: 'timer' | 'queued' | 'vad_silence'): Promise<void> {
@@ -179,9 +183,9 @@ export class SessionWorker {
     if (!this.running) return;
     this.running = false;
 
-    if (this.silenceTimer !== null) {
-      clearTimeout(this.silenceTimer);
-      this.silenceTimer = null;
+    if (this.silenceCountdownTimer !== null) {
+      clearTimeout(this.silenceCountdownTimer);
+      this.silenceCountdownTimer = null;
     }
     if (this.analysisTimer !== null) {
       clearTimeout(this.analysisTimer);
@@ -203,14 +207,29 @@ export class SessionWorker {
     logger.info('Worker stopped', { sessionId: this.sessionId });
   }
 
-  // ── 群体沉默检测：默认每 30s 检查一次 ───────────────────────────────────────────
+  // ── 群体沉默检测：由 VAD 静默事件启动倒计时，到阈值后再确认 ───────────────────────
 
-  private async checkGroupSilence(scheduledFor: Date): Promise<void> {
+  private async checkGroupSilence(scheduledFor: Date, lastVoiceAtMs: number): Promise<void> {
     try {
-      const lastEnd = await getLastSpeakEndGlobal(this.sessionId);
-      if (!lastEnd) return;
+      const vadState = await getVadSpeakingState(this.sessionId);
+      if (vadState?.is_speaking) {
+        logger.info('Group silence skipped because VAD says someone is speaking', {
+          sessionId: this.sessionId,
+        });
+        return;
+      }
 
-      const silenceMs = Date.now() - lastEnd.getTime();
+      const latestVoiceAtMs = vadState?.last_voice_at_ms ?? null;
+      if (typeof latestVoiceAtMs === 'number' && latestVoiceAtMs > lastVoiceAtMs) {
+        this.scheduleGroupSilenceCountdown({
+          session_id: this.sessionId,
+          last_voice_at_ms: latestVoiceAtMs,
+          silence_ms: vadState?.silence_ms ?? Math.max(0, Date.now() - latestVoiceAtMs),
+        });
+        return;
+      }
+
+      const silenceMs = Date.now() - lastVoiceAtMs;
       const silenceS = silenceMs / 1000;
 
       if (silenceS <= GROUP_SILENCE_THRESHOLD_S) return;

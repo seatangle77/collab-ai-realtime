@@ -2,6 +2,7 @@ import { createLogger } from './logger';
 import { config } from './config';
 import { getOngoingSessions } from './db/queries';
 import { SessionWorker } from './session-worker';
+import type { VadSilenceEvent } from './vad-silence-listener';
 
 const logger = createLogger('session-manager');
 
@@ -31,14 +32,15 @@ export class SessionManager {
     logger.info('SessionManager stopped');
   }
 
-  triggerVadSilence(sessionId: string): void {
+  triggerVadSilence(event: VadSilenceEvent): void {
+    const sessionId = event.session_id;
     const worker = this.workers.get(sessionId);
     if (!worker) {
       logger.debug('VAD silence event ignored because worker is not registered', { sessionId });
       return;
     }
 
-    worker.onVadSilenceAvailable();
+    worker.onVadSilenceAvailable(event);
   }
 
   // ── 同步 ongoing sessions ─────────────────────────────────────────────────

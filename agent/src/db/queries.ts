@@ -241,19 +241,6 @@ export async function getLastSpeakEndPerUser(
   return res.rows;
 }
 
-/** 获取 session 全局最近一条转写创建时间（群体沉默检测用） */
-export async function getLastSpeakEndGlobal(
-  sessionId: string,
-): Promise<Date | null> {
-  const res = await pool.query<{ last_end: Date | null }>(
-    `SELECT MAX(created_at) AS last_end
-     FROM speech_transcripts
-     WHERE session_id = $1`,
-    [sessionId],
-  );
-  return res.rows[0]?.last_end ?? null;
-}
-
 /** 写入当前窗口的宽松 TF-IDF 关键词（供 info_gain 历史对比使用，按成员存储） */
 export async function writeWindowMetricsKeywords(
   sessionId: string,
