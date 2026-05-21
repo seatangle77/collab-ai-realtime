@@ -86,8 +86,8 @@ class NLPSettings(BaseSettings):
     )
 
     embed_model: str = "paraphrase-multilingual-MiniLM-L12-v2"
-    fast_model: str = "qwen3.6-flash"
-    reasoning_model: str = "qwen3.6-plus"
+    fast_model: str = "qwen3.5-flash"
+    reasoning_model: str = "qwen-plus"
     qwen_api_key: str = Field(default="")
     qwen_api_key_local: str = Field(default="", exclude=True)
     qwen_api_key_production: str = Field(default="", exclude=True)
