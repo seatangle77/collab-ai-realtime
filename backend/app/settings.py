@@ -12,7 +12,7 @@ from sqlalchemy.engine import URL
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 SECRETS_FILE = str(BACKEND_DIR.parent / "secrets.env")
 
-# 提前加载密钥文件，使 os.getenv() 全局可见（auth.py 等直接读环境变量的地方）
+# 提前加载密钥文件，使 os.getenv() 全局可见（auth.py / redis_client.py 等直接读环境变量的地方）
 load_dotenv(SECRETS_FILE, override=False)
 
 APP_ENV = (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("NODE_ENV") or "local").lower()
@@ -29,6 +29,9 @@ else:
         str(BACKEND_DIR / ".env.production"),  # 默认配置
         str(BACKEND_DIR / ".env.local"),       # 本地覆盖
     )
+
+for _env_file in _ENV_FILES:
+    load_dotenv(_env_file, override=False)
 
 
 class Settings(BaseSettings):
