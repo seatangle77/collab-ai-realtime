@@ -309,7 +309,7 @@ const transcriptTimelineItems = computed<TimelineItem[]>(() => {
     })
 
   const pushGroups = new Map<string, PushTimelineItem>()
-  for (const item of dedupeTimelinePushLogs(pushLogs.value)) {
+  for (const item of dedupeTimelinePushLogs(pushLogs.value.filter((push) => push.delivery_status === 'delivered'))) {
     const groupKey = buildTimelinePushGroupKey(item) ?? `id-${item.id}`
     const sortAt = parseTime(item.triggered_at) ?? 0
     const recipient = getPushRecipientLabel(item)

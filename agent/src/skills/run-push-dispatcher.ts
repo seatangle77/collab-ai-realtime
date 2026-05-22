@@ -7,7 +7,6 @@ import {
   skipOtherPendingMemberInterventionQueueItems,
   updatePushQueueStatus,
   writeDiscussionState,
-  writePushLog,
 } from '../db/queries';
 import { notifyPush } from '../http/nlp-client';
 import { runPushFilterChain } from './push/run-push-filter-chain';
@@ -35,32 +34,6 @@ export const pushDispatcherHooks = {
 
 const PUSH_CLAIM_BATCH_SIZE = 20;
 const PROCESSING_STALE_TIMEOUT_MS = 5 * 60 * 1000; // 5 分钟
-
-const FILTER_REASON_TO_DELIVERY_REASON: Record<string, string> = {
-  same_round_dedup: 'same_round_dedup_skipped',
-  recent_exact_content: 'recent_exact_content_skipped',
-  content_similarity: 'content_similarity_skipped',
-  vad_speaking: 'vad_speaking_deferred',
-  hook_skip: 'hook_skip',
-};
-
-async function writeFilteredPushLog(
-  item: Awaited<ReturnType<typeof claimPendingPushQueue>>[number],
-  deliveryStatus: 'skipped' | 'deferred',
-  reasonCode: string,
-): Promise<void> {
-  await writePushLog({
-    session_id: item.session_id,
-    state_id: null,
-    queue_id: item.id,
-    target_user_id: item.target_user_id,
-    push_content: item.push_content,
-    content_embedding: item.content_embedding,
-    push_channel: 'web',
-    delivery_status: deliveryStatus,
-    delivery_reason: FILTER_REASON_TO_DELIVERY_REASON[reasonCode] ?? reasonCode,
-  });
-}
 
 export async function runPushDispatcher(sessionId: string): Promise<void> {
   logger.info('push dispatcher tick', { sessionId });
@@ -108,7 +81,6 @@ export async function runPushDispatcher(sessionId: string): Promise<void> {
     try {
       if (await pushDispatcherHooks.shouldSkipPushQueueItem()) {
         await updatePushQueueStatus(item.id, 'skipped', undefined, 'filter_hook');
-        await writeFilteredPushLog(item, 'skipped', 'hook_skip');
         logger.info(`push skipped by hook queue_id=${item.id} user=${item.target_user_id}`, { sessionId });
         continue;
       }
@@ -126,7 +98,6 @@ export async function runPushDispatcher(sessionId: string): Promise<void> {
           hook_skip: 'filter_hook',
         };
         await updatePushQueueStatus(item.id, 'skipped', undefined, skipReasonMap[outcome.reasonCode] ?? outcome.reasonCode);
-        await writeFilteredPushLog(item, 'skipped', outcome.reasonCode);
         logger.info(
           `push skipped queue_id=${item.id} user=${item.target_user_id} by=${outcome.by} reason=${outcome.reasonCode}`,
           { sessionId },
@@ -140,7 +111,6 @@ export async function runPushDispatcher(sessionId: string): Promise<void> {
           hook_skip: 'filter_error',
         };
         await updatePushQueueStatus(item.id, 'deferred', undefined, deferReasonMap[outcome.reasonCode] ?? 'filter_error');
-        await writeFilteredPushLog(item, 'deferred', outcome.reasonCode);
         logger.info(
           `push deferred queue_id=${item.id} user=${item.target_user_id} by=${outcome.by} reason=${outcome.reasonCode}`,
           { sessionId },

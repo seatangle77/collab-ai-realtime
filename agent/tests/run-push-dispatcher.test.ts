@@ -229,16 +229,14 @@ describe('runPushDispatcher', () => {
     expect(mockUpdatePushQueueStatus).toHaveBeenCalledWith('pq_1', 'deferred', undefined, 'filter_error');
   });
 
-  it('过滤拦截时，writeFilteredPushLog 携带正确的 queue_id', async () => {
+  it('过滤拦截时只更新队列状态，不写 push_logs', async () => {
     jest.spyOn(dispatcher.pushDispatcherHooks, 'shouldSkipPushQueueItem').mockResolvedValue(false);
     mockHasRecentDeliveredPushWithExactContent.mockResolvedValue(true);
 
     await dispatcher.runPushDispatcher(SESSION);
 
-    expect(mockWritePushLog).toHaveBeenCalledTimes(1);
-    const callArg = mockWritePushLog.mock.calls[0][0];
-    expect(callArg.queue_id).toBe('pq_1');
-    expect(callArg.delivery_status).toBe('skipped');
+    expect(mockUpdatePushQueueStatus).toHaveBeenCalledWith('pq_1', 'skipped', undefined, 'filter_exact_content');
+    expect(mockWritePushLog).not.toHaveBeenCalled();
   });
 
   it('投递返回 queue_already_final 时写 failed + skip_reason=queue_already_final', async () => {
