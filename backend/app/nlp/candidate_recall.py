@@ -47,10 +47,10 @@ _USER_TEMPLATE = """\
 2. 对每个词判断是否需要给未提及者提示
    - 先判断哪些成员明确提到了这个词，或明显使用了这个词的同义表达
    - needs_prompt=true：这个词有理解门槛，且存在没有提到/没有回应这个词的成员
-   - target_user_ids：需要收到提示的成员 ID 列表，可以包含多人
+   - target_user_ids：需要收到提示的成员 ID 列表，必须包含所有符合条件的成员，不能只挑一部分
    - target_user_ids 必须只包含没有提到这个词的成员
    - 绝对不要把提示推送给已经提到这个词的成员
-   - 如果只有 1 个成员提到该词，且该词值得解释，则把 target_user_ids 设为其他没有提到该词的成员，可以包含多人
+   - 如果只有 1 个成员提到该词，且该词值得解释，则把其余所有没有提到该词的成员都加入 target_user_ids，不能遗漏
    - 如果所有成员都提到了这个词，则 needs_prompt=false，target_user_ids=[]
    - 如果这个词不值得解释，则 needs_prompt=false，target_user_ids=[]
    - reason：一句话说明判断理由
