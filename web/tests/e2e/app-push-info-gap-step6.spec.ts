@@ -308,6 +308,7 @@ test.describe('Step 6 - Push and InfoGap behaviors', () => {
     // 先展开抽屉才能点击按钮
     await page.locator('.ai-sheet__handle-bar').click()
     await expect(page.locator('.info-gap-btn')).toHaveCount(2)
+    await expect(page.locator('.info-gap-btn').first()).toContainText('风险')
     await page.locator('.info-gap-btn').filter({ hasText: '预算' }).click()
     await page.locator('.info-gap-btn').filter({ hasText: '风险' }).click()
     await expect(page.locator('.info-gap-btn')).toHaveCount(2)

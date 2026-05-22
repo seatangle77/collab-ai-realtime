@@ -138,6 +138,17 @@ function normalizeInfoGapButton(button: InfoGapButton): InfoGapButton {
   }
 }
 
+function infoGapButtonTime(button: InfoGapButton): number {
+  const raw = button.created_at ?? button.window_start
+  if (!raw) return 0
+  const time = Date.parse(raw)
+  return Number.isFinite(time) ? time : 0
+}
+
+function sortInfoGapButtonsNewestFirst(buttons: InfoGapButton[]): InfoGapButton[] {
+  return [...buttons].sort((a, b) => infoGapButtonTime(b) - infoGapButtonTime(a))
+}
+
 function normalizePushLog(item: PushLogItem): PushLogItem | null {
   if (!item.push_content) return null
   if (currentUser.value?.id && item.target_user_id && item.target_user_id !== currentUser.value.id) {
@@ -252,7 +263,7 @@ async function fetchInfoGapButtons() {
     const data = await appHttp.get<InfoGapButton[]>(
       `/api/sessions/${sessionId}/info-gap/buttons${includeAll ? '?include_all=true' : ''}`,
     )
-    infoGapButtons.value = data.map((button) => normalizeInfoGapButton(button))
+    infoGapButtons.value = sortInfoGapButtonsNewestFirst(data.map((button) => normalizeInfoGapButton(button)))
   } catch {
     // 静默失败，不影响主流程
   }
@@ -1205,7 +1216,7 @@ function handleWsMessage(event: MessageEvent<string>) {
       const newBtns = d.buttons
         .map((button) => normalizeInfoGapButton(button))
         .filter((b) => !existingIds.has(b.id))
-      infoGapButtons.value = [...infoGapButtons.value, ...newBtns]
+      infoGapButtons.value = [...newBtns, ...infoGapButtons.value]
     }
     return
   }
