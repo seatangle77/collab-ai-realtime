@@ -31,7 +31,7 @@ else:
     )
 
 for _env_file in _ENV_FILES:
-    load_dotenv(_env_file, override=False)
+    load_dotenv(_env_file, override=True)
 
 
 class Settings(BaseSettings):
