@@ -128,8 +128,7 @@ export async function getOngoingSessions(): Promise<Session[]> {
   const res = await pool.query<Session>(
     `SELECT id, group_id, status, started_at
      FROM chat_sessions
-     WHERE status = 'ongoing'
-       AND active_ws_count > 0`,
+     WHERE status = 'ongoing'`,
   );
   return res.rows;
 }
