@@ -1,7 +1,7 @@
 """
 关键词召回 + 信息缺口评估（合并为一次大模型调用）
 输入：各成员发言文本
-输出：关键词列表，每个词含 needs_prompt / target_user_id / reason
+输出：关键词列表，每个词含 needs_prompt / target_user_ids / reason
 """
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ _USER_TEMPLATE = """\
 1. 提取 0~5 个对部分成员可能陌生的词，必须同时满足：
    - 对话中真实出现的词
    - 必须返回原文中连续出现的完整词语或短语，不能拆开、截断或只取其中一个字
-   - 中文关键词通常至少为 2 个字；只有像 AI、MBTI 这类固定英文缩写可以少于 2 个字
+   - 中文关键词通常至少为 2 个字；只有像 AI、PT、MBTI 这类固定英文缩写可以少于 2 个字
    - 例如：原文出现“搭子”时只能返回“搭子”，不能返回“搭”；原文出现“熟人社会”时不能只返回“熟人”或“社会”
    - 如果拿不准是否为完整词语，宁可不返回，也不要返回单字或残缺词
    - 有一定理解门槛，属于以下类型之一：
@@ -44,9 +44,15 @@ _USER_TEMPLATE = """\
    - 如果多个候选词语义高度相近，只保留最有代表性的一个，不要同时返回
    - 排除：日常口语、通用名词、全员都在使用的词（说明大家都懂）
    - 没有符合条件的词时，返回空数组，不要凑数
-2. 对每个词判断成员间是否存在理解差异
-   - needs_prompt=true：某成员对这个词的理解明显与他人不同，需要提示
-   - target_user_id：需要收到提示的成员 ID，没有则填空字符串
+2. 对每个词判断是否需要给未提及者提示
+   - 先判断哪些成员明确提到了这个词，或明显使用了这个词的同义表达
+   - needs_prompt=true：这个词有理解门槛，且存在没有提到/没有回应这个词的成员
+   - target_user_ids：需要收到提示的成员 ID 列表，可以包含多人
+   - target_user_ids 必须只包含没有提到这个词的成员
+   - 绝对不要把提示推送给已经提到这个词的成员
+   - 如果只有 1 个成员提到该词，且该词值得解释，则把 target_user_ids 设为其他没有提到该词的成员，可以包含多人
+   - 如果所有成员都提到了这个词，则 needs_prompt=false，target_user_ids=[]
+   - 如果这个词不值得解释，则 needs_prompt=false，target_user_ids=[]
    - reason：一句话说明判断理由
 
 返回严格 JSON（不含任何其他内容）：
@@ -55,13 +61,13 @@ _USER_TEMPLATE = """\
     {{
       "word": "量化宽松",
       "needs_prompt": true,
-      "target_user_id": "u_terry",
-      "reason": "Terry 多次提及但其他人没有回应，可能不熟悉这个概念"
+      "target_user_ids": ["u_lily", "u_tom"],
+      "reason": "Terry 提到了“量化宽松”，Lily 和 Tom 没有提到或回应，这个词可能需要补充解释"
     }},
     {{
       "word": "搭子",
       "needs_prompt": false,
-      "target_user_id": "",
+      "target_user_ids": [],
       "reason": "三人都在用这个词且语境一致"
     }}
   ]
@@ -262,10 +268,16 @@ def _normalize_item(raw: Any) -> dict[str, Any] | None:
     word = str(raw.get("word", "")).strip()
     if not word:
         return None
+    raw_target_user_ids = raw.get("target_user_ids", [])
+    target_user_ids = raw_target_user_ids if isinstance(raw_target_user_ids, list) else []
     return {
         "word": word,
         "needs_prompt": bool(raw.get("needs_prompt", False)),
-        "target_user_id": str(raw.get("target_user_id", "") or "").strip(),
+        "target_user_ids": [
+            str(uid).strip()
+            for uid in target_user_ids
+            if str(uid).strip()
+        ],
         "reason": str(raw.get("reason", "")).strip(),
     }
 
@@ -275,7 +287,7 @@ def recall_with_gap(member_texts: dict[str, str]) -> dict[str, Any]:
     调用大模型，一次完成关键词召回和信息缺口评估。
 
     :param member_texts: {user_id: 发言文本}
-    :return: {"keywords": [{"word", "needs_prompt", "target_user_id", "reason"}]}
+    :return: {"keywords": [{"word", "needs_prompt", "target_user_ids", "reason"}]}
     """
     texts = {uid: t for uid, t in member_texts.items() if isinstance(t, str) and t.strip()}
     if len(texts) < 2:

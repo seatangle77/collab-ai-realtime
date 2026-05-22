@@ -202,15 +202,15 @@ def test_validate_keywords_extra_word_in_response_ignored(monkeypatch: pytest.Mo
 def test_dedupe_semantic_keywords_empty_or_single() -> None:
     assert candidate_recall._dedupe_semantic_keywords([], {}) == []
 
-    keywords = [{"word": "MBTI", "needs_prompt": True, "target_user_id": "u1", "reason": ""}]
+    keywords = [{"word": "MBTI", "needs_prompt": True, "target_user_ids": ["u1"], "reason": ""}]
     assert candidate_recall._dedupe_semantic_keywords(keywords, {"u1": "MBTI"}) == keywords
 
 
 def test_dedupe_semantic_keywords_merges_similar_terms() -> None:
     keywords = [
-        {"word": "搞抽象", "needs_prompt": True, "target_user_id": "u1", "reason": ""},
-        {"word": "玩抽象", "needs_prompt": False, "target_user_id": "", "reason": ""},
-        {"word": "MBTI", "needs_prompt": True, "target_user_id": "u2", "reason": ""},
+        {"word": "搞抽象", "needs_prompt": True, "target_user_ids": ["u1"], "reason": ""},
+        {"word": "玩抽象", "needs_prompt": False, "target_user_ids": [], "reason": ""},
+        {"word": "MBTI", "needs_prompt": True, "target_user_ids": ["u2"], "reason": ""},
     ]
 
     with (
@@ -231,8 +231,8 @@ def test_dedupe_semantic_keywords_merges_similar_terms() -> None:
 
 def test_dedupe_semantic_keywords_keeps_distinct_terms() -> None:
     keywords = [
-        {"word": "MBTI", "needs_prompt": True, "target_user_id": "u1", "reason": ""},
-        {"word": "量化宽松", "needs_prompt": True, "target_user_id": "u2", "reason": ""},
+        {"word": "MBTI", "needs_prompt": True, "target_user_ids": ["u1"], "reason": ""},
+        {"word": "量化宽松", "needs_prompt": True, "target_user_ids": ["u2"], "reason": ""},
     ]
 
     with (
@@ -252,8 +252,8 @@ def test_dedupe_semantic_keywords_keeps_distinct_terms() -> None:
 
 def test_dedupe_semantic_keywords_prefers_needs_prompt_and_longer_term() -> None:
     keywords = [
-        {"word": "抽象", "needs_prompt": False, "target_user_id": "", "reason": ""},
-        {"word": "搞抽象", "needs_prompt": True, "target_user_id": "u1", "reason": "需要提示"},
+        {"word": "抽象", "needs_prompt": False, "target_user_ids": [], "reason": ""},
+        {"word": "搞抽象", "needs_prompt": True, "target_user_ids": ["u1"], "reason": "需要提示"},
     ]
 
     with (
@@ -274,8 +274,8 @@ def test_dedupe_semantic_keywords_prefers_needs_prompt_and_longer_term() -> None
 
 def test_dedupe_semantic_keywords_embedding_exception_fail_open() -> None:
     keywords = [
-        {"word": "搞抽象", "needs_prompt": True, "target_user_id": "u1", "reason": ""},
-        {"word": "玩抽象", "needs_prompt": False, "target_user_id": "", "reason": ""},
+        {"word": "搞抽象", "needs_prompt": True, "target_user_ids": ["u1"], "reason": ""},
+        {"word": "玩抽象", "needs_prompt": False, "target_user_ids": [], "reason": ""},
     ]
 
     with patch.object(candidate_recall.embedder, "encode", side_effect=RuntimeError("model not loaded")):
@@ -309,8 +309,8 @@ def test_recall_with_gap_normal(monkeypatch: pytest.MonkeyPatch) -> None:
     recall_response = MagicMock()
     recall_response.choices[0].message.content = """{
   "keywords": [
-    {"word": "量化宽松", "needs_prompt": true, "target_user_id": "u2", "reason": "u2 多次提及但 u1 没有回应"},
-    {"word": "缩表", "needs_prompt": false, "target_user_id": "", "reason": "两人理解一致"}
+    {"word": "量化宽松", "needs_prompt": true, "target_user_ids": ["u2"], "reason": "u2 多次提及但 u1 没有回应"},
+    {"word": "缩表", "needs_prompt": false, "target_user_ids": [], "reason": "两人理解一致"}
   ]
 }"""
 
@@ -332,7 +332,7 @@ def test_recall_with_gap_normal(monkeypatch: pytest.MonkeyPatch) -> None:
     assert len(result["keywords"]) == 2
     assert result["keywords"][0]["word"] == "量化宽松"
     assert result["keywords"][0]["needs_prompt"] is True
-    assert result["keywords"][0]["target_user_id"] == "u2"
+    assert result["keywords"][0]["target_user_ids"] == ["u2"]
     assert result["keywords"][1]["word"] == "缩表"
     assert result["keywords"][1]["needs_prompt"] is False
 
@@ -344,8 +344,8 @@ def test_recall_with_gap_validation_filters_noise(monkeypatch: pytest.MonkeyPatc
     recall_response = MagicMock()
     recall_response.choices[0].message.content = """{
   "keywords": [
-    {"word": "量化宽松", "needs_prompt": true, "target_user_id": "u2", "reason": "u2 提及"},
-    {"word": "八子", "needs_prompt": true, "target_user_id": "u1", "reason": "u1 多次提及"}
+    {"word": "量化宽松", "needs_prompt": true, "target_user_ids": ["u2"], "reason": "u2 提及"},
+    {"word": "八子", "needs_prompt": true, "target_user_ids": ["u1"], "reason": "u1 多次提及"}
   ]
 }"""
 
@@ -377,9 +377,9 @@ def test_recall_with_gap_semantic_dedupe_after_validation(monkeypatch: pytest.Mo
     recall_response = MagicMock()
     recall_response.choices[0].message.content = """{
   "keywords": [
-    {"word": "搞抽象", "needs_prompt": true, "target_user_id": "u1", "reason": "u1 可能不懂"},
-    {"word": "玩抽象", "needs_prompt": false, "target_user_id": "", "reason": "语义相近"},
-    {"word": "MBTI", "needs_prompt": true, "target_user_id": "u2", "reason": "u2 可能不懂"}
+    {"word": "搞抽象", "needs_prompt": true, "target_user_ids": ["u1"], "reason": "u1 可能不懂"},
+    {"word": "玩抽象", "needs_prompt": false, "target_user_ids": [], "reason": "语义相近"},
+    {"word": "MBTI", "needs_prompt": true, "target_user_ids": ["u2"], "reason": "u2 可能不懂"}
   ]
 }"""
 
@@ -417,8 +417,8 @@ def test_recall_with_gap_validation_filters_all(monkeypatch: pytest.MonkeyPatch)
     recall_response = MagicMock()
     recall_response.choices[0].message.content = """{
   "keywords": [
-    {"word": "八子", "needs_prompt": true, "target_user_id": "u1", "reason": "乱码"},
-    {"word": "哦的", "needs_prompt": true, "target_user_id": "u2", "reason": "乱码"}
+    {"word": "八子", "needs_prompt": true, "target_user_ids": ["u1"], "reason": "乱码"},
+    {"word": "哦的", "needs_prompt": true, "target_user_ids": ["u2"], "reason": "乱码"}
   ]
 }"""
 
@@ -447,7 +447,7 @@ def test_recall_with_gap_validation_fail_open(monkeypatch: pytest.MonkeyPatch) -
     recall_response = MagicMock()
     recall_response.choices[0].message.content = """{
   "keywords": [
-    {"word": "量化宽松", "needs_prompt": true, "target_user_id": "u2", "reason": "u2 提及"}
+    {"word": "量化宽松", "needs_prompt": true, "target_user_ids": ["u2"], "reason": "u2 提及"}
   ]
 }"""
 

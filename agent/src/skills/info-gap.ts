@@ -25,7 +25,7 @@ export interface SkwResult {
 export interface InfoGapKeywordCandidate {
   word: string;
   needs_prompt: boolean;
-  target_user_id: string;
+  target_user_ids: string[];
   reason: string;
   sourceByUser: Record<string, string>;
   activeMemberIds: string[];
@@ -93,9 +93,11 @@ function mergeCandidates(candidates: InfoGapKeywordCandidate[]): InfoGapKeywordC
       if (source) existing.sourceByUser[uid] = existing.sourceByUser[uid] ?? source;
     }
 
+    existing.target_user_ids = [
+      ...new Set([...existing.target_user_ids, ...item.target_user_ids]),
+    ];
     if (!existing.needs_prompt && item.needs_prompt) {
       existing.needs_prompt = true;
-      existing.target_user_id = item.target_user_id;
       existing.reason = item.reason;
     }
     existing.windowEnd = item.windowEnd > existing.windowEnd ? item.windowEnd : existing.windowEnd;
@@ -186,7 +188,7 @@ export async function recallInfoGapKeywords(
           window_start: windowStart,
           keyword: item.word,
           needs_prompt: item.needs_prompt,
-          target_user_id: item.target_user_id || null,
+          target_user_id: item.target_user_ids.length > 0 ? item.target_user_ids.join(',') : null,
           llm_reason: item.reason || null,
         }),
       ).catch((err: Error) => {
@@ -209,7 +211,13 @@ export async function recallInfoGapKeywords(
     return {
       word: item.word,
       needs_prompt: item.needs_prompt,
-      target_user_id: item.target_user_id,
+      target_user_ids: [
+        ...new Set(
+          item.target_user_ids
+            .map((uid) => uid.trim())
+            .filter((uid) => uid && uid in activeMemberTexts),
+        ),
+      ],
       reason: item.reason,
       sourceByUser,
       activeMemberIds: Object.keys(activeMemberTexts),
@@ -355,53 +363,55 @@ export async function decideInfoGapButtons(input: InfoGapDecisionInput): Promise
   }
 
   for (const item of candidates) {
-    if (!item.needs_prompt || !item.target_user_id) continue;
+    if (!item.needs_prompt || item.target_user_ids.length === 0) continue;
 
-    const alreadyPending = await hasPendingInfoGapKeyword(sessionId, item.target_user_id, item.word);
-    if (alreadyPending) {
-      logger.info(`[SKW] 「${item.word}」用户 ${item.target_user_id} 已有 pending 按钮，跳过`, { sessionId });
-      continue;
+    for (const targetUserId of item.target_user_ids) {
+      const alreadyPending = await hasPendingInfoGapKeyword(sessionId, targetUserId, item.word);
+      if (alreadyPending) {
+        logger.info(`[SKW] 「${item.word}」用户 ${targetUserId} 已有 pending 按钮，跳过`, { sessionId });
+        continue;
+      }
+
+      const everPushed = await hasEverPushedInfoGapKeyword(sessionId, targetUserId, item.word);
+      if (everPushed) {
+        logger.info(`[SKW] 「${item.word}」用户 ${targetUserId} 本会话已推送过，跳过`, { sessionId });
+        continue;
+      }
+
+      const recentlySimilar = await hasSimilarRecentInfoGapKeyword(
+        sessionId,
+        targetUserId,
+        item.word,
+        windowStart,
+      );
+      if (recentlySimilar) continue;
+
+      const skwScore = skwScoreByWordUser[item.word]?.[targetUserId] ?? 0.1;
+      const buttonId = await writeInfoGapButton({
+        session_id: sessionId,
+        user_id: targetUserId,
+        keyword: item.word,
+        skw_score: skwScore,
+        window_start: windowStart,
+        llm_reason: item.reason,
+      });
+
+      if (!buttonId) {
+        logger.info(`[SKW] 「${item.word}」writeInfoGapButton 未插入（ON CONFLICT），跳过`, { sessionId });
+        continue;
+      }
+
+      await notifyInfoGapButton({
+        session_id: sessionId,
+        user_id: targetUserId,
+        button_id: buttonId,
+        keyword: item.word,
+        skw_score: skwScore,
+        window_start: windowStart.toISOString(),
+      });
+
+      logger.info(`[SKW] 「${item.word}」按钮已推送给用户 ${targetUserId}`, { sessionId });
     }
-
-    const everPushed = await hasEverPushedInfoGapKeyword(sessionId, item.target_user_id, item.word);
-    if (everPushed) {
-      logger.info(`[SKW] 「${item.word}」用户 ${item.target_user_id} 本会话已推送过，跳过`, { sessionId });
-      continue;
-    }
-
-    const recentlySimilar = await hasSimilarRecentInfoGapKeyword(
-      sessionId,
-      item.target_user_id,
-      item.word,
-      windowStart,
-    );
-    if (recentlySimilar) continue;
-
-    const skwScore = skwScoreByWordUser[item.word]?.[item.target_user_id] ?? 0.1;
-    const buttonId = await writeInfoGapButton({
-      session_id: sessionId,
-      user_id: item.target_user_id,
-      keyword: item.word,
-      skw_score: skwScore,
-      window_start: windowStart,
-      llm_reason: item.reason,
-    });
-
-    if (!buttonId) {
-      logger.info(`[SKW] 「${item.word}」writeInfoGapButton 未插入（ON CONFLICT），跳过`, { sessionId });
-      continue;
-    }
-
-    await notifyInfoGapButton({
-      session_id: sessionId,
-      user_id: item.target_user_id,
-      button_id: buttonId,
-      keyword: item.word,
-      skw_score: skwScore,
-      window_start: windowStart.toISOString(),
-    });
-
-    logger.info(`[SKW] 「${item.word}」按钮已推送给用户 ${item.target_user_id}`, { sessionId });
   }
 
   return { keywords: words, scores };

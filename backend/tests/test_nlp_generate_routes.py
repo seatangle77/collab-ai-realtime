@@ -72,7 +72,7 @@ def test_keyword_recall_with_gap_ok(monkeypatch) -> None:
                 {
                     "word": "MVP",
                     "needs_prompt": True,
-                    "target_user_id": "u2",
+                    "target_user_ids": ["u2"],
                     "reason": "u2 没跟上这个缩写",
                 }
             ]
@@ -87,7 +87,7 @@ def test_keyword_recall_with_gap_ok(monkeypatch) -> None:
     )
 
     assert resp.status_code == 200
-    assert resp.json()["keywords"][0]["target_user_id"] == "u2"
+    assert resp.json()["keywords"][0]["target_user_ids"] == ["u2"]
 
 
 def test_keyword_recall_with_gap_403_without_admin_token() -> None:

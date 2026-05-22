@@ -26,7 +26,7 @@ export interface SimilarityResult {
 export interface KeywordRecallItem {
   word: string;
   needs_prompt: boolean;
-  target_user_id: string;
+  target_user_ids: string[];
   reason: string;
 }
 

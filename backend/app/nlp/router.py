@@ -87,7 +87,7 @@ def compute_similarity(req: SimilarityRequest, _: bool = Depends(require_admin))
 class KeywordRecallItem(ApiModel):
     word: str
     needs_prompt: bool
-    target_user_id: str
+    target_user_ids: list[str] = Field(default_factory=list)
     reason: str
 
 

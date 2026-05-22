@@ -57,15 +57,15 @@ function makeRecall(
   words: Array<{
     word: string;
     needs_prompt?: boolean;
-    target_user_id?: string;
+    target_user_ids?: string[];
     reason?: string;
   }>,
 ) {
   return {
-    keywords: words.map(({ word, needs_prompt = false, target_user_id = '', reason = '' }) => ({
+    keywords: words.map(({ word, needs_prompt = false, target_user_ids = [], reason = '' }) => ({
       word,
       needs_prompt,
-      target_user_id,
+      target_user_ids,
       reason,
     })),
   };
@@ -117,7 +117,7 @@ describe('info-gap / computeSkw', () => {
       makeTranscript('u2', '我也聊 AI'),
     ]);
     mockKeywordRecallWithGap.mockResolvedValue(makeRecall([
-      { word: 'AI', needs_prompt: true, target_user_id: 'u1', reason: '需要追问' },
+      { word: 'AI', needs_prompt: true, target_user_ids: ['u1'], reason: '需要追问' },
     ]));
     mockEmbed.mockResolvedValue([[1, 0], [0.8, 0.2]]);
     mockSimilarity.mockResolvedValue([0.75]);
@@ -416,7 +416,7 @@ describe('info-gap / computeSkw', () => {
         makeTranscript('u2', '我也觉得 AI 能提升效率'),
       ]);
       mockKeywordRecallWithGap.mockResolvedValue(makeRecall([
-        { word: 'AI', needs_prompt: true, target_user_id: 'u1', reason: 'u1 可以进一步展开 AI 视角' },
+        { word: 'AI', needs_prompt: true, target_user_ids: ['u1'], reason: 'u1 可以进一步展开 AI 视角' },
       ]));
       mockEmbed.mockResolvedValue([[1, 0], [0.8, 0.2]]);
       mockSimilarity.mockResolvedValue([0.75]);
@@ -442,13 +442,55 @@ describe('info-gap / computeSkw', () => {
       });
     });
 
-    it('target_user_id 已有 pending 按钮：跳过，不写不推', async () => {
+    it('needs_prompt=true 且 target_user_ids 有多人：分别写入并推送', async () => {
+      const members3 = ['u1', 'u2', 'u3'];
+      mockGetTranscripts.mockResolvedValue([
+        makeTranscript('u1', '我提到了 MVP'),
+        makeTranscript('u2', '我没有接这个词'),
+        makeTranscript('u3', '我也没有接这个词'),
+      ]);
+      mockKeywordRecallWithGap.mockResolvedValue(makeRecall([
+        { word: 'MVP', needs_prompt: true, target_user_ids: ['u2', 'u3'], reason: 'u1 提到 MVP，其他人未回应' },
+      ]));
+      mockWriteInfoGapButton
+        .mockResolvedValueOnce('igb_u2')
+        .mockResolvedValueOnce('igb_u3');
+
+      await computeSkw(SESSION, WIN_START, WIN_END, members3);
+
+      expect(mockWriteInfoGapButton).toHaveBeenCalledTimes(2);
+      expect(mockWriteInfoGapButton).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        session_id: SESSION,
+        user_id: 'u2',
+        keyword: 'MVP',
+        skw_score: 0.1,
+      }));
+      expect(mockWriteInfoGapButton).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        session_id: SESSION,
+        user_id: 'u3',
+        keyword: 'MVP',
+        skw_score: 0.1,
+      }));
+      expect(mockNotifyInfoGapButton).toHaveBeenCalledTimes(2);
+      expect(mockNotifyInfoGapButton).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        user_id: 'u2',
+        button_id: 'igb_u2',
+        keyword: 'MVP',
+      }));
+      expect(mockNotifyInfoGapButton).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        user_id: 'u3',
+        button_id: 'igb_u3',
+        keyword: 'MVP',
+      }));
+    });
+
+    it('target_user_ids 已有 pending 按钮：跳过，不写不推', async () => {
       mockGetTranscripts.mockResolvedValue([
         makeTranscript('u1', '我们聊 AI'),
         makeTranscript('u2', '我也聊 AI'),
       ]);
       mockKeywordRecallWithGap.mockResolvedValue(makeRecall([
-        { word: 'AI', needs_prompt: true, target_user_id: 'u1', reason: '需要追问' },
+        { word: 'AI', needs_prompt: true, target_user_ids: ['u1'], reason: '需要追问' },
       ]));
       mockEmbed.mockResolvedValue([[1, 0], [0.8, 0.2]]);
       mockSimilarity.mockResolvedValue([0.75]);
@@ -466,7 +508,7 @@ describe('info-gap / computeSkw', () => {
         makeTranscript('u2', '我也聊 AI'),
       ]);
       mockKeywordRecallWithGap.mockResolvedValue(makeRecall([
-        { word: 'AI', needs_prompt: true, target_user_id: 'u1', reason: '需要追问' },
+        { word: 'AI', needs_prompt: true, target_user_ids: ['u1'], reason: '需要追问' },
       ]));
       mockEmbed.mockResolvedValue([[1, 0], [0.8, 0.2]]);
       mockSimilarity.mockResolvedValue([0.75]);
@@ -485,7 +527,7 @@ describe('info-gap / computeSkw', () => {
         makeTranscript('u2', '我也聊玩抽象'),
       ]);
       mockKeywordRecallWithGap.mockResolvedValue(makeRecall([
-        { word: '玩抽象', needs_prompt: true, target_user_id: 'u1', reason: '需要追问' },
+        { word: '玩抽象', needs_prompt: true, target_user_ids: ['u1'], reason: '需要追问' },
       ]));
       mockEmbed
         .mockResolvedValueOnce([[1, 0], [0.8, 0.2]])
@@ -511,7 +553,7 @@ describe('info-gap / computeSkw', () => {
         makeTranscript('u2', '我也聊玩抽象'),
       ]);
       mockKeywordRecallWithGap.mockResolvedValue(makeRecall([
-        { word: '玩抽象', needs_prompt: true, target_user_id: 'u1', reason: '需要追问' },
+        { word: '玩抽象', needs_prompt: true, target_user_ids: ['u1'], reason: '需要追问' },
       ]));
       mockEmbed
         .mockResolvedValueOnce([[1, 0], [0.8, 0.2]])
@@ -541,7 +583,7 @@ describe('info-gap / computeSkw', () => {
         makeTranscript('u2', '我也聊 AI'),
       ]);
       mockKeywordRecallWithGap.mockResolvedValue(makeRecall([
-        { word: 'AI', needs_prompt: true, target_user_id: 'u1', reason: '需要追问' },
+        { word: 'AI', needs_prompt: true, target_user_ids: ['u1'], reason: '需要追问' },
       ]));
       mockEmbed.mockResolvedValue([[1, 0], [0.8, 0.2]]);
       mockSimilarity.mockResolvedValue([0.75]);
@@ -553,13 +595,13 @@ describe('info-gap / computeSkw', () => {
       expect(mockNotifyInfoGapButton).not.toHaveBeenCalled();
     });
 
-    it('needs_prompt=true 但 target_user_id 为空字符串：跳过', async () => {
+    it('needs_prompt=true 但 target_user_ids 为空数组：跳过', async () => {
       mockGetTranscripts.mockResolvedValue([
         makeTranscript('u1', '我们聊 AI'),
         makeTranscript('u2', '我也聊 AI'),
       ]);
       mockKeywordRecallWithGap.mockResolvedValue(makeRecall([
-        { word: 'AI', needs_prompt: true, target_user_id: '', reason: '缺少目标用户' },
+        { word: 'AI', needs_prompt: true, target_user_ids: [], reason: '缺少目标用户' },
       ]));
       mockEmbed.mockResolvedValue([[1, 0], [0.8, 0.2]]);
       mockSimilarity.mockResolvedValue([0.75]);
@@ -570,7 +612,7 @@ describe('info-gap / computeSkw', () => {
       expect(mockNotifyInfoGapButton).not.toHaveBeenCalled();
     });
 
-    it('3人都提及时，按钮写入的 skw_score 是 target_user_id 对其他提及者分数的平均值', async () => {
+    it('3人都提及时，按钮写入的 skw_score 是 target_user_ids 对其他提及者分数的平均值', async () => {
       const members3 = ['u1', 'u2', 'u3'];
       mockGetTranscripts.mockResolvedValue([
         makeTranscript('u1', 'AI 在这里'),
@@ -578,7 +620,7 @@ describe('info-gap / computeSkw', () => {
         makeTranscript('u3', 'AI 在别处'),
       ]);
       mockKeywordRecallWithGap.mockResolvedValue(makeRecall([
-        { word: 'AI', needs_prompt: true, target_user_id: 'u1', reason: '让 u1 继续展开' },
+        { word: 'AI', needs_prompt: true, target_user_ids: ['u1'], reason: '让 u1 继续展开' },
       ]));
       mockEmbed.mockResolvedValue([[1, 0], [0.8, 0.2], [0.6, 0.4]]);
       mockSimilarity.mockResolvedValue([0.9, 0.8, 0.7]);
