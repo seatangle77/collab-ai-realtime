@@ -49,11 +49,11 @@ const currentGroup = computed<AppGroupSummary | null>(() => {
         <p class="app-home-group">
           <span class="app-home-group-label">当前群组：</span>
           <span class="app-home-group-value">
-            {{ currentGroup?.name || '未选择，请前往「我的群组」选择' }}
+            {{ currentGroup?.name || '未加入群组，请先新建或加入群组' }}
           </span>
         </p>
         <p class="app-home-desc">
-          这里将是普通用户使用协作与会话功能的入口。你可以在「我的群组」中加入或管理协作群组，
+          这里将是普通用户使用协作与会话功能的入口。你可以在「我的群组」中创建、加入或管理协作群组，
           在「我的会话」中查看与 Collab AI 的历史会话，在「我的声纹」中管理声纹样本并生成声纹。
         </p>
       </div>

@@ -126,8 +126,6 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
 
     now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
     user_id = f"u{uuid.uuid4().hex[:8]}"
-    group_id = f"g{uuid.uuid4().hex[:8]}"
-    membership_id = f"gm{uuid.uuid4().hex[:8]}"
 
     # 写入用户
     result = await db.execute(
@@ -148,37 +146,6 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
         },
     )
     row = result.mappings().one()
-
-    # 创建默认群组
-    await db.execute(
-        text(
-            """
-            INSERT INTO groups (id, name, is_active, is_default, created_at)
-            VALUES (:id, :name, TRUE, TRUE, :created_at)
-            """
-        ),
-        {
-            "id": group_id,
-            "name": f"{payload.name} 的群组",
-            "created_at": now_utc,
-        },
-    )
-
-    # 创建 owner 成员关系
-    await db.execute(
-        text(
-            """
-            INSERT INTO group_memberships (id, group_id, user_id, role, status, created_at)
-            VALUES (:id, :group_id, :user_id, 'owner', 'active', :created_at)
-            """
-        ),
-        {
-            "id": membership_id,
-            "group_id": group_id,
-            "user_id": user_id,
-            "created_at": now_utc,
-        },
-    )
 
     await db.commit()
     return UserOut.model_validate(dict(row))

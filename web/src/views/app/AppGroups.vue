@@ -389,7 +389,7 @@ onMounted(() => {
         v-if="!groups.length && !loading"
         icon="👥"
         title="你还没有加入任何群组"
-        description="可以先新建一个群组，或等待他人创建并邀请你加入。"
+        description="可以先新建一个群组，或从下方加入已有群组。"
         action-label="新建群组"
         compact
         @action="openCreateDialog"

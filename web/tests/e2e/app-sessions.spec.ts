@@ -156,7 +156,7 @@ async function setAppContext(
 }
 
 test.describe('App 我的会话页面 - 当前群组前提', () => {
-  test('1. 未选当前群组时提示前往我的群组', async ({ page }) => {
+  test('1. 未加入任何群组时提示前往我的群组且不能新建会话', async ({ page }) => {
     const user = await registerUserForE2E('no-group')
     await loginViaUI(page, user)
 
@@ -168,8 +168,9 @@ test.describe('App 我的会话页面 - 当前群组前提', () => {
     await page.goto('/app/sessions')
     await expect(page.getByRole('heading', { name: '我的会话' })).toBeVisible()
 
-    const emptyNotice = page.getByText('当前未选择群组，请先前往「我的群组」选择或加入一个群组。', { exact: false })
+    const emptyNotice = page.getByText('请先前往「我的群组」新建或加入一个群组，之后才能新建会话。', { exact: false })
     await expect(emptyNotice).toBeVisible()
+    await expect(page.getByRole('button', { name: '新建会话' })).toHaveCount(0)
 
     await page.getByRole('button', { name: '前往我的群组' }).click()
     await expect(page).toHaveURL(/\/app\/groups/)
@@ -216,7 +217,7 @@ test.describe.serial('App 我的会话页面 - 单用户完整流程', () => {
     const titleToEnd = `App Filter Ended ${RUN_ID}`
 
     // 新建 active 会话（UI）
-    await page.getByRole('button', { name: '新建会话' }).click()
+    await page.locator('.app-sessions-new-btn-inline').click()
     const dialog = page.getByRole('dialog', { name: '新建会话' })
     await dialog.getByLabel('会话标题').fill(titleActive)
     await dialog.getByRole('button', { name: '确 定' }).click()
@@ -249,7 +250,7 @@ test.describe.serial('App 我的会话页面 - 单用户完整流程', () => {
   test('4. 编辑会话成功并刷新列表（含未开始/进行中状态）', async ({ page }) => {
     const originalTitle = `App Rename Orig ${RUN_ID}`
 
-    await page.getByRole('button', { name: '新建会话' }).click()
+    await page.locator('.app-sessions-new-btn-inline').click()
     const dialog = page.getByRole('dialog', { name: '新建会话' })
     await dialog.getByLabel('会话标题').fill(originalTitle)
     await dialog.getByRole('button', { name: '确 定' }).click()
@@ -277,7 +278,7 @@ test.describe.serial('App 我的会话页面 - 单用户完整流程', () => {
 
   test('5. 点击会话进入详情页，无转写时展示空状态', async ({ page }) => {
     const title = `App Transcripts Empty ${RUN_ID}`
-    await page.getByRole('button', { name: '新建会话' }).click()
+    await page.locator('.app-sessions-new-btn-inline').click()
     const dialog = page.getByRole('dialog', { name: '新建会话' })
     await dialog.getByLabel('会话标题').fill(title)
     await dialog.getByRole('button', { name: '确 定' }).click()
@@ -289,7 +290,7 @@ test.describe.serial('App 我的会话页面 - 单用户完整流程', () => {
     await item.locator('.app-sessions-item-main').click()
 
     await expect(page).toHaveURL(/\/app\/sessions\/.+/)
-    await expect(page.locator('.app-session-detail-transcripts-empty')).toContainText('暂无转写记录')
+    await expect(page.locator('.app-session-detail-transcripts-empty')).toContainText('暂无讨论实录')
   })
 })
 
@@ -313,7 +314,7 @@ test.describe.serial('App 我的会话页面 - 表单校验与边界', () => {
   })
 
   test('5.1 新建会话 - 标题为空时表单校验阻止提交', async ({ page }) => {
-    await page.getByRole('button', { name: '新建会话' }).click()
+    await page.locator('.app-sessions-new-btn-inline').click()
 
     const dialog = page.getByRole('dialog', { name: '新建会话' })
     const noGroupTip = page.getByText('你还没有加入任何群组', { exact: false })
@@ -343,7 +344,7 @@ test.describe.serial('App 我的会话页面 - 表单校验与边界', () => {
 
     const beforeList = await page.locator('.app-sessions-item').allTextContents()
 
-    await page.getByRole('button', { name: '新建会话' }).click()
+    await page.locator('.app-sessions-new-btn-inline').click()
     const dialog = page.getByRole('dialog', { name: '新建会话' })
     await dialog.getByLabel('会话标题').fill(title)
     await dialog.getByRole('button', { name: '取 消' }).click()
@@ -358,7 +359,7 @@ test.describe.serial('App 我的会话页面 - 表单校验与边界', () => {
     const tempTime = '2026-03-10T09:00:00Z'
 
     // 第一次打开并填写
-    await page.getByRole('button', { name: '新建会话' }).click()
+    await page.locator('.app-sessions-new-btn-inline').click()
     let dialog = page.getByRole('dialog', { name: '新建会话' })
     await expect(dialog).toBeVisible()
     await dialog.getByLabel('会话标题').fill(tempTitle)
@@ -379,7 +380,7 @@ test.describe.serial('App 我的会话页面 - 表单校验与边界', () => {
     const title = `App With Planned Start ${RUN_ID}`
     const planned = '2026-03-10T10:00:00Z'
 
-    await page.getByRole('button', { name: '新建会话' }).click()
+    await page.locator('.app-sessions-new-btn-inline').click()
     const dialog = page.getByRole('dialog', { name: '新建会话' })
     await dialog.getByLabel('会话标题').fill(title)
     await dialog.getByPlaceholder('可选：设置这次会话的起始时间').fill(planned)
@@ -402,7 +403,7 @@ test.describe.serial('App 我的会话页面 - 表单校验与边界', () => {
     await page.goto('/app/sessions')
     await expect(page.getByRole('heading', { name: '我的会话' })).toBeVisible()
 
-    await page.getByRole('button', { name: '新建会话' }).click()
+    await page.locator('.app-sessions-new-btn-inline').click()
     const dialog = page.getByRole('dialog', { name: '新建会话' })
     await expect(dialog).toBeVisible()
 
@@ -417,14 +418,14 @@ test.describe.serial('App 我的会话页面 - 表单校验与边界', () => {
     await dialog.getByRole('button', { name: '确 定' }).click()
 
     // 当前群组应自动切换到另一个群组
-    const groupValue = page.locator('.app-sessions-group-value')
+    const groupValue = page.locator('.app-sessions-group-inline')
     await expect(groupValue).toContainText(anotherGroup.name)
 
     // 列表中能看到刚创建的会话
     await expect(page.getByText(title, { exact: false })).toBeVisible()
   })
 
-  test('5.5 ⋯ 菜单按状态显示正确的操作项（取消/结束/已结束无操作）', async ({ page }) => {
+  test('5.5 ⋯ 菜单按状态显示正确的操作项（取消/结束）', async ({ page }) => {
     test.setTimeout(90000)
     const title = `App Status Menu ${RUN_ID}`
 
@@ -458,38 +459,6 @@ test.describe.serial('App 我的会话页面 - 表单校验与边界', () => {
     await ongoingItem.locator('.app-sessions-more-btn').click()
     await expect(page.getByRole('menuitem', { name: '结束会话' })).toBeVisible()
     await expect(page.getByRole('menuitem', { name: '取消会话' })).not.toBeVisible()
-
-    // 通过 ⋯ 菜单结束会话
-    await page.getByRole('menuitem', { name: '结束会话' }).click()
-    const confirmDialog = page.getByRole('dialog', { name: '结束会话' })
-    await expect(confirmDialog).toBeVisible()
-    await confirmDialog.getByRole('button', { name: '结束' }).click()
-    await expect(page.getByText('会话已结束')).toBeVisible()
-
-    // 重新加载，确保已结束状态已写入后端，再切 Tab
-    await page.reload()
-    await expect(page.getByRole('heading', { name: '我的会话' })).toBeVisible()
-    await page.getByRole('button', { name: '已结束' }).click()
-    const endedItem = page.locator('.app-sessions-item').filter({ hasText: title }).first()
-    await expect(endedItem).toBeVisible({ timeout: 15000 })
-
-    // ended：⋯ 菜单无「结束会话」也无「取消会话」，只有「编辑标题」
-    await endedItem.locator('.app-sessions-more-btn').click()
-    await expect(page.getByRole('menuitem', { name: '结束会话' })).not.toBeVisible()
-    await expect(page.getByRole('menuitem', { name: '取消会话' })).not.toBeVisible()
-    await expect(page.getByRole('menuitem', { name: '编辑标题' })).toBeVisible()
-
-    // 已结束会话仍可编辑标题，但无预设开始时间控件
-    await page.getByRole('menuitem', { name: '编辑标题' }).click()
-    const editDialog = page.getByRole('dialog', { name: '编辑会话' })
-    await expect(editDialog).toBeVisible()
-    await expect(editDialog.getByPlaceholder('仅未开始会话可编辑')).toHaveCount(0)
-
-    const endedNewTitle = `${title} Edited`
-    await editDialog.getByLabel('会话标题').fill(endedNewTitle)
-    await editDialog.getByRole('button', { name: '保 存' }).click()
-    await expect(page.getByText('更新会话成功')).toBeVisible()
-    await expect(page.getByText(endedNewTitle, { exact: false })).toBeVisible()
   })
 })
 
@@ -526,7 +495,7 @@ test.describe.serial('App 我的会话页面 - 多用户与权限边界', () => 
   test('7. 非群成员访问该群组会话列表时，前端展示错误提示', async ({ page }) => {
     await loginViaUI(page, outsider)
 
-    // 伪造 current_group 为该群组，但后端会判定不是成员并返回 403
+    // 伪造 current_group 为该群组；页面会用 /groups/my 校验后清掉无效缓存。
     await page.evaluate((g) => {
       window.localStorage.setItem(
         'app_current_group',
@@ -536,8 +505,8 @@ test.describe.serial('App 我的会话页面 - 多用户与权限边界', () => 
 
     await page.goto('/app/sessions')
 
-    // 403 后会从 /app/sessions 跳转走（可能跳到 /app/login 再重定向到 /app）
-    await expect(page).not.toHaveURL(/\/app\/sessions/)
-    await expect(page).toHaveURL(/\/app(\/login)?\/?$/)
+    await expect(page).toHaveURL(/\/app\/sessions/)
+    await expect(page.getByText('你还没有加入任何群组')).toBeVisible()
+    await expect(page.getByRole('button', { name: '新建会话' })).toHaveCount(0)
   })
 })

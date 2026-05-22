@@ -94,11 +94,11 @@ def scenario_register_missing_required_fields() -> bool:
     return ok
 
 
-def scenario_register_creates_default_group(ctx: Dict[str, Any]) -> bool:
-    """注册后应自动创建 is_default=true 的群组，名称为 '{name} 的群组'。"""
+def scenario_register_does_not_create_default_group(ctx: Dict[str, Any]) -> bool:
+    """注册后不应自动创建群组。"""
     user_id = ctx.get("user_id")
     if not user_id:
-        return _log(False, "register_creates_default_group：ctx 中无 user_id", ctx)
+        return _log(False, "register_does_not_create_default_group：ctx 中无 user_id", ctx)
 
     r = requests.get(
         f"{BASE_URL}/api/admin/users/{user_id}",
@@ -111,19 +111,15 @@ def scenario_register_creates_default_group(ctx: Dict[str, Any]) -> bool:
     group_ids = data.get("group_ids", [])
     group_names = data.get("group_names", [])
 
-    if not group_ids:
-        return _log(False, "注册后用户应有默认群组，但 group_ids 为空", data)
-
-    expected_name = f"{ctx['name']} 的群组"
-    ok = expected_name in group_names
-    return _log(ok, f"注册自动创建默认群组场景（期望群组名：{expected_name!r}）", data)
+    ok = group_ids == [] and group_names == []
+    return _log(ok, "注册后不自动创建群组场景", data)
 
 
-def scenario_register_creates_owner_membership(ctx: Dict[str, Any]) -> bool:
-    """注册后应自动创建 role=owner, status=active 的成员关系。"""
+def scenario_register_does_not_create_membership(ctx: Dict[str, Any]) -> bool:
+    """注册后不应自动创建成员关系。"""
     user_id = ctx.get("user_id")
     if not user_id:
-        return _log(False, "register_creates_owner_membership：ctx 中无 user_id", ctx)
+        return _log(False, "register_does_not_create_membership：ctx 中无 user_id", ctx)
 
     r = requests.get(
         f"{BASE_URL}/api/admin/memberships",
@@ -134,9 +130,8 @@ def scenario_register_creates_owner_membership(ctx: Dict[str, Any]) -> bool:
         return _log(False, "查询成员关系失败", {"status": r.status_code, "body": r.text})
 
     items = r.json().get("items", [])
-    owner_active = [m for m in items if m.get("role") == "owner" and m.get("status") == "active"]
-    ok = len(owner_active) >= 1
-    return _log(ok, "注册自动创建 owner 成员关系场景", {"memberships": items})
+    ok = items == []
+    return _log(ok, "注册后不自动创建成员关系场景", {"memberships": items})
 
 
 # ────────────────────────────────────────────────────────────
@@ -330,8 +325,8 @@ def run_all() -> bool:
     ok &= scenario_register_missing_required_fields()
     ok &= scenario_register_success(ctx)
     ok &= scenario_register_duplicate_email(ctx)
-    ok &= scenario_register_creates_default_group(ctx)
-    ok &= scenario_register_creates_owner_membership(ctx)
+    ok &= scenario_register_does_not_create_default_group(ctx)
+    ok &= scenario_register_does_not_create_membership(ctx)
 
     print("\n-- 登录 --")
     ok &= scenario_login_success(ctx)

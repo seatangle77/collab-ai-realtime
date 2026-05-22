@@ -34,6 +34,15 @@ function loadCurrentGroup(): AppGroupSummary | null {
   }
 }
 
+function saveCurrentGroup(group: AppGroupSummary | null) {
+  if (typeof window === 'undefined') return
+  if (group) {
+    window.localStorage.setItem('app_current_group', JSON.stringify(group))
+  } else {
+    window.localStorage.removeItem('app_current_group')
+  }
+}
+
 function extractErrorMessage(err: unknown): string {
   const msg = (err as any)?.message ?? '请求失败'
   if (typeof msg !== 'string') return '请求失败'
@@ -124,6 +133,21 @@ function canEndSession(session: AppChatSession): boolean {
   return session.status === 'ongoing'
 }
 
+function resetSessionCache() {
+  sessions.value = []
+  allSessionsCache.value = null
+  includeEndedLoaded.value = false
+}
+
+function setCurrentGroup(group: AppGroupSummary | null) {
+  const changed = currentGroup.value?.id !== group?.id
+  currentGroup.value = group
+  saveCurrentGroup(group)
+  if (changed) {
+    resetSessionCache()
+  }
+}
+
 async function fetchSessions(filter: SessionFilter = activeFilter.value) {
   if (!currentGroup.value) {
     sessions.value = []
@@ -154,18 +178,37 @@ async function fetchMyGroupsForSessions() {
   try {
     const data = await listMyGroups()
     myGroups.value = data.map((g) => ({ id: g.id, name: g.name }))
-    if (!currentGroup.value && myGroups.value.length) {
-      const first = myGroups.value[0]!
-      currentGroup.value = { id: first.id, name: first.name }
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem('app_current_group', JSON.stringify(currentGroup.value))
-      }
+
+    if (!myGroups.value.length) {
+      setCurrentGroup(null)
+      return
     }
+
+    const existing = currentGroup.value
+      ? myGroups.value.find((g) => g.id === currentGroup.value?.id)
+      : null
+    const next = existing ?? myGroups.value[0]!
+    setCurrentGroup({ id: next.id, name: next.name })
   } catch (err) {
     console.error(err)
     ElMessage.error(extractErrorMessage(err))
   } finally {
     groupsLoading.value = false
+  }
+}
+
+async function ensureMyGroupsLoaded() {
+  if (!myGroups.value.length) {
+    await fetchMyGroupsForSessions()
+  } else if (currentGroup.value && !myGroups.value.some((g) => g.id === currentGroup.value?.id)) {
+    await fetchMyGroupsForSessions()
+  }
+}
+
+async function initializeSessionsPage() {
+  await fetchMyGroupsForSessions()
+  if (currentGroup.value) {
+    await fetchSessions('active')
   }
 }
 
@@ -182,9 +225,7 @@ function handleFilterChange(filter: SessionFilter) {
 }
 
 async function openCreateDialog() {
-  if (!myGroups.value.length) {
-    await fetchMyGroupsForSessions()
-  }
+  await ensureMyGroupsLoaded()
   if (!myGroups.value.length) {
     ElMessage.info('你还没有加入任何群组，请先在「我的群组」中创建或加入群组')
     return
@@ -200,7 +241,7 @@ async function openCreateDialog() {
 }
 
 async function submitCreate() {
-  if (!currentGroup.value || !createFormRef.value) return
+  if (!createFormRef.value) return
   await createFormRef.value.validate(async (valid) => {
     if (!valid) return
     try {
@@ -220,11 +261,7 @@ async function submitCreate() {
       } else {
         const g = myGroups.value.find((x) => x.id === targetGroupId)
         if (g) {
-          const cg = { id: g.id, name: g.name }
-          currentGroup.value = cg
-          if (typeof window !== 'undefined') {
-            window.localStorage.setItem('app_current_group', JSON.stringify(cg))
-          }
+          setCurrentGroup({ id: g.id, name: g.name })
         }
       }
       void fetchSessions(activeFilter.value)
@@ -320,10 +357,7 @@ function goToDetail(session: AppChatSession) {
 }
 
 onMounted(() => {
-  void fetchMyGroupsForSessions()
-  if (currentGroup.value) {
-    void fetchSessions('active')
-  }
+  void initializeSessionsPage()
 })
 </script>
 
@@ -337,8 +371,8 @@ onMounted(() => {
     <div v-if="!hasCurrentGroup" class="app-sessions-empty-group">
       <AppEmptyState
         icon="👥"
-        title="当前未选择群组"
-        description="请先前往「我的群组」选择或加入一个群组。"
+        title="你还没有加入任何群组"
+        description="请先前往「我的群组」新建或加入一个群组，之后才能新建会话。"
         action-label="前往我的群组"
         @action="goToGroups"
       />

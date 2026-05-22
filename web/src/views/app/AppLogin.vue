@@ -28,6 +28,7 @@ async function handleSubmit() {
     if (typeof window !== 'undefined') {
       window.localStorage.setItem('app_access_token', res.access_token)
       window.localStorage.setItem('app_user', JSON.stringify(res.user))
+      window.localStorage.removeItem('app_current_group')
     }
 
     const needsReset = !!res.user.password_needs_reset
@@ -206,4 +207,3 @@ function goRegister() {
   font-size: 13px;
 }
 </style>
-

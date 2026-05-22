@@ -54,7 +54,7 @@ def _setup() -> dict:
     member_token, member_id = _register_login(f"member_{RUN_ID}")
     outsider_token, outsider_id = _register_login(f"outsider_{RUN_ID}")
 
-    # leader 建群（注册时已有 default group，这里建一个测试专用群）
+    # leader 显式创建测试专用群
     r = requests.post(f"{BASE_URL}/api/groups", json={"name": f"tr_group_{RUN_ID}"},
                       headers=_auth(leader_token))
     r.raise_for_status()

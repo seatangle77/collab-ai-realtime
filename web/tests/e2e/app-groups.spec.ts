@@ -117,9 +117,8 @@ test.describe('App 我的群组页面 - 基础场景', () => {
     await expect(page.getByText('已加入群组').locator('..')).toContainText('0')
 
     // 我的群组空状态
-    await expect(
-      page.getByText('你还没有加入任何群组，可以先新建一个群组，或等待他人创建并邀请你加入。'),
-    ).toBeVisible()
+    await expect(page.getByText('你还没有加入任何群组')).toBeVisible()
+    await expect(page.getByText('可以先新建一个群组，或从下方加入已有群组。')).toBeVisible()
 
     // 当前群组详情空状态
     await expect(page.getByText('尚未选择群组')).toBeVisible()
@@ -344,4 +343,3 @@ test.describe('App 我的群组页面 - 边界与异常', () => {
     await expect(page.getByRole('button', { name: '移出' })).toHaveCount(0)
   })
 })
-

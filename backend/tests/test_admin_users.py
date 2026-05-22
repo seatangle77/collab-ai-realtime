@@ -98,17 +98,17 @@ def scenario_admin_create_user_success(ctx: Dict[str, Any]) -> bool:
     return _log(ok, "admin 创建用户成功场景", data)
 
 
-def scenario_admin_create_user_creates_default_group(ctx: Dict[str, Any]) -> bool:
+def scenario_admin_create_user_does_not_create_default_group(ctx: Dict[str, Any]) -> bool:
     user_id = ctx.get("created_user_id")
     if not user_id:
-        return _log(False, "create_user_creates_default_group：ctx 中无 created_user_id")
+        return _log(False, "create_user_does_not_create_default_group：ctx 中无 created_user_id")
 
     r = requests.get(f"{BASE_URL}/api/admin/users/{user_id}", headers=ADMIN_HEADERS)
     if r.status_code != 200:
         return _log(False, "查询创建的用户详情失败", {"status": r.status_code})
     data = r.json()
-    ok = len(data.get("group_ids", [])) >= 1
-    return _log(ok, "admin 创建用户自动生成默认群组场景", data)
+    ok = data.get("group_ids", []) == [] and data.get("group_names", []) == []
+    return _log(ok, "admin 创建用户不自动生成默认群组场景", data)
 
 
 def scenario_admin_create_user_duplicate_email(ctx: Dict[str, Any]) -> bool:
@@ -263,10 +263,9 @@ def scenario_admin_get_user_detail(ctx: Dict[str, Any]) -> bool:
         return _log(False, "admin 获取用户详情失败（期望 200）", {"status": r.status_code, "body": r.text})
     data = r.json()
     ok = data["id"] == target["id"] and data["email"] == target["email"]
-    # 详情接口应包含 group 字段（注册时自动创建了默认群组）
+    # 详情接口应包含 group 字段，新用户可以尚未加入任何群组。
     ok &= isinstance(data.get("group_ids"), list)
     ok &= isinstance(data.get("group_names"), list)
-    ok &= len(data.get("group_ids", [])) >= 1  # 至少有注册时创建的默认群组
     return _log(ok, "admin 获取用户详情（含 group 信息）场景", data)
 
 
@@ -552,18 +551,13 @@ def scenario_admin_export_csv_no_token() -> bool:
 # ────────────────────────────────────────────────────────────
 
 def scenario_admin_delete_user_fk_no_error() -> bool:
-    """注册用户 → admin 获取默认群组 → 创建会话 → 删除用户 → 断言 204（无 FK 报错）。"""
+    """注册用户 → 显式创建群组和成员关系 → 创建会话 → 删除用户 → 断言 204（无 FK 报错）。"""
     user = register_dummy_user("FKDelTest")
     user_id = user["id"]
 
-    # 获取用户默认群组
-    r = requests.get(f"{BASE_URL}/api/admin/users/{user_id}", headers=ADMIN_HEADERS)
-    if r.status_code != 200:
-        return _log(False, "FK删除场景：获取用户详情失败", {"status": r.status_code})
-    group_ids = r.json().get("group_ids", [])
-    if not group_ids:
-        return _log(False, "FK删除场景：用户无默认群组", r.json())
-    group_id = group_ids[0]
+    group = _create_admin_group(f"FKDelGroup {uuid.uuid4().hex[:4]} {RUN_ID}")
+    group_id = group["id"]
+    _create_admin_membership(group_id, user_id, role="leader")
 
     # 在该群组中创建一个会话（模拟有关联数据）
     r2 = requests.post(
@@ -581,19 +575,17 @@ def scenario_admin_delete_user_fk_no_error() -> bool:
 
 
 def scenario_admin_batch_delete_fk_no_error() -> bool:
-    """注册2用户 → 默认群组各创建会话 → 批量删除 → 断言 deleted=2（无 FK 报错）。"""
+    """注册2用户 → 显式创建群组和成员关系 → 创建会话 → 批量删除 → 断言 deleted=2（无 FK 报错）。"""
     u1 = register_dummy_user("FKBatchDel1")
     u2 = register_dummy_user("FKBatchDel2")
 
-    # 在 u1 的默认群组中创建会话
-    r = requests.get(f"{BASE_URL}/api/admin/users/{u1['id']}", headers=ADMIN_HEADERS)
-    group_ids = r.json().get("group_ids", []) if r.status_code == 200 else []
-    if group_ids:
-        requests.post(
-            f"{BASE_URL}/api/admin/chat-sessions/",
-            json={"group_id": group_ids[0], "session_title": f"FK Batch Session {RUN_ID}"},
-            headers=ADMIN_HEADERS,
-        )
+    group = _create_admin_group(f"FKBatchGroup {uuid.uuid4().hex[:4]} {RUN_ID}")
+    _create_admin_membership(group["id"], u1["id"], role="leader")
+    requests.post(
+        f"{BASE_URL}/api/admin/chat-sessions/",
+        json={"group_id": group["id"], "session_title": f"FK Batch Session {RUN_ID}"},
+        headers=ADMIN_HEADERS,
+    )
 
     r = requests.post(
         f"{BASE_URL}/api/admin/users/batch-delete",
@@ -658,7 +650,7 @@ def run_all() -> bool:
 
     print("\n-- 创建用户 --")
     ok &= scenario_admin_create_user_success(ctx)
-    ok &= scenario_admin_create_user_creates_default_group(ctx)
+    ok &= scenario_admin_create_user_does_not_create_default_group(ctx)
     ok &= scenario_admin_create_user_duplicate_email(ctx)
     ok &= scenario_admin_create_user_invalid_password()
 
