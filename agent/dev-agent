@@ -48,15 +48,40 @@ const client = new Client({
 let child = null;
 let shuttingDown = false;
 
+function signalExitCode(signal) {
+  const signalNumbers = {
+    SIGINT: 2,
+    SIGTERM: 15,
+    SIGHUP: 1,
+  };
+  return 128 + (signalNumbers[signal] || 0);
+}
+
 async function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   if (child && !child.killed) {
-    child.kill(signal);
+    write(`Stopping agent with ${signal}...\n`);
+    try {
+      process.kill(-child.pid, signal);
+    } catch {
+      child.kill(signal);
+    }
+    setTimeout(() => {
+      if (child && child.exitCode === null && child.signalCode === null) {
+        writeErr('Agent did not stop in time; forcing shutdown with SIGKILL.\n');
+        try {
+          process.kill(-child.pid, 'SIGKILL');
+        } catch {
+          child.kill('SIGKILL');
+        }
+      }
+    }, 5000).unref();
     return;
   }
   await client.end().catch(() => {});
   logStream.end();
+  process.exit(signalExitCode(signal));
 }
 
 process.on('SIGINT', () => void shutdown('SIGINT'));
@@ -76,6 +101,7 @@ process.on('SIGTERM', () => void shutdown('SIGTERM'));
   child = spawn('npm', ['run', 'dev'], {
     cwd: process.cwd(),
     env: process.env,
+    detached: true,
     stdio: ['inherit', 'pipe', 'pipe'],
   });
 
@@ -86,8 +112,7 @@ process.on('SIGTERM', () => void shutdown('SIGTERM'));
     await client.query('SELECT pg_advisory_unlock($1, $2)', [lockKey1, lockKey2]).catch(() => {});
     await client.end().catch(() => {});
     logStream.end(() => {
-      if (signal) process.kill(process.pid, signal);
-      process.exit(code ?? 1);
+      process.exit(signal ? signalExitCode(signal) : (code ?? 1));
     });
   });
 })().catch(async (err) => {
