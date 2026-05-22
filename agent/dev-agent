@@ -10,4 +10,90 @@ mkdir -p "$LOG_DIR"
 cd "$AGENT_DIR"
 
 echo "Agent log: $LOG_FILE"
-npm run dev 2>&1 | tee "$LOG_FILE"
+export AGENT_LOG_FILE="$LOG_FILE"
+
+node <<'NODE'
+const fs = require('fs');
+const { spawn } = require('child_process');
+const dotenv = require('dotenv');
+const { Client } = require('pg');
+
+dotenv.config({ path: '.env.local' });
+dotenv.config({ path: '../secrets.env' });
+
+const logFile = process.env.AGENT_LOG_FILE;
+const logStream = fs.createWriteStream(logFile, { flags: 'a' });
+
+function write(line) {
+  process.stdout.write(line);
+  logStream.write(line);
+}
+
+function writeErr(line) {
+  process.stderr.write(line);
+  logStream.write(line);
+}
+
+const lockKey1 = 20260522;
+const lockKey2 = 1;
+const client = new Client({
+  host: process.env.DB_HOST || '127.0.0.1',
+  port: Number(process.env.DB_PORT || 5432),
+  database: process.env.DB_NAME || 'collaborative_ai_chatbot',
+  user: process.env.DB_USER || 'postgres',
+  password: process.env.DB_PASSWORD || '',
+  connectionTimeoutMillis: 5000,
+});
+
+let child = null;
+let shuttingDown = false;
+
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  if (child && !child.killed) {
+    child.kill(signal);
+    return;
+  }
+  await client.end().catch(() => {});
+  logStream.end();
+}
+
+process.on('SIGINT', () => void shutdown('SIGINT'));
+process.on('SIGTERM', () => void shutdown('SIGTERM'));
+
+(async () => {
+  await client.connect();
+  const result = await client.query('SELECT pg_try_advisory_lock($1, $2) AS locked', [lockKey1, lockKey2]);
+  if (!result.rows[0]?.locked) {
+    writeErr('Another collab-ai agent is already running for this database. Abort.\n');
+    await client.end();
+    logStream.end();
+    process.exit(2);
+  }
+
+  write('Agent DB lock acquired. Starting npm run dev...\n');
+  child = spawn('npm', ['run', 'dev'], {
+    cwd: process.cwd(),
+    env: process.env,
+    stdio: ['inherit', 'pipe', 'pipe'],
+  });
+
+  child.stdout.on('data', (chunk) => write(chunk));
+  child.stderr.on('data', (chunk) => writeErr(chunk));
+
+  child.on('exit', async (code, signal) => {
+    await client.query('SELECT pg_advisory_unlock($1, $2)', [lockKey1, lockKey2]).catch(() => {});
+    await client.end().catch(() => {});
+    logStream.end(() => {
+      if (signal) process.kill(process.pid, signal);
+      process.exit(code ?? 1);
+    });
+  });
+})().catch(async (err) => {
+  writeErr(`Failed to start agent with DB lock: ${err.message}\n`);
+  await client.end().catch(() => {});
+  logStream.end();
+  process.exit(1);
+});
+NODE
