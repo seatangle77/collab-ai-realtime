@@ -2,6 +2,7 @@
 import { ref, watch } from 'vue'
 
 const props = defineProps<{
+  title?: string
   content: string
   visible: boolean
 }>()
@@ -66,7 +67,7 @@ watch(
       @mouseenter="handleMouseEnter"
       @mouseleave="handleMouseLeave"
     >
-      <span class="push-title">AI 建议</span>
+      <span class="push-title">{{ title ?? 'AI 建议' }}</span>
       <span class="push-content">{{ content }}</span>
       <button type="button" class="push-close-btn" @click="handleManualClose">知道了</button>
     </div>

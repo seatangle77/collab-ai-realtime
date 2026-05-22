@@ -114,9 +114,11 @@ interface OfflineAudioSegment {
 
 // ── 推送通知 ──────────────────────────────────────────────────────────────────
 const pushContent = ref('')
+const pushTitle = ref('AI 建议')
 const pushVisible = ref(false)
 
-function showPushNotification(content: string, _triggeredAt?: string | null) {
+function showPushNotification(content: string, _triggeredAt?: string | null, title = 'AI 建议') {
+  pushTitle.value = title
   pushContent.value = content
   pushVisible.value = false
   // 强制触发 watch（即使上一条还没消失也能重新触发）
@@ -278,7 +280,7 @@ function handleInfoGapButtonClicked(buttonId: string, content: string, keyword: 
       viewed: true,
     }
   })
-  if (content) showPushNotification(`${keyword}：${content}`)
+  if (content) showPushNotification(`${keyword}：${content}`, null, '概念解释')
 }
 
 function upsertPushEvent(push: PushLogItem) {
@@ -1647,6 +1649,7 @@ onUnmounted(() => {
   <div class="app-session-detail-page">
     <!-- 推送消息 Toast（fixed 定位，不占文档流） -->
     <PushNotification
+      :title="pushTitle"
       :content="pushContent"
       :visible="pushVisible"
       @dismissed="pushVisible = false"
