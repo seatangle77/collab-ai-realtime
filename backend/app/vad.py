@@ -11,7 +11,7 @@ from .redis_client import get_redis_client
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/internal", tags=["vad"])
-VAD_SPEAKING_THRESHOLD_MS = 700
+VAD_SPEAKING_THRESHOLD_MS = 650
 
 
 @router.get(

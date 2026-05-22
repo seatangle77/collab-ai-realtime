@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import subprocess
 import threading
 import time
@@ -13,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audio.speaker_identifier import SpeakerIdentifier
 from app.audio.tencent_asr import TencentASR
+from app.nlp.lexicon_loader import load_external_stopwords, load_pystopwords
 from app.transcript_realtime import insert_speech_transcript_and_broadcast
 from app.redis_client import get_redis_client
 from app.ws_manager import ws_manager
@@ -34,8 +36,30 @@ PCM_READER_HEARTBEAT_SEC = 5
 VAD_FRAME_BYTES = 320        # 16kHz * 16bit * 10ms = 320 bytes
 VAD_REDIS_TTL_SEC = 2        # is_speaking key 过期时间，超过则认为无人说话
 VAD_REDIS_WRITE_INTERVAL = 0.5  # 最多每 0.5s 写一次 Redis，避免过于频繁
-VAD_SILENCE_NOTIFY_MS = 600
+VAD_SILENCE_NOTIFY_MS = 650
 VAD_SILENCE_CHANNEL = "agent:vad_silence"
+
+TEXT_STRIP_RE = re.compile(r"[\s，。！？、,.!?;；:：\"'“”‘’（）()]+")
+
+
+def load_asr_stopwords() -> set[str]:
+    return {word.strip().lower() for word in (load_external_stopwords() | load_pystopwords()) if word.strip()}
+
+
+ASR_STOPWORDS = load_asr_stopwords()
+
+
+def should_drop_asr_text(text: str, speaker: str | None = None, confidence: float | None = None) -> bool:
+    normalized = TEXT_STRIP_RE.sub("", text).lower()
+    if not normalized:
+        return True
+    if normalized in ASR_STOPWORDS:
+        return True
+    if len(normalized) <= 1:
+        return True
+    if speaker == "unknown" and confidence is not None and confidence < 0.2 and len(normalized) <= 3:
+        return True
+    return False
 
 
 class AudioService:
@@ -51,7 +75,7 @@ class AudioService:
         self._aac_ffmpeg_proc: subprocess.Popen | None = None
         self._aac_reader_thread: threading.Thread | None = None
         self._aac_stop_event = threading.Event()
-        self._vad = webrtcvad.Vad(2) if webrtcvad is not None else None
+        self._vad = webrtcvad.Vad(3) if webrtcvad is not None else None
         self._vad_last_redis_write: float = 0.0
         self._vad_last_voice_at: float | None = None
         self._vad_silence_notified = True
@@ -208,7 +232,9 @@ class AudioService:
         腾讯 ASR on_sentence_end 回调（已由 run_coroutine_threadsafe 桥接到 asyncio）。
         流程：音频长度检查 → Resemblyzer 识别说话人 → 写库 + 广播
         """
-        if not text or not text.strip():
+        text = text.strip()
+        if should_drop_asr_text(text):
+            logger.info("[AudioService] session=%s drop_asr_filler text=%r", self.session_id, text[:50])
             return
 
         # 音频太短，跳过声纹识别
@@ -227,6 +253,13 @@ class AudioService:
             speaker, confidence = await loop.run_in_executor(
                 None, self.identifier.identify, audio_bytes
             )
+
+        if should_drop_asr_text(text, speaker, confidence):
+            logger.info(
+                "[AudioService] session=%s drop_asr_noise speaker=%s confidence=%.3f text=%r",
+                self.session_id, speaker, confidence, text[:50],
+            )
+            return
 
         logger.info(
             "[AudioService] session=%s speaker=%s confidence=%.3f text=%r",
