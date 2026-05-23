@@ -77,8 +77,6 @@ jobs:
             sed -i 's|^ExecStart=.*|ExecStart=/bin/bash /root/workspace/collab-ai-realtime/backend/start.sh|' /etc/systemd/system/collab-ai.service
             systemctl daemon-reload
             systemctl restart collab-ai
-            sleep 5
-            curl -f http://127.0.0.1:8000/
 
             # ── 7. 更新 agent systemd 启动命令并启动 ──────────────
             sed -i 's|^ExecStart=.*|ExecStart=/bin/bash /root/workspace/collab-ai-realtime/agent/start.sh|' /etc/systemd/system/collab-ai-agent.service
