@@ -5,10 +5,18 @@ set -e
 export TZ=Asia/Shanghai
 export APP_ENV=production
 
-cd /var/www/collab-ai-realtime/backend
-source /var/www/collab-ai-realtime/venv/bin/activate
+ROOT_DIR="/root/workspace/collab-ai-realtime"
+LOG_DIR="$ROOT_DIR/logs"
+LOG_FILE="$LOG_DIR/backend-$(date +%Y%m%d-%H%M%S).log"
 
-exec uvicorn app.main:app \
+mkdir -p "$LOG_DIR"
+
+cd "$ROOT_DIR/backend"
+source "$ROOT_DIR/backend/venv/bin/activate"
+
+echo "Backend log: $LOG_FILE"
+uvicorn app.main:app \
     --host 0.0.0.0 \
     --port 8000 \
-    --workers 1
+    --workers 1 \
+    2>&1 | tee "$LOG_FILE"

@@ -49,29 +49,39 @@ jobs:
           command_timeout: 10m
           script: |
             set -e
-            cd /root/workspace/collab-ai-realtime
+            export PATH="/root/.nvm/versions/node/v22.22.2/bin:$PATH"
 
-            # 拉取最新代码
+            # ── 1. 停服务 ──────────────────────────────────────────
+            systemctl stop collab-ai-agent
+            systemctl stop collab-ai
+
+            # ── 2. 拉取最新代码 ────────────────────────────────────
+            cd /root/workspace/collab-ai-realtime
             git fetch origin main
             git reset --hard origin/main
 
-            # 更新 Python 依赖
-            cd backend
+            # ── 3. 更新 backend 依赖 ───────────────────────────────
+            cd /root/workspace/collab-ai-realtime/backend
             source venv/bin/activate
             pip install -r requirements.txt -q
 
-            # 重启后端
-            systemctl restart collab-ai
-
-            # 更新 agent 依赖并构建
+            # ── 4. 更新 agent 依赖并构建 ───────────────────────────
             cd /root/workspace/collab-ai-realtime/agent
-            export PATH="/root/.nvm/versions/node/v22.22.2/bin:$PATH"
-            node -v
-            npm -v
             npm ci
             npm run build
 
-            # 重启 agent（服务文件已在服务器手动配置）
-            systemctl restart collab-ai-agent
+            # ── 5. 重启 Redis ──────────────────────────────────────
+            systemctl restart redis-server
+
+            # ── 6. 启动 backend ────────────────────────────────────
+            systemctl start collab-ai
+
+            # ── 7. 更新 agent systemd 启动命令并启动 ──────────────
+            sed -i 's|^ExecStart=.*|ExecStart=/bin/bash /root/workspace/collab-ai-realtime/agent/start.sh|' /etc/systemd/system/collab-ai-agent.service
+            systemctl daemon-reload
+            systemctl start collab-ai-agent
+
+            # ── 8. Nginx 检查配置并 reload ─────────────────────────
+            nginx -t && systemctl reload nginx
 
             echo "✅ 部署完成"
