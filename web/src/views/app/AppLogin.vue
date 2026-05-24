@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { appLogin } from '../../api/appAuth'
+import { getJPushDeviceToken } from '../../native/jpushDevice'
 import { extractErrorMessage } from '../../utils/error'
 
 const router = useRouter()
@@ -10,7 +11,10 @@ const route = useRoute()
 const email = ref('')
 const password = ref('')
 const loading = ref(false)
+const deviceTokenLoading = ref(false)
 const error = ref('')
+const deviceToken = ref('')
+const deviceTokenError = ref('')
 
 async function handleSubmit() {
   error.value = ''
@@ -49,6 +53,25 @@ async function handleSubmit() {
 function goRegister() {
   const redirect = (route.query.redirect as string | undefined) || '/app'
   router.push({ path: '/app/register', query: { redirect } })
+}
+
+async function showDeviceToken() {
+  deviceToken.value = ''
+  deviceTokenError.value = ''
+  deviceTokenLoading.value = true
+
+  try {
+    const token = await getJPushDeviceToken()
+    if (!token) {
+      deviceTokenError.value = '极光 device_token 暂未生成，请稍后重试'
+      return
+    }
+    deviceToken.value = token
+  } catch (e: unknown) {
+    deviceTokenError.value = extractErrorMessage(e) || '读取 device_token 失败'
+  } finally {
+    deviceTokenLoading.value = false
+  }
 }
 </script>
 
@@ -96,6 +119,19 @@ function goRegister() {
           立即注册
         </button>
       </p>
+
+      <div class="device-token-panel">
+        <button
+          type="button"
+          class="device-token-button"
+          :disabled="deviceTokenLoading"
+          @click="showDeviceToken"
+        >
+          {{ deviceTokenLoading ? '读取中...' : '显示 device_token' }}
+        </button>
+        <p v-if="deviceTokenError" class="device-token-error">{{ deviceTokenError }}</p>
+        <p v-if="deviceToken" class="device-token-value">{{ deviceToken }}</p>
+      </div>
     </div>
   </div>
 </template>
@@ -205,5 +241,45 @@ function goRegister() {
   text-decoration: underline;
   padding: 0 2px;
   font-size: 13px;
+}
+
+.device-token-panel {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.device-token-button {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  padding: 9px 12px;
+  background: rgba(15, 23, 42, 0.65);
+  color: #e5e7eb;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.device-token-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.device-token-error {
+  margin: 10px 0 0;
+  color: #fca5a5;
+  font-size: 12px;
+}
+
+.device-token-value {
+  margin: 10px 0 0;
+  padding: 10px;
+  border-radius: 8px;
+  background: rgba(2, 6, 23, 0.72);
+  color: #bfdbfe;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 </style>
