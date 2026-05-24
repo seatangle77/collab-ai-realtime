@@ -33,7 +33,7 @@ const menuGroups = computed<AdminMenuGroup[]>(() => [
     items: [
       { path: '/admin/discussion-states', label: '讨论状态' },
       { path: '/admin/window-metrics', label: '窗口指标' },
-      { path: '/admin/window-metrics-keywords', label: '窗口关键词' },
+      // { path: '/admin/window-metrics-keywords', label: '窗口关键词' },
       { path: '/admin/window-metrics-batch-reasoning', label: '窗口论证批量日志' },
       { path: '/admin/discussion-summaries', label: '讨论摘要' },
       { path: '/admin/info-gap-buttons', label: '信息缺口按钮' },

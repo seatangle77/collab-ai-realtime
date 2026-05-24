@@ -4,7 +4,7 @@ import { computeSpeakingRatio } from './perception/speaking-ratio';
 import { computeSilence } from './perception/silence';
 import { computeTtrAndArgDensity } from './perception/ttr-and-arg-density';
 import { computeSrep } from './perception/srep';
-import { computeInfoGain } from './perception/info-gain';
+// import { computeInfoGain } from './perception/info-gain';
 import { computeHasReasoning } from './perception/reasoning';
 
 const logger = createLogger('pipeline');
@@ -63,7 +63,7 @@ export async function runPerceptionPipeline(input: PipelineInput): Promise<Pipel
   });
 
   // ── Step 1~3：启动所有互不依赖的分析任务，避免 reasoning 与 info_gain 串行等待 ───
-  logger.info('[Step 1~3] 并行启动：基础指标 / 论证结构 / 信息增益', { sessionId });
+  logger.info('[Step 1~3] 并行启动：基础指标 / 论证结构', { sessionId });
   const baseMetricsPromise = Promise.allSettled([
     computeSpeakingRatio(sessionId, windowStart, windowEnd, memberIds),
     computeSilence(sessionId, windowStart, windowEnd, memberIds),
@@ -71,13 +71,13 @@ export async function runPerceptionPipeline(input: PipelineInput): Promise<Pipel
     computeSrep(sessionId, windowStart, windowEnd, memberIds),
   ]);
   const reasoningSettledPromise = toSettled(computeHasReasoning(sessionId, windowStart, windowEnd, memberIds));
-  const infoGainSettledPromise = toSettled(computeInfoGain(sessionId, windowStart, windowEnd, memberIds));
+  // const infoGainSettledPromise = toSettled(computeInfoGain(sessionId, windowStart, windowEnd, memberIds));
 
-  logger.info('[Step 5] 统一等待分析结果：基础指标 / 论证结构 / 信息增益', { sessionId });
-  const [baseMetricsSettled, reasoningSettled, igSettled] = await Promise.all([
+  logger.info('[Step 5] 统一等待分析结果：基础指标 / 论证结构', { sessionId });
+  const [baseMetricsSettled, reasoningSettled] = await Promise.all([
     toSettled(baseMetricsPromise),
     reasoningSettledPromise,
-    infoGainSettledPromise,
+    // infoGainSettledPromise,
   ]);
 
   if (baseMetricsSettled.status === 'rejected') {
@@ -145,15 +145,8 @@ export async function runPerceptionPipeline(input: PipelineInput): Promise<Pipel
     logger.error('写入 window_metrics_batch_reasoning 失败', { sessionId, message: (err as Error).message });
   });
 
-  // ── Step 3：读取已启动的信息增益计算结果。信息缺口已拆到独立调度链。────────
-  logger.info('[Step 6] 处理信息增益结果（InfoGain，失败则兜底为空）', { sessionId });
-  let infoGains: Record<string, number | null> = {};
-
-  if (igSettled.status === 'fulfilled') {
-    infoGains = igSettled.value.infoGains;
-  } else {
-    logger.error('InfoGain 信息增益计算失败', { sessionId, message: (igSettled.reason as Error)?.message });
-  }
+  // ── Step 3：信息增益已禁用 ──────────────────────────────────────────────────
+  const infoGains: Record<string, number | null> = {};
 
   // ── Step 4：逐用户写入 window_metrics ─────────────────────────────────────
   logger.info('[Step 4] 写入数据库 window_metrics', { sessionId });

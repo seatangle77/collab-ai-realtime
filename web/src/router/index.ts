@@ -123,11 +123,11 @@ const routes: RouteRecordRaw[] = [
         name: 'AdminWindowMetrics',
         component: () => import('../views/admin/AdminWindowMetricsPage.vue'),
       },
-      {
-        path: 'window-metrics-keywords',
-        name: 'AdminWindowMetricsKeywords',
-        component: () => import('../views/admin/AdminWindowMetricsKeywordsPage.vue'),
-      },
+      // {
+      //   path: 'window-metrics-keywords',
+      //   name: 'AdminWindowMetricsKeywords',
+      //   component: () => import('../views/admin/AdminWindowMetricsKeywordsPage.vue'),
+      // },
       {
         path: 'window-metrics-batch-reasoning',
         name: 'AdminWindowMetricsBatchReasoning',
