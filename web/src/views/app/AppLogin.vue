@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { appLogin } from '../../api/appAuth'
 import { getJPushDeviceToken } from '../../native/jpushDevice'
+import { sendLocalTestNotification } from '../../native/localTestNotification'
 import { extractErrorMessage } from '../../utils/error'
 
 const router = useRouter()
@@ -12,9 +13,13 @@ const email = ref('')
 const password = ref('')
 const loading = ref(false)
 const deviceTokenLoading = ref(false)
+const localNotificationLoading = ref(false)
 const error = ref('')
 const deviceToken = ref('')
 const deviceTokenError = ref('')
+const deviceTokenHint = ref('')
+const localNotificationMessage = ref('')
+const localNotificationError = ref('')
 
 async function handleSubmit() {
   error.value = ''
@@ -58,19 +63,42 @@ function goRegister() {
 async function showDeviceToken() {
   deviceToken.value = ''
   deviceTokenError.value = ''
+  deviceTokenHint.value = '正在获取极光 device_token...'
   deviceTokenLoading.value = true
 
   try {
-    const token = await getJPushDeviceToken()
+    let token = ''
+    for (let i = 0; i < 8; i += 1) {
+      token = await getJPushDeviceToken()
+      if (token) break
+      await new Promise((resolve) => window.setTimeout(resolve, 1000))
+    }
+
     if (!token) {
-      deviceTokenError.value = '极光 device_token 暂未生成，请稍后重试'
+      deviceTokenError.value = '极光 device_token 还在注册中，请稍后再试'
       return
     }
     deviceToken.value = token
   } catch (e: unknown) {
     deviceTokenError.value = extractErrorMessage(e) || '读取 device_token 失败'
   } finally {
+    deviceTokenHint.value = ''
     deviceTokenLoading.value = false
+  }
+}
+
+async function sendLocalNotification() {
+  localNotificationMessage.value = ''
+  localNotificationError.value = ''
+  localNotificationLoading.value = true
+
+  try {
+    await sendLocalTestNotification()
+    localNotificationMessage.value = '本地测试通知已发送'
+  } catch (e: unknown) {
+    localNotificationError.value = extractErrorMessage(e) || '发送本地通知失败'
+  } finally {
+    localNotificationLoading.value = false
   }
 }
 </script>
@@ -129,8 +157,21 @@ async function showDeviceToken() {
         >
           {{ deviceTokenLoading ? '读取中...' : '显示 device_token' }}
         </button>
+        <p v-if="deviceTokenHint" class="device-token-hint">{{ deviceTokenHint }}</p>
         <p v-if="deviceTokenError" class="device-token-error">{{ deviceTokenError }}</p>
         <p v-if="deviceToken" class="device-token-value">{{ deviceToken }}</p>
+        <button
+          type="button"
+          class="device-token-button device-token-button--secondary"
+          :disabled="localNotificationLoading"
+          @click="sendLocalNotification"
+        >
+          {{ localNotificationLoading ? '发送中...' : '发送本地测试通知' }}
+        </button>
+        <p v-if="localNotificationMessage" class="device-token-success">
+          {{ localNotificationMessage }}
+        </p>
+        <p v-if="localNotificationError" class="device-token-error">{{ localNotificationError }}</p>
       </div>
     </div>
   </div>
@@ -265,9 +306,27 @@ async function showDeviceToken() {
   cursor: default;
 }
 
+.device-token-button--secondary {
+  margin-top: 10px;
+  border-color: rgba(96, 165, 250, 0.55);
+  background: rgba(30, 64, 175, 0.35);
+}
+
 .device-token-error {
   margin: 10px 0 0;
   color: #fca5a5;
+  font-size: 12px;
+}
+
+.device-token-hint {
+  margin: 10px 0 0;
+  color: #cbd5e1;
+  font-size: 12px;
+}
+
+.device-token-success {
+  margin: 10px 0 0;
+  color: #bbf7d0;
   font-size: 12px;
 }
 

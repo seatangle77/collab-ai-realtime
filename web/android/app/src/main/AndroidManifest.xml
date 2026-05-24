@@ -37,12 +37,26 @@
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
 
-        <meta-data
-            android:name="JPUSH_APPKEY"
-            android:value="19dd0a9755ab499763c22dcc" />
-        <meta-data
-            android:name="JPUSH_CHANNEL"
-            android:value="default" />
+        <service
+            android:name=".JPushCommonService"
+            android:enabled="true"
+            android:exported="false"
+            android:process=":pushcore">
+            <intent-filter>
+                <action android:name="cn.jiguang.user.service.action" />
+            </intent-filter>
+        </service>
+
+        <receiver
+            android:name=".JPushMessageReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="cn.jpush.android.intent.RECEIVER_MESSAGE" />
+                <category android:name="${applicationId}" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
     <!-- Permissions -->

@@ -134,9 +134,9 @@ function logout() {
         :to="tab.path"
         class="app-tab-item"
         :class="{ 'app-tab-item--active': isTabActive(tab.path) }"
+        :aria-label="tab.label"
       >
         <component :is="tab.icon" class="app-tab-icon-svg" aria-hidden="true" />
-        <span class="app-tab-label">{{ tab.label }}</span>
       </RouterLink>
     </nav>
   </div>
@@ -155,8 +155,8 @@ function logout() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 56px;
-  padding: 0 16px;
+  min-height: calc(56px + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) 16px 0;
   background: rgba(255, 255, 255, 0.8);
   border-bottom: 1px solid var(--app-border);
   backdrop-filter: blur(12px);
@@ -244,7 +244,7 @@ function logout() {
 /* ── 主内容区 ── */
 .app-main {
   flex: 1;
-  padding: 16px 16px 88px; /* 底部留出 tab bar + 安全区 */
+  padding: 16px 16px calc(88px + env(safe-area-inset-bottom));
   overflow-y: auto;
 }
 
@@ -269,10 +269,8 @@ function logout() {
 .app-tab-item {
   flex: 1;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
   padding: 8px 4px;
   text-decoration: none;
   color: var(--app-text-muted);
@@ -284,18 +282,8 @@ function logout() {
 }
 
 .app-tab-icon-svg {
-  width: 20px;
-  height: 20px;
+  width: 28px;
+  height: 28px;
   flex-shrink: 0;
-}
-
-.app-tab-label {
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 1.2;
-}
-
-.app-tab-item--active .app-tab-label {
-  font-weight: 600;
 }
 </style>

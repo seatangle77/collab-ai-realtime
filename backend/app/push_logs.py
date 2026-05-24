@@ -53,6 +53,10 @@ class GroupNotifyIn(ApiModel):
     content: str
 
 
+class JPushStaticTestIn(ApiModel):
+    device_token: str
+
+
 def _build_reasoning_run_id(session_id: str, window_start: Any) -> str | None:
     if window_start is None:
         return None
@@ -260,6 +264,29 @@ async def push_notify(
         "delivery_reason": delivery_reason,
         "ws_sent": sent,
     }
+
+
+@router.post("/jpush/test-static")
+async def send_static_jpush_test(body: JPushStaticTestIn) -> dict[str, Any]:
+    device_token = body.device_token.strip()
+    if not device_token:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="device_token 不能为空")
+
+    content = "你说‘有时候搞抽象’难界定——难在是别人看不懂，还是你自己不确定想表达什么？"
+    try:
+        response = await asyncio.to_thread(
+            send_push_to_registration_id,
+            device_token,
+            content,
+            JPUSH_NOTIFICATION_TITLE,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
+    except Exception as exc:
+        logger.exception("[jpush_test_static] send failed")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"极光推送失败：{exc}")
+
+    return {"ok": True, "device_token": device_token, "content": content, "jpush_response": response}
 
 
 @router.post(

@@ -65,7 +65,6 @@ const currentGroup = computed<AppGroupSummary | null>(() => {
           </div>
           <div class="app-home-quick-text">
             <p class="app-home-quick-name">我的群组</p>
-            <p class="app-home-quick-hint">管理协作群组</p>
           </div>
         </RouterLink>
 
@@ -75,7 +74,6 @@ const currentGroup = computed<AppGroupSummary | null>(() => {
           </div>
           <div class="app-home-quick-text">
             <p class="app-home-quick-name">我的会话</p>
-            <p class="app-home-quick-hint">查看历史会话</p>
           </div>
         </RouterLink>
 
@@ -85,7 +83,6 @@ const currentGroup = computed<AppGroupSummary | null>(() => {
           </div>
           <div class="app-home-quick-text">
             <p class="app-home-quick-name">我的声纹</p>
-            <p class="app-home-quick-hint">管理声纹样本</p>
           </div>
         </RouterLink>
       </div>
@@ -166,7 +163,7 @@ const currentGroup = computed<AppGroupSummary | null>(() => {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 18px 20px;
+  padding: 16px 18px;
   border-radius: var(--app-radius-card);
   background: var(--app-bg-elevated);
   border: 1px solid var(--app-border);
@@ -221,15 +218,9 @@ const currentGroup = computed<AppGroupSummary | null>(() => {
 }
 
 .app-home-quick-name {
-  margin: 0 0 2px;
+  margin: 0;
   font-size: 15px;
   font-weight: 600;
   color: var(--app-text-primary);
-}
-
-.app-home-quick-hint {
-  margin: 0;
-  font-size: 12px;
-  color: var(--app-text-secondary);
 }
 </style>
