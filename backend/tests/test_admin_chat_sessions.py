@@ -83,6 +83,16 @@ def end_session(access_token: str, session_id: str) -> Dict[str, Any]:
     return r.json()
 
 
+def start_session(access_token: str, session_id: str) -> Dict[str, Any]:
+    headers = {"Authorization": f"Bearer {access_token}"}
+    r = requests.post(
+        f"{BASE_URL}/api/sessions/{session_id}/start",
+        headers=headers,
+    )
+    r.raise_for_status()
+    return r.json()
+
+
 # ---------- 场景：准备 chat_sessions ----------
 
 
@@ -814,6 +824,46 @@ def scenario_admin_update_chat_session_no_fields(ctx: Dict[str, Any]) -> bool:
     return _log(ok, "admin 更新会话但没有任何字段返回 400 场景", {"status_code": r.status_code, "body": r.text})
 
 
+# ---------- 场景：管理员结束会话 ----------
+
+
+def scenario_admin_end_ongoing_chat_session() -> bool:
+    info = register_and_login("admin_end_ongoing")
+    access_token = info["access_token"]
+    group_detail = create_group(access_token, name=f"Admin End Session Group {RUN_ID}")
+    group_id = group_detail["group"]["id"]
+    session = create_session(access_token, group_id, title="Admin End Ongoing Session")
+    start_session(access_token, session["id"])
+
+    r = requests.post(
+        f"{BASE_URL}/api/admin/chat-sessions/{session['id']}/end",
+        headers=ADMIN_HEADERS,
+    )
+    if r.status_code != 200:
+        return _log(False, "admin 结束进行中会话失败（期望 200）", {"status_code": r.status_code, "body": r.text})
+
+    data = r.json()
+    ok = data.get("status") == "ended" and data.get("ended_at") is not None
+    return _log(ok, "admin 结束进行中会话成功场景", data)
+
+
+def scenario_admin_end_not_started_chat_session() -> bool:
+    info = register_and_login("admin_end_not_started")
+    access_token = info["access_token"]
+    group_detail = create_group(access_token, name=f"Admin End Not Started Group {RUN_ID}")
+    session = create_session(access_token, group_detail["group"]["id"], title="Admin End Not Started Session")
+
+    r = requests.post(
+        f"{BASE_URL}/api/admin/chat-sessions/{session['id']}/end",
+        headers=ADMIN_HEADERS,
+    )
+    return _log(
+        r.status_code == 400,
+        "admin 结束未开始会话返回 400 场景",
+        {"status_code": r.status_code, "body": r.text},
+    )
+
+
 # ---------- 场景：删除会话 ----------
 
 
@@ -990,6 +1040,8 @@ def run_all() -> bool:
     ok &= scenario_admin_update_chat_session_flags(ctx)
     ok &= scenario_admin_update_chat_session_times(ctx)
     ok &= scenario_admin_update_chat_session_no_fields(ctx)
+    ok &= scenario_admin_end_ongoing_chat_session()
+    ok &= scenario_admin_end_not_started_chat_session()
     ok &= scenario_admin_delete_chat_session_success(ctx)
     ok &= scenario_admin_delete_chat_session_not_found()
     ok &= scenario_admin_batch_delete_chat_sessions_success()
@@ -1004,4 +1056,3 @@ def run_all() -> bool:
 if __name__ == "__main__":
     import sys
     sys.exit(0 if run_all() else 1)
-

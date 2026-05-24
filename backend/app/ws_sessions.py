@@ -92,23 +92,27 @@ async def _get_session_created_by(session_id: str) -> str | None:
         return row["created_by"]
 
 
-async def _auto_end_session(session_id: str) -> None:
-    """心跳超时时自动将会话标记为已结束（幂等）"""
+async def _auto_end_session(session_id: str) -> bool:
+    """自动将会话标记为已结束；返回本次是否真的更新了 ongoing 会话。"""
     session_factory = get_sessionmaker()
     async with session_factory() as db:
-        await db.execute(
+        result = await db.execute(
             text(
                 """
                 UPDATE chat_sessions
                 SET status = 'ended', ended_at = NOW(), last_updated = NOW(), active_ws_count = 0
-                WHERE id = :id AND status != 'ended'
+                WHERE id = :id AND status = 'ongoing'
                 """
             ),
             {"id": session_id},
         )
         await db.commit()
+        ended = (result.rowcount or 0) > 0
+    if not ended:
+        return False
     await destroy_audio_service(session_id)
-    _logger.info("会话心跳超时，已自动结束 session_id=%s", session_id)
+    _logger.info("会话已自动结束 session_id=%s", session_id)
+    return True
 
 
 def _cancel_cleanup_task(session_id: str) -> None:
@@ -144,8 +148,12 @@ async def _delayed_cleanup(session_id: str) -> None:
             return
 
         _logger.warning("会话无人重连超时，执行兜底清理 session_id=%s", session_id)
-        await destroy_audio_service(session_id)
-        await _auto_end_session(session_id)
+        ended = await _auto_end_session(session_id)
+        if ended:
+            await ws_manager.broadcast_to_session(
+                session_id,
+                build_session_ended({"session_id": session_id, "reason": "all_disconnected_timeout"}),
+            )
     except asyncio.CancelledError:
         raise
 
@@ -169,20 +177,23 @@ async def _increment_active_ws_count(session_id: str) -> bool:
         return (result.rowcount or 0) > 0
 
 
-async def _decrement_active_ws_count(session_id: str) -> None:
+async def _decrement_active_ws_count(session_id: str) -> int:
     session_factory = get_sessionmaker()
     async with session_factory() as db:
-        await db.execute(
+        result = await db.execute(
             text(
                 """
                 UPDATE chat_sessions
                 SET active_ws_count = GREATEST(active_ws_count - 1, 0)
                 WHERE id = :id
+                RETURNING active_ws_count
                 """
             ),
             {"id": session_id},
         )
         await db.commit()
+        row = result.mappings().first()
+        return int(row["active_ws_count"] or 0) if row else 0
 
 
 async def _get_session_member_ids(session_id: str) -> list[str]:
@@ -290,11 +301,12 @@ async def ws_session_endpoint(
                     )
                 except asyncio.TimeoutError:
                     _logger.warning("发起者心跳超时，自动结束会话 session_id=%s", session_id)
-                    await _auto_end_session(session_id)
-                    await ws_manager.broadcast_to_session(
-                        session_id,
-                        build_session_ended({"session_id": session_id, "reason": "host_timeout"}),
-                    )
+                    ended = await _auto_end_session(session_id)
+                    if ended:
+                        await ws_manager.broadcast_to_session(
+                            session_id,
+                            build_session_ended({"session_id": session_id, "reason": "host_timeout"}),
+                        )
                     break
             else:
                 raw = await websocket.receive_text()
@@ -412,5 +424,6 @@ async def ws_session_endpoint(
             ws_manager.get_online_user_ids(session_id),
         )
         if counted_active_ws:
-            await _decrement_active_ws_count(session_id)
-            await _schedule_cleanup_if_empty(session_id)
+            remaining_active_ws = await _decrement_active_ws_count(session_id)
+            if remaining_active_ws <= 0:
+                await _schedule_cleanup_if_empty(session_id)

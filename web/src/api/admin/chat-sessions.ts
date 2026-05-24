@@ -62,6 +62,10 @@ export async function updateAdminChatSession(
   return http.patch<AdminChatSession>(`/api/admin/chat-sessions/${id}`, payload)
 }
 
+export async function endAdminChatSession(id: string): Promise<AdminChatSession> {
+  return http.post<AdminChatSession>(`/api/admin/chat-sessions/${id}/end`)
+}
+
 export async function deleteAdminChatSession(id: string): Promise<void> {
   await http.delete<void>(`/api/admin/chat-sessions/${id}`)
 }
@@ -73,4 +77,3 @@ export async function deleteAdminChatSessionsBatch(ids: string[]): Promise<Batch
 export async function getAdminChatSession(id: string): Promise<AdminChatSession> {
   return http.get<AdminChatSession>(`/api/admin/chat-sessions/${id}`)
 }
-

@@ -9,8 +9,11 @@ from ..api_model import ApiModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..audio.audio_service import destroy_audio_service
 from ..db import get_db
 from ..groups import _get_group_or_404
+from ..ws_manager import ws_manager
+from ..ws_protocol import build_session_ended
 from .deps import require_admin
 from .schemas import BatchDeleteRequest, BatchDeleteResponse, Page, PageMeta
 
@@ -315,6 +318,57 @@ async def update_chat_session(
         )
 
     await db.commit()
+    return AdminChatSessionOut.model_validate(dict(row))
+
+
+@router.post(
+    "/{session_id}/end",
+    response_model=AdminChatSessionOut,
+    dependencies=[Depends(require_admin)],
+)
+async def end_chat_session_by_admin(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> AdminChatSessionOut:
+    result = await db.execute(
+        text(
+            """
+            UPDATE chat_sessions
+            SET status = 'ended',
+                ended_at = NOW(),
+                last_updated = NOW(),
+                active_ws_count = 0
+            WHERE id = :id
+              AND status = 'ongoing'
+            RETURNING id, group_id, session_title, created_at, last_updated, status, started_at, ended_at
+            """
+        ),
+        {"id": session_id},
+    )
+    row = result.mappings().first()
+    if not row:
+        existing = await db.execute(
+            text("SELECT status FROM chat_sessions WHERE id = :id"),
+            {"id": session_id},
+        )
+        existing_row = existing.mappings().first()
+        if not existing_row:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="会话不存在",
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="仅进行中的会话可以结束",
+        )
+
+    await db.commit()
+    await ws_manager.broadcast_to_session(
+        session_id,
+        build_session_ended({"session_id": session_id, "reason": "admin_ended"}),
+    )
+    await ws_manager.close_session_connections(session_id, code=1000, reason="admin_ended")
+    await destroy_audio_service(session_id)
     return AdminChatSessionOut.model_validate(dict(row))
 
 

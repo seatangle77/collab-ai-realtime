@@ -7,6 +7,7 @@ import type { AdminChatSession, AdminGroup } from '../../types/admin'
 import {
   listAdminChatSessions,
   updateAdminChatSession,
+  endAdminChatSession,
   deleteAdminChatSession,
   deleteAdminChatSessionsBatch,
   createAdminChatSession,
@@ -334,6 +335,28 @@ async function handleDelete(row: AdminChatSession) {
   }
 }
 
+async function handleEnd(row: AdminChatSession) {
+  try {
+    await ElMessageBox.confirm(`确认结束会话「${row.session_title || row.id}」吗？`, '结束确认', {
+      type: 'warning',
+      confirmButtonText: '结束',
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
+
+  try {
+    await endAdminChatSession(row.id)
+    ElMessage.success('会话已结束')
+    fetchSessions()
+  } catch (e: any) {
+    console.error(e)
+    const msg = e?.response?.data?.detail || e?.message || '结束会话失败'
+    ElMessage.error(msg)
+  }
+}
+
 onMounted(() => {
   fetchSessions()
 })
@@ -490,6 +513,7 @@ onMounted(() => {
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="router.push('/admin/chat-sessions/' + row.id)">详情</el-button>
             <el-button type="primary" link size="small" @click="openEditDialog(row)">编辑</el-button>
+            <el-button v-if="row.status === 'ongoing'" type="warning" link size="small" @click="handleEnd(row)">结束</el-button>
             <el-button type="danger" link size="small" @click="handleDelete(row)">删除</el-button>
           </template>
         </el-table-column>

@@ -17,6 +17,7 @@ WS 主机识别 + 心跳超时 + session_ended 广播 集成测试
   T5-1: host 超时 → host + guest 两端均收到 session_ended（约 155s）
   T5-2: 超时时只有 host 在线 → session_ended 正常，不崩溃（约 155s）
   T5-3: host + 2 个 guest → 三端均收到 session_ended（约 155s）
+  T6-1: host 断线但 member 仍在线 → 不结束；全员断线 60s 后 → ended（约 130s）
 
 运行：
   # 快速测试（T3 + T4-5/6，约 60s）
@@ -44,6 +45,7 @@ WS_BASE = "ws://127.0.0.1:8000"
 RUN_ID = uuid.uuid4().hex[:6]
 
 HEARTBEAT_TIMEOUT = 150  # 与后端 ws_sessions.py 保持一致
+CLEANUP_GRACE_SECONDS = 60  # 与后端 ws_sessions.py 保持一致
 FAST_WS_TIMEOUT = 5      # 快速用例等待消息超时
 SLOW_WS_TIMEOUT = 160    # 慢速用例等待超时消息（须 > HEARTBEAT_TIMEOUT）
 
@@ -640,6 +642,66 @@ def t5_3_timeout_three_clients(ctx: Dict[str, Any]) -> bool:
                 pass
 
 
+def t6_1_all_disconnected_cleanup_only_when_empty(ctx: Dict[str, Any]) -> bool:
+    """host 断线但 member 仍在线时不结束；所有人断线超过 grace 后才自动 ended"""
+    wait = CLEANUP_GRACE_SECONDS + 3
+    print(f"   ⏳ T6-1 等待约 {wait * 2}s（全员断线兜底清理）...")
+    session_id = _create_ongoing_session(
+        ctx["leader_token"], ctx["group_id"], f"T6-1 {RUN_ID}"
+    )
+    ws_host = None
+    ws_member = None
+    try:
+        ws_host = _ws_connect(session_id, ctx["leader_token"], timeout=SLOW_WS_TIMEOUT)
+        _recv(ws_host)  # connected
+        ws_member = _ws_connect(session_id, ctx["member_token"], timeout=SLOW_WS_TIMEOUT)
+        _recv(ws_member)  # connected
+
+        ws_host.close()
+        ws_host = None
+        time.sleep(wait)
+
+        status_after_host_left = _verify_session_status(
+            session_id,
+            ctx["leader_token"],
+            ctx["group_id"],
+        )
+        ok = status_after_host_left == "ongoing"
+
+        ws_member.close()
+        ws_member = None
+        time.sleep(wait)
+
+        status_after_all_left = _verify_session_status(
+            session_id,
+            ctx["leader_token"],
+            ctx["group_id"],
+        )
+        ok &= status_after_all_left == "ended"
+
+        return _log(
+            ok,
+            "T6-1: 仅 host 断线不结束；全员断线超过 60s 后 ended",
+            {
+                "status_after_host_left": status_after_host_left,
+                "status_after_all_left": status_after_all_left,
+            },
+        )
+    except Exception as e:
+        return _log(False, "T6-1: 异常", str(e))
+    finally:
+        for ws in [ws_host, ws_member]:
+            if ws:
+                try:
+                    ws.close()
+                except Exception:
+                    pass
+        requests.post(
+            f"{BASE_URL}/api/sessions/{session_id}/end",
+            headers=_auth(ctx["leader_token"]),
+        )
+
+
 # ═══════════════════════════════════════════════════════════════════════
 #  main
 # ═══════════════════════════════════════════════════════════════════════
@@ -681,6 +743,10 @@ def run_all(include_slow: bool = False) -> bool:
             t5_1_timeout_broadcast_to_all(ctx),
             t5_2_timeout_only_host_online(ctx),
             t5_3_timeout_three_clients(ctx),
+        ]
+        print("\n─── 慢速用例：T6 全员断线兜底清理 ───")
+        slow_results += [
+            t6_1_all_disconnected_cleanup_only_when_empty(ctx),
         ]
     else:
         print("\n（慢速用例 T4/T5 已跳过，使用 --include-slow 运行）")
