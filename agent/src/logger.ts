@@ -1,4 +1,10 @@
+import fs from 'fs';
+import path from 'path';
+
 type Level = 'info' | 'warn' | 'error' | 'debug';
+
+const SESSION_LOG_DIR = process.env.SESSION_LOG_DIR
+  || path.resolve(__dirname, '..', '..', 'logs', 'sessions');
 
 const SHANGHAI_TIME_FORMATTER = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Shanghai',
@@ -31,6 +37,36 @@ function log(level: Level, context: string, message: string, meta?: unknown): vo
     console.warn(line);
   } else {
     console.log(line);
+  }
+  writeSessionLog(line, message, meta);
+}
+
+function safeSessionId(value: unknown): string | null {
+  if (typeof value !== 'string' || value.trim() === '') return null;
+  return value.trim().replace(/[^A-Za-z0-9_.:-]/g, '_');
+}
+
+function extractSessionId(message: string, meta?: unknown): string | null {
+  if (meta && typeof meta === 'object') {
+    const record = meta as Record<string, unknown>;
+    const fromMeta = safeSessionId(record.sessionId) || safeSessionId(record.session_id);
+    if (fromMeta) return fromMeta;
+  }
+
+  const match = message.match(/\bsession(?:_id|Id)?=([A-Za-z0-9_.:-]+)/);
+  return match ? safeSessionId(match[1]) : null;
+}
+
+function writeSessionLog(line: string, message: string, meta?: unknown): void {
+  const sessionId = extractSessionId(message, meta);
+  if (!sessionId) return;
+
+  try {
+    const sessionDir = path.join(SESSION_LOG_DIR, sessionId);
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.appendFileSync(path.join(sessionDir, 'agent.log'), `${line}\n`, 'utf8');
+  } catch {
+    // Logging must never break the agent's main work.
   }
 }
 
