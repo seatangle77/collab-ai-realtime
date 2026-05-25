@@ -246,5 +246,17 @@ function goLogin() {
   padding: 0 2px;
   font-size: 13px;
 }
-</style>
 
+@media (max-width: 600px) {
+  .auth-page {
+    min-height: 100svh;
+    align-items: flex-start;
+    padding-top: max(72px, calc(env(safe-area-inset-top) + 56px));
+    padding-bottom: 28px;
+  }
+
+  .auth-card {
+    border-radius: 16px;
+  }
+}
+</style>

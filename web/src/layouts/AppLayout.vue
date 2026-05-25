@@ -144,6 +144,7 @@ function logout() {
         :aria-label="tab.label"
       >
         <component :is="tab.icon" class="app-tab-icon-svg" aria-hidden="true" />
+        <span class="app-tab-label">{{ tab.label }}</span>
       </RouterLink>
     </nav>
   </div>
@@ -261,7 +262,7 @@ function logout() {
   bottom: 0;
   left: 0;
   right: 0;
-  min-height: 64px;
+  min-height: 68px;
   display: flex;
   align-items: stretch;
   background: rgba(255, 255, 255, 0.96);
@@ -276,9 +277,11 @@ function logout() {
 .app-tab-item {
   flex: 1;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 8px 4px;
+  gap: 3px;
+  padding: 7px 2px 6px;
   text-decoration: none;
   color: var(--app-text-muted);
   transition: color 0.18s ease;
@@ -289,8 +292,18 @@ function logout() {
 }
 
 .app-tab-icon-svg {
-  width: 28px;
-  height: 28px;
+  width: 23px;
+  height: 23px;
   flex-shrink: 0;
+}
+
+.app-tab-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 1.15;
+  font-weight: 500;
 }
 </style>

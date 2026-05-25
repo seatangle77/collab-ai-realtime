@@ -341,4 +341,17 @@ async function sendLocalNotification() {
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
+
+@media (max-width: 600px) {
+  .auth-page {
+    min-height: 100svh;
+    align-items: flex-start;
+    padding-top: max(92px, calc(env(safe-area-inset-top) + 72px));
+    padding-bottom: 28px;
+  }
+
+  .auth-card {
+    border-radius: 16px;
+  }
+}
 </style>
