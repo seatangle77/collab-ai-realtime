@@ -28,17 +28,36 @@ VALID_DELIVERY_STATUSES = {"pending", "delivered", "failed", "skipped", "deferre
 JPUSH_NOTIFICATION_TITLE = "AI 讨论建议"
 
 
-async def _jpush_safe(device_token: str, content: str, title: str) -> None:
-    """JPush 推送，失败静默处理，不抛出异常。"""
+def _mask_device_token(device_token: str) -> str:
+    if len(device_token) <= 8:
+        return "*" * len(device_token)
+    return f"{device_token[:4]}...{device_token[-4:]}"
+
+
+async def _jpush_safe(device_token: str, content: str, title: str) -> bool:
+    """JPush 推送，失败只记录日志，不影响实时 WS 投递结果。"""
+    masked_token = _mask_device_token(device_token)
     try:
-        await asyncio.to_thread(
+        response = await asyncio.to_thread(
             send_push_to_registration_id,
             device_token,
             content,
             title,
         )
+        logger.warning(
+            "[jpush] sent device_token=%s content_len=%s response=%s",
+            masked_token,
+            len(content),
+            response,
+        )
+        return True
     except Exception:
-        pass
+        logger.exception(
+            "[jpush] send failed device_token=%s content_len=%s",
+            masked_token,
+            len(content),
+        )
+        return False
 
 
 class PushNotifyIn(ApiModel):
@@ -256,7 +275,19 @@ async def push_notify(
     token_row = token_result.mappings().first()
     device_token = token_row["device_token"] if token_row else None
     if device_token:
+        logger.warning(
+            "%s [push_notify_jpush] target_user_id=%s device_token=%s action=send",
+            WS_TRACE,
+            body.target_user_id,
+            _mask_device_token(device_token),
+        )
         await _jpush_safe(device_token, body.content, JPUSH_NOTIFICATION_TITLE)
+    else:
+        logger.warning(
+            "%s [push_notify_jpush] target_user_id=%s action=skip reason=no_device_token",
+            WS_TRACE,
+            body.target_user_id,
+        )
 
     return {
         "id": log_id,
