@@ -162,7 +162,7 @@ class MyASRListener(SpeechRecognitionListener):
 
 
 class TencentASR:
-    def __init__(self, session_id: str, on_result, on_partial_result, loop):
+    def __init__(self, session_id: str, on_result, on_partial_result, loop, enable_reconnect: bool = True):
         """
         session_id : 当前会话 ID
         on_result  : async def on_result(text: str, audio_bytes: bytes)
@@ -173,6 +173,7 @@ class TencentASR:
         self._loop = loop
         self._retry_count = 0
         self._stopped = False
+        self._enable_reconnect = enable_reconnect
 
         self.listener = MyASRListener(
             session_id,
@@ -203,6 +204,10 @@ class TencentASR:
 
     def _on_asr_error(self) -> None:
         """ASR 连接异常时触发，最多重连 MAX_RETRIES 次，间隔递增"""
+        if not self._enable_reconnect:
+            logger.warning("[TencentASR] session=%s 忽略重连：当前任务禁用自动重连", self.session_id)
+            return
+
         if self._stopped:
             logger.warning("[TencentASR] session=%s 忽略重连：已停止", self.session_id)
             return

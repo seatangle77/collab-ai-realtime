@@ -1,86 +1,38 @@
 <script setup lang="ts">
-import { ref, computed, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import './icebreaker/AppIcebreaker.css'
+import {
+  P1_QUESTIONS_PER_MEMBER,
+  STORY_ROUNDS,
+  buildP1MemberQuestions,
+  createScoreDraft,
+  pickStoryOpening,
+} from './icebreaker/content'
+import { FALLBACK_MEMBER, useIcebreakerMembers } from './icebreaker/useIcebreakerMembers'
+import type { IcebreakerMember } from './icebreaker/types'
+import { useAudioRecorder } from '../../composables/useAudioRecorder'
+import {
+  evaluateIcebreakerStory,
+  transcribeIcebreakerTurn,
+} from '../../api/appIcebreaker'
+import type { IcebreakerStoryTurnPayload } from '../../api/appIcebreaker'
+import { extractErrorMessage } from '../../utils/error'
 
 const router = useRouter()
 
-// ── Static mock members（后续替换为 group API 返回的真实成员）──
-const MEMBERS = [
-  { id: '1', name: '张三', initial: '张', bg: '#3b82f6' },
-  { id: '2', name: '李四', initial: '李', bg: '#8b5cf6' },
-  { id: '3', name: '王五', initial: '王', bg: '#10b981' },
-]
+const {
+  pageLoading,
+  pageError,
+  currentGroup,
+  currentGroupName,
+  members,
+  loadIcebreakerMembers,
+} = useIcebreakerMembers(resetIcebreakerFlow)
 
-// ─────────────────────────────────────────────────────────────────
-// 工具函数
-// ─────────────────────────────────────────────────────────────────
-function shuffle<T>(arr: T[]): T[] {
-  const a = [...arr]
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    const tmp = a[i] as T
-    a[i] = a[j] as T
-    a[j] = tmp
-  }
-  return a
-}
-
-// ─────────────────────────────────────────────────────────────────
-// Phase 1 题库
-// ─────────────────────────────────────────────────────────────────
-const P1_FIXED = '先介绍一下自己——你叫什么名字？你的星座是什么？MBTI 是什么？（不知道 MBTI 的话，说说你觉得自己偏内向还是外向？）'
-
-const P1_EXTRA_POOL = [
-  '用一道菜来形容你自己——你是什么菜？为什么？',
-  '你有没有一个吃东西的奇怪口味偏好，说出来别人都觉得你怪？',
-  '你有没有一个"连自己都觉得很蠢但就是改不掉"的习惯？',
-  '你在朋友群里通常是什么角色——发疯的、拉架的、还是潜水的？',
-  '你最近发呆的时候在想什么？',
-  '你最近有没有做过一件事，做完之后在心里默默给自己鼓掌的？',
-  '朋友最常拿你开玩笑的点是什么？',
-  '你有没有一个"理论上该戒掉但完全没打算戒"的坏习惯？',
-  '你上一次骗自己"就最后一次"是什么事？',
-  '你有没有一件"只要没人看见就不算"的事？',
-  '你最近做过最"不像自己"的一件事是什么？',
-  '你有没有一首歌，单曲循环次数自己都不敢数？',
-  '你有没有一个"只有你自己觉得好笑、但给别人解释半天他们也不懂"的梗？',
-  '你睡前胡思乱想的时候通常在想什么？',
-  '你最容易"破防"的点是什么——什么事会让你突然绷不住？',
-  '你在家一个人的时候，会做什么在外面绝对不做的事？',
-  '你有没有一件事，"明明知道在浪费时间，但就是停不下来"？',
-  '你上一次在公共场合尴尬到想消失是什么时候？',
-  '你有没有一个偷偷坚持的小迷信或仪式感？',
-  '如果给你现在的状态配一首 BGM，你会选什么歌？',
-  '如果你是一种天气，你今天是什么天气？',
-  '你有没有一件"明明不该笑但还是笑出来了"的事？',
-  '你最近搜索过的最奇怪的一个问题是什么？',
-  '你有没有一个"偷偷挺厉害但很少告诉别人"的技能？',
-]
-
-// 每位成员：[固定题, 随机题1, 随机题2]
-const p1MemberQuestions: string[][] = MEMBERS.map(() =>
-  [P1_FIXED, ...shuffle(P1_EXTRA_POOL).slice(0, 2)]
-)
-
-// ─────────────────────────────────────────────────────────────────
-// Phase 2 故事接龙题库
-// ─────────────────────────────────────────────────────────────────
-const STORY_POOL = [
-  '一个快递员在送一封没有地址的包裹，上面只写着"给最需要它的人"……',
-  '深夜 12 点，手机突然收到一条陌生消息："我知道你今天做了什么。"……',
-  '便利店收银台上，你发现了一张字条：如果你捡到这张纸，请不要回头……',
-  '早上醒来，你发现镜子里的自己比你早了整整三秒……',
-  '电梯门打开，里面站着的人和你长得一模一样，而且正在按同一层楼……',
-  '一只流浪猫突然开口说了一句话，然后就再也不说了……',
-  '博物馆镇馆之宝今天早上不翼而飞，监控只拍到它自己走出了大门……',
-  '不知从何时起，城里所有人都忘记了"蓝色"这种颜色……',
-  '废弃游乐场里，一架旋转木马在没有风的深夜自己转了起来……',
-  '旧书店里有一本日记，翻开来，上面写的竟然是你明年 365 天的每一天……',
-  '全市所有时钟在同一秒停了下来，指针停在了 3:33……',
-  '邮差送来一封信，收件人是「二十年后的你」，寄件人是「现在的你」……',
-]
-
-const storyOpening = shuffle(STORY_POOL)[0]!
+const p1MemberQuestions = ref<string[][]>([])
+const storyOpening = pickStoryOpening()
 
 // ─────────────────────────────────────────────────────────────────
 // Flow
@@ -88,6 +40,44 @@ const storyOpening = shuffle(STORY_POOL)[0]!
 type Screen = 'intro' | 'phase1' | 'phase2_intro' | 'phase2' | 'scoring' | 'done'
 const screen = ref<Screen>('intro')
 const exiting = ref(false)
+const recorder = useAudioRecorder()
+const activeRecordingPhase = ref<'phase1' | 'story' | null>(null)
+const currentRecordingChunks = ref<Blob[]>([])
+const currentRecordingMimeType = ref('audio/webm')
+
+recorder.onChunk((blob, mimeType) => {
+  if (!activeRecordingPhase.value) return
+  currentRecordingChunks.value.push(blob)
+  currentRecordingMimeType.value = mimeType || blob.type || currentRecordingMimeType.value
+})
+
+function currentGroupId(): string {
+  return currentGroup.value?.id ?? ''
+}
+
+async function beginAudioCapture(phase: 'phase1' | 'story') {
+  currentRecordingChunks.value = []
+  currentRecordingMimeType.value = 'audio/webm'
+  activeRecordingPhase.value = phase
+  try {
+    await recorder.startRecording()
+  } catch (e) {
+    activeRecordingPhase.value = null
+    ElMessage.error(extractErrorMessage(e) || '录音启动失败')
+    throw e
+  }
+}
+
+async function endAudioCapture(): Promise<Blob | null> {
+  try {
+    await recorder.stopRecording()
+  } catch (e) {
+    ElMessage.error(extractErrorMessage(e) || '录音停止失败')
+  }
+  activeRecordingPhase.value = null
+  if (!currentRecordingChunks.value.length) return null
+  return new Blob(currentRecordingChunks.value, { type: currentRecordingMimeType.value })
+}
 
 // ─────────────────────────────────────────────────────────────────
 // Phase 1 状态
@@ -97,13 +87,15 @@ type RecordState = 'ready' | 'recording' | 'saved'
 const p1MemberIdx = ref(0)
 const p1QuestionIdx = ref(0)
 const p1RecordState = ref<RecordState>('ready')
+const p1Saving = ref(false)
 const p1Countdown = ref(20)
 let p1Interval: ReturnType<typeof setInterval> | null = null
 
-const p1Member = computed(() => MEMBERS[p1MemberIdx.value]!)
-const p1Question = computed(() => p1MemberQuestions[p1MemberIdx.value]?.[p1QuestionIdx.value] ?? '')
-const p1CurrentStep = computed(() => p1MemberIdx.value * 3 + p1QuestionIdx.value + 1)
-const P1_TOTAL = 9
+const p1Member = computed(() => members.value[p1MemberIdx.value] ?? FALLBACK_MEMBER)
+const p1Question = computed(() => p1MemberQuestions.value[p1MemberIdx.value]?.[p1QuestionIdx.value] ?? '')
+const p1CurrentStep = computed(() => p1MemberIdx.value * P1_QUESTIONS_PER_MEMBER + p1QuestionIdx.value + 1)
+const p1Total = computed(() => members.value.length * P1_QUESTIONS_PER_MEMBER)
+const p1ProgressPercent = computed(() => p1Total.value > 0 ? ((p1CurrentStep.value - 1) / p1Total.value) * 100 : 0)
 
 const RING_C = 2 * Math.PI * 44
 const p1RingOffset = computed(() => RING_C * (1 - p1Countdown.value / 20))
@@ -113,18 +105,36 @@ function stopP1Countdown() {
   if (p1Interval) { clearInterval(p1Interval); p1Interval = null }
 }
 
-function startRecording() {
+async function startRecording() {
+  if (!currentGroupId()) return
+  try {
+    await beginAudioCapture('phase1')
+  } catch {
+    return
+  }
   p1RecordState.value = 'recording'
   p1Countdown.value = 20
   p1Interval = setInterval(() => {
     p1Countdown.value--
-    if (p1Countdown.value <= 0) { stopP1Countdown(); p1RecordState.value = 'saved' }
+    if (p1Countdown.value <= 0) { void stopRecording() }
   }, 1000)
 }
 
-function stopRecording() { stopP1Countdown(); p1RecordState.value = 'saved' }
+async function stopRecording() {
+  if (p1Saving.value) return
+  stopP1Countdown()
+  p1Saving.value = true
+  await endAudioCapture()
+  p1Saving.value = false
+  p1RecordState.value = 'saved'
+}
 
-function reRecord() { stopP1Countdown(); p1Countdown.value = 20; p1RecordState.value = 'ready' }
+async function reRecord() {
+  stopP1Countdown()
+  await endAudioCapture()
+  p1Countdown.value = 20
+  p1RecordState.value = 'ready'
+}
 
 function nextP1Question() {
   exiting.value = true
@@ -132,9 +142,9 @@ function nextP1Question() {
     exiting.value = false
     p1RecordState.value = 'ready'
     p1Countdown.value = 20
-    if (p1QuestionIdx.value < 2) {
+    if (p1QuestionIdx.value < P1_QUESTIONS_PER_MEMBER - 1) {
       p1QuestionIdx.value++
-    } else if (p1MemberIdx.value < 2) {
+    } else if (p1MemberIdx.value < members.value.length - 1) {
       p1MemberIdx.value++
       p1QuestionIdx.value = 0
     } else {
@@ -144,6 +154,7 @@ function nextP1Question() {
 }
 
 function startPhase1() {
+  if (members.value.length === 0) return
   p1MemberIdx.value = 0; p1QuestionIdx.value = 0
   p1RecordState.value = 'ready'; p1Countdown.value = 20
   screen.value = 'phase1'
@@ -160,36 +171,121 @@ function jumpToPhase2() {
 // ─────────────────────────────────────────────────────────────────
 // Phase 2 故事接龙状态
 // ─────────────────────────────────────────────────────────────────
-const STORY_ROUNDS = 2
-const STORY_TOTAL_TURNS = MEMBERS.length * STORY_ROUNDS  // 6
+const storyTotalTurns = computed(() => members.value.length * STORY_ROUNDS)  // 6 when group has 3 members
 
 const storyCurTurn = ref(0)
 const storyRecordState = ref<RecordState>('ready')
+const storySaving = ref(false)
+const storyTurns = ref<IcebreakerStoryTurnPayload[]>([])
+const storyTranscribeTasks = new Map<number, Promise<void>>()
 const storyCountdown = ref(30)
 let storyInterval: ReturnType<typeof setInterval> | null = null
 
 const STORY_RING_C = 2 * Math.PI * 44
 const storyRingOffset = computed(() => STORY_RING_C * (1 - storyCountdown.value / 30))
 const storyIsUrgent = computed(() => storyCountdown.value <= 5)
-const storyMember = computed(() => MEMBERS[storyCurTurn.value % MEMBERS.length]!)
-const storyRound = computed(() => Math.floor(storyCurTurn.value / MEMBERS.length) + 1)
+const storyProgressPercent = computed(() => storyTotalTurns.value > 0 ? (storyCurTurn.value / storyTotalTurns.value) * 100 : 0)
+const storyMember = computed(() => {
+  if (members.value.length === 0) return FALLBACK_MEMBER
+  return members.value[storyCurTurn.value % members.value.length] ?? FALLBACK_MEMBER
+})
+const storyRound = computed(() => {
+  if (members.value.length === 0) return 1
+  return Math.floor(storyCurTurn.value / members.value.length) + 1
+})
+
+function getStoryMemberAt(index: number): IcebreakerMember {
+  if (members.value.length === 0) return FALLBACK_MEMBER
+  return members.value[index % members.value.length] ?? FALLBACK_MEMBER
+}
+
+function getStoryRoundAt(index: number): number {
+  if (members.value.length === 0) return 1
+  return Math.floor(index / members.value.length) + 1
+}
 
 function stopStoryCountdown() {
   if (storyInterval) { clearInterval(storyInterval); storyInterval = null }
 }
 
-function startStoryRecording() {
+function uploadStoryTurnInBackground(audio: Blob | null) {
+  const groupId = currentGroupId()
+  const member = storyMember.value
+  const round = storyRound.value
+  const turnIndex = storyCurTurn.value + 1
+  if (!groupId || !member.id || !audio) {
+    ElMessage.warning('这一棒没有录到音频，可以重录')
+    return
+  }
+
+  const mimeType = currentRecordingMimeType.value || audio.type || 'audio/webm'
+  let task: Promise<void>
+  task = transcribeIcebreakerTurn({
+    groupId,
+    userId: member.id,
+    round,
+    turnIndex,
+    mimeType,
+    audio,
+  }).then((result) => {
+    if (storyTranscribeTasks.get(turnIndex) !== task) return
+    const text = result.text.trim()
+    if (!text) throw new Error('这段录音没有识别到文字')
+    const nextTurn: IcebreakerStoryTurnPayload = {
+      user_id: member.id,
+      user_name: member.name,
+      round,
+      turn_index: turnIndex,
+      text,
+    }
+    const others = storyTurns.value.filter((turn) => turn.turn_index !== turnIndex)
+    storyTurns.value = [...others, nextTurn].sort((a, b) => a.turn_index - b.turn_index)
+  }).catch((e) => {
+    if (storyTranscribeTasks.get(turnIndex) !== task) return
+    console.error('icebreaker transcribe failed', e)
+  })
+  storyTranscribeTasks.set(turnIndex, task)
+}
+
+async function startStoryRecording() {
+  if (!currentGroupId()) return
+  try {
+    await beginAudioCapture('story')
+  } catch {
+    return
+  }
   storyRecordState.value = 'recording'
   storyCountdown.value = 30
   storyInterval = setInterval(() => {
     storyCountdown.value--
-    if (storyCountdown.value <= 0) { stopStoryCountdown(); storyRecordState.value = 'saved' }
+    if (storyCountdown.value <= 0) { void stopStoryRecording() }
   }, 1000)
 }
 
-function stopStoryRecording() { stopStoryCountdown(); storyRecordState.value = 'saved' }
+async function stopStoryRecording() {
+  if (storySaving.value) return
+  stopStoryCountdown()
+  storySaving.value = true
+  try {
+    const audio = await endAudioCapture()
+    uploadStoryTurnInBackground(audio)
+    storyRecordState.value = 'saved'
+  } catch (e) {
+    storyRecordState.value = 'ready'
+    ElMessage.error(extractErrorMessage(e) || '破冰录音转写失败')
+  } finally {
+    storySaving.value = false
+  }
+}
 
-function reStoryRecord() { stopStoryCountdown(); storyCountdown.value = 30; storyRecordState.value = 'ready' }
+async function reStoryRecord() {
+  stopStoryCountdown()
+  await endAudioCapture()
+  storyTranscribeTasks.delete(storyCurTurn.value + 1)
+  storyTurns.value = storyTurns.value.filter((turn) => turn.turn_index !== storyCurTurn.value + 1)
+  storyCountdown.value = 30
+  storyRecordState.value = 'ready'
+}
 
 function nextStoryTurn() {
   exiting.value = true
@@ -197,7 +293,7 @@ function nextStoryTurn() {
     exiting.value = false
     storyRecordState.value = 'ready'
     storyCountdown.value = 30
-    if (storyCurTurn.value < STORY_TOTAL_TURNS - 1) {
+    if (storyCurTurn.value < storyTotalTurns.value - 1) {
       storyCurTurn.value++
     } else {
       screen.value = 'scoring'
@@ -207,9 +303,12 @@ function nextStoryTurn() {
 }
 
 function startStoryPhase() {
+  if (members.value.length === 0) return
   storyCurTurn.value = 0
   storyRecordState.value = 'ready'
   storyCountdown.value = 30
+  storyTurns.value = []
+  storyTranscribeTasks.clear()
   screen.value = 'phase2'
 }
 
@@ -220,58 +319,111 @@ const scoringLoading = ref(true)
 const scoreValue = ref(0)          // 精彩度 0-100
 const scoreComment = ref('')       // 毒舌评价
 const scoreMvpIdx = ref(0)         // 最佳桥段奖得主
+const scoreMvpTitle = ref('')      // 奖项名
 const scoreMvpReason = ref('')     // 得奖理由
 const scoreImageGradient = ref('') // 配图背景渐变
 const scoreImageEmoji = ref('')    // 配图主视觉
+const polishedStory = ref('')
 let scoringTimer: ReturnType<typeof setTimeout> | null = null
+const scoreMvpMember = computed(() => members.value[scoreMvpIdx.value] ?? FALLBACK_MEMBER)
 
-const SCORE_COMMENTS = [
-  '故事走向混乱到堪比烂尾剧，但三位讲述者拼命圆场的姿态感人至深。下次可以提前商量一下结局。',
-  '开头悬疑感十足，结尾急着收摊——故事还没说完，大家就已经迫不及待地想鼓掌了。',
-  '三个人的脑洞加在一起勉强拼出了一个能听完的故事，已经远超 AI 的预期，请继续努力。',
-  '情节转折之频繁，连编剧看了都要怀疑人生。不过至少没有人中途放弃，精神可嘉。',
-  '这个故事最大的亮点是结尾戛然而止，成功给观众留下了无限想象空间——当然也可能是没想好。',
-  '逻辑漏洞虽多，但胜在气氛热烈。AI 决定忽略所有不合理之处，给这份努力打高分。',
-]
-
-const SCORE_MVP_REASONS = [
-  '在关键时刻强行引入了一个新角色，险些救活整个故事，差一点就成功了。',
-  '用一句话把剧情从悬崖边上拉了回来，虽然方向有点歪，但至少没掉下去。',
-  '贡献了全场最出人意料的反转，让其他人愣了整整三秒不知道怎么接。',
-  '在大家都不知道故事该往哪走的时候，勇敢地给出了一个方向——尽管不太对。',
-  '凭借一己之力把故事的画风从悬疑拉成了喜剧，意外地让全场活跃起来。',
-]
-
-const SCORE_IMAGE_STYLES = [
-  { gradient: 'linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #4c1d95 100%)', emoji: '🌌' },
-  { gradient: 'linear-gradient(135deg, #064e3b 0%, #065f46 50%, #047857 100%)', emoji: '🌿' },
-  { gradient: 'linear-gradient(135deg, #7f1d1d 0%, #991b1b 50%, #b91c1c 100%)', emoji: '🔮' },
-  { gradient: 'linear-gradient(135deg, #0c4a6e 0%, #075985 50%, #0369a1 100%)', emoji: '🌊' },
-  { gradient: 'linear-gradient(135deg, #451a03 0%, #78350f 50%, #92400e 100%)', emoji: '🏜️' },
-  { gradient: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', emoji: '🤖' },
-]
-
-function startScoring() {
-  scoreValue.value = Math.floor(Math.random() * 26) + 65  // 65-90
-  scoreComment.value = SCORE_COMMENTS[Math.floor(Math.random() * SCORE_COMMENTS.length)]!
-  scoreMvpIdx.value = Math.floor(Math.random() * MEMBERS.length)
-  scoreMvpReason.value = SCORE_MVP_REASONS[Math.floor(Math.random() * SCORE_MVP_REASONS.length)]!
-  const style = SCORE_IMAGE_STYLES[Math.floor(Math.random() * SCORE_IMAGE_STYLES.length)]!
-  scoreImageGradient.value = style.gradient
-  scoreImageEmoji.value = style.emoji
+async function startScoring() {
   scoringLoading.value = true
-  scoringTimer = setTimeout(() => { scoringLoading.value = false }, 2800)
+  try {
+    const draft = createScoreDraft()
+    scoreImageGradient.value = draft.imageStyle.gradient
+    scoreImageEmoji.value = draft.imageStyle.emoji
+    await storyTranscribeTasks.get(storyTotalTurns.value)
+    if (storyTurns.value.length === 0) {
+      throw new Error('还没有可用于评价的故事文本')
+    }
+    const result = await evaluateIcebreakerStory({
+      group_id: currentGroupId(),
+      story_opening: storyOpening,
+      members: members.value.map((member) => ({
+        user_id: member.id,
+        user_name: member.name,
+      })),
+      turns: storyTurns.value,
+    })
+    polishedStory.value = result.polished_story
+    scoreValue.value = result.score
+    scoreComment.value = result.comment
+    scoreMvpTitle.value = result.mvp_title
+    scoreMvpReason.value = result.mvp_reason
+    scoreMvpIdx.value = Math.max(0, members.value.findIndex((member) => member.id === result.mvp_user_id))
+  } catch (e) {
+    const fallback = createScoreDraft()
+    scoreValue.value = fallback.value
+    scoreComment.value = fallback.comment
+    scoreMvpIdx.value = Math.floor(Math.random() * Math.max(members.value.length, 1))
+    scoreMvpTitle.value = fallback.mvpTitle
+    scoreMvpReason.value = fallback.mvpReason
+    polishedStory.value = storyTurns.value.map((turn) => turn.text).join(' ')
+    scoreImageGradient.value = fallback.imageStyle.gradient
+    scoreImageEmoji.value = fallback.imageStyle.emoji
+    ElMessage.error(extractErrorMessage(e) || 'AI 评价失败，已展示本地兜底评价')
+  } finally {
+    scoringTimer = setTimeout(() => { scoringLoading.value = false }, 400)
+  }
 }
+
+function resetIcebreakerFlow() {
+  stopP1Countdown()
+  stopStoryCountdown()
+  if (scoringTimer) {
+    clearTimeout(scoringTimer)
+    scoringTimer = null
+  }
+  p1MemberQuestions.value = buildP1MemberQuestions(members.value.length)
+  screen.value = 'intro'
+  exiting.value = false
+  p1MemberIdx.value = 0
+  p1QuestionIdx.value = 0
+  p1RecordState.value = 'ready'
+  p1Saving.value = false
+  p1Countdown.value = 20
+  storyCurTurn.value = 0
+  storyRecordState.value = 'ready'
+  storySaving.value = false
+  storyTurns.value = []
+  storyTranscribeTasks.clear()
+  storyCountdown.value = 30
+  polishedStory.value = ''
+  scoringLoading.value = true
+}
+
+onMounted(() => {
+  loadIcebreakerMembers()
+})
 
 onUnmounted(() => {
   stopP1Countdown()
   stopStoryCountdown()
+  void recorder.stopRecording().catch(() => undefined)
   if (scoringTimer) clearTimeout(scoringTimer)
 })
 </script>
 
 <template>
   <div class="ib">
+    <div v-if="pageLoading" class="ib-screen ib-state">
+      <div class="ib-state-icon">🧊</div>
+      <p class="ib-state-title">正在加载小组成员</p>
+      <p class="ib-state-desc">破冰名单会自动关联你当前的小组。</p>
+    </div>
+
+    <div v-else-if="pageError" class="ib-screen ib-state">
+      <div class="ib-state-icon">🧊</div>
+      <p class="ib-state-title">暂时不能开始破冰</p>
+      <p class="ib-state-desc">{{ pageError }}</p>
+      <div class="ib-state-actions">
+        <button class="ib-btn ib-btn--primary" @click="router.push('/app/groups')">去小组页</button>
+        <button class="ib-btn ib-btn--ghost" @click="loadIcebreakerMembers">重新加载</button>
+      </div>
+    </div>
+
+    <template v-else>
 
     <!-- ── Phase Nav ────────────────────────────────────────────── -->
     <div class="ib-phase-nav">
@@ -292,7 +444,7 @@ onUnmounted(() => {
       <div class="ib-intro-hero">
         <span class="ib-intro-hero-emoji">🧊</span>
         <h1 class="ib-intro-title">破冰时间</h1>
-        <p class="ib-intro-subtitle">开始正式讨论前，用几分钟互相认识一下</p>
+        <p class="ib-intro-subtitle">{{ currentGroupName }} · 开始正式讨论前，用几分钟互相认识一下</p>
       </div>
 
       <div class="ib-intro-phases">
@@ -313,7 +465,7 @@ onUnmounted(() => {
       </div>
 
       <div class="ib-intro-members">
-        <div v-for="m in MEMBERS" :key="m.id" class="ib-intro-member">
+        <div v-for="m in members" :key="m.id" class="ib-intro-member">
           <div class="ib-avatar ib-avatar--lg" :style="{ background: m.bg }">{{ m.initial }}</div>
           <span class="ib-intro-member-name">{{ m.name }}</span>
         </div>
@@ -332,11 +484,11 @@ onUnmounted(() => {
     >
       <div class="ib-topbar">
         <div class="ib-progress">
-          <div class="ib-progress-fill" :style="{ width: `${((p1CurrentStep - 1) / P1_TOTAL) * 100}%` }"></div>
+          <div class="ib-progress-fill" :style="{ width: `${p1ProgressPercent}%` }"></div>
         </div>
         <div class="ib-topbar-labels">
           <span class="ib-phase-badge">阶段一：自我介绍</span>
-          <span class="ib-step-tag">{{ p1CurrentStep }} / {{ P1_TOTAL }}</span>
+          <span class="ib-step-tag">{{ p1CurrentStep }} / {{ p1Total }}</span>
         </div>
       </div>
 
@@ -346,7 +498,9 @@ onUnmounted(() => {
           <p class="ib-speaker-name">{{ p1Member.name }}</p>
           <p class="ib-speaker-hint">
             <template v-if="p1RecordState === 'ready'">轮到你啦，准备好了就开始 👇</template>
-            <template v-else-if="p1RecordState === 'recording'">🔴 录音中，说完后点停止</template>
+            <template v-else-if="p1RecordState === 'recording'">
+              {{ p1Saving ? '正在保存录音……' : '🔴 录音中，说完后点停止' }}
+            </template>
             <template v-else>✓ 这题录完啦</template>
           </p>
         </div>
@@ -357,7 +511,7 @@ onUnmounted(() => {
       </div>
 
       <div v-if="p1RecordState === 'ready'" class="ib-record-ready">
-        <button class="ib-btn ib-btn--primary ib-btn--lg ib-btn--record" @click="startRecording">
+        <button class="ib-btn ib-btn--primary ib-btn--lg ib-btn--record" :disabled="p1Saving" @click="startRecording">
           🎙&nbsp;&nbsp;开始录音
         </button>
       </div>
@@ -379,7 +533,9 @@ onUnmounted(() => {
           <text x="50" y="57" text-anchor="middle" font-size="26" font-weight="700"
             :fill="p1IsUrgent ? '#ef4444' : '#0f172a'">{{ p1Countdown }}</text>
         </svg>
-        <button class="ib-btn ib-btn--danger-outline" @click="stopRecording">停止录音</button>
+        <button class="ib-btn ib-btn--danger-outline" :disabled="p1Saving" @click="stopRecording">
+          {{ p1Saving ? '保存中…' : '停止录音' }}
+        </button>
       </div>
 
       <div v-else class="ib-saved-section">
@@ -388,9 +544,9 @@ onUnmounted(() => {
           <span>{{ p1Member.name }} 的声音特征已记录</span>
         </div>
         <div class="ib-save-actions">
-          <button class="ib-btn ib-btn--ghost" @click="reRecord">↺ 重录这一题</button>
+          <button class="ib-btn ib-btn--ghost" :disabled="p1Saving" @click="reRecord">↺ 重录这一题</button>
           <button class="ib-btn ib-btn--primary" @click="nextP1Question">
-            {{ p1CurrentStep < P1_TOTAL ? '下一题 →' : '进入第二阶段 →' }}
+            {{ p1CurrentStep < p1Total ? '下一题 →' : '进入第二阶段 →' }}
           </button>
         </div>
       </div>
@@ -425,12 +581,12 @@ onUnmounted(() => {
         <div class="ib-progress">
           <div
             class="ib-progress-fill ib-progress-fill--green"
-            :style="{ width: `${(storyCurTurn / STORY_TOTAL_TURNS) * 100}%` }"
+            :style="{ width: `${storyProgressPercent}%` }"
           ></div>
         </div>
         <div class="ib-topbar-labels">
           <span class="ib-phase-badge ib-phase-badge--green">故事接龙</span>
-          <span class="ib-step-tag">第 {{ storyRound }} 轮 · 第 {{ storyCurTurn + 1 }} / {{ STORY_TOTAL_TURNS }} 棒</span>
+          <span class="ib-step-tag">第 {{ storyRound }} 轮 · 第 {{ storyCurTurn + 1 }} / {{ storyTotalTurns }} 棒</span>
         </div>
       </div>
 
@@ -443,7 +599,7 @@ onUnmounted(() => {
       <!-- 接龙进度链 -->
       <div class="ib-chain-log">
         <div
-          v-for="i in STORY_TOTAL_TURNS"
+          v-for="i in storyTotalTurns"
           :key="i"
           class="ib-chain-node"
           :class="{
@@ -454,10 +610,10 @@ onUnmounted(() => {
         >
           <div
             class="ib-avatar ib-avatar--sm"
-            :style="{ background: MEMBERS[(i - 1) % MEMBERS.length]!.bg }"
-          >{{ MEMBERS[(i - 1) % MEMBERS.length]!.initial }}</div>
+            :style="{ background: getStoryMemberAt(i - 1).bg }"
+          >{{ getStoryMemberAt(i - 1).initial }}</div>
           <span class="ib-chain-node-label">
-            R{{ Math.floor((i - 1) / MEMBERS.length) + 1 }}
+            R{{ getStoryRoundAt(i - 1) }}
           </span>
           <span v-if="(i - 1) < storyCurTurn" class="ib-chain-node-status ib-chain-done-mark">✓</span>
           <span v-else-if="(i - 1) === storyCurTurn" class="ib-chain-node-status ib-chain-active-mark">●</span>
@@ -471,15 +627,17 @@ onUnmounted(() => {
           <p class="ib-speaker-name">{{ storyMember.name }}</p>
           <p class="ib-speaker-hint">
             <template v-if="storyRecordState === 'ready'">轮到你接龙啦，准备好了就开始 👇</template>
-            <template v-else-if="storyRecordState === 'recording'">🔴 接龙中，说完后点停止</template>
-            <template v-else>✓ 这棒接完啦！</template>
+            <template v-else-if="storyRecordState === 'recording'">
+              {{ storySaving ? '正在转写这一棒……' : '🔴 接龙中，说完后点停止' }}
+            </template>
+            <template v-else>✓ 这棒已转写完成！</template>
           </p>
         </div>
       </div>
 
       <!-- 录音控件 -->
       <div v-if="storyRecordState === 'ready'" class="ib-record-ready">
-        <button class="ib-btn ib-btn--primary ib-btn--lg ib-btn--record ib-btn--green" @click="startStoryRecording">
+        <button class="ib-btn ib-btn--primary ib-btn--lg ib-btn--record ib-btn--green" :disabled="storySaving" @click="startStoryRecording">
           🎙&nbsp;&nbsp;开始接龙
         </button>
       </div>
@@ -501,18 +659,20 @@ onUnmounted(() => {
           <text x="50" y="57" text-anchor="middle" font-size="26" font-weight="700"
             :fill="storyIsUrgent ? '#ef4444' : '#0f172a'">{{ storyCountdown }}</text>
         </svg>
-        <button class="ib-btn ib-btn--danger-outline" @click="stopStoryRecording">停止接龙</button>
+        <button class="ib-btn ib-btn--danger-outline" :disabled="storySaving" @click="stopStoryRecording">
+          {{ storySaving ? '转写中…' : '停止接龙' }}
+        </button>
       </div>
 
       <div v-else class="ib-saved-section">
         <div class="ib-save-banner ib-save-banner--green">
           <span class="ib-save-icon">✓</span>
-          <span>{{ storyMember.name }} 的故事片段已记录</span>
+          <span>{{ storyMember.name }} 的故事片段已转写</span>
         </div>
         <div class="ib-save-actions">
-          <button class="ib-btn ib-btn--ghost" @click="reStoryRecord">↺ 重新接龙</button>
+          <button class="ib-btn ib-btn--ghost" :disabled="storySaving" @click="reStoryRecord">↺ 重新接龙</button>
           <button class="ib-btn ib-btn--primary" @click="nextStoryTurn">
-            {{ storyCurTurn < STORY_TOTAL_TURNS - 1 ? '下一棒 →' : '查看 AI 点评 →' }}
+            {{ storyCurTurn < storyTotalTurns - 1 ? '下一棒 →' : '查看 AI 点评 →' }}
           </button>
         </div>
       </div>
@@ -525,7 +685,7 @@ onUnmounted(() => {
       <template v-if="scoringLoading">
         <div class="ib-scoring-loading">
           <div class="ib-scoring-robot">🤖</div>
-          <p class="ib-scoring-loading-title">AI 正在分析你们的故事……</p>
+          <p class="ib-scoring-loading-title">AI 正在整理并分析你们的故事……</p>
           <div class="ib-scoring-dots">
             <span></span><span></span><span></span>
           </div>
@@ -554,6 +714,11 @@ onUnmounted(() => {
             <p class="ib-score-comment-text">{{ scoreComment }}</p>
           </div>
 
+          <div v-if="polishedStory" class="ib-score-story-card">
+            <p class="ib-score-story-label">AI 整理版故事</p>
+            <p class="ib-score-story-text">{{ polishedStory }}</p>
+          </div>
+
           <!-- AI 配图 -->
           <div class="ib-score-image" :style="{ background: scoreImageGradient }">
             <span class="ib-score-image-emoji">{{ scoreImageEmoji }}</span>
@@ -565,12 +730,13 @@ onUnmounted(() => {
           <div class="ib-score-award">
             <div class="ib-score-award-trophy">🏅</div>
             <div class="ib-score-award-body">
-              <p class="ib-score-award-label">最佳桥段奖</p>
+              <p class="ib-score-award-label">本场称号</p>
+              <p class="ib-score-award-title">{{ scoreMvpTitle }}</p>
               <div class="ib-score-award-winner">
-                <div class="ib-avatar ib-avatar--lg" :style="{ background: MEMBERS[scoreMvpIdx]!.bg }">
-                  {{ MEMBERS[scoreMvpIdx]!.initial }}
+                <div class="ib-avatar ib-avatar--lg" :style="{ background: scoreMvpMember.bg }">
+                  {{ scoreMvpMember.initial }}
                 </div>
-                <span class="ib-score-award-name">{{ MEMBERS[scoreMvpIdx]!.name }}</span>
+                <span class="ib-score-award-name">{{ scoreMvpMember.name }}</span>
               </div>
               <p class="ib-score-award-reason">{{ scoreMvpReason }}</p>
             </div>
@@ -593,7 +759,7 @@ onUnmounted(() => {
       <p class="ib-done-desc">大家已经互相认识了，开始正式讨论吧。</p>
 
       <div class="ib-done-members">
-        <div v-for="m in MEMBERS" :key="m.id" class="ib-done-member">
+        <div v-for="m in members" :key="m.id" class="ib-done-member">
           <div class="ib-avatar ib-avatar--xl" :style="{ background: m.bg }">{{ m.initial }}</div>
           <span class="ib-done-member-name">{{ m.name }}</span>
         </div>
@@ -607,966 +773,6 @@ onUnmounted(() => {
       </div>
     </div>
 
+    </template>
   </div>
 </template>
-
-<style scoped>
-/* ── Container ─────────────────────────────────────────────────── */
-.ib {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 8px 24px 80px;
-}
-
-/* ── Phase Nav ──────────────────────────────────────────────────── */
-.ib-phase-nav {
-  display: flex;
-  gap: 8px;
-  width: 100%;
-  margin-bottom: 4px;
-}
-
-.ib-nav-btn {
-  flex: 1;
-  padding: 8px 16px;
-  font-size: 14px;
-  font-weight: 600;
-  font-family: inherit;
-  border-radius: 999px;
-  border: 1.5px solid var(--app-border);
-  background: var(--app-bg-elevated);
-  color: var(--app-text-muted);
-  cursor: pointer;
-  transition: all 0.18s ease;
-}
-
-.ib-nav-btn--active {
-  border-color: var(--app-primary);
-  color: var(--app-primary);
-  background: var(--app-primary-soft);
-}
-
-.ib-nav-btn:hover:not(.ib-nav-btn--active) {
-  border-color: var(--app-border-strong);
-  color: var(--app-text-primary);
-}
-
-/* ── Screen base ────────────────────────────────────────────────── */
-.ib-screen {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 22px;
-  animation: ib-enter 0.35s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.ib-screen--exit {
-  animation: ib-leave 0.32s cubic-bezier(0.55, 0, 1, 0.45) forwards;
-  pointer-events: none;
-}
-
-@keyframes ib-enter {
-  from { opacity: 0; transform: translateY(18px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes ib-leave {
-  from { opacity: 1; transform: translateY(0); }
-  to   { opacity: 0; transform: translateY(-14px); }
-}
-
-/* ── Progress bar ───────────────────────────────────────────────── */
-.ib-topbar {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.ib-progress {
-  width: 100%;
-  height: 4px;
-  background: var(--app-border);
-  border-radius: 999px;
-  overflow: hidden;
-}
-
-.ib-progress-fill {
-  height: 100%;
-  background: var(--app-primary);
-  border-radius: 999px;
-  transition: width 0.5s ease;
-}
-
-.ib-progress-fill--green {
-  background: linear-gradient(90deg, #34d399, #10b981);
-}
-
-.ib-topbar-labels {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.ib-phase-badge {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--app-primary);
-  background: var(--app-primary-soft);
-  padding: 4px 12px;
-  border-radius: 999px;
-}
-
-.ib-phase-badge--green {
-  color: #065f46;
-  background: #d1fae5;
-}
-
-.ib-step-tag {
-  font-size: 15px;
-  color: var(--app-text-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-/* ── Avatar ─────────────────────────────────────────────────────── */
-.ib-avatar {
-  width: 36px;
-  height: 36px;
-  border-radius: 999px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  font-weight: 700;
-  color: #fff;
-  flex-shrink: 0;
-}
-
-.ib-avatar--sm {
-  width: 30px;
-  height: 30px;
-  font-size: 12px;
-}
-
-.ib-avatar--lg {
-  width: 44px;
-  height: 44px;
-  font-size: 16px;
-}
-
-.ib-avatar--xl {
-  width: 56px;
-  height: 56px;
-  font-size: 20px;
-}
-
-/* ── Buttons ─────────────────────────────────────────────────────── */
-.ib-btn {
-  border-radius: var(--app-radius-pill);
-  padding: 10px 28px;
-  font-size: 15px;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  border: none;
-  transition: all 0.18s ease;
-  line-height: 1.4;
-}
-
-.ib-btn--primary {
-  background: var(--app-primary);
-  color: #fff;
-}
-
-.ib-btn--primary:hover:not(:disabled) {
-  background: var(--app-primary-hover);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
-}
-
-.ib-btn--green {
-  background: #10b981 !important;
-}
-
-.ib-btn--green:hover:not(:disabled) {
-  background: #059669 !important;
-  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35) !important;
-}
-
-.ib-btn--ghost {
-  background: none;
-  color: var(--app-text-secondary);
-  border: 1.5px solid transparent;
-}
-
-.ib-btn--ghost:hover {
-  color: var(--app-text-primary);
-  border-color: var(--app-border);
-}
-
-.ib-btn--lg {
-  padding: 13px 40px;
-  font-size: 16px;
-}
-
-.ib-btn--disabled,
-.ib-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-  transform: none !important;
-  box-shadow: none !important;
-}
-
-.ib-btn--danger-outline {
-  background: none;
-  border: 1.5px solid #ef4444;
-  color: #ef4444;
-  border-radius: var(--app-radius-pill);
-  padding: 10px 28px;
-  font-size: 15px;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  transition: all 0.18s ease;
-}
-
-.ib-btn--danger-outline:hover {
-  background: #fef2f2;
-}
-
-/* ── INTRO ───────────────────────────────────────────────────────── */
-.ib-intro {
-  padding-top: 16px;
-}
-
-.ib-intro-hero {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  padding: 32px 24px 28px;
-  width: 100%;
-  background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
-  border-radius: 18px;
-  border: 1px solid var(--app-border);
-}
-
-.ib-intro-hero-emoji {
-  font-size: 52px;
-  line-height: 1;
-}
-
-.ib-intro-title {
-  margin: 0;
-  font-size: 38px;
-  font-weight: 800;
-  color: var(--app-text-primary);
-  letter-spacing: -0.5px;
-}
-
-.ib-intro-subtitle {
-  margin: 0;
-  font-size: 18px;
-  color: var(--app-text-secondary);
-}
-
-.ib-intro-phases {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.ib-intro-phase {
-  display: flex;
-  align-items: flex-start;
-  gap: 14px;
-  padding: 16px 18px;
-  background: var(--app-bg-elevated);
-  border: 1px solid var(--app-border);
-  border-radius: 12px;
-  box-shadow: var(--app-shadow-card);
-}
-
-.ib-intro-phase-num {
-  font-size: 36px;
-  font-weight: 800;
-  color: var(--app-primary);
-  opacity: 0.25;
-  line-height: 1;
-  flex-shrink: 0;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -1px;
-}
-
-.ib-intro-phase-body {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.ib-intro-phase-title {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--app-text-primary);
-}
-
-.ib-intro-phase-desc {
-  margin: 0;
-  font-size: 16px;
-  color: var(--app-text-secondary);
-  line-height: 1.6;
-}
-
-.ib-intro-members {
-  display: flex;
-  gap: 20px;
-  justify-content: center;
-}
-
-.ib-intro-member {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-}
-
-.ib-intro-member-name {
-  font-size: 16px;
-  color: var(--app-text-secondary);
-  font-weight: 500;
-}
-
-/* ── PHASE 1 ─────────────────────────────────────────────────────── */
-.ib-p1 {
-  width: 100%;
-}
-
-.ib-speaker-callout {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  width: 100%;
-  padding: 16px 20px;
-  background: var(--app-bg-elevated);
-  border-radius: 14px;
-  border: 1.5px solid var(--app-border);
-  box-shadow: var(--app-shadow-card);
-}
-
-.ib-speaker-name {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--app-text-primary);
-}
-
-.ib-speaker-hint {
-  margin: 0;
-  font-size: 16px;
-  color: var(--app-text-secondary);
-}
-
-.ib-question-card {
-  width: 100%;
-  padding: 28px 24px;
-  background: linear-gradient(135deg, #eff6ff 0%, #eef2ff 100%);
-  border-radius: 18px;
-  border: 1.5px solid #c7d2fe;
-  animation: ib-q-enter 0.3s ease;
-}
-
-@keyframes ib-q-enter {
-  from { opacity: 0; transform: scale(0.97); }
-  to   { opacity: 1; transform: scale(1); }
-}
-
-.ib-question-text {
-  margin: 0;
-  font-size: 28px;
-  font-weight: 700;
-  color: #1e3a8a;
-  line-height: 1.45;
-  text-align: center;
-}
-
-.ib-countdown-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-}
-
-.ib-ring {
-  filter: drop-shadow(0 2px 8px rgba(37, 99, 235, 0.15));
-}
-
-.ib-record-ready {
-  display: flex;
-  justify-content: center;
-  padding: 8px 0;
-}
-
-.ib-btn--record {
-  min-width: 200px;
-  font-size: 18px;
-  letter-spacing: 0.02em;
-}
-
-.ib-saved-section {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
-}
-
-.ib-save-banner {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 14px 24px;
-  background: #f0fdf4;
-  border: 1.5px solid #86efac;
-  border-radius: 14px;
-  font-size: 17px;
-  font-weight: 600;
-  color: #166534;
-  width: 100%;
-  justify-content: center;
-  animation: ib-enter 0.3s ease;
-}
-
-.ib-save-banner--green {
-  background: #ecfdf5;
-  border-color: #6ee7b7;
-  color: #065f46;
-}
-
-.ib-save-icon {
-  font-size: 20px;
-  font-weight: 800;
-  color: #16a34a;
-}
-
-.ib-save-actions {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  flex-wrap: wrap;
-  justify-content: center;
-}
-
-/* ── PHASE 2 INTRO ───────────────────────────────────────────────── */
-.ib-p2intro {
-  padding-top: 32px;
-  text-align: center;
-}
-
-.ib-p2intro-icon {
-  font-size: 64px;
-  line-height: 1;
-  animation: ib-pulse 1.8s ease-in-out infinite;
-}
-
-@keyframes ib-pulse {
-  0%, 100% { transform: scale(1); }
-  50%       { transform: scale(1.1); }
-}
-
-.ib-p2intro-title {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--app-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-}
-
-.ib-p2intro-sub {
-  margin: 0;
-  font-size: 40px;
-  font-weight: 800;
-  color: var(--app-text-primary);
-  letter-spacing: -0.5px;
-}
-
-.ib-p2intro-desc {
-  margin: 0;
-  font-size: 18px;
-  color: var(--app-text-secondary);
-  line-height: 1.8;
-}
-
-.ib-p2intro-opening-preview {
-  width: 100%;
-  background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%);
-  border: 1.5px solid #6ee7b7;
-  border-radius: 16px;
-  padding: 20px 24px;
-  text-align: left;
-}
-
-.ib-p2intro-opening-label {
-  margin: 0 0 8px;
-  font-size: 13px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #059669;
-}
-
-.ib-p2intro-opening-text {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-  color: #064e3b;
-  line-height: 1.6;
-}
-
-/* ── PHASE 2 故事接龙 ─────────────────────────────────────────────── */
-.ib-p2 {
-  width: 100%;
-}
-
-/* 故事开头卡片 */
-.ib-story-opening-card {
-  width: 100%;
-  padding: 18px 22px;
-  background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%);
-  border: 1.5px solid #6ee7b7;
-  border-radius: 14px;
-  animation: ib-q-enter 0.3s ease;
-}
-
-.ib-story-opening-label {
-  margin: 0 0 6px;
-  font-size: 12px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: #059669;
-}
-
-.ib-story-opening-text {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-  color: #064e3b;
-  line-height: 1.6;
-}
-
-/* 接龙进度链 */
-.ib-chain-log {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  overflow-x: auto;
-  padding: 4px 0;
-}
-
-.ib-chain-node {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  flex: 1;
-  min-width: 52px;
-  padding: 10px 6px;
-  border-radius: 12px;
-  background: var(--app-bg-elevated);
-  border: 1.5px solid var(--app-border);
-  transition: all 0.2s ease;
-  position: relative;
-}
-
-.ib-chain-node--active {
-  border-color: #10b981;
-  background: #ecfdf5;
-  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
-}
-
-.ib-chain-node--done {
-  background: #f0fdf4;
-  border-color: #a7f3d0;
-}
-
-.ib-chain-node--future {
-  opacity: 0.4;
-}
-
-.ib-chain-node-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--app-text-muted);
-  letter-spacing: 0.02em;
-}
-
-.ib-chain-node-status {
-  font-size: 12px;
-  font-weight: 800;
-  position: absolute;
-  top: 5px;
-  right: 7px;
-}
-
-.ib-chain-done-mark {
-  color: #10b981;
-}
-
-.ib-chain-active-mark {
-  color: #10b981;
-  animation: ib-blink 1s ease-in-out infinite;
-}
-
-@keyframes ib-blink {
-  0%, 100% { opacity: 1; }
-  50%       { opacity: 0.3; }
-}
-
-/* ── SCORING ─────────────────────────────────────────────────────── */
-.ib-scoring {
-  width: 100%;
-  min-height: 60vh;
-  justify-content: center;
-}
-
-/* loading */
-.ib-scoring-loading {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 18px;
-  padding: 60px 0;
-}
-
-.ib-scoring-robot {
-  font-size: 72px;
-  animation: ib-bob 1.2s ease-in-out infinite;
-}
-
-@keyframes ib-bob {
-  0%, 100% { transform: translateY(0); }
-  50%       { transform: translateY(-10px); }
-}
-
-.ib-scoring-loading-title {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--app-text-secondary);
-}
-
-.ib-scoring-dots {
-  display: flex;
-  gap: 8px;
-}
-
-.ib-scoring-dots span {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #10b981;
-  animation: ib-dot-bounce 1.2s ease-in-out infinite;
-}
-
-.ib-scoring-dots span:nth-child(2) { animation-delay: 0.2s; }
-.ib-scoring-dots span:nth-child(3) { animation-delay: 0.4s; }
-
-@keyframes ib-dot-bounce {
-  0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
-  40%            { transform: scale(1);   opacity: 1; }
-}
-
-/* result */
-.ib-scoring-result {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 20px;
-}
-
-/* 精彩度大分 */
-.ib-score-hero {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  padding: 28px 24px 24px;
-  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-  border-radius: 20px;
-  color: #fff;
-}
-
-.ib-score-hero-label {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: #94a3b8;
-}
-
-.ib-score-hero-number {
-  display: flex;
-  align-items: flex-end;
-  gap: 4px;
-  line-height: 1;
-}
-
-.ib-score-value {
-  font-size: 88px;
-  font-weight: 900;
-  letter-spacing: -4px;
-  background: linear-gradient(135deg, #f59e0b, #fbbf24);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-.ib-score-unit {
-  font-size: 28px;
-  font-weight: 700;
-  color: #f59e0b;
-  padding-bottom: 14px;
-}
-
-.ib-score-bar-wrap {
-  width: 100%;
-  height: 6px;
-  background: rgba(255,255,255,0.1);
-  border-radius: 999px;
-  overflow: hidden;
-}
-
-.ib-score-bar-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #f59e0b, #fbbf24);
-  border-radius: 999px;
-  transition: width 1.2s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-/* 毒舌评价 */
-.ib-score-comment-card {
-  width: 100%;
-  display: flex;
-  gap: 14px;
-  align-items: flex-start;
-  padding: 20px 22px;
-  background: var(--app-bg-elevated);
-  border: 1.5px solid var(--app-border);
-  border-radius: 16px;
-  box-shadow: var(--app-shadow-card);
-}
-
-.ib-score-comment-robot {
-  font-size: 30px;
-  line-height: 1;
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-
-.ib-score-comment-text {
-  margin: 0;
-  font-size: 17px;
-  font-weight: 500;
-  color: var(--app-text-primary);
-  line-height: 1.75;
-}
-
-/* AI 配图 */
-.ib-score-image {
-  width: 100%;
-  aspect-ratio: 16/9;
-  border-radius: 16px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  padding: 24px;
-  position: relative;
-  overflow: hidden;
-}
-
-.ib-score-image-emoji {
-  font-size: 72px;
-  line-height: 1;
-  filter: drop-shadow(0 4px 16px rgba(0,0,0,0.4));
-}
-
-.ib-score-image-caption {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 500;
-  color: rgba(255,255,255,0.7);
-  text-align: center;
-  line-height: 1.6;
-  max-width: 480px;
-}
-
-.ib-score-image-badge {
-  position: absolute;
-  bottom: 12px;
-  right: 14px;
-  font-size: 11px;
-  font-weight: 600;
-  color: rgba(255,255,255,0.5);
-  letter-spacing: 0.06em;
-}
-
-/* 最佳桥段奖 */
-.ib-score-award {
-  width: 100%;
-  display: flex;
-  gap: 16px;
-  align-items: flex-start;
-  padding: 20px 22px;
-  background: linear-gradient(135deg, #fefce8 0%, #fffbeb 100%);
-  border: 1.5px solid #fcd34d;
-  border-radius: 16px;
-}
-
-.ib-score-award-trophy {
-  font-size: 36px;
-  line-height: 1;
-  flex-shrink: 0;
-}
-
-.ib-score-award-body {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.ib-score-award-label {
-  margin: 0;
-  font-size: 12px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: #92400e;
-}
-
-.ib-score-award-winner {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.ib-score-award-name {
-  font-size: 22px;
-  font-weight: 800;
-  color: #78350f;
-}
-
-.ib-score-award-reason {
-  margin: 0;
-  font-size: 15px;
-  color: #92400e;
-  line-height: 1.6;
-}
-
-/* ── DONE ────────────────────────────────────────────────────────── */
-.ib-done {
-  padding-top: 24px;
-  text-align: center;
-  position: relative;
-}
-
-.ib-done-confetti {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 200px;
-  pointer-events: none;
-  overflow: hidden;
-}
-
-.ib-confetti-dot {
-  position: absolute;
-  left: calc(var(--i) * 5%);
-  top: calc(var(--i) * 2% - 10px);
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: hsl(calc(var(--i) * 18deg), 80%, 65%);
-  animation: ib-fall 3s ease-in calc(var(--i) * 0.12s) infinite;
-  opacity: 0;
-}
-
-@keyframes ib-fall {
-  0%   { opacity: 0; transform: translateY(-20px) rotate(0deg); }
-  10%  { opacity: 1; }
-  80%  { opacity: 1; }
-  100% { opacity: 0; transform: translateY(180px) rotate(720deg); }
-}
-
-.ib-done-emoji {
-  font-size: 72px;
-  line-height: 1;
-  display: block;
-  position: relative;
-  z-index: 1;
-}
-
-.ib-done-title {
-  margin: 0;
-  font-size: 32px;
-  font-weight: 800;
-  color: var(--app-text-primary);
-  letter-spacing: -0.5px;
-}
-
-.ib-done-desc {
-  margin: 0;
-  font-size: 18px;
-  color: var(--app-text-secondary);
-  line-height: 1.6;
-}
-
-.ib-done-members {
-  display: flex;
-  gap: 24px;
-  justify-content: center;
-}
-
-.ib-done-member {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-}
-
-.ib-done-member-name {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--app-text-secondary);
-}
-
-.ib-done-actions {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-}
-
-/* ── Transitions ─────────────────────────────────────────────────── */
-.ib-rise-enter-active,
-.ib-rise-leave-active {
-  transition: opacity 0.4s ease, transform 0.4s ease;
-}
-
-.ib-rise-enter-from,
-.ib-rise-leave-to {
-  opacity: 0;
-  transform: translateY(16px);
-}
-</style>
