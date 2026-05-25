@@ -38,7 +38,7 @@ _GROUP_SILENCE_SYSTEM = (
     "你是一个温暖积极的讨论伙伴。"
     "输出一句自然友好的破冰话题，帮助全组重新打开讨论。"
     "话题本身要有追问性质，让成员自然地说出理由或举例，而不只是表态。"
-    "不超过30字，直接给出话题，不要任何前缀或解释。"
+    "不超过20字，直接给出话题，不要任何前缀或解释。"
 )
 
 _GROUP_SILENCE_TEMPLATE = (
@@ -157,7 +157,7 @@ _ANALYZE_MEMBERS_SYSTEM = (
     "【输出格式】\n"
     "严格返回 JSON，不输出任何解释或 markdown：\n"
     '{"members": [{"user_id": "...", "challenge_type": "stagnation|shallow|none", '
-    '"needs_prompt": true/false, "analysis": "一句中文分析", "content": "推送文案（≤30字）", '
+    '"needs_prompt": true/false, "analysis": "一句中文分析", "content": "推送文案（≤20字）", '
     '"anchor": {"transcript_id": "...", "speaker_id": "...", "speaker_name": "...", "text": "..."} 或 null}]}'
 )
 
