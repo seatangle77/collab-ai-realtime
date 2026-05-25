@@ -37,13 +37,12 @@ def send_push_to_registration_id(
     client = _get_push_client()
     push = client.create_push()
 
-    push.platform = jpush_sdk.all_
+    push.platform = jpush_sdk.platform("android")
     push.audience = jpush_sdk.audience(
         jpush_sdk.registration_id(registration_id)
     )
     push.notification = jpush_sdk.notification(
         android=jpush_sdk.android(alert=content, title=title),
-        ios=jpush_sdk.ios(alert=content, title=title),
     )
     push.options = {"time_to_live": 60}
 
