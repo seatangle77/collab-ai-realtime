@@ -58,6 +58,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('../views/app/AppVoiceProfile.vue'),
       },
       {
+        path: 'icebreaker',
+        name: 'AppIcebreaker',
+        component: () => import('../views/app/AppIcebreaker.vue'),
+      },
+      {
         path: 'sessions/:id',
         name: 'AppSessionDetail',
         component: () => import('../views/app/AppSessionDetailPage.vue'),

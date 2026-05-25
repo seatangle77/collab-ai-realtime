@@ -2,7 +2,8 @@
 import { useRoute, useRouter } from 'vue-router'
 import { computed } from 'vue'
 import type { Component } from 'vue'
-import { HomeFilled, User, ChatLineRound, Microphone } from '@element-plus/icons-vue'
+import { HomeFilled, User, ChatLineRound, Microphone, Sunny } from '@element-plus/icons-vue'
+import { Capacitor } from '@capacitor/core'
 
 const router = useRouter()
 const route = useRoute()
@@ -25,11 +26,14 @@ interface TabItem {
   icon: Component
 }
 
+const isNative = Capacitor.isNativePlatform()
+
 const tabs: TabItem[] = [
   { path: '/app', label: '首页', icon: HomeFilled },
   { path: '/app/groups', label: '群组', icon: User },
   { path: '/app/sessions', label: '会话', icon: ChatLineRound },
   { path: '/app/voice-profile', label: '声纹', icon: Microphone },
+  ...(!isNative ? [{ path: '/app/icebreaker', label: '破冰', icon: Sunny }] : []),
 ]
 
 function isTabActive(tabPath: string): boolean {
@@ -45,6 +49,9 @@ function isTabActive(tabPath: string): boolean {
   }
   if (tabPath === '/app/voice-profile') {
     return p.startsWith('/app/voice-profile')
+  }
+  if (tabPath === '/app/icebreaker') {
+    return p.startsWith('/app/icebreaker')
   }
   return false
 }
