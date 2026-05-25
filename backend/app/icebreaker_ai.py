@@ -75,14 +75,14 @@ _USER_TEMPLATE = (
     "成员：\n{members}\n\n"
     "故事接龙记录：\n{turns}\n\n"
     "请输出 JSON：\n"
-    "{\n"
+    "{{\n"
     '  "polished_story": "把6段接龙整理成一段顺畅中文故事，去掉口头禅和重复，但保留原意",\n'
     '  "score": 65到95之间的整数,\n'
     '  "comment": "一句中文短评，8到18字，像朋友吐槽",\n'
     '  "mvp_user_id": "获奖成员user_id",\n'
     '  "mvp_title": "称号，例如全场最会圆奖/剧情急救员/硬接大师",\n'
     '  "mvp_reason": "一句中文理由，12到24字"\n'
-    "}"
+    "}}"
 )
 
 
