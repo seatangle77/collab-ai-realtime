@@ -11,79 +11,9 @@ const MEMBERS = [
   { id: '3', name: '王五', initial: '王', bg: '#10b981' },
 ]
 
-// 第一题固定：名字 + 星座 + MBTI 合并
-const P1_FIXED = '先介绍一下自己——你叫什么名字？你的星座是什么？MBTI 是什么？（不知道 MBTI 的话，说说你觉得自己偏内向还是外向？）'
-
-// 随机题池
-const P1_EXTRA_POOL = [
-  '你现在在做什么工作或者在读什么专业？',
-  '你今天来之前在干嘛？',
-  '用一个词描述你今天的状态',
-  '你最近在迷什么？',
-  '你平时怎么放松？',
-  '你最近看过或玩过让你印象深刻的东西是什么？',
-  '如果让你用三个词描述自己，你会选哪三个？',
-  '你有没有一个别人不太知道的小爱好？',
-  '你觉得自己最大的优点是什么？',
-  '你最近有没有在学什么新东西？',
-  '你是那种容易交到朋友的人吗？',
-  '如果明天不用上班/上学，你会怎么过？',
-  '你最喜欢哪种天气？为什么？',
-  '你有没有一句最近常挂在嘴边的话或口头禅？',
-  '你觉得自己更像猫还是狗？为什么？',
-  '你做过最冲动的一件事是什么？',
-  '你对自己的城市有什么特别的感情吗？',
-  '如果可以立刻掌握一项技能，你会选什么？',
-  '你有没有一个坚持了很久的习惯？',
-  '你最享受一天中的哪个时间段？',
-  '最近让你开心的一件小事是什么？',
-  '你更喜欢早起还是熬夜？',
-  '如果只能选一种食物吃一整年，你会选什么？',
-  '你有没有觉得自己和别人很不一样的地方？',
-]
-
-const P2_POOL = [
-  { a: '永远只能喝热饮', b: '永远只能喝冷饮' },
-  { a: '出门永远迷路', b: '在家永远找不到东西' },
-  { a: '每天必须午睡2小时', b: '每天晚上12点前必须睡' },
-  { a: '能看见别人的心情但说不出来', b: '能说出自己心情但没人信' },
-  { a: '永远不能吃甜的', b: '永远不能吃咸的' },
-  { a: '每次说话都会有回音', b: '每次说话都会延迟3秒' },
-  { a: '走路永远比别人慢一倍', b: '说话永远比别人快一倍' },
-  { a: '永远记得所有尴尬瞬间', b: '永远记不住别人的名字' },
-  { a: '每天只能睡5小时但精神好', b: '每天睡10小时但还是困' },
-  { a: '说话时嘴边总有字幕显示', b: '脑子里想什么头顶都有气泡显示' },
-  { a: '永远不能发朋友圈但可以看', b: '永远可以发朋友圈但看不到别人的' },
-  { a: '每次坐电梯必须和陌生人同乘', b: '每次坐电梯都要等超过5分钟' },
-  { a: '每次笑都特别大声', b: '每次笑都完全没有声音' },
-  { a: '永远不能听音乐', b: '永远不能看视频' },
-  { a: '手机永远只剩20%电', b: '手机永远只有2格信号' },
-  { a: '永远不能用表情包', b: '永远不能发语音消息' },
-  { a: '所有人都知道你的年龄', b: '所有人都知道你的体重' },
-  { a: '每次打电话对方声音都很小', b: '每次打电话对方声音都很大' },
-  { a: '拍的照片永远有人闯入', b: '拍的照片永远对不上焦' },
-  { a: '永远不知道现在几点', b: '永远不知道今天星期几' },
-  { a: '每次开会必须第一个发言', b: '每次开会必须最后一个发言' },
-  { a: '永远买不到打折商品', b: '永远只能买打折商品' },
-  { a: '每次睡觉都做噩梦但记得很清楚', b: '每次睡觉都做好梦但完全不记得' },
-  { a: '永远不能点外卖', b: '永远不能去餐厅堂食' },
-  { a: '每天必须发一条朋友圈', b: '每天必须看完所有人的朋友圈' },
-  { a: '永远不能截图', b: '永远不能复制粘贴' },
-  { a: '永远不知道食物吃完后多少卡路里', b: '每吃一口都要知道精确卡路里' },
-  { a: '朋友永远比你先到约定地点', b: '朋友永远比你晚到30分钟' },
-  { a: '永远不能用耳机', b: '永远只能用耳机不能外放' },
-  { a: '买东西永远没有购物袋', b: '买东西永远装不下的袋子' },
-  { a: '你说的话别人总是听不清第一遍', b: '你听别人说话总是听不清第一遍' },
-  { a: '睡觉时手机必须放在另一个房间', b: '睡觉时必须开着电视才能入睡' },
-  { a: '每次回消息都要等对方10分钟', b: '你每次都要10分钟后才能看到消息' },
-  { a: '永远不能吃辣', b: '永远不能吃生冷食物' },
-  { a: '每次出门都忘带一样东西', b: '每次出门包里都有一样不知道是什么的东西' },
-  { a: '永远不能改变发型', b: '永远不能改变穿衣风格' },
-  { a: '每天必须和一个陌生人聊满5分钟', b: '每天必须向一个陌生人道歉' },
-  { a: '永远记得所有人的生日但不能送礼物', b: '永远忘记所有人的生日但礼物总是很合适' },
-  { a: '只能在公共场合哭', b: '只能在公共场合大笑' },
-]
-
+// ─────────────────────────────────────────────────────────────────
+// 工具函数
+// ─────────────────────────────────────────────────────────────────
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr]
   for (let i = a.length - 1; i > 0; i--) {
@@ -95,36 +25,91 @@ function shuffle<T>(arr: T[]): T[] {
   return a
 }
 
+// ─────────────────────────────────────────────────────────────────
+// Phase 1 题库
+// ─────────────────────────────────────────────────────────────────
+const P1_FIXED = '先介绍一下自己——你叫什么名字？你的星座是什么？MBTI 是什么？（不知道 MBTI 的话，说说你觉得自己偏内向还是外向？）'
+
+const P1_EXTRA_POOL = [
+  '用一道菜来形容你自己——你是什么菜？为什么？',
+  '你有没有一个吃东西的奇怪口味偏好，说出来别人都觉得你怪？',
+  '你有没有一个"连自己都觉得很蠢但就是改不掉"的习惯？',
+  '你在朋友群里通常是什么角色——发疯的、拉架的、还是潜水的？',
+  '你最近发呆的时候在想什么？',
+  '你最近有没有做过一件事，做完之后在心里默默给自己鼓掌的？',
+  '朋友最常拿你开玩笑的点是什么？',
+  '你有没有一个"理论上该戒掉但完全没打算戒"的坏习惯？',
+  '你上一次骗自己"就最后一次"是什么事？',
+  '你有没有一件"只要没人看见就不算"的事？',
+  '你最近做过最"不像自己"的一件事是什么？',
+  '你有没有一首歌，单曲循环次数自己都不敢数？',
+  '你有没有一个"只有你自己觉得好笑、但给别人解释半天他们也不懂"的梗？',
+  '你睡前胡思乱想的时候通常在想什么？',
+  '你最容易"破防"的点是什么——什么事会让你突然绷不住？',
+  '你在家一个人的时候，会做什么在外面绝对不做的事？',
+  '你有没有一件事，"明明知道在浪费时间，但就是停不下来"？',
+  '你上一次在公共场合尴尬到想消失是什么时候？',
+  '你有没有一个偷偷坚持的小迷信或仪式感？',
+  '如果给你现在的状态配一首 BGM，你会选什么歌？',
+  '如果你是一种天气，你今天是什么天气？',
+  '你有没有一件"明明不该笑但还是笑出来了"的事？',
+  '你最近搜索过的最奇怪的一个问题是什么？',
+  '你有没有一个"偷偷挺厉害但很少告诉别人"的技能？',
+]
+
 // 每位成员：[固定题, 随机题1, 随机题2]
 const p1MemberQuestions: string[][] = MEMBERS.map(() =>
   [P1_FIXED, ...shuffle(P1_EXTRA_POOL).slice(0, 2)]
 )
-const p2Questions = shuffle(P2_POOL).slice(0, 6)
 
-// ── Flow ────────────────────────────────────────────────────────
-type Screen = 'intro' | 'phase1' | 'phase2_intro' | 'phase2' | 'done'
+// ─────────────────────────────────────────────────────────────────
+// Phase 2 故事接龙题库
+// ─────────────────────────────────────────────────────────────────
+const STORY_POOL = [
+  '一个快递员在送一封没有地址的包裹，上面只写着"给最需要它的人"……',
+  '深夜 12 点，手机突然收到一条陌生消息："我知道你今天做了什么。"……',
+  '便利店收银台上，你发现了一张字条：如果你捡到这张纸，请不要回头……',
+  '早上醒来，你发现镜子里的自己比你早了整整三秒……',
+  '电梯门打开，里面站着的人和你长得一模一样，而且正在按同一层楼……',
+  '一只流浪猫突然开口说了一句话，然后就再也不说了……',
+  '博物馆镇馆之宝今天早上不翼而飞，监控只拍到它自己走出了大门……',
+  '不知从何时起，城里所有人都忘记了"蓝色"这种颜色……',
+  '废弃游乐场里，一架旋转木马在没有风的深夜自己转了起来……',
+  '旧书店里有一本日记，翻开来，上面写的竟然是你明年 365 天的每一天……',
+  '全市所有时钟在同一秒停了下来，指针停在了 3:33……',
+  '邮差送来一封信，收件人是「二十年后的你」，寄件人是「现在的你」……',
+]
+
+const storyOpening = shuffle(STORY_POOL)[0]!
+
+// ─────────────────────────────────────────────────────────────────
+// Flow
+// ─────────────────────────────────────────────────────────────────
+type Screen = 'intro' | 'phase1' | 'phase2_intro' | 'phase2' | 'scoring' | 'done'
 const screen = ref<Screen>('intro')
 const exiting = ref(false)
 
-// ── Phase 1 ─────────────────────────────────────────────────────
-type P1RecordState = 'ready' | 'recording' | 'saved'
+// ─────────────────────────────────────────────────────────────────
+// Phase 1 状态
+// ─────────────────────────────────────────────────────────────────
+type RecordState = 'ready' | 'recording' | 'saved'
 
-const p1MemberIdx = ref(0)    // 0-2（哪位成员）
-const p1QuestionIdx = ref(0)  // 0-2（第几题）
-const p1RecordState = ref<P1RecordState>('ready')
+const p1MemberIdx = ref(0)
+const p1QuestionIdx = ref(0)
+const p1RecordState = ref<RecordState>('ready')
 const p1Countdown = ref(20)
 let p1Interval: ReturnType<typeof setInterval> | null = null
 
 const p1Member = computed(() => MEMBERS[p1MemberIdx.value]!)
 const p1Question = computed(() => p1MemberQuestions[p1MemberIdx.value]?.[p1QuestionIdx.value] ?? '')
 const p1CurrentStep = computed(() => p1MemberIdx.value * 3 + p1QuestionIdx.value + 1)
-const P1_TOTAL = 9  // 3人 × 3题
+const P1_TOTAL = 9
 
 const RING_C = 2 * Math.PI * 44
 const p1RingOffset = computed(() => RING_C * (1 - p1Countdown.value / 20))
 const p1IsUrgent = computed(() => p1Countdown.value <= 5)
 
-function stopCountdown() {
+function stopP1Countdown() {
   if (p1Interval) { clearInterval(p1Interval); p1Interval = null }
 }
 
@@ -133,23 +118,13 @@ function startRecording() {
   p1Countdown.value = 20
   p1Interval = setInterval(() => {
     p1Countdown.value--
-    if (p1Countdown.value <= 0) {
-      stopCountdown()
-      p1RecordState.value = 'saved'
-    }
+    if (p1Countdown.value <= 0) { stopP1Countdown(); p1RecordState.value = 'saved' }
   }, 1000)
 }
 
-function stopRecording() {
-  stopCountdown()
-  p1RecordState.value = 'saved'
-}
+function stopRecording() { stopP1Countdown(); p1RecordState.value = 'saved' }
 
-function reRecord() {
-  stopCountdown()
-  p1Countdown.value = 20
-  p1RecordState.value = 'ready'
-}
+function reRecord() { stopP1Countdown(); p1Countdown.value = 20; p1RecordState.value = 'ready' }
 
 function nextP1Question() {
   exiting.value = true
@@ -169,79 +144,108 @@ function nextP1Question() {
 }
 
 function startPhase1() {
-  p1MemberIdx.value = 0
-  p1QuestionIdx.value = 0
-  p1RecordState.value = 'ready'
-  p1Countdown.value = 20
+  p1MemberIdx.value = 0; p1QuestionIdx.value = 0
+  p1RecordState.value = 'ready'; p1Countdown.value = 20
   screen.value = 'phase1'
 }
 
-// ── Phase 2 ─────────────────────────────────────────────────────
-const p2Step = ref(0)
-const p2MyVote = ref<'a' | 'b' | null>(null)
-const p2SimVotes = ref<{ id: string; choice: 'a' | 'b' }[]>([])
-let p2T1: ReturnType<typeof setTimeout> | null = null
-let p2T2: ReturnType<typeof setTimeout> | null = null
+// ─────────────────────────────────────────────────────────────────
+// Phase 2 故事接龙状态
+// ─────────────────────────────────────────────────────────────────
+const STORY_ROUNDS = 2
+const STORY_TOTAL_TURNS = MEMBERS.length * STORY_ROUNDS  // 6
 
-const p2Q = computed(() => p2Questions[p2Step.value]!)
-const p2CountA = computed(() =>
-  (p2MyVote.value === 'a' ? 1 : 0) + p2SimVotes.value.filter(v => v.choice === 'a').length)
-const p2CountB = computed(() =>
-  (p2MyVote.value === 'b' ? 1 : 0) + p2SimVotes.value.filter(v => v.choice === 'b').length)
-const p2AllVoted = computed(() => p2MyVote.value !== null && p2SimVotes.value.length >= 2)
-const p2CanNext = computed(() => p2MyVote.value !== null)
+const storyCurTurn = ref(0)
+const storyRecordState = ref<RecordState>('ready')
+const storyCountdown = ref(30)
+let storyInterval: ReturnType<typeof setInterval> | null = null
 
-function clearSim() {
-  if (p2T1) { clearTimeout(p2T1); p2T1 = null }
-  if (p2T2) { clearTimeout(p2T2); p2T2 = null }
+const STORY_RING_C = 2 * Math.PI * 44
+const storyRingOffset = computed(() => STORY_RING_C * (1 - storyCountdown.value / 30))
+const storyIsUrgent = computed(() => storyCountdown.value <= 5)
+const storyMember = computed(() => MEMBERS[storyCurTurn.value % MEMBERS.length]!)
+const storyRound = computed(() => Math.floor(storyCurTurn.value / MEMBERS.length) + 1)
+
+function stopStoryCountdown() {
+  if (storyInterval) { clearInterval(storyInterval); storyInterval = null }
 }
 
-function p2Vote(choice: 'a' | 'b') {
-  if (p2MyVote.value !== null) return
-  p2MyVote.value = choice
-  p2T1 = setTimeout(() => {
-    const c: 'a' | 'b' = Math.random() > 0.45 ? 'a' : 'b'
-    p2SimVotes.value = [...p2SimVotes.value, { id: MEMBERS[1]!.id, choice: c }]
-  }, 600 + Math.random() * 500)
-  p2T2 = setTimeout(() => {
-    const c: 'a' | 'b' = Math.random() > 0.45 ? 'a' : 'b'
-    p2SimVotes.value = [...p2SimVotes.value, { id: MEMBERS[2]!.id, choice: c }]
-  }, 1100 + Math.random() * 700)
+function startStoryRecording() {
+  storyRecordState.value = 'recording'
+  storyCountdown.value = 30
+  storyInterval = setInterval(() => {
+    storyCountdown.value--
+    if (storyCountdown.value <= 0) { stopStoryCountdown(); storyRecordState.value = 'saved' }
+  }, 1000)
 }
 
-function nextP2() {
-  if (!p2CanNext.value) return
-  clearSim()
+function stopStoryRecording() { stopStoryCountdown(); storyRecordState.value = 'saved' }
+
+function reStoryRecord() { stopStoryCountdown(); storyCountdown.value = 30; storyRecordState.value = 'ready' }
+
+function nextStoryTurn() {
   exiting.value = true
   setTimeout(() => {
-    if (p2Step.value < p2Questions.length - 1) {
-      p2Step.value++
-      p2MyVote.value = null
-      p2SimVotes.value = []
-      exiting.value = false
+    exiting.value = false
+    storyRecordState.value = 'ready'
+    storyCountdown.value = 30
+    if (storyCurTurn.value < STORY_TOTAL_TURNS - 1) {
+      storyCurTurn.value++
     } else {
-      exiting.value = false
-      screen.value = 'done'
+      screen.value = 'scoring'
+      startScoring()
     }
   }, 360)
 }
 
-function startPhase2() {
-  p2Step.value = 0
-  p2MyVote.value = null
-  p2SimVotes.value = []
+function startStoryPhase() {
+  storyCurTurn.value = 0
+  storyRecordState.value = 'ready'
+  storyCountdown.value = 30
   screen.value = 'phase2'
 }
 
-function memberById(id: string) {
-  return MEMBERS.find(m => m.id === id)
+// ─────────────────────────────────────────────────────────────────
+// Scoring（AI 点评）
+// ─────────────────────────────────────────────────────────────────
+interface ScoreDim { label: string; emoji: string; score: number; max: number }
+
+const scoringLoading = ref(true)
+const scoreDims = ref<ScoreDim[]>([])
+const scoreMvpIdx = ref(0)
+const scoreTags = ref<string[]>([])
+const scoreSummary = ref('')
+let scoringTimer: ReturnType<typeof setTimeout> | null = null
+
+const SCORE_TAGS_POOL = ['悬疑', '奇幻', '温情', '搞笑', '惊悚', '励志', '科幻', '治愈', '反转', '热血']
+
+const SCORE_SUMMARIES = [
+  '三位讲述者将这个神秘的开头推向了始料未及的方向，每一棒都充满惊喜！',
+  '想象力爆棚！从开头的悬念到意外的结尾，团队默契让故事走向了全新高度。',
+  '充满创意的接龙！大家的发言相互呼应，把一个小开头变成了难忘的故事。',
+  '反转不断，高潮迭起！这场故事接龙展示了大家不俗的创造力和默契配合。',
+]
+
+function startScoring() {
+  const DIMS: Omit<ScoreDim, 'score'>[] = [
+    { label: '故事完整度', emoji: '📖', max: 5 },
+    { label: '想象力指数', emoji: '✨', max: 5 },
+    { label: '团队配合度', emoji: '🤝', max: 5 },
+    { label: '情节反转数', emoji: '🎭', max: 5 },
+  ]
+  scoreDims.value = DIMS.map(d => ({ ...d, score: Math.floor(Math.random() * 2) + 4 }))
+  scoreMvpIdx.value = Math.floor(Math.random() * MEMBERS.length)
+  scoreTags.value = shuffle(SCORE_TAGS_POOL).slice(0, 3)
+  scoreSummary.value = SCORE_SUMMARIES[Math.floor(Math.random() * SCORE_SUMMARIES.length)]!
+  scoringLoading.value = true
+  scoringTimer = setTimeout(() => { scoringLoading.value = false }, 2600)
 }
 
 onUnmounted(() => {
-  stopCountdown()
-  clearSim()
+  stopP1Countdown()
+  stopStoryCountdown()
+  if (scoringTimer) clearTimeout(scoringTimer)
 })
-
 </script>
 
 <template>
@@ -252,7 +256,7 @@ onUnmounted(() => {
       <div class="ib-intro-hero">
         <span class="ib-intro-hero-emoji">🧊</span>
         <h1 class="ib-intro-title">破冰时间</h1>
-        <p class="ib-intro-subtitle">开始正式讨论前，用 5 分钟互相认识一下</p>
+        <p class="ib-intro-subtitle">开始正式讨论前，用几分钟互相认识一下</p>
       </div>
 
       <div class="ib-intro-phases">
@@ -260,14 +264,14 @@ onUnmounted(() => {
           <span class="ib-intro-phase-num">01</span>
           <div class="ib-intro-phase-body">
             <p class="ib-intro-phase-title">自我介绍</p>
-            <p class="ib-intro-phase-desc">每人回答一个问题，各有 45 秒，系统同时采集声音特征</p>
+            <p class="ib-intro-phase-desc">每人回答三个问题，各有 20 秒，让大家互相了解</p>
           </div>
         </div>
         <div class="ib-intro-phase">
           <span class="ib-intro-phase-num">02</span>
           <div class="ib-intro-phase-body">
-            <p class="ib-intro-phase-title">极端二选一</p>
-            <p class="ib-intro-phase-desc">每题大家各选一边，选完再聊聊为什么</p>
+            <p class="ib-intro-phase-title">故事接龙</p>
+            <p class="ib-intro-phase-desc">从随机开头轮流续写，两轮后由 AI 点评故事</p>
           </div>
         </div>
       </div>
@@ -316,14 +320,12 @@ onUnmounted(() => {
         <p class="ib-question-text">{{ p1Question }}</p>
       </div>
 
-      <!-- ready：等待点击开始 -->
       <div v-if="p1RecordState === 'ready'" class="ib-record-ready">
         <button class="ib-btn ib-btn--primary ib-btn--lg ib-btn--record" @click="startRecording">
           🎙&nbsp;&nbsp;开始录音
         </button>
       </div>
 
-      <!-- recording：倒计时 + 停止 -->
       <div v-else-if="p1RecordState === 'recording'" class="ib-countdown-wrap">
         <svg class="ib-ring" viewBox="0 0 100 100" width="116" height="116">
           <circle cx="50" cy="50" r="44" fill="none" stroke="#e2e8f0" stroke-width="7" />
@@ -338,18 +340,12 @@ onUnmounted(() => {
             transform="rotate(-90 50 50)"
             style="transition: stroke-dashoffset 1s linear, stroke 0.3s ease"
           />
-          <text
-            x="50" y="57"
-            text-anchor="middle"
-            font-size="26"
-            font-weight="700"
-            :fill="p1IsUrgent ? '#ef4444' : '#0f172a'"
-          >{{ p1Countdown }}</text>
+          <text x="50" y="57" text-anchor="middle" font-size="26" font-weight="700"
+            :fill="p1IsUrgent ? '#ef4444' : '#0f172a'">{{ p1Countdown }}</text>
         </svg>
         <button class="ib-btn ib-btn--danger-outline" @click="stopRecording">停止录音</button>
       </div>
 
-      <!-- saved：保存提示 + 重录 + 下一题 -->
       <div v-else class="ib-saved-section">
         <div class="ib-save-banner">
           <span class="ib-save-icon">✓</span>
@@ -366,24 +362,24 @@ onUnmounted(() => {
 
     <!-- ── PHASE 2 INTRO ─────────────────────────────────────────── -->
     <div v-else-if="screen === 'phase2_intro'" class="ib-screen ib-p2intro">
-      <div class="ib-p2intro-icon">⚡</div>
+      <div class="ib-p2intro-icon">📖</div>
       <h2 class="ib-p2intro-title">第二阶段</h2>
-      <h3 class="ib-p2intro-sub">极端二选一</h3>
+      <h3 class="ib-p2intro-sub">故事接龙</h3>
       <p class="ib-p2intro-desc">
-        接下来每题都是两个极端选项，<br>
-        大家各选一边，选完再聊聊为什么。
+        接下来大家轮流续写同一个故事，<br>
+        每人每棒 30 秒，共 {{ STORY_ROUNDS }} 轮。<br>
+        最后由 AI 打分点评！
       </p>
-      <div class="ib-p2intro-preview">
-        <span class="ib-p2intro-opt ib-p2intro-opt--a">A</span>
-        <span class="ib-p2intro-vs">VS</span>
-        <span class="ib-p2intro-opt ib-p2intro-opt--b">B</span>
+      <div class="ib-p2intro-opening-preview">
+        <p class="ib-p2intro-opening-label">本次故事开头</p>
+        <p class="ib-p2intro-opening-text">{{ storyOpening }}</p>
       </div>
-      <button class="ib-btn ib-btn--primary ib-btn--lg" @click="startPhase2">
-        我准备好了
+      <button class="ib-btn ib-btn--primary ib-btn--lg" @click="startStoryPhase">
+        开始接龙
       </button>
     </div>
 
-    <!-- ── PHASE 2 ──────────────────────────────────────────────── -->
+    <!-- ── PHASE 2 故事接龙 ────────────────────────────────────────── -->
     <div
       v-else-if="screen === 'phase2'"
       class="ib-screen ib-p2"
@@ -392,109 +388,168 @@ onUnmounted(() => {
       <div class="ib-topbar">
         <div class="ib-progress">
           <div
-            class="ib-progress-fill ib-progress-fill--orange"
-            :style="{ width: `${(p2Step / p2Questions.length) * 100}%` }"
+            class="ib-progress-fill ib-progress-fill--green"
+            :style="{ width: `${(storyCurTurn / STORY_TOTAL_TURNS) * 100}%` }"
           ></div>
         </div>
         <div class="ib-topbar-labels">
-          <span class="ib-phase-badge ib-phase-badge--orange">极端二选一</span>
-          <span class="ib-step-tag">第 {{ p2Step + 1 }} 题 / {{ p2Questions.length }} 题</span>
+          <span class="ib-phase-badge ib-phase-badge--green">故事接龙</span>
+          <span class="ib-step-tag">第 {{ storyRound }} 轮 · 第 {{ storyCurTurn + 1 }} / {{ STORY_TOTAL_TURNS }} 棒</span>
         </div>
       </div>
 
-      <div class="ib-options" :key="p2Step">
-        <button
-          class="ib-option ib-option--a"
-          :class="{
-            'ib-option--chosen': p2MyVote === 'a',
-            'ib-option--dim': p2MyVote !== null && p2MyVote !== 'a',
-          }"
-          @click="p2Vote('a')"
-        >
-          <span class="ib-option-letter">A</span>
-          <span class="ib-option-text">{{ p2Q.a }}</span>
-          <span v-if="p2MyVote === 'a'" class="ib-option-check">✓</span>
-        </button>
+      <!-- 故事开头卡片 -->
+      <div class="ib-story-opening-card">
+        <p class="ib-story-opening-label">故事开头</p>
+        <p class="ib-story-opening-text">{{ storyOpening }}</p>
+      </div>
 
-        <div class="ib-vs">VS</div>
-
-        <button
-          class="ib-option ib-option--b"
+      <!-- 接龙进度链 -->
+      <div class="ib-chain-log">
+        <div
+          v-for="i in STORY_TOTAL_TURNS"
+          :key="i"
+          class="ib-chain-node"
           :class="{
-            'ib-option--chosen': p2MyVote === 'b',
-            'ib-option--dim': p2MyVote !== null && p2MyVote !== 'b',
+            'ib-chain-node--done':   (i - 1) < storyCurTurn,
+            'ib-chain-node--active': (i - 1) === storyCurTurn,
+            'ib-chain-node--future': (i - 1) > storyCurTurn,
           }"
-          @click="p2Vote('b')"
         >
-          <span class="ib-option-letter">B</span>
-          <span class="ib-option-text">{{ p2Q.b }}</span>
-          <span v-if="p2MyVote === 'b'" class="ib-option-check">✓</span>
+          <div
+            class="ib-avatar ib-avatar--sm"
+            :style="{ background: MEMBERS[(i - 1) % MEMBERS.length]!.bg }"
+          >{{ MEMBERS[(i - 1) % MEMBERS.length]!.initial }}</div>
+          <span class="ib-chain-node-label">
+            R{{ Math.floor((i - 1) / MEMBERS.length) + 1 }}
+          </span>
+          <span v-if="(i - 1) < storyCurTurn" class="ib-chain-node-status ib-chain-done-mark">✓</span>
+          <span v-else-if="(i - 1) === storyCurTurn" class="ib-chain-node-status ib-chain-active-mark">●</span>
+        </div>
+      </div>
+
+      <!-- 当前发言者 -->
+      <div class="ib-speaker-callout">
+        <div class="ib-avatar ib-avatar--xl" :style="{ background: storyMember.bg }">{{ storyMember.initial }}</div>
+        <div>
+          <p class="ib-speaker-name">{{ storyMember.name }}</p>
+          <p class="ib-speaker-hint">
+            <template v-if="storyRecordState === 'ready'">轮到你接龙啦，准备好了就开始 👇</template>
+            <template v-else-if="storyRecordState === 'recording'">🔴 接龙中，说完后点停止</template>
+            <template v-else>✓ 这棒接完啦！</template>
+          </p>
+        </div>
+      </div>
+
+      <!-- 录音控件 -->
+      <div v-if="storyRecordState === 'ready'" class="ib-record-ready">
+        <button class="ib-btn ib-btn--primary ib-btn--lg ib-btn--record ib-btn--green" @click="startStoryRecording">
+          🎙&nbsp;&nbsp;开始接龙
         </button>
       </div>
 
-      <!-- Votes section（投票后出现）-->
+      <div v-else-if="storyRecordState === 'recording'" class="ib-countdown-wrap">
+        <svg class="ib-ring" viewBox="0 0 100 100" width="116" height="116">
+          <circle cx="50" cy="50" r="44" fill="none" stroke="#e2e8f0" stroke-width="7" />
+          <circle
+            cx="50" cy="50" r="44"
+            fill="none"
+            :stroke="storyIsUrgent ? '#ef4444' : '#10b981'"
+            stroke-width="7"
+            stroke-linecap="round"
+            :stroke-dasharray="STORY_RING_C"
+            :stroke-dashoffset="storyRingOffset"
+            transform="rotate(-90 50 50)"
+            style="transition: stroke-dashoffset 1s linear, stroke 0.3s ease"
+          />
+          <text x="50" y="57" text-anchor="middle" font-size="26" font-weight="700"
+            :fill="storyIsUrgent ? '#ef4444' : '#0f172a'">{{ storyCountdown }}</text>
+        </svg>
+        <button class="ib-btn ib-btn--danger-outline" @click="stopStoryRecording">停止接龙</button>
+      </div>
+
+      <div v-else class="ib-saved-section">
+        <div class="ib-save-banner ib-save-banner--green">
+          <span class="ib-save-icon">✓</span>
+          <span>{{ storyMember.name }} 的故事片段已记录</span>
+        </div>
+        <div class="ib-save-actions">
+          <button class="ib-btn ib-btn--ghost" @click="reStoryRecord">↺ 重新接龙</button>
+          <button class="ib-btn ib-btn--primary" @click="nextStoryTurn">
+            {{ storyCurTurn < STORY_TOTAL_TURNS - 1 ? '下一棒 →' : '查看 AI 点评 →' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── SCORING AI 点评 ────────────────────────────────────────── -->
+    <div v-else-if="screen === 'scoring'" class="ib-screen ib-scoring">
+
+      <!-- 加载中 -->
+      <template v-if="scoringLoading">
+        <div class="ib-scoring-loading">
+          <div class="ib-scoring-robot">🤖</div>
+          <p class="ib-scoring-loading-title">AI 正在分析你们的故事……</p>
+          <div class="ib-scoring-dots">
+            <span></span><span></span><span></span>
+          </div>
+        </div>
+      </template>
+
+      <!-- 结果揭晓 -->
       <Transition name="ib-rise">
-        <div v-if="p2MyVote !== null" class="ib-votes">
-          <div class="ib-votes-row">
-            <!-- 自己的票 -->
-            <div class="ib-vote-chip">
-              <div class="ib-avatar" :style="{ background: MEMBERS[0]!.bg }">{{ MEMBERS[0]!.initial }}</div>
-              <span
-                class="ib-vote-tag"
-                :class="p2MyVote === 'a' ? 'ib-vote-tag--a' : 'ib-vote-tag--b'"
-              >{{ p2MyVote.toUpperCase() }}</span>
-            </div>
-            <!-- 模拟其他成员的票 -->
-            <template v-for="sv in p2SimVotes" :key="sv.id">
-              <div class="ib-vote-chip">
-                <div class="ib-avatar" :style="{ background: memberById(sv.id)?.bg }">
-                  {{ memberById(sv.id)?.initial }}
-                </div>
-                <span
-                  class="ib-vote-tag"
-                  :class="sv.choice === 'a' ? 'ib-vote-tag--a' : 'ib-vote-tag--b'"
-                >{{ sv.choice.toUpperCase() }}</span>
-              </div>
-            </template>
-            <!-- 等待中的成员 -->
-            <template v-if="p2SimVotes.length < 2">
-              <div
-                v-for="i in (2 - p2SimVotes.length)"
-                :key="`wait-${i}`"
-                class="ib-vote-chip ib-vote-chip--waiting"
-              >
-                <div class="ib-avatar ib-avatar--muted">?</div>
-                <span class="ib-vote-tag ib-vote-tag--wait">…</span>
-              </div>
-            </template>
+        <div v-if="!scoringLoading" class="ib-scoring-result">
+
+          <div class="ib-scoring-header">
+            <span class="ib-scoring-trophy">🏆</span>
+            <h2 class="ib-scoring-title">AI 点评出炉！</h2>
           </div>
 
-          <!-- 汇总结果 -->
-          <Transition name="ib-rise">
-            <div v-if="p2AllVoted" class="ib-result">
-              <div class="ib-result-bar">
-                <div
-                  class="ib-result-seg ib-result-seg--a"
-                  :style="{ flex: p2CountA }"
-                >{{ p2CountA }}人选A</div>
-                <div
-                  class="ib-result-seg ib-result-seg--b"
-                  :style="{ flex: p2CountB }"
-                >{{ p2CountB }}人选B</div>
+          <!-- 故事总评 -->
+          <div class="ib-scoring-summary-card">
+            <p class="ib-scoring-summary-text">"{{ scoreSummary }}"</p>
+            <div class="ib-scoring-tags">
+              <span v-for="tag in scoreTags" :key="tag" class="ib-scoring-tag">{{ tag }}</span>
+            </div>
+          </div>
+
+          <!-- 评分维度 -->
+          <div class="ib-scoring-dims">
+            <div v-for="dim in scoreDims" :key="dim.label" class="ib-scoring-dim">
+              <span class="ib-scoring-dim-emoji">{{ dim.emoji }}</span>
+              <div class="ib-scoring-dim-body">
+                <div class="ib-scoring-dim-top">
+                  <span class="ib-scoring-dim-label">{{ dim.label }}</span>
+                  <span class="ib-scoring-dim-score">{{ dim.score }}/{{ dim.max }}</span>
+                </div>
+                <div class="ib-stars">
+                  <span
+                    v-for="i in dim.max"
+                    :key="i"
+                    class="ib-star"
+                    :class="{ 'ib-star--filled': i <= dim.score }"
+                  >★</span>
+                </div>
               </div>
             </div>
-          </Transition>
+          </div>
+
+          <!-- 最佳故事家 -->
+          <div class="ib-scoring-mvp">
+            <div class="ib-avatar ib-avatar--xl" :style="{ background: MEMBERS[scoreMvpIdx]!.bg }">
+              {{ MEMBERS[scoreMvpIdx]!.initial }}
+            </div>
+            <div>
+              <p class="ib-scoring-mvp-label">🌟 最佳故事家</p>
+              <p class="ib-scoring-mvp-name">{{ MEMBERS[scoreMvpIdx]!.name }}</p>
+            </div>
+          </div>
+
+          <button class="ib-btn ib-btn--primary ib-btn--lg" @click="screen = 'done'">
+            完成破冰 🎉
+          </button>
         </div>
       </Transition>
-
-      <button
-        class="ib-btn ib-btn--primary"
-        :class="{ 'ib-btn--disabled': !p2CanNext }"
-        :disabled="!p2CanNext"
-        @click="nextP2"
-      >
-        {{ p2Step < p2Questions.length - 1 ? '下一题 →' : '完成破冰 ✓' }}
-      </button>
     </div>
 
     <!-- ── DONE ──────────────────────────────────────────────────── -->
@@ -579,8 +634,8 @@ onUnmounted(() => {
   transition: width 0.5s ease;
 }
 
-.ib-progress-fill--orange {
-  background: linear-gradient(90deg, #f59e0b, #f97316);
+.ib-progress-fill--green {
+  background: linear-gradient(90deg, #34d399, #10b981);
 }
 
 .ib-topbar-labels {
@@ -598,9 +653,9 @@ onUnmounted(() => {
   border-radius: 999px;
 }
 
-.ib-phase-badge--orange {
-  color: #92400e;
-  background: #fffbeb;
+.ib-phase-badge--green {
+  color: #065f46;
+  background: #d1fae5;
 }
 
 .ib-step-tag {
@@ -623,6 +678,12 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
+.ib-avatar--sm {
+  width: 30px;
+  height: 30px;
+  font-size: 12px;
+}
+
 .ib-avatar--lg {
   width: 44px;
   height: 44px;
@@ -633,10 +694,6 @@ onUnmounted(() => {
   width: 56px;
   height: 56px;
   font-size: 20px;
-}
-
-.ib-avatar--muted {
-  background: #d1d5db !important;
 }
 
 /* ── Buttons ─────────────────────────────────────────────────────── */
@@ -663,15 +720,13 @@ onUnmounted(() => {
   box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
 }
 
-.ib-btn--secondary {
-  background: var(--app-bg-elevated);
-  color: var(--app-text-primary);
-  border: 1.5px solid var(--app-border);
+.ib-btn--green {
+  background: #10b981 !important;
 }
 
-.ib-btn--secondary:hover {
-  border-color: var(--app-primary);
-  color: var(--app-primary);
+.ib-btn--green:hover:not(:disabled) {
+  background: #059669 !important;
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35) !important;
 }
 
 .ib-btn--ghost {
@@ -696,6 +751,23 @@ onUnmounted(() => {
   cursor: not-allowed;
   transform: none !important;
   box-shadow: none !important;
+}
+
+.ib-btn--danger-outline {
+  background: none;
+  border: 1.5px solid #ef4444;
+  color: #ef4444;
+  border-radius: var(--app-radius-pill);
+  padding: 10px 28px;
+  font-size: 15px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.ib-btn--danger-outline:hover {
+  background: #fef2f2;
 }
 
 /* ── INTRO ───────────────────────────────────────────────────────── */
@@ -866,12 +938,6 @@ onUnmounted(() => {
   filter: drop-shadow(0 2px 8px rgba(37, 99, 235, 0.15));
 }
 
-.ib-mic-hint {
-  margin: 0;
-  font-size: 15px;
-  color: var(--app-text-muted);
-}
-
 .ib-record-ready {
   display: flex;
   justify-content: center;
@@ -882,23 +948,6 @@ onUnmounted(() => {
   min-width: 200px;
   font-size: 18px;
   letter-spacing: 0.02em;
-}
-
-.ib-btn--danger-outline {
-  background: none;
-  border: 1.5px solid #ef4444;
-  color: #ef4444;
-  border-radius: var(--app-radius-pill);
-  padding: 10px 28px;
-  font-size: 15px;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  transition: all 0.18s ease;
-}
-
-.ib-btn--danger-outline:hover {
-  background: #fef2f2;
 }
 
 .ib-saved-section {
@@ -925,6 +974,12 @@ onUnmounted(() => {
   animation: ib-enter 0.3s ease;
 }
 
+.ib-save-banner--green {
+  background: #ecfdf5;
+  border-color: #6ee7b7;
+  color: #065f46;
+}
+
 .ib-save-icon {
   font-size: 20px;
   font-weight: 800;
@@ -948,12 +1003,12 @@ onUnmounted(() => {
 .ib-p2intro-icon {
   font-size: 64px;
   line-height: 1;
-  animation: ib-pulse 1.5s ease-in-out infinite;
+  animation: ib-pulse 1.8s ease-in-out infinite;
 }
 
 @keyframes ib-pulse {
   0%, 100% { transform: scale(1); }
-  50%       { transform: scale(1.08); }
+  50%       { transform: scale(1.1); }
 }
 
 .ib-p2intro-title {
@@ -977,206 +1032,347 @@ onUnmounted(() => {
   margin: 0;
   font-size: 18px;
   color: var(--app-text-secondary);
-  line-height: 1.7;
+  line-height: 1.8;
 }
 
-.ib-p2intro-preview {
-  display: flex;
-  align-items: center;
-  gap: 16px;
+.ib-p2intro-opening-preview {
+  width: 100%;
+  background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%);
+  border: 1.5px solid #6ee7b7;
+  border-radius: 16px;
+  padding: 20px 24px;
+  text-align: left;
 }
 
-.ib-p2intro-opt {
-  width: 64px;
-  height: 64px;
-  border-radius: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 24px;
-  font-weight: 800;
-  color: #fff;
+.ib-p2intro-opening-label {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #059669;
 }
 
-.ib-p2intro-opt--a {
-  background: linear-gradient(135deg, #f59e0b, #d97706);
+.ib-p2intro-opening-text {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: #064e3b;
+  line-height: 1.6;
 }
 
-.ib-p2intro-opt--b {
-  background: linear-gradient(135deg, #3b82f6, #2563eb);
-}
-
-.ib-p2intro-vs {
-  font-size: 15px;
-  font-weight: 800;
-  color: var(--app-text-muted);
-  letter-spacing: 0.05em;
-}
-
-/* ── PHASE 2 ─────────────────────────────────────────────────────── */
+/* ── PHASE 2 故事接龙 ─────────────────────────────────────────────── */
 .ib-p2 {
   width: 100%;
 }
 
-.ib-options {
+/* 故事开头卡片 */
+.ib-story-opening-card {
   width: 100%;
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  gap: 12px;
+  padding: 18px 22px;
+  background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%);
+  border: 1.5px solid #6ee7b7;
+  border-radius: 14px;
   animation: ib-q-enter 0.3s ease;
 }
 
-.ib-option {
-  position: relative;
+.ib-story-opening-label {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #059669;
+}
+
+.ib-story-opening-text {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #064e3b;
+  line-height: 1.6;
+}
+
+/* 接龙进度链 */
+.ib-chain-log {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 4px 0;
+}
+
+.ib-chain-node {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 36px 24px;
-  border-radius: 18px;
-  border: none;
-  cursor: pointer;
-  font-family: inherit;
-  min-height: 220px;
-  transition: transform 0.2s ease, opacity 0.25s ease, box-shadow 0.2s ease;
-  color: #fff;
+  gap: 4px;
+  flex: 1;
+  min-width: 52px;
+  padding: 10px 6px;
+  border-radius: 12px;
+  background: var(--app-bg-elevated);
+  border: 1.5px solid var(--app-border);
+  transition: all 0.2s ease;
+  position: relative;
 }
 
-.ib-option--a {
-  background: linear-gradient(145deg, #fbbf24, #d97706);
-  box-shadow: 0 4px 16px rgba(217, 119, 6, 0.25);
+.ib-chain-node--active {
+  border-color: #10b981;
+  background: #ecfdf5;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
 }
 
-.ib-option--b {
-  background: linear-gradient(145deg, #60a5fa, #2563eb);
-  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.25);
+.ib-chain-node--done {
+  background: #f0fdf4;
+  border-color: #a7f3d0;
 }
 
-.ib-option:not(.ib-option--chosen):not(.ib-option--dim):hover {
-  transform: translateY(-3px);
+.ib-chain-node--future {
+  opacity: 0.4;
 }
 
-.ib-option--chosen {
-  transform: translateY(-4px) scale(1.02);
-  outline: 3px solid rgba(255,255,255,0.6);
-  outline-offset: 2px;
-}
-
-.ib-option--dim {
-  opacity: 0.38;
-  transform: scale(0.97);
-}
-
-.ib-option-letter {
-  font-size: 13px;
-  font-weight: 800;
-  opacity: 0.7;
-  letter-spacing: 0.05em;
-}
-
-.ib-option-text {
-  font-size: 20px;
-  font-weight: 700;
-  line-height: 1.4;
-  text-align: center;
-}
-
-.ib-option-check {
-  position: absolute;
-  top: 12px;
-  right: 14px;
-  font-size: 18px;
-  font-weight: 800;
-}
-
-.ib-vs {
-  font-size: 13px;
-  font-weight: 800;
+.ib-chain-node-label {
+  font-size: 11px;
+  font-weight: 600;
   color: var(--app-text-muted);
-  letter-spacing: 0.08em;
-  user-select: none;
+  letter-spacing: 0.02em;
 }
 
-/* ── Votes section ──────────────────────────────────────────────── */
-.ib-votes {
+.ib-chain-node-status {
+  font-size: 12px;
+  font-weight: 800;
+  position: absolute;
+  top: 5px;
+  right: 7px;
+}
+
+.ib-chain-done-mark {
+  color: #10b981;
+}
+
+.ib-chain-active-mark {
+  color: #10b981;
+  animation: ib-blink 1s ease-in-out infinite;
+}
+
+@keyframes ib-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+
+/* ── SCORING ─────────────────────────────────────────────────────── */
+.ib-scoring {
+  width: 100%;
+  min-height: 60vh;
+  justify-content: center;
+}
+
+/* loading */
+.ib-scoring-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding: 60px 0;
+}
+
+.ib-scoring-robot {
+  font-size: 72px;
+  animation: ib-bob 1.2s ease-in-out infinite;
+}
+
+@keyframes ib-bob {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-10px); }
+}
+
+.ib-scoring-loading-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--app-text-secondary);
+}
+
+.ib-scoring-dots {
+  display: flex;
+  gap: 8px;
+}
+
+.ib-scoring-dots span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10b981;
+  animation: ib-dot-bounce 1.2s ease-in-out infinite;
+}
+
+.ib-scoring-dots span:nth-child(2) { animation-delay: 0.2s; }
+.ib-scoring-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes ib-dot-bounce {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+  40%            { transform: scale(1);   opacity: 1; }
+}
+
+/* result */
+.ib-scoring-result {
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  align-items: center;
+  gap: 20px;
 }
 
-.ib-votes-row {
-  display: flex;
-  gap: 16px;
-  justify-content: center;
-  flex-wrap: wrap;
-}
-
-.ib-vote-chip {
+.ib-scoring-header {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 6px;
 }
 
-.ib-vote-chip--waiting {
-  opacity: 0.5;
+.ib-scoring-trophy {
+  font-size: 64px;
+  line-height: 1;
 }
 
-.ib-vote-tag {
-  font-size: 12px;
-  font-weight: 700;
-  padding: 2px 9px;
+.ib-scoring-title {
+  margin: 0;
+  font-size: 32px;
+  font-weight: 800;
+  color: var(--app-text-primary);
+  letter-spacing: -0.5px;
+}
+
+/* 总评卡片 */
+.ib-scoring-summary-card {
+  width: 100%;
+  padding: 22px 24px;
+  background: linear-gradient(135deg, #fefce8 0%, #fffbeb 100%);
+  border: 1.5px solid #fcd34d;
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ib-scoring-summary-text {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 500;
+  color: #78350f;
+  line-height: 1.7;
+  font-style: italic;
+}
+
+.ib-scoring-tags {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ib-scoring-tag {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 3px 12px;
   border-radius: 999px;
-}
-
-.ib-vote-tag--a {
   background: #fef3c7;
   color: #92400e;
+  border: 1px solid #fcd34d;
 }
 
-.ib-vote-tag--b {
-  background: #dbeafe;
-  color: #1e40af;
-}
-
-.ib-vote-tag--wait {
-  background: #f1f5f9;
-  color: #94a3b8;
-}
-
-.ib-result {
+/* 评分维度 */
+.ib-scoring-dims {
   width: 100%;
-}
-
-.ib-result-bar {
   display: flex;
-  height: 36px;
-  border-radius: 10px;
-  overflow: hidden;
-  gap: 2px;
+  flex-direction: column;
+  gap: 12px;
 }
 
-.ib-result-seg {
+.ib-scoring-dim {
   display: flex;
   align-items: center;
-  justify-content: center;
-  font-size: 13px;
+  gap: 14px;
+  padding: 14px 18px;
+  background: var(--app-bg-elevated);
+  border: 1px solid var(--app-border);
+  border-radius: 12px;
+  box-shadow: var(--app-shadow-card);
+}
+
+.ib-scoring-dim-emoji {
+  font-size: 28px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.ib-scoring-dim-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ib-scoring-dim-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ib-scoring-dim-label {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--app-text-primary);
+}
+
+.ib-scoring-dim-score {
+  font-size: 15px;
   font-weight: 700;
-  color: #fff;
-  min-width: 0;
-  transition: flex 0.5s ease;
-  border-radius: 8px;
+  color: var(--app-text-secondary);
+  font-variant-numeric: tabular-nums;
 }
 
-.ib-result-seg--a {
-  background: linear-gradient(90deg, #fbbf24, #d97706);
+.ib-stars {
+  display: flex;
+  gap: 3px;
 }
 
-.ib-result-seg--b {
-  background: linear-gradient(90deg, #60a5fa, #2563eb);
+.ib-star {
+  font-size: 20px;
+  color: #d1d5db;
+  line-height: 1;
+  transition: color 0.2s ease;
+}
+
+.ib-star--filled {
+  color: #f59e0b;
+}
+
+/* MVP */
+.ib-scoring-mvp {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  padding: 18px 22px;
+  background: linear-gradient(135deg, #faf5ff 0%, #f5f3ff 100%);
+  border: 1.5px solid #c4b5fd;
+  border-radius: 16px;
+}
+
+.ib-scoring-mvp-label {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #7c3aed;
+}
+
+.ib-scoring-mvp-name {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 800;
+  color: #4c1d95;
 }
 
 /* ── DONE ────────────────────────────────────────────────────────── */
@@ -1268,12 +1464,12 @@ onUnmounted(() => {
 /* ── Transitions ─────────────────────────────────────────────────── */
 .ib-rise-enter-active,
 .ib-rise-leave-active {
-  transition: opacity 0.3s ease, transform 0.3s ease;
+  transition: opacity 0.4s ease, transform 0.4s ease;
 }
 
 .ib-rise-enter-from,
 .ib-rise-leave-to {
   opacity: 0;
-  transform: translateY(10px);
+  transform: translateY(16px);
 }
 </style>
