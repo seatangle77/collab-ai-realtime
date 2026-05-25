@@ -365,7 +365,6 @@ onMounted(() => {
   <div class="app-sessions">
     <div class="app-sessions-header">
       <h2 class="app-sessions-title">我的会话</h2>
-      <span class="app-sessions-group-inline">当前群组：{{ currentGroup?.name || '未选择' }}</span>
     </div>
 
     <div v-if="!hasCurrentGroup" class="app-sessions-empty-group">
@@ -408,11 +407,15 @@ onMounted(() => {
           </button>
         </div>
         <!-- 桌面端：Tab 同行显示 -->
-        <button type="button" class="app-sessions-primary-btn app-sessions-new-btn-inline" @click="openCreateDialog">
-          <el-icon class="app-sessions-new-icon" :size="16">
+        <button
+          type="button"
+          class="app-sessions-create-btn app-sessions-new-btn-inline"
+          aria-label="创建会话"
+          @click="openCreateDialog"
+        >
+          <el-icon class="app-sessions-new-icon" :size="24">
             <Plus />
           </el-icon>
-          新建会话
         </button>
       </div>
 
@@ -585,9 +588,8 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 4px;
-  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
 }
 
 .app-sessions-title {
@@ -598,11 +600,6 @@ onMounted(() => {
   letter-spacing: -0.02em;
 }
 
-.app-sessions-group-inline {
-  font-size: 13px;
-  color: var(--app-text-secondary);
-}
-
 .app-sessions-empty-group {
   margin-top: 16px;
   border-radius: var(--app-radius-card);
@@ -611,15 +608,15 @@ onMounted(() => {
 
 .app-sessions-empty-text {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--app-font-size-body);
   line-height: 1.65;
   color: var(--app-text-secondary);
 }
 
 /* 筛选胶囊 + 新建（与 demo：独立圆角按钮 + 主色实心） */
 .app-sessions-toolbar {
-  margin-top: 16px;
-  margin-bottom: 16px;
+  margin-top: 0;
+  margin-bottom: 12px;
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
@@ -638,7 +635,7 @@ onMounted(() => {
   border-radius: var(--app-radius-pill);
   border: none;
   padding: 8px 16px;
-  font-size: 14px;
+  font-size: var(--app-font-size-body);
   font-weight: 500;
   font-family: inherit;
   cursor: pointer;
@@ -663,16 +660,15 @@ onMounted(() => {
   color: var(--app-text-primary);
 }
 
-.app-sessions-primary-btn {
+.app-sessions-create-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  width: 48px;
+  height: 48px;
   border-radius: var(--app-radius-pill);
   border: 1px solid var(--app-primary);
-  padding: 8px 16px;
-  font-size: 14px;
-  font-weight: 500;
+  padding: 0;
   font-family: inherit;
   background: var(--app-primary);
   color: #ffffff;
@@ -684,7 +680,7 @@ onMounted(() => {
     box-shadow 0.18s ease;
 }
 
-.app-sessions-primary-btn:hover {
+.app-sessions-create-btn:hover {
   background: var(--app-primary-hover);
   border-color: var(--app-primary-hover);
 }
@@ -705,7 +701,7 @@ onMounted(() => {
 
 .app-sessions-loading {
   padding: 20px 0;
-  font-size: 14px;
+  font-size: var(--app-font-size-body);
   color: var(--app-text-secondary);
 }
 
@@ -723,7 +719,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 18px 20px;
+  padding: 14px 16px;
   border-radius: var(--app-radius-card);
   background: var(--app-bg-elevated);
   border: 1px solid var(--app-border);
@@ -756,7 +752,7 @@ onMounted(() => {
 }
 
 .app-sessions-item-title {
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 600;
   color: var(--app-text-primary);
   white-space: nowrap;
@@ -770,7 +766,7 @@ onMounted(() => {
 }
 
 .app-sessions-item-meta {
-  font-size: 13px;
+  font-size: 15px;
   color: var(--app-text-secondary);
   line-height: 1.45;
 }
@@ -852,8 +848,8 @@ onMounted(() => {
   }
 
   .app-sessions-tab {
-    padding: 6px 10px;
-    font-size: 12px;
+    padding: 7px 12px;
+    font-size: var(--app-font-size-caption);
   }
 }
 

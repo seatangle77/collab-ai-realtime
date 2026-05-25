@@ -1,10 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, RefreshRight, SwitchButton } from '@element-plus/icons-vue'
-import { formatDateTimeToCST } from '../../utils/datetime'
 import AppEmptyState from '../../components/AppEmptyState.vue'
 import {
   type AppGroupDetail,
@@ -77,7 +75,6 @@ function extractErrorMessage(err: unknown): string {
   return msg
 }
 
-const router = useRouter()
 const currentUser = ref<AppUser | null>(loadUserFromStorage())
 const currentGroup = ref<AppCurrentGroup | null>(loadCurrentGroupFromStorage())
 
@@ -102,10 +99,6 @@ const createRules: FormRules<typeof createForm> = {
 }
 
 const isLeader = computed(() => activeGroupDetail.value?.my_role === 'leader')
-
-const totalMyGroups = computed(() => groups.value.length)
-const totalDiscoverGroups = computed(() => discoverGroups.value.length)
-const currentMemberCount = computed(() => activeGroupDetail.value?.member_count ?? 0)
 
 async function fetchMyGroups() {
   loading.value = true
@@ -344,53 +337,25 @@ onMounted(() => {
   <div class="app-groups">
     <div class="app-groups-header">
       <h2 class="app-groups-title">我的群组</h2>
-      <div class="app-groups-meta">
-        <span class="app-groups-user" v-if="currentUser">
-          {{ currentUser.name || currentUser.email }}（{{ currentUser.email }}）
-        </span>
-        <span class="app-groups-group">
-          <span class="app-groups-group-label">当前群组：</span>
-          <span class="app-groups-group-value">
-            {{ currentGroup?.name || '未选择' }}
-          </span>
-        </span>
-      </div>
-    </div>
-
-    <div class="app-groups-overview">
-      <div class="app-groups-overview-pill">
-        <span class="app-groups-overview-value">{{ totalMyGroups }}</span>
-        <span class="app-groups-overview-label">已加入群组</span>
-      </div>
-      <div class="app-groups-overview-pill">
-        <span class="app-groups-overview-value">
-          {{ activeGroupDetail ? currentMemberCount : '—' }}
-        </span>
-        <span class="app-groups-overview-label">当前群成员</span>
-      </div>
-      <div class="app-groups-overview-pill">
-        <span class="app-groups-overview-value">{{ totalDiscoverGroups }}</span>
-        <span class="app-groups-overview-label">可加入群组</span>
-      </div>
+      <button
+        class="app-groups-create-btn"
+        type="button"
+        aria-label="创建群组"
+        @click="openCreateDialog"
+      >
+        <el-icon class="app-groups-create-icon" :size="24">
+          <Plus />
+        </el-icon>
+      </button>
     </div>
 
     <el-card class="app-groups-card app-groups-card--secondary" shadow="never">
-      <div class="app-groups-list-header">
-        <div>
-          <h3 class="app-groups-list-title">我的群组</h3>
-          <p class="app-groups-list-subtitle">
-            你可以加入多个群组，切换当前群组会影响「我的会话」等页面中展示的内容。
-          </p>
-        </div>
-        <el-button type="primary" size="small" :icon="Plus" @click="openCreateDialog">新建群组</el-button>
-      </div>
-
       <AppEmptyState
         v-if="!groups.length && !loading"
         icon="👥"
         title="你还没有加入任何群组"
-        description="可以先新建一个群组，或从下方加入已有群组。"
-        action-label="新建群组"
+        description="创建或加入一个群组后，就可以选择成员发起会话。"
+        action-label="创建"
         compact
         @action="openCreateDialog"
       />
@@ -409,94 +374,36 @@ onMounted(() => {
               <span class="app-groups-list-role">
                 {{ g.my_role === 'leader' ? '群主' : '成员' }}
               </span>
-              <span
-                v-if="currentGroup && currentGroup.id === g.id"
-                class="app-groups-list-current"
-              >
-                当前
-              </span>
             </div>
             <div class="app-groups-list-meta">
-              成员：{{ g.member_count }} 人 · 创建时间：{{ formatDateTimeToCST(g.created_at) }}
+              {{ g.member_count }} 位成员
             </div>
           </div>
         </div>
       </div>
-    </el-card>
 
-    <el-card class="app-groups-card" shadow="never">
-      <h3 class="app-groups-join-title">加入已有群组</h3>
-      <p class="app-groups-join-desc">
-        从下拉列表中选择一个当前可加入的群组，点击「加入群组」即可加入。列表仅展示未满员且你尚未加入的群组。
-      </p>
-      <div class="app-groups-join-row">
-        <el-select
-          v-model="joinGroupId"
-          class="app-groups-join-input"
-          placeholder="选择一个可加入的群组"
-          :loading="discoverLoading"
-          clearable
-          filterable
-          :disabled="!discoverGroups.length"
-        >
-          <el-option
-            v-for="g in discoverGroups"
-            :key="g.id"
-            :label="`${g.name}（${g.member_count} 人）`"
-            :value="g.id"
-          />
-        </el-select>
-        <el-button plain :disabled="!joinGroupId" @click="handleJoinGroup">
-          加入群组
-        </el-button>
-      </div>
-      <p v-if="!discoverLoading && !discoverGroups.length" class="app-groups-join-hint">
-        当前没有可加入的公开群组，请让群主或管理员创建群并邀请你加入。
-      </p>
-    </el-card>
-
-    <el-card class="app-groups-card" shadow="never">
-      <template v-if="activeGroupDetail">
-        <div class="app-groups-detail-header">
-          <div>
-            <div class="app-groups-detail-name-row">
-              <h3 class="app-groups-detail-name">
-                {{ activeGroupDetail.group.name }}
-              </h3>
-              <el-tag v-if="isLeader" type="warning" size="small">群主</el-tag>
-              <el-tag
-                v-if="!activeGroupDetail.group.is_active"
-                type="info"
-                size="small"
-                class="app-groups-detail-tag"
-              >
-                已停用
-              </el-tag>
-            </div>
-            <div class="app-groups-detail-sub">
-              <span class="app-groups-detail-id">ID：{{ activeGroupDetail.group.id }}</span>
-              <span class="app-groups-detail-dot">·</span>
-              <span>
-                创建时间：{{ formatDateTimeToCST(activeGroupDetail.group.created_at) }}
-              </span>
-              <span class="app-groups-detail-dot">·</span>
-              <span>成员数：{{ activeGroupDetail.member_count }}</span>
+      <div class="app-groups-detail-section">
+        <template v-if="activeGroupDetail">
+          <div class="app-groups-members-head">
+            <div>
+              <h4 class="app-groups-members-title">成员列表</h4>
+              <p v-if="!activeGroupDetail.group.is_active" class="app-groups-members-count">已停用</p>
             </div>
           </div>
-          <div class="app-groups-detail-actions">
-            <el-button size="small" :icon="RefreshRight" @click="handleRefresh">刷新</el-button>
-            <el-button v-if="isLeader" size="small" @click="handleRenameGroup">修改名称</el-button>
-            <el-button size="small" type="danger" :icon="SwitchButton" @click="handleLeaveCurrentGroup">退出群组</el-button>
-            <el-button size="small" type="primary" @click="router.push('/app/groups/' + activeGroupDetail.group.id)">进入群组</el-button>
-          </div>
-        </div>
 
-        <p class="app-groups-detail-desc">
-          当前群组会影响你在「我的会话」等页面看到的内容。你可以在上方切换群组，或在这里管理成员。
-        </p>
+          <div class="app-groups-action-grid">
+            <el-button class="app-groups-action-btn" :icon="RefreshRight" @click="handleRefresh">
+              刷新
+            </el-button>
+            <el-button v-if="isLeader" class="app-groups-action-btn" @click="handleRenameGroup">
+              改名
+            </el-button>
+            <el-button class="app-groups-action-btn" type="danger" :icon="SwitchButton" @click="handleLeaveCurrentGroup">
+              退出
+            </el-button>
+          </div>
 
         <div class="app-groups-members">
-          <h4 class="app-groups-members-title">成员列表</h4>
           <div v-if="detailLoading" class="app-groups-members-loading">成员信息加载中...</div>
           <AppEmptyState
             v-else-if="activeGroupDetail.members.length === 0"
@@ -548,14 +455,43 @@ onMounted(() => {
             </div>
           </div>
         </div>
-      </template>
-      <template v-else>
-        <AppEmptyState
-          icon="📭"
-          title="尚未选择群组"
-          description="先在上方「我的群组」中选择一个群组，或者创建 / 加入一个群组后，在这里查看成员与详细信息。"
-        />
-      </template>
+        </template>
+        <template v-else>
+          <AppEmptyState
+            icon="📭"
+            title="尚未选择群组"
+            description="创建或加入群组后，可以在这里查看成员。"
+          />
+        </template>
+      </div>
+    </el-card>
+
+    <el-card class="app-groups-card" shadow="never">
+      <h3 class="app-groups-join-title">加入已有群组</h3>
+      <div class="app-groups-join-row">
+        <el-select
+          v-model="joinGroupId"
+          class="app-groups-join-input"
+          placeholder="选择一个可加入的群组"
+          :loading="discoverLoading"
+          clearable
+          filterable
+          :disabled="!discoverGroups.length"
+        >
+          <el-option
+            v-for="g in discoverGroups"
+            :key="g.id"
+            :label="`${g.name}（${g.member_count} 人）`"
+            :value="g.id"
+          />
+        </el-select>
+        <el-button plain :disabled="!joinGroupId" @click="handleJoinGroup">
+          加入群组
+        </el-button>
+      </div>
+      <p v-if="!discoverLoading && !discoverGroups.length" class="app-groups-join-hint">
+        当前没有可加入的公开群组，请让群主或管理员创建群并邀请你加入。
+      </p>
     </el-card>
 
     <el-dialog v-model="createDialogVisible" title="新建群组" :width="'min(480px, 92vw)'">
@@ -583,11 +519,10 @@ onMounted(() => {
 
 .app-groups-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
 }
 
 .app-groups-title {
@@ -598,72 +533,39 @@ onMounted(() => {
   letter-spacing: -0.02em;
 }
 
-.app-groups-meta {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 6px;
-  font-size: 13px;
-}
-
-.app-groups-user {
-  color: var(--app-text-secondary);
-}
-
-.app-groups-group {
+.app-groups-create-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 10px;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
   border-radius: var(--app-radius-pill);
-  background: var(--app-bg-page);
-  border: 1px solid var(--app-border);
-  color: var(--app-text-secondary);
+  border: 1px solid var(--app-primary);
+  padding: 0;
+  font-family: inherit;
+  background: var(--app-primary);
+  color: #fff;
+  cursor: pointer;
+  box-shadow: var(--app-shadow-card);
+  flex-shrink: 0;
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
 }
 
-.app-groups-group-label {
-  color: var(--app-text-muted);
+.app-groups-create-btn:hover {
+  background: var(--app-primary-hover);
+  border-color: var(--app-primary-hover);
 }
 
-.app-groups-group-value {
-  font-weight: 500;
-  color: var(--app-text-primary);
-}
-
-/* 统计胶囊（对齐 demo） */
-.app-groups-overview {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.app-groups-overview-pill {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  padding: 10px 14px;
-  border-radius: var(--app-radius-pill);
-  background: #f1f5f9;
-  color: var(--app-text-secondary);
-}
-
-.app-groups-overview-label {
-  font-size: var(--app-font-size-caption);
-  font-weight: 500;
-}
-
-.app-groups-overview-value {
-  font-size: var(--app-font-size-heading);
-  font-weight: 700;
-  color: var(--app-text-primary);
+.app-groups-create-icon {
+  flex-shrink: 0;
 }
 
 /* 卡片分区 */
 .app-groups-card {
-  margin-bottom: 16px;
+  margin-bottom: 12px;
   border-radius: var(--app-radius-card);
   border: 1px solid var(--app-border);
   background: var(--app-bg-elevated);
@@ -671,7 +573,7 @@ onMounted(() => {
 }
 
 .app-groups-card :deep(.el-card__body) {
-  padding: 18px 20px;
+  padding: 14px 16px;
 }
 
 .app-groups-card--secondary {
@@ -679,31 +581,9 @@ onMounted(() => {
   background: #fbfdff;
 }
 
-.app-groups-list-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.app-groups-list-title {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--app-text-primary);
-}
-
-.app-groups-list-subtitle {
-  margin: 6px 0 0;
-  font-size: 13px;
-  line-height: 1.55;
-  color: var(--app-text-secondary);
-}
-
 .app-groups-empty {
   margin: 8px 0 4px;
-  font-size: 14px;
+  font-size: var(--app-font-size-body);
   line-height: 1.55;
   color: var(--app-text-secondary);
 }
@@ -711,7 +591,7 @@ onMounted(() => {
 .app-groups-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 }
 
 .app-groups-list.is-loading {
@@ -722,7 +602,7 @@ onMounted(() => {
 .app-groups-list-item {
   display: flex;
   align-items: stretch;
-  padding: 18px 20px;
+  padding: 14px 16px;
   border-radius: var(--app-radius-card);
   border: 1px solid var(--app-border);
   background: var(--app-bg-elevated);
@@ -759,13 +639,13 @@ onMounted(() => {
 }
 
 .app-groups-list-name {
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 600;
   color: var(--app-text-primary);
 }
 
 .app-groups-list-role {
-  font-size: 11px;
+  font-size: var(--app-font-size-caption);
   font-weight: 600;
   padding: 2px 8px;
   border-radius: var(--app-radius-pill);
@@ -773,44 +653,28 @@ onMounted(() => {
   color: var(--app-color-ai);
 }
 
-.app-groups-list-current {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: var(--app-radius-pill);
-  background: #dbeafe;
-  color: var(--app-primary);
-}
-
 .app-groups-list-meta {
-  font-size: 13px;
+  font-size: 15px;
   color: var(--app-text-secondary);
 }
 
 .app-groups-join-title {
-  margin: 0 0 8px;
-  font-size: 16px;
+  margin: 0 0 12px;
+  font-size: var(--app-font-size-heading);
   font-weight: 600;
   color: var(--app-text-primary);
 }
 
-.app-groups-join-desc {
-  margin: 0 0 12px;
-  font-size: 13px;
-  line-height: 1.55;
-  color: var(--app-text-secondary);
-}
-
 .app-groups-join-hint {
   margin: 10px 0 0;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--app-text-muted);
 }
 
 .app-groups-join-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
 }
 
@@ -819,66 +683,53 @@ onMounted(() => {
   min-width: 200px;
 }
 
-.app-groups-detail-header {
+.app-groups-detail-section {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--app-border);
+}
+
+.app-groups-members-head {
   display: flex;
-  align-items: flex-start;
+  align-items: flex-end;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
 }
 
-.app-groups-detail-name-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.app-groups-detail-name {
-  margin: 0;
-  font-size: var(--app-font-size-title);
-  font-weight: 700;
-  color: var(--app-text-primary);
-}
-
-.app-groups-detail-tag {
-  margin-left: 2px;
-}
-
-.app-groups-detail-sub {
-  margin-top: 6px;
-  font-size: 13px;
+.app-groups-members-count {
+  margin: 4px 0 0;
+  font-size: 15px;
   color: var(--app-text-secondary);
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
 }
 
-.app-groups-detail-id {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-  font-size: 12px;
-}
-
-.app-groups-detail-dot {
-  color: var(--app-text-muted);
-}
-
-.app-groups-detail-actions {
-  display: flex;
-  flex-wrap: wrap;
+.app-groups-action-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+  margin-bottom: 12px;
+}
+
+.app-groups-action-grid :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+
+.app-groups-action-btn {
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  border-radius: var(--app-radius-md);
+  font-weight: 700;
 }
 
 .app-groups-members {
-  margin-top: 16px;
+  margin-top: 0;
   padding-top: 4px;
 }
 
 .app-groups-members-title {
-  margin: 0 0 10px;
-  font-size: 15px;
+  margin: 0 0 8px;
+  font-size: 17px;
   font-weight: 600;
   color: var(--app-text-primary);
 }
@@ -886,26 +737,19 @@ onMounted(() => {
 .app-groups-self-tag {
   margin-left: 4px;
   color: var(--app-primary);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
 }
 
-.app-groups-detail-desc {
-  margin: 0 0 4px;
-  font-size: 13px;
-  line-height: 1.55;
-  color: var(--app-text-secondary);
-}
-
 .app-groups-members-loading {
-  font-size: 14px;
+  font-size: var(--app-font-size-body);
   color: var(--app-text-secondary);
 }
 
 .app-groups-members-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .app-groups-member-item {
@@ -913,8 +757,8 @@ onMounted(() => {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 18px 20px;
+  gap: 8px;
+  padding: 14px 16px;
   border-radius: var(--app-radius-card);
   background: var(--app-bg-page);
 }
@@ -922,7 +766,7 @@ onMounted(() => {
 .app-groups-member-main {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
 }
 
@@ -934,7 +778,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: var(--app-font-size-caption);
   font-weight: 600;
   color: var(--app-text-primary);
   flex-shrink: 0;
@@ -954,13 +798,13 @@ onMounted(() => {
 }
 
 .app-groups-member-name {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--app-text-primary);
 }
 
 .app-groups-member-meta {
-  font-size: 13px;
+  font-size: 15px;
   color: var(--app-text-secondary);
 }
 
@@ -968,25 +812,7 @@ onMounted(() => {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-}
-
-.app-groups-detail-empty {
-  padding: 8px 4px 4px;
-}
-
-.app-groups-detail-empty-title {
-  margin: 0 0 8px;
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--app-text-primary);
-}
-
-.app-groups-detail-empty-desc {
-  margin: 0;
-  font-size: 14px;
-  line-height: 1.55;
-  color: var(--app-text-secondary);
+  gap: 6px;
 }
 
 .dialog-footer {

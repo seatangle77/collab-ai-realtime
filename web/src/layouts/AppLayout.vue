@@ -182,7 +182,7 @@ function logout() {
 }
 
 .app-user-name {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 500;
   color: var(--app-text-secondary);
   max-width: 96px;
@@ -192,7 +192,7 @@ function logout() {
 }
 
 .app-current-group {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--app-text-secondary);
   background: var(--app-bg-page);
@@ -209,7 +209,7 @@ function logout() {
   flex-shrink: 0;
   border-radius: 8px;
   padding: 6px 12px;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
   font-family: inherit;
   cursor: pointer;
@@ -244,7 +244,7 @@ function logout() {
 /* ── 主内容区 ── */
 .app-main {
   flex: 1;
-  padding: 16px 16px calc(88px + env(safe-area-inset-bottom));
+  padding: 12px 12px calc(80px + env(safe-area-inset-bottom));
   overflow-y: auto;
 }
 

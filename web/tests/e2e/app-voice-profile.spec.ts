@@ -168,15 +168,15 @@ test.describe('App 我的声纹 - 鉴权与初始展示', () => {
     await expect(page).toHaveURL(/redirect=\/app\/voice-profile/)
   })
 
-  test('新用户进入页面展示空状态和三个 Tab', async ({ page }) => {
+  test('新用户进入页面展示空状态和两个音频入口', async ({ page }) => {
     const user = await registerUserForE2E('empty')
     await loginViaUI(page, user)
     await page.goto('/app/voice-profile')
 
     await expect(page.getByRole('heading', { name: '我的声纹' })).toBeVisible()
-    await expect(page.getByText('录制或上传音频样本，生成专属声纹用于说话人识别。')).toBeVisible()
+    await expect(page.getByText('录制或上传音频样本，生成专属声纹用于说话人识别。')).toHaveCount(0)
     await expect(page.getByRole('button', { name: '现场录音' })).toBeVisible()
-    await expect(page.getByRole('button', { name: '粘贴 URL' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '粘贴 URL' })).toHaveCount(0)
     await expect(page.getByRole('button', { name: '上传文件' })).toBeVisible()
     await expect(page.getByText('暂无样本')).toBeVisible()
     await expect(page.getByText('已添加 0 / 5 条样本')).toBeVisible()
@@ -184,13 +184,13 @@ test.describe('App 我的声纹 - 鉴权与初始展示', () => {
   })
 })
 
-test.describe('App 我的声纹 - URL 样本', () => {
+test.describe.skip('App 我的声纹 - URL 样本（入口已从移动端页面移除）', () => {
   test('可以通过 URL 添加样本并自动保存', async ({ page }) => {
     const user = await createAppVoiceUser({ label: 'url-add' })
     await loginViaUI(page, user)
     await page.goto('/app/voice-profile')
 
-    await page.getByRole('button', { name: '粘贴 URL' }).click()
+    await page.getByRole('button', { name: '现场录音' }).click()
     await page.getByPlaceholder('请输入音频 URL').fill('https://example.com/one.wav')
     await page.getByRole('button', { name: '添加' }).click()
 
@@ -205,7 +205,7 @@ test.describe('App 我的声纹 - URL 样本', () => {
     await loginViaUI(page, user)
     await page.goto('/app/voice-profile')
 
-    await page.getByRole('button', { name: '粘贴 URL' }).click()
+    await page.getByRole('button', { name: '现场录音' }).click()
     const input = page.getByPlaceholder('请输入音频 URL')
     await input.fill('https://example.com/enter.wav')
     await input.press('Enter')
@@ -476,6 +476,13 @@ test.describe('App 我的声纹 - 生成声纹与异常', () => {
   test('保存样本失败时显示错误消息', async ({ page }) => {
     const user = await createAppVoiceUser({ label: 'err-save' })
     await loginViaUI(page, user)
+    await page.route('**/api/voice-profile/me/upload-audio', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ url: 'https://example.com/error.wav' }),
+      }),
+    )
     await page.route('**/api/voice-profile/me/samples', async (route) => {
       if (route.request().method() === 'PUT') {
         await route.fulfill({ status: 500, body: 'save error' })
@@ -485,9 +492,9 @@ test.describe('App 我的声纹 - 生成声纹与异常', () => {
     })
 
     await page.goto('/app/voice-profile')
-    await page.getByRole('button', { name: '粘贴 URL' }).click()
-    await page.getByPlaceholder('请输入音频 URL').fill('https://example.com/error.wav')
-    await page.getByRole('button', { name: '添加' }).click()
+    await page.locator('.record-tab').filter({ hasText: '上传文件' }).click()
+    await page.locator('input[type="file"]').setInputFiles(makeAudioFilePayload('error.m4a'))
+    await page.getByRole('button', { name: '上传此文件' }).click()
 
     await expect(messageLocator(page, /保存样本列表失败|save error/)).toBeVisible()
   })

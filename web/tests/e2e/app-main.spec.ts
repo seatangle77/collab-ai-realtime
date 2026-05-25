@@ -74,10 +74,14 @@ test.describe('App 登录后主界面与头部信息', () => {
     const header = page.locator('.app-header-right')
     await expect(header.getByText(name, { exact: true })).toBeVisible()
 
-    // 首页欢迎区展示欢迎语和邮箱
+    // 首页欢迎区不展示邮箱，突出当前小组与下一步操作
     await expect(page.getByText('欢迎回来')).toBeVisible()
-    await expect(page.locator('.app-home-card').getByText(email)).toBeVisible()
-    await expect(page.locator('.app-home-card').getByText('未加入群组，请先新建或加入群组')).toBeVisible()
+    await expect(page.locator('.app-home-card').getByText(email)).toHaveCount(0)
+    await expect(page.locator('.app-home-group-value')).toHaveText('请先加入小组')
+    await expect(page.getByText('加入小组后，选择成员新建并发起会话')).toBeVisible()
+    await expect(page.getByRole('link', { name: '加入小组' })).toHaveCount(0)
+    await expect(page.getByRole('link', { name: '新建会话' })).toHaveCount(0)
+    await expect(page.locator('.app-home-quick-grid')).toHaveCount(0)
   })
 
   test('2. 登录后导航到我的群组与我的会话，仍展示当前用户与当前群组', async ({ page }) => {
@@ -94,8 +98,8 @@ test.describe('App 登录后主界面与头部信息', () => {
     await expect(page.locator('.app-groups-title')).toBeVisible()
     const header = page.locator('.app-header-right')
     await expect(header.getByText(name, { exact: true })).toBeVisible()
-    await expect(page.locator('.app-groups').getByText('当前群组：')).toBeVisible()
-    await expect(page.locator('.app-groups-group-value')).toHaveText('未选择')
+    await expect(page.locator('.app-groups').getByText(email)).toHaveCount(0)
+    await expect(page.locator('.app-groups').getByText('当前群组：')).toHaveCount(0)
 
     // 我的会话
     await page.goto('/app/sessions')

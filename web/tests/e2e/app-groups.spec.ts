@@ -113,12 +113,9 @@ test.describe('App 我的群组页面 - 基础场景', () => {
     // 页面主标题（h2）
     await expect(page.locator('.app-groups-title')).toBeVisible()
 
-    // 概览标签
-    await expect(page.getByText('已加入群组').locator('..')).toContainText('0')
-
     // 我的群组空状态
     await expect(page.getByText('你还没有加入任何群组')).toBeVisible()
-    await expect(page.getByText('可以先新建一个群组，或从下方加入已有群组。')).toBeVisible()
+    await expect(page.getByText('创建或加入一个群组后，就可以选择成员发起会话。')).toBeVisible()
 
     // 当前群组详情空状态
     await expect(page.getByText('尚未选择群组')).toBeVisible()
@@ -131,7 +128,7 @@ test.describe('App 我的群组页面 - 基础场景', () => {
 
     const groupName = `UI创建群-${Date.now()}`
 
-    await page.getByRole('button', { name: '新建群组' }).click()
+    await page.locator('.app-groups-create-btn').click()
     const dialog = page.getByRole('dialog', { name: '新建群组' })
     await expect(dialog).toBeVisible()
     await dialog.getByLabel('名称').fill(groupName)
@@ -139,14 +136,14 @@ test.describe('App 我的群组页面 - 基础场景', () => {
 
     await expect(page.getByText('创建群组成功')).toBeVisible()
 
-    // 我的群组列表出现该群，标记为当前
+    // 我的群组列表出现该群并自动选中
     const listItem = page.locator('.app-groups-list-item').filter({ hasText: groupName }).first()
     await expect(listItem).toBeVisible()
     await expect(listItem.getByText('群主')).toBeVisible()
-    await expect(listItem.getByText('当前')).toBeVisible()
+    await expect(listItem).toHaveAttribute('data-active', 'true')
 
     // 详情中成员数为 1，成员列表只有自己且有“我”标记
-    await expect(page.getByText(`成员数：1`)).toBeVisible()
+    await expect(page.getByText('1 位成员')).toBeVisible()
     const memberRow = page.locator('.app-groups-member-item').first()
     await expect(memberRow.getByText('我')).toBeVisible()
   })
@@ -178,11 +175,11 @@ test.describe.serial('App 我的群组页面 - 多角色与加入/退出', () =>
 
     await expect(page.getByText('加入群组成功')).toBeVisible()
 
-    // 我的群组列表中出现至少一个群，且有“成员”“当前”标记
+    // 我的群组列表中出现至少一个群，且有“成员”标记并自动选中
     const listItem = page.locator('.app-groups-list-item').first()
     await expect(listItem).toBeVisible()
     await expect(listItem.getByText('成员')).toBeVisible()
-    await expect(listItem.getByText('当前')).toBeVisible()
+    await expect(listItem).toHaveAttribute('data-active', 'true')
   })
 
   test('4. 成员退出群组后不再出现在我的群组中', async ({ page }) => {
@@ -197,7 +194,7 @@ test.describe.serial('App 我的群组页面 - 多角色与加入/退出', () =>
 
     // 详情中点击退出群组
     await page.locator('.app-groups-list-item').filter({ hasText: group.name }).first().click()
-    await page.getByRole('button', { name: '退出群组' }).click()
+    await page.locator('.app-groups-action-btn').filter({ hasText: '退出' }).click()
     await page.getByRole('button', { name: '退出群组' }).last().click()
 
     await expect(page.getByText('已退出群组')).toBeVisible()
@@ -219,7 +216,7 @@ test.describe.serial('App 我的群组页面 - 多角色与加入/退出', () =>
     await page.locator('.app-groups-list-item').filter({ hasText: group.name }).first().click()
 
     const newName = `${group.name}-已重命名`
-    await page.getByRole('button', { name: '修改名称' }).click()
+    await page.getByRole('button', { name: '改名' }).click()
     const promptInput = page.locator('.el-message-box').getByRole('textbox')
     await promptInput.fill(newName)
     await page.getByRole('button', { name: '保存' }).click()
@@ -230,8 +227,8 @@ test.describe.serial('App 我的群组页面 - 多角色与加入/退出', () =>
     const listItem = page.locator('.app-groups-list-item').filter({ hasText: newName }).first()
     await expect(listItem).toBeVisible()
 
-    // 详情标题更新
-    await expect(page.getByRole('heading', { name: newName })).toBeVisible()
+    // 当前选中项仍然是重命名后的群组
+    await expect(listItem).toHaveAttribute('data-active', 'true')
 
     // 头部当前群组名称更新（需要刷新以读取 localStorage）
     await page.reload()
@@ -279,7 +276,7 @@ test.describe('App 我的群组页面 - 边界与异常', () => {
     await loginViaUI(page, user)
     await page.goto('/app/groups')
 
-    await page.getByRole('button', { name: '新建群组' }).click()
+    await page.locator('.app-groups-create-btn').click()
     const dialog = page.getByRole('dialog', { name: '新建群组' })
     await expect(dialog).toBeVisible()
 
@@ -296,13 +293,13 @@ test.describe('App 我的群组页面 - 边界与异常', () => {
 
     const tempName = `Temp-${Date.now()}`
 
-    await page.getByRole('button', { name: '新建群组' }).click()
+    await page.locator('.app-groups-create-btn').click()
     let dialog = page.getByRole('dialog', { name: '新建群组' })
     await expect(dialog).toBeVisible()
     await dialog.getByLabel('名称').fill(tempName)
     await dialog.getByRole('button', { name: '取消' }).click()
 
-    await page.getByRole('button', { name: '新建群组' }).click()
+    await page.locator('.app-groups-create-btn').click()
     dialog = page.getByRole('dialog', { name: '新建群组' })
     await expect(dialog.getByLabel('名称')).toHaveValue('')
   })
@@ -336,8 +333,8 @@ test.describe('App 我的群组页面 - 边界与异常', () => {
     await page.goto('/app/groups')
     await page.locator('.app-groups-list-item').filter({ hasText: group.name }).first().click()
 
-    // 详情操作区不应有“修改名称”按钮
-    await expect(page.getByRole('button', { name: '修改名称' })).toHaveCount(0)
+    // 详情操作区不应有“改名”按钮
+    await expect(page.getByRole('button', { name: '改名' })).toHaveCount(0)
 
     // 成员列表中不应出现“移出”按钮
     await expect(page.getByRole('button', { name: '移出' })).toHaveCount(0)

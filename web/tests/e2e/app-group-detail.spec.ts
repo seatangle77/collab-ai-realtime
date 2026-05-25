@@ -142,21 +142,7 @@ test.describe('AppGroupDetail - 基础加载', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 // B. 从 AppGroups 入口导航
 // ─────────────────────────────────────────────────────────────────────────────
-test.describe('AppGroupDetail - 从 AppGroups 入口', () => {
-  test('B-1: 在 AppGroups 选中群后点击"进入群组"跳转到详情页', async ({ page }) => {
-    const leader = await registerAndLogin('b1-leader')
-    const groupName = `导航测试群-${Date.now()}`
-    await createGroupAsUser(leader.token, groupName)
-
-    await loginViaUI(page, leader)
-    await page.goto('/app/groups')
-
-    await page.locator('.app-groups-list-item').filter({ hasText: groupName }).first().click()
-    await page.getByRole('button', { name: '进入群组' }).click()
-
-    await expect(page).toHaveURL(/\/app\/groups\/.+/)
-  })
-
+test.describe('AppGroupDetail - 直接访问与返回', () => {
   test('B-2: 进入详情后点返回，回到 AppGroups', async ({ page }) => {
     const leader = await registerAndLogin('b2-leader')
     const groupId = await createGroupAsUser(leader.token, `返回导航测试群-${Date.now()}`)

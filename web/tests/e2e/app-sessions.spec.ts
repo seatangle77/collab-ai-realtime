@@ -417,10 +417,6 @@ test.describe.serial('App 我的会话页面 - 表单校验与边界', () => {
     await dialog.getByLabel('会话标题').fill(title)
     await dialog.getByRole('button', { name: '确 定' }).click()
 
-    // 当前群组应自动切换到另一个群组
-    const groupValue = page.locator('.app-sessions-group-inline')
-    await expect(groupValue).toContainText(anotherGroup.name)
-
     // 列表中能看到刚创建的会话
     await expect(page.getByText(title, { exact: false })).toBeVisible()
   })

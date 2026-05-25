@@ -17,11 +17,10 @@ const savingSamples = ref(false)
 const generating = ref(false)
 const isRecording = ref(false)
 const isUploading = ref(false)
-const activeRecordTab = ref<'record' | 'url' | 'file'>('record')
+const activeRecordTab = ref<'record' | 'file'>('record')
 
 const profile = ref<VoiceProfileOut | null>(null)
 const editableUrls = ref<string[]>([])
-const newUrlInput = ref('')
 const recordedChunks = ref<BlobPart[]>([])
 const recordingDuration = ref(0)
 const previewUrl = ref<string | null>(null)
@@ -72,21 +71,6 @@ async function fetchProfile() {
 
 async function handleRemoveUrl(idx: number) {
   editableUrls.value.splice(idx, 1)
-  await handleSaveSamples()
-}
-
-async function handleAddUrl() {
-  const v = newUrlInput.value.trim()
-  if (!v) {
-    ElMessage.warning('请输入非空的样本 URL')
-    return
-  }
-  if (editableUrls.value.length >= 5) {
-    ElMessage.warning('已达到最多 5 条样本')
-    return
-  }
-  editableUrls.value.push(v)
-  newUrlInput.value = ''
   await handleSaveSamples()
 }
 
@@ -180,7 +164,7 @@ function resetSelectedFile() {
   }
 }
 
-function handleTabChange(tab: 'record' | 'url' | 'file') {
+function handleTabChange(tab: 'record' | 'file') {
   if (tab !== activeRecordTab.value) {
     if (activeRecordTab.value === 'record') {
       resetRecording()
@@ -282,7 +266,7 @@ async function handleGenerateEmbedding() {
   if (!profile.value) return
   const hadEmbedding = hasEmbedding.value
   if (!editableUrls.value.length) {
-    ElMessage.warning('请先添加样本 URL 后再生成声纹')
+    ElMessage.warning('请先添加音频样本后再生成声纹')
     return
   }
   if (hadEmbedding) {
@@ -324,7 +308,6 @@ onBeforeUnmount(() => {
   <div class="app-voice-profile">
     <div class="app-voice-profile-card" v-loading="loading">
       <h2 class="app-voice-profile-title">我的声纹</h2>
-      <p class="app-voice-profile-desc">录制或上传音频样本，生成专属声纹用于说话人识别。</p>
 
       <template v-if="profile">
         <div class="voice-stepbar" aria-label="声纹设置步骤">
@@ -348,14 +331,6 @@ onBeforeUnmount(() => {
               @click="handleTabChange('record')"
             >
               现场录音
-            </button>
-            <button
-              type="button"
-              class="record-tab"
-              :class="{ active: activeRecordTab === 'url' }"
-              @click="handleTabChange('url')"
-            >
-              粘贴 URL
             </button>
             <button
               type="button"
@@ -417,20 +392,6 @@ onBeforeUnmount(() => {
             </template>
           </div>
 
-          <!-- Tab: 粘贴 URL -->
-          <div v-if="activeRecordTab === 'url'" class="tab-panel">
-            <div class="url-add-row">
-              <el-input
-                v-model="newUrlInput"
-                size="default"
-                placeholder="请输入音频 URL"
-                class="url-input"
-                @keyup.enter.prevent="handleAddUrl"
-              />
-              <el-button type="primary" size="default" @click="handleAddUrl">添加</el-button>
-            </div>
-          </div>
-
           <!-- Tab: 上传文件 -->
           <div v-if="activeRecordTab === 'file'" class="tab-panel tab-panel--file">
             <input
@@ -486,7 +447,7 @@ onBeforeUnmount(() => {
               v-if="editableUrls.length === 0"
               icon="🎙️"
               title="暂无样本"
-              description="请先通过录音或粘贴 URL 添加样本。"
+              description="请先录音或上传音频文件。"
               compact
             />
             <div
@@ -572,7 +533,7 @@ onBeforeUnmount(() => {
 .app-voice-profile-card {
   width: 100%;
   max-width: var(--app-content-width-narrow);
-  padding: 18px 20px;
+  padding: 16px;
   border-radius: var(--app-radius-card);
   background: var(--app-bg-elevated);
   box-shadow: var(--app-shadow-soft);
@@ -580,18 +541,11 @@ onBeforeUnmount(() => {
 }
 
 .app-voice-profile-title {
-  margin: 0 0 8px;
+  margin: 0 0 16px;
   font-size: var(--app-font-size-title);
   font-weight: 700;
   color: var(--app-text-primary);
   letter-spacing: -0.02em;
-}
-
-.app-voice-profile-desc {
-  margin: 0 0 24px;
-  font-size: 14px;
-  line-height: 1.65;
-  color: var(--app-text-secondary);
 }
 
 .voice-stepbar {
@@ -645,14 +599,14 @@ onBeforeUnmount(() => {
 
 .voice-step-heading {
   margin: 0 0 12px;
-  font-size: 16px;
+  font-size: var(--app-font-size-heading);
   font-weight: 600;
   color: var(--app-text-primary);
 }
 
 .voice-samples-count {
   margin: 16px 0 10px;
-  font-size: 14px;
+  font-size: var(--app-font-size-body);
   font-weight: 500;
   color: var(--app-text-secondary);
 }
@@ -670,11 +624,11 @@ onBeforeUnmount(() => {
   border-radius: var(--app-radius-card);
   background: var(--app-bg-elevated);
   box-shadow: var(--app-shadow-card);
-  padding: 18px 20px;
+  padding: 14px 16px;
 }
 
 .recording-indicator {
-  font-size: 14px;
+  font-size: var(--app-font-size-body);
   font-weight: 500;
   color: var(--app-danger);
 }
@@ -700,7 +654,7 @@ onBeforeUnmount(() => {
 }
 
 .recording-hint {
-  font-size: 13px;
+  font-size: var(--app-font-size-caption);
   color: var(--app-text-muted);
 }
 
@@ -739,7 +693,7 @@ onBeforeUnmount(() => {
 .sample-index {
   flex-shrink: 0;
   width: 22px;
-  font-size: 13px;
+  font-size: var(--app-font-size-caption);
   font-weight: 500;
   color: var(--app-text-muted);
   text-align: right;
@@ -774,7 +728,7 @@ onBeforeUnmount(() => {
 }
 
 .samples-empty {
-  font-size: 14px;
+  font-size: var(--app-font-size-body);
   color: var(--app-text-muted);
   padding: 8px 0;
 }
@@ -798,7 +752,7 @@ onBeforeUnmount(() => {
 .record-tab {
   padding: 0 0 10px;
   margin-bottom: -1px;
-  font-size: 14px;
+  font-size: var(--app-font-size-body);
   font-weight: 500;
   font-family: inherit;
   color: var(--app-text-secondary);
@@ -870,12 +824,12 @@ onBeforeUnmount(() => {
 }
 
 .file-drop-area__title {
-  font-size: 14px;
+  font-size: var(--app-font-size-body);
   font-weight: 600;
 }
 
 .file-drop-area__hint {
-  font-size: 13px;
+  font-size: var(--app-font-size-caption);
 }
 
 .file-info {
@@ -893,7 +847,7 @@ onBeforeUnmount(() => {
 .file-info__name {
   min-width: 0;
   flex: 1;
-  font-size: 14px;
+  font-size: var(--app-font-size-body);
   font-weight: 500;
   color: var(--app-text-primary);
   word-break: break-all;
@@ -901,22 +855,11 @@ onBeforeUnmount(() => {
 
 .file-info__meta {
   flex-shrink: 0;
-  font-size: 13px;
-}
-
-.url-add-row {
-  display: flex;
-  align-items: stretch;
-  gap: 12px;
-  width: 100%;
-}
-
-.url-input {
-  flex: 1;
+  font-size: var(--app-font-size-caption);
 }
 
 .generate-hint {
-  font-size: 13px;
+  font-size: var(--app-font-size-caption);
   color: var(--app-text-muted);
 }
 
@@ -937,7 +880,7 @@ onBeforeUnmount(() => {
 }
 
 .embedding-done-time {
-  font-size: 13px;
+  font-size: var(--app-font-size-caption);
   color: var(--app-text-secondary);
 }
 
@@ -946,7 +889,7 @@ onBeforeUnmount(() => {
 }
 
 .detail-collapse :deep(.el-collapse-item__header) {
-  font-size: 14px;
+  font-size: var(--app-font-size-body);
   font-weight: 500;
   color: var(--app-text-secondary);
 }
@@ -964,7 +907,7 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   gap: 8px 24px;
   margin-bottom: 12px;
-  font-size: 13px;
+  font-size: var(--app-font-size-caption);
   color: var(--app-text-secondary);
 }
 
@@ -978,7 +921,7 @@ onBeforeUnmount(() => {
   border-radius: var(--app-radius-sm);
   background: var(--app-bg-page);
   border: 1px solid var(--app-border);
-  font-size: 12px;
+  font-size: var(--app-font-size-caption);
   line-height: 1.5;
   overflow-x: auto;
   max-height: 200px;

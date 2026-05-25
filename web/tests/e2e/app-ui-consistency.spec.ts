@@ -227,29 +227,29 @@ test.describe('Step 6 - UI Consistency', () => {
 
   test('titles and page widths use the shared tokens', async ({ page }) => {
     await page.goto('/app')
-    await expect(page.locator('.app-home-title')).toBeVisible()
-    expect(await page.locator('.app-home-title').evaluate((el) => getComputedStyle(el).fontSize)).toBe('22px')
+    await expect(page.locator('.app-home-group-value')).toBeVisible()
+    expect(await page.locator('.app-home-group-value').evaluate((el) => getComputedStyle(el).fontSize)).toBe('28px')
     expect(await page.locator('.app-home-stack').evaluate((el) => getComputedStyle(el).maxWidth)).toBe('720px')
 
     await page.goto('/app/sessions')
     await expect(page.locator('.app-sessions-title')).toBeVisible()
-    expect(await page.locator('.app-sessions-title').evaluate((el) => getComputedStyle(el).fontSize)).toBe('22px')
+    expect(await page.locator('.app-sessions-title').evaluate((el) => getComputedStyle(el).fontSize)).toBe('26px')
     expect(await page.locator('.app-sessions').evaluate((el) => getComputedStyle(el).maxWidth)).toBe('840px')
 
     await page.goto('/app/groups')
     await expect(page.locator('.app-groups-title')).toBeVisible()
-    expect(await page.locator('.app-groups-title').evaluate((el) => getComputedStyle(el).fontSize)).toBe('22px')
+    expect(await page.locator('.app-groups-title').evaluate((el) => getComputedStyle(el).fontSize)).toBe('26px')
     expect(await page.locator('.app-groups').evaluate((el) => getComputedStyle(el).maxWidth)).toBe('840px')
 
     await page.goto('/app/voice-profile')
     await expect(page.locator('.app-voice-profile-title')).toBeVisible()
-    expect(await page.locator('.app-voice-profile-title').evaluate((el) => getComputedStyle(el).fontSize)).toBe('22px')
+    expect(await page.locator('.app-voice-profile-title').evaluate((el) => getComputedStyle(el).fontSize)).toBe('26px')
     expect(await page.locator('.app-voice-profile-card').evaluate((el) => getComputedStyle(el).maxWidth)).toBe('720px')
   })
 
   test('primary actions and utility buttons use pill corners', async ({ page }) => {
     await page.goto('/app/sessions')
-    expect(await page.locator('.app-sessions-primary-btn').evaluate((el) => getComputedStyle(el).borderRadius)).toBe('999px')
+    expect(await page.locator('.app-sessions-create-btn').evaluate((el) => getComputedStyle(el).borderRadius)).toBe('999px')
     expect(await page.locator('.app-sessions-more-btn').first().evaluate((el) => getComputedStyle(el).borderRadius)).toBe('999px')
 
     await page.goto('/app/sessions/session-step6')
@@ -258,7 +258,7 @@ test.describe('Step 6 - UI Consistency', () => {
     expect(await page.locator('.app-session-detail-more-btn').evaluate((el) => getComputedStyle(el).borderRadius)).toBe('999px')
 
     await page.goto('/app/groups')
-    expect(await page.locator('.app-groups-group').evaluate((el) => getComputedStyle(el).borderRadius)).toBe('999px')
+    expect(await page.locator('.app-groups-create-btn').evaluate((el) => getComputedStyle(el).borderRadius)).toBe('999px')
   })
 
   test('AI suggestion card uses the semantic AI colors', async ({ page }) => {
