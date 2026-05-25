@@ -24,6 +24,15 @@ export function formatLogTimestamp(date = new Date()): string {
   return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second} +08`;
 }
 
+function formatSessionLogTimestamp(date = new Date()): string {
+  const parts = Object.fromEntries(
+    SHANGHAI_TIME_FORMATTER.formatToParts(date).map((part) => [part.type, part.value]),
+  );
+  return `${parts.year}${parts.month}${parts.day}-${parts.hour}${parts.minute}${parts.second}`;
+}
+
+const SESSION_LOG_FILENAME = `agent-${formatSessionLogTimestamp()}.log`;
+
 function log(level: Level, context: string, message: string, meta?: unknown): void {
   const ts = formatLogTimestamp();
   const prefix = `[${ts}] [${level.toUpperCase().padEnd(5)}] [${context}]`;
@@ -64,7 +73,7 @@ function writeSessionLog(line: string, message: string, meta?: unknown): void {
   try {
     const sessionDir = path.join(SESSION_LOG_DIR, sessionId);
     fs.mkdirSync(sessionDir, { recursive: true });
-    fs.appendFileSync(path.join(sessionDir, 'agent.log'), `${line}\n`, 'utf8');
+    fs.appendFileSync(path.join(sessionDir, SESSION_LOG_FILENAME), `${line}\n`, 'utf8');
   } catch {
     // Logging must never break the agent's main work.
   }

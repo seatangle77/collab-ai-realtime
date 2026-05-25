@@ -248,6 +248,9 @@ export interface NotifyPushResult {
   delivery_status: 'pending' | 'delivered' | 'failed' | 'skipped' | 'deferred';
   delivery_reason: string | null;
   ws_sent: boolean;
+  jpush_attempted?: boolean;
+  jpush_status?: string | null;
+  jpush_reason?: string | null;
 }
 
 /** fast_model：为群体沉默生成一句破冰话题 */
@@ -320,6 +323,9 @@ export async function notifyPush(
       ws_sent: res.data.ws_sent,
       delivery_status: res.data.delivery_status,
       delivery_reason: res.data.delivery_reason,
+      jpush_attempted: res.data.jpush_attempted ?? null,
+      jpush_status: res.data.jpush_status ?? null,
+      jpush_reason: res.data.jpush_reason ?? null,
       log_id: res.data.id,
     });
     return res.data;

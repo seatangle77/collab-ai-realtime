@@ -34,7 +34,7 @@ def _mask_device_token(device_token: str) -> str:
     return f"{device_token[:4]}...{device_token[-4:]}"
 
 
-async def _jpush_safe(device_token: str, content: str, title: str) -> bool:
+async def _jpush_safe(device_token: str, content: str, title: str) -> tuple[bool, str | None]:
     """JPush 推送，失败只记录日志，不影响实时 WS 投递结果。"""
     masked_token = _mask_device_token(device_token)
     try:
@@ -50,14 +50,14 @@ async def _jpush_safe(device_token: str, content: str, title: str) -> bool:
             len(content),
             response,
         )
-        return True
-    except Exception:
+        return True, None
+    except Exception as exc:
         logger.exception(
             "[jpush] send failed device_token=%s content_len=%s",
             masked_token,
             len(content),
         )
-        return False
+        return False, str(exc)
 
 
 class PushNotifyIn(ApiModel):
@@ -274,6 +274,9 @@ async def push_notify(
     )
     token_row = token_result.mappings().first()
     device_token = token_row["device_token"] if token_row else None
+    jpush_attempted = False
+    jpush_status = "no_device_token"
+    jpush_reason: str | None = "no_device_token"
     if device_token:
         logger.warning(
             "%s [push_notify_jpush] target_user_id=%s device_token=%s action=send",
@@ -281,7 +284,10 @@ async def push_notify(
             body.target_user_id,
             _mask_device_token(device_token),
         )
-        await _jpush_safe(device_token, body.content, JPUSH_NOTIFICATION_TITLE)
+        jpush_attempted = True
+        jpush_ok, jpush_error = await _jpush_safe(device_token, body.content, JPUSH_NOTIFICATION_TITLE)
+        jpush_status = "sent" if jpush_ok else "failed"
+        jpush_reason = None if jpush_ok else jpush_error
     else:
         logger.warning(
             "%s [push_notify_jpush] target_user_id=%s action=skip reason=no_device_token",
@@ -294,6 +300,9 @@ async def push_notify(
         "delivery_status": new_status,
         "delivery_reason": delivery_reason,
         "ws_sent": sent,
+        "jpush_attempted": jpush_attempted,
+        "jpush_status": jpush_status,
+        "jpush_reason": jpush_reason,
     }
 
 

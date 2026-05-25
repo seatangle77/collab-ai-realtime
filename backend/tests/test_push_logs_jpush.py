@@ -68,9 +68,10 @@ def test_jpush_safe_swallows_sender_exception(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setattr(push_logs, "send_push_to_registration_id", _boom)
 
-    _run(push_logs._jpush_safe("tok-1", "内容", "标题"))
+    result = _run(push_logs._jpush_safe("tok-1", "内容", "标题"))
 
     assert calls == [("tok-1", "内容", "标题")]
+    assert result == (False, "jpush failed")
 
 
 def test_push_notify_calls_jpush_when_target_has_device_token(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -89,8 +90,9 @@ def test_push_notify_calls_jpush_when_target_has_device_token(monkeypatch: pytes
         ws_calls.append((session_id, user_id, message))
         return True
 
-    async def _fake_jpush(device_token: str, content: str, title: str) -> None:
+    async def _fake_jpush(device_token: str, content: str, title: str) -> tuple[bool, None]:
         jpush_calls.append((device_token, content, title))
+        return True, None
 
     monkeypatch.setattr(push_logs.ws_manager, "send_to_user", _fake_send_to_user)
     monkeypatch.setattr(push_logs, "_jpush_safe", _fake_jpush)
@@ -100,6 +102,9 @@ def test_push_notify_calls_jpush_when_target_has_device_token(monkeypatch: pytes
 
     assert resp["delivery_status"] == "delivered"
     assert resp["ws_sent"] is True
+    assert resp["jpush_attempted"] is True
+    assert resp["jpush_status"] == "sent"
+    assert resp["jpush_reason"] is None
     assert ws_calls and ws_calls[0][0:2] == ("s1", "u1")
     assert jpush_calls == [("dev-token-u1", "请主动补充理由", "AI 讨论建议")]
     assert db.commits == 2
@@ -118,8 +123,9 @@ def test_push_notify_skips_jpush_when_target_has_no_device_token(monkeypatch: py
     async def _fake_send_to_user(session_id: str, user_id: str, message: dict[str, Any]) -> bool:
         return False
 
-    async def _fake_jpush(device_token: str, content: str, title: str) -> None:
+    async def _fake_jpush(device_token: str, content: str, title: str) -> tuple[bool, None]:
         jpush_calls.append((device_token, content, title))
+        return True, None
 
     monkeypatch.setattr(push_logs.ws_manager, "send_to_user", _fake_send_to_user)
     monkeypatch.setattr(push_logs, "_jpush_safe", _fake_jpush)
@@ -129,6 +135,9 @@ def test_push_notify_skips_jpush_when_target_has_no_device_token(monkeypatch: py
 
     assert resp["delivery_status"] == "failed"
     assert resp["ws_sent"] is False
+    assert resp["jpush_attempted"] is False
+    assert resp["jpush_status"] == "no_device_token"
+    assert resp["jpush_reason"] == "no_device_token"
     assert jpush_calls == []
     assert db.commits == 2
 
@@ -144,8 +153,9 @@ def test_push_notify_terminal_queue_status_returns_early_without_jpush(monkeypat
         ]
     )
 
-    async def _fake_jpush(device_token: str, content: str, title: str) -> None:
+    async def _fake_jpush(device_token: str, content: str, title: str) -> tuple[bool, None]:
         jpush_calls.append((device_token, content, title))
+        return True, None
 
     monkeypatch.setattr(push_logs, "_jpush_safe", _fake_jpush)
 

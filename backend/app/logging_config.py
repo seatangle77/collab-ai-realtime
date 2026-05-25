@@ -17,6 +17,10 @@ SESSION_LOG_DIR = Path(os.getenv("SESSION_LOG_DIR", REPO_ROOT / "logs" / "sessio
 SESSION_ID_PATTERN = re.compile(r"\bsession(?:_id|Id)?=([A-Za-z0-9_.:-]+)")
 
 
+def _session_log_timestamp() -> str:
+    return datetime.datetime.now(tz=SHANGHAI_TZ).strftime("%Y%m%d-%H%M%S")
+
+
 class CSTFormatter(logging.Formatter):
     def formatTime(self, record: logging.LogRecord, datefmt: Optional[str] = None) -> str:
         dt = datetime.datetime.fromtimestamp(record.created, tz=SHANGHAI_TZ)
@@ -38,11 +42,12 @@ def _safe_session_id(value: object) -> str | None:
 
 
 class SessionFileHandler(logging.Handler):
-    """Copy records with a session_id into logs/sessions/<session_id>/backend.log."""
+    """Copy records with a session_id into a per-run file under logs/sessions/<session_id>/."""
 
-    def __init__(self, base_dir: Path) -> None:
+    def __init__(self, base_dir: Path, filename: str) -> None:
         super().__init__()
         self.base_dir = base_dir
+        self.filename = filename
         self._lock = threading.Lock()
 
     def _extract_session_id(self, record: logging.LogRecord) -> str | None:
@@ -65,7 +70,7 @@ class SessionFileHandler(logging.Handler):
             session_dir = self.base_dir / session_id
             with self._lock:
                 session_dir.mkdir(parents=True, exist_ok=True)
-                with (session_dir / "backend.log").open("a", encoding="utf-8") as file:
+                with (session_dir / self.filename).open("a", encoding="utf-8") as file:
                     file.write(line + "\n")
         except Exception:
             self.handleError(record)
@@ -79,9 +84,10 @@ def _set_handlers(logger: logging.Logger, handlers: Iterable[logging.Handler], l
 def configure_logging(level: int = logging.INFO) -> None:
     app_handler = _make_handler(CSTFormatter(LOG_FORMAT))
     access_handler = _make_handler(CSTFormatter(ACCESS_LOG_FORMAT))
-    session_app_handler = SessionFileHandler(SESSION_LOG_DIR)
+    session_log_filename = f"backend-{_session_log_timestamp()}.log"
+    session_app_handler = SessionFileHandler(SESSION_LOG_DIR, session_log_filename)
     session_app_handler.setFormatter(CSTFormatter(LOG_FORMAT))
-    session_access_handler = SessionFileHandler(SESSION_LOG_DIR)
+    session_access_handler = SessionFileHandler(SESSION_LOG_DIR, session_log_filename)
     session_access_handler.setFormatter(CSTFormatter(ACCESS_LOG_FORMAT))
 
     _set_handlers(logging.getLogger(), [app_handler, session_app_handler], level)
