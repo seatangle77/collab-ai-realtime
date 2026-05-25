@@ -52,7 +52,9 @@ function shuffle<T>(arr: T[]): T[] {
   const a = [...arr]
   for (let i = a.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1))
-    ;[a[i], a[j]] = [a[j], a[i]]
+    const tmp = a[i] as T
+    a[i] = a[j] as T
+    a[j] = tmp
   }
   return a
 }
@@ -77,8 +79,8 @@ const p1RecordState = ref<P1RecordState>('ready')
 const p1Countdown = ref(20)
 let p1Interval: ReturnType<typeof setInterval> | null = null
 
-const p1Member = computed(() => MEMBERS[p1MemberIdx.value])
-const p1Question = computed(() => p1MemberQuestions[p1MemberIdx.value][p1QuestionIdx.value])
+const p1Member = computed(() => MEMBERS[p1MemberIdx.value]!)
+const p1Question = computed(() => p1MemberQuestions[p1MemberIdx.value]?.[p1QuestionIdx.value] ?? '')
 const p1CurrentStep = computed(() => p1MemberIdx.value * 3 + p1QuestionIdx.value + 1)
 const P1_TOTAL = 9  // 3人 × 3题
 
@@ -145,7 +147,7 @@ const p2SimVotes = ref<{ id: string; choice: 'a' | 'b' }[]>([])
 let p2T1: ReturnType<typeof setTimeout> | null = null
 let p2T2: ReturnType<typeof setTimeout> | null = null
 
-const p2Q = computed(() => p2Questions[p2Step.value])
+const p2Q = computed(() => p2Questions[p2Step.value]!)
 const p2CountA = computed(() =>
   (p2MyVote.value === 'a' ? 1 : 0) + p2SimVotes.value.filter(v => v.choice === 'a').length)
 const p2CountB = computed(() =>
@@ -163,11 +165,11 @@ function p2Vote(choice: 'a' | 'b') {
   p2MyVote.value = choice
   p2T1 = setTimeout(() => {
     const c: 'a' | 'b' = Math.random() > 0.45 ? 'a' : 'b'
-    p2SimVotes.value = [...p2SimVotes.value, { id: MEMBERS[1].id, choice: c }]
+    p2SimVotes.value = [...p2SimVotes.value, { id: MEMBERS[1]!.id, choice: c }]
   }, 600 + Math.random() * 500)
   p2T2 = setTimeout(() => {
     const c: 'a' | 'b' = Math.random() > 0.45 ? 'a' : 'b'
-    p2SimVotes.value = [...p2SimVotes.value, { id: MEMBERS[2].id, choice: c }]
+    p2SimVotes.value = [...p2SimVotes.value, { id: MEMBERS[2]!.id, choice: c }]
   }, 1100 + Math.random() * 700)
 }
 
@@ -400,7 +402,7 @@ onUnmounted(() => {
           <div class="ib-votes-row">
             <!-- 自己的票 -->
             <div class="ib-vote-chip">
-              <div class="ib-avatar" :style="{ background: MEMBERS[0].bg }">{{ MEMBERS[0].initial }}</div>
+              <div class="ib-avatar" :style="{ background: MEMBERS[0]!.bg }">{{ MEMBERS[0]!.initial }}</div>
               <span
                 class="ib-vote-tag"
                 :class="p2MyVote === 'a' ? 'ib-vote-tag--a' : 'ib-vote-tag--b'"
