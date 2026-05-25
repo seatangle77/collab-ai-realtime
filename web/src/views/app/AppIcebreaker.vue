@@ -149,6 +149,14 @@ function startPhase1() {
   screen.value = 'phase1'
 }
 
+function jumpToPhase2() {
+  stopP1Countdown()
+  storyCurTurn.value = 0
+  storyRecordState.value = 'ready'
+  storyCountdown.value = 30
+  screen.value = 'phase2_intro'
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Phase 2 故事接龙状态
 // ─────────────────────────────────────────────────────────────────
@@ -208,37 +216,51 @@ function startStoryPhase() {
 // ─────────────────────────────────────────────────────────────────
 // Scoring（AI 点评）
 // ─────────────────────────────────────────────────────────────────
-interface ScoreDim { label: string; emoji: string; score: number; max: number }
-
 const scoringLoading = ref(true)
-const scoreDims = ref<ScoreDim[]>([])
-const scoreMvpIdx = ref(0)
-const scoreTags = ref<string[]>([])
-const scoreSummary = ref('')
+const scoreValue = ref(0)          // 精彩度 0-100
+const scoreComment = ref('')       // 毒舌评价
+const scoreMvpIdx = ref(0)         // 最佳桥段奖得主
+const scoreMvpReason = ref('')     // 得奖理由
+const scoreImageGradient = ref('') // 配图背景渐变
+const scoreImageEmoji = ref('')    // 配图主视觉
 let scoringTimer: ReturnType<typeof setTimeout> | null = null
 
-const SCORE_TAGS_POOL = ['悬疑', '奇幻', '温情', '搞笑', '惊悚', '励志', '科幻', '治愈', '反转', '热血']
+const SCORE_COMMENTS = [
+  '故事走向混乱到堪比烂尾剧，但三位讲述者拼命圆场的姿态感人至深。下次可以提前商量一下结局。',
+  '开头悬疑感十足，结尾急着收摊——故事还没说完，大家就已经迫不及待地想鼓掌了。',
+  '三个人的脑洞加在一起勉强拼出了一个能听完的故事，已经远超 AI 的预期，请继续努力。',
+  '情节转折之频繁，连编剧看了都要怀疑人生。不过至少没有人中途放弃，精神可嘉。',
+  '这个故事最大的亮点是结尾戛然而止，成功给观众留下了无限想象空间——当然也可能是没想好。',
+  '逻辑漏洞虽多，但胜在气氛热烈。AI 决定忽略所有不合理之处，给这份努力打高分。',
+]
 
-const SCORE_SUMMARIES = [
-  '三位讲述者将这个神秘的开头推向了始料未及的方向，每一棒都充满惊喜！',
-  '想象力爆棚！从开头的悬念到意外的结尾，团队默契让故事走向了全新高度。',
-  '充满创意的接龙！大家的发言相互呼应，把一个小开头变成了难忘的故事。',
-  '反转不断，高潮迭起！这场故事接龙展示了大家不俗的创造力和默契配合。',
+const SCORE_MVP_REASONS = [
+  '在关键时刻强行引入了一个新角色，险些救活整个故事，差一点就成功了。',
+  '用一句话把剧情从悬崖边上拉了回来，虽然方向有点歪，但至少没掉下去。',
+  '贡献了全场最出人意料的反转，让其他人愣了整整三秒不知道怎么接。',
+  '在大家都不知道故事该往哪走的时候，勇敢地给出了一个方向——尽管不太对。',
+  '凭借一己之力把故事的画风从悬疑拉成了喜剧，意外地让全场活跃起来。',
+]
+
+const SCORE_IMAGE_STYLES = [
+  { gradient: 'linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #4c1d95 100%)', emoji: '🌌' },
+  { gradient: 'linear-gradient(135deg, #064e3b 0%, #065f46 50%, #047857 100%)', emoji: '🌿' },
+  { gradient: 'linear-gradient(135deg, #7f1d1d 0%, #991b1b 50%, #b91c1c 100%)', emoji: '🔮' },
+  { gradient: 'linear-gradient(135deg, #0c4a6e 0%, #075985 50%, #0369a1 100%)', emoji: '🌊' },
+  { gradient: 'linear-gradient(135deg, #451a03 0%, #78350f 50%, #92400e 100%)', emoji: '🏜️' },
+  { gradient: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', emoji: '🤖' },
 ]
 
 function startScoring() {
-  const DIMS: Omit<ScoreDim, 'score'>[] = [
-    { label: '故事完整度', emoji: '📖', max: 5 },
-    { label: '想象力指数', emoji: '✨', max: 5 },
-    { label: '团队配合度', emoji: '🤝', max: 5 },
-    { label: '情节反转数', emoji: '🎭', max: 5 },
-  ]
-  scoreDims.value = DIMS.map(d => ({ ...d, score: Math.floor(Math.random() * 2) + 4 }))
+  scoreValue.value = Math.floor(Math.random() * 26) + 65  // 65-90
+  scoreComment.value = SCORE_COMMENTS[Math.floor(Math.random() * SCORE_COMMENTS.length)]!
   scoreMvpIdx.value = Math.floor(Math.random() * MEMBERS.length)
-  scoreTags.value = shuffle(SCORE_TAGS_POOL).slice(0, 3)
-  scoreSummary.value = SCORE_SUMMARIES[Math.floor(Math.random() * SCORE_SUMMARIES.length)]!
+  scoreMvpReason.value = SCORE_MVP_REASONS[Math.floor(Math.random() * SCORE_MVP_REASONS.length)]!
+  const style = SCORE_IMAGE_STYLES[Math.floor(Math.random() * SCORE_IMAGE_STYLES.length)]!
+  scoreImageGradient.value = style.gradient
+  scoreImageEmoji.value = style.emoji
   scoringLoading.value = true
-  scoringTimer = setTimeout(() => { scoringLoading.value = false }, 2600)
+  scoringTimer = setTimeout(() => { scoringLoading.value = false }, 2800)
 }
 
 onUnmounted(() => {
@@ -250,6 +272,20 @@ onUnmounted(() => {
 
 <template>
   <div class="ib">
+
+    <!-- ── Phase Nav ────────────────────────────────────────────── -->
+    <div class="ib-phase-nav">
+      <button
+        class="ib-nav-btn"
+        :class="{ 'ib-nav-btn--active': screen === 'intro' || screen === 'phase1' }"
+        @click="startPhase1"
+      >阶段一 · 自我介绍</button>
+      <button
+        class="ib-nav-btn"
+        :class="{ 'ib-nav-btn--active': screen === 'phase2_intro' || screen === 'phase2' || screen === 'scoring' || screen === 'done' }"
+        @click="jumpToPhase2"
+      >阶段二 · 故事接龙</button>
+    </div>
 
     <!-- ── INTRO ─────────────────────────────────────────────────── -->
     <div v-if="screen === 'intro'" class="ib-screen ib-intro">
@@ -500,48 +536,43 @@ onUnmounted(() => {
       <Transition name="ib-rise">
         <div v-if="!scoringLoading" class="ib-scoring-result">
 
-          <div class="ib-scoring-header">
-            <span class="ib-scoring-trophy">🏆</span>
-            <h2 class="ib-scoring-title">AI 点评出炉！</h2>
-          </div>
-
-          <!-- 故事总评 -->
-          <div class="ib-scoring-summary-card">
-            <p class="ib-scoring-summary-text">"{{ scoreSummary }}"</p>
-            <div class="ib-scoring-tags">
-              <span v-for="tag in scoreTags" :key="tag" class="ib-scoring-tag">{{ tag }}</span>
+          <!-- 精彩度大分 -->
+          <div class="ib-score-hero">
+            <p class="ib-score-hero-label">精彩度评分</p>
+            <div class="ib-score-hero-number">
+              <span class="ib-score-value">{{ scoreValue }}</span>
+              <span class="ib-score-unit">分</span>
+            </div>
+            <div class="ib-score-bar-wrap">
+              <div class="ib-score-bar-fill" :style="{ width: `${scoreValue}%` }"></div>
             </div>
           </div>
 
-          <!-- 评分维度 -->
-          <div class="ib-scoring-dims">
-            <div v-for="dim in scoreDims" :key="dim.label" class="ib-scoring-dim">
-              <span class="ib-scoring-dim-emoji">{{ dim.emoji }}</span>
-              <div class="ib-scoring-dim-body">
-                <div class="ib-scoring-dim-top">
-                  <span class="ib-scoring-dim-label">{{ dim.label }}</span>
-                  <span class="ib-scoring-dim-score">{{ dim.score }}/{{ dim.max }}</span>
+          <!-- 毒舌评价 -->
+          <div class="ib-score-comment-card">
+            <span class="ib-score-comment-robot">🤖</span>
+            <p class="ib-score-comment-text">{{ scoreComment }}</p>
+          </div>
+
+          <!-- AI 配图 -->
+          <div class="ib-score-image" :style="{ background: scoreImageGradient }">
+            <span class="ib-score-image-emoji">{{ scoreImageEmoji }}</span>
+            <p class="ib-score-image-caption">{{ storyOpening }}</p>
+            <span class="ib-score-image-badge">AI 配图</span>
+          </div>
+
+          <!-- 最佳桥段奖 -->
+          <div class="ib-score-award">
+            <div class="ib-score-award-trophy">🏅</div>
+            <div class="ib-score-award-body">
+              <p class="ib-score-award-label">最佳桥段奖</p>
+              <div class="ib-score-award-winner">
+                <div class="ib-avatar ib-avatar--lg" :style="{ background: MEMBERS[scoreMvpIdx]!.bg }">
+                  {{ MEMBERS[scoreMvpIdx]!.initial }}
                 </div>
-                <div class="ib-stars">
-                  <span
-                    v-for="i in dim.max"
-                    :key="i"
-                    class="ib-star"
-                    :class="{ 'ib-star--filled': i <= dim.score }"
-                  >★</span>
-                </div>
+                <span class="ib-score-award-name">{{ MEMBERS[scoreMvpIdx]!.name }}</span>
               </div>
-            </div>
-          </div>
-
-          <!-- 最佳故事家 -->
-          <div class="ib-scoring-mvp">
-            <div class="ib-avatar ib-avatar--xl" :style="{ background: MEMBERS[scoreMvpIdx]!.bg }">
-              {{ MEMBERS[scoreMvpIdx]!.initial }}
-            </div>
-            <div>
-              <p class="ib-scoring-mvp-label">🌟 最佳故事家</p>
-              <p class="ib-scoring-mvp-name">{{ MEMBERS[scoreMvpIdx]!.name }}</p>
+              <p class="ib-score-award-reason">{{ scoreMvpReason }}</p>
             </div>
           </div>
 
@@ -585,6 +616,39 @@ onUnmounted(() => {
   max-width: 960px;
   margin: 0 auto;
   padding: 8px 24px 80px;
+}
+
+/* ── Phase Nav ──────────────────────────────────────────────────── */
+.ib-phase-nav {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 4px;
+}
+
+.ib-nav-btn {
+  flex: 1;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  border-radius: 999px;
+  border: 1.5px solid var(--app-border);
+  background: var(--app-bg-elevated);
+  color: var(--app-text-muted);
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.ib-nav-btn--active {
+  border-color: var(--app-primary);
+  color: var(--app-primary);
+  background: var(--app-primary-soft);
+}
+
+.ib-nav-btn:hover:not(.ib-nav-btn--active) {
+  border-color: var(--app-border-strong);
+  color: var(--app-text-primary);
 }
 
 /* ── Screen base ────────────────────────────────────────────────── */
@@ -1225,154 +1289,187 @@ onUnmounted(() => {
   gap: 20px;
 }
 
-.ib-scoring-header {
+/* 精彩度大分 */
+.ib-score-hero {
+  width: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
+  padding: 28px 24px 24px;
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  border-radius: 20px;
+  color: #fff;
 }
 
-.ib-scoring-trophy {
-  font-size: 64px;
+.ib-score-hero-label {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.ib-score-hero-number {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
   line-height: 1;
 }
 
-.ib-scoring-title {
-  margin: 0;
-  font-size: 32px;
-  font-weight: 800;
-  color: var(--app-text-primary);
-  letter-spacing: -0.5px;
+.ib-score-value {
+  font-size: 88px;
+  font-weight: 900;
+  letter-spacing: -4px;
+  background: linear-gradient(135deg, #f59e0b, #fbbf24);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
-/* 总评卡片 */
-.ib-scoring-summary-card {
+.ib-score-unit {
+  font-size: 28px;
+  font-weight: 700;
+  color: #f59e0b;
+  padding-bottom: 14px;
+}
+
+.ib-score-bar-wrap {
   width: 100%;
-  padding: 22px 24px;
-  background: linear-gradient(135deg, #fefce8 0%, #fffbeb 100%);
-  border: 1.5px solid #fcd34d;
-  border-radius: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.ib-scoring-summary-text {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 500;
-  color: #78350f;
-  line-height: 1.7;
-  font-style: italic;
-}
-
-.ib-scoring-tags {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.ib-scoring-tag {
-  font-size: 13px;
-  font-weight: 600;
-  padding: 3px 12px;
+  height: 6px;
+  background: rgba(255,255,255,0.1);
   border-radius: 999px;
-  background: #fef3c7;
-  color: #92400e;
-  border: 1px solid #fcd34d;
+  overflow: hidden;
 }
 
-/* 评分维度 */
-.ib-scoring-dims {
+.ib-score-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #f59e0b, #fbbf24);
+  border-radius: 999px;
+  transition: width 1.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* 毒舌评价 */
+.ib-score-comment-card {
   width: 100%;
   display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.ib-scoring-dim {
-  display: flex;
-  align-items: center;
   gap: 14px;
-  padding: 14px 18px;
+  align-items: flex-start;
+  padding: 20px 22px;
   background: var(--app-bg-elevated);
-  border: 1px solid var(--app-border);
-  border-radius: 12px;
+  border: 1.5px solid var(--app-border);
+  border-radius: 16px;
   box-shadow: var(--app-shadow-card);
 }
 
-.ib-scoring-dim-emoji {
-  font-size: 28px;
-  flex-shrink: 0;
+.ib-score-comment-robot {
+  font-size: 30px;
   line-height: 1;
+  flex-shrink: 0;
+  margin-top: 2px;
 }
 
-.ib-scoring-dim-body {
-  flex: 1;
+.ib-score-comment-text {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--app-text-primary);
+  line-height: 1.75;
+}
+
+/* AI 配图 */
+.ib-score-image {
+  width: 100%;
+  aspect-ratio: 16/9;
+  border-radius: 16px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-}
-
-.ib-scoring-dim-top {
-  display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px;
+  position: relative;
+  overflow: hidden;
 }
 
-.ib-scoring-dim-label {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--app-text-primary);
-}
-
-.ib-scoring-dim-score {
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--app-text-secondary);
-  font-variant-numeric: tabular-nums;
-}
-
-.ib-stars {
-  display: flex;
-  gap: 3px;
-}
-
-.ib-star {
-  font-size: 20px;
-  color: #d1d5db;
+.ib-score-image-emoji {
+  font-size: 72px;
   line-height: 1;
-  transition: color 0.2s ease;
+  filter: drop-shadow(0 4px 16px rgba(0,0,0,0.4));
 }
 
-.ib-star--filled {
-  color: #f59e0b;
+.ib-score-image-caption {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.7);
+  text-align: center;
+  line-height: 1.6;
+  max-width: 480px;
 }
 
-/* MVP */
-.ib-scoring-mvp {
-  display: flex;
-  align-items: center;
-  gap: 16px;
+.ib-score-image-badge {
+  position: absolute;
+  bottom: 12px;
+  right: 14px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.5);
+  letter-spacing: 0.06em;
+}
+
+/* 最佳桥段奖 */
+.ib-score-award {
   width: 100%;
-  padding: 18px 22px;
-  background: linear-gradient(135deg, #faf5ff 0%, #f5f3ff 100%);
-  border: 1.5px solid #c4b5fd;
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  padding: 20px 22px;
+  background: linear-gradient(135deg, #fefce8 0%, #fffbeb 100%);
+  border: 1.5px solid #fcd34d;
   border-radius: 16px;
 }
 
-.ib-scoring-mvp-label {
-  margin: 0 0 4px;
-  font-size: 14px;
-  font-weight: 600;
-  color: #7c3aed;
+.ib-score-award-trophy {
+  font-size: 36px;
+  line-height: 1;
+  flex-shrink: 0;
 }
 
-.ib-scoring-mvp-name {
+.ib-score-award-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ib-score-award-label {
   margin: 0;
-  font-size: 24px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #92400e;
+}
+
+.ib-score-award-winner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ib-score-award-name {
+  font-size: 22px;
   font-weight: 800;
-  color: #4c1d95;
+  color: #78350f;
+}
+
+.ib-score-award-reason {
+  margin: 0;
+  font-size: 15px;
+  color: #92400e;
+  line-height: 1.6;
 }
 
 /* ── DONE ────────────────────────────────────────────────────────── */
