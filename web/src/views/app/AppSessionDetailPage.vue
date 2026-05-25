@@ -136,7 +136,7 @@ function normalizeInfoGapButton(button: InfoGapButton): InfoGapButton {
   return {
     ...button,
     explanation: button.explanation ?? '',
-    viewed: button.viewed ?? false,
+    viewed: button.viewed ?? button.status === 'clicked',
   }
 }
 
@@ -261,9 +261,8 @@ const infoGapButtons = ref<InfoGapButton[]>([])
 
 async function fetchInfoGapButtons() {
   try {
-    const includeAll = session.value?.status === 'ended'
     const data = await appHttp.get<InfoGapButton[]>(
-      `/api/sessions/${sessionId}/info-gap/buttons${includeAll ? '?include_all=true' : ''}`,
+      `/api/sessions/${sessionId}/info-gap/buttons?include_all=true`,
     )
     infoGapButtons.value = sortInfoGapButtonsNewestFirst(data.map((button) => normalizeInfoGapButton(button)))
   } catch {

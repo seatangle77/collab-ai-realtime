@@ -25,7 +25,7 @@ WS_TRACE = "[WS_TRACE]"
 
 VALID_PUSH_CHANNELS = {"web", "app", "glasses", "info_gap"}
 VALID_DELIVERY_STATUSES = {"pending", "delivered", "failed", "skipped", "deferred"}
-JPUSH_NOTIFICATION_TITLE = "AI 讨论建议"
+JPUSH_NOTIFICATION_TITLE = ""
 
 
 def _mask_device_token(device_token: str) -> str:

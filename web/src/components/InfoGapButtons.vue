@@ -8,6 +8,7 @@ export interface InfoGapButton {
   analysis_run_id?: string
   window_start?: string
   created_at?: string
+  status?: string
   explanation?: string
   viewed?: boolean
 }
