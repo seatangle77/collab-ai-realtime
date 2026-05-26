@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from 'vue-router'
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { Component } from 'vue'
 import { HomeFilled, User, ChatLineRound, Microphone, Sunny } from '@element-plus/icons-vue'
 import { Capacitor } from '@capacitor/core'
 
 const router = useRouter()
 const route = useRoute()
+const isAccountMenuOpen = ref(false)
 
 interface AppUser {
   id: string
@@ -83,11 +84,25 @@ const currentGroup = computed<AppGroupSummary | null>(() => {
   }
 })
 
+const accountInitial = computed(() => {
+  const displayName = currentUser.value?.name || currentUser.value?.email || ''
+  return displayName.trim().charAt(0).toUpperCase() || '我'
+})
+
+watch(
+  () => route.fullPath,
+  () => {
+    isAccountMenuOpen.value = false
+  },
+)
+
 function goAuth() {
+  isAccountMenuOpen.value = false
   router.push('/app/login')
 }
 
 function logout() {
+  isAccountMenuOpen.value = false
   if (typeof window !== 'undefined') {
     window.localStorage.removeItem('app_access_token')
     window.localStorage.removeItem('app_user')
@@ -99,14 +114,13 @@ function logout() {
 
 <template>
   <div class="app-layout">
-    <!-- 顶部 Header：只保留 Logo + 用户信息 + 退出 -->
     <header class="app-header">
       <div class="app-logo">Collab AI</div>
       <div class="app-header-right">
-        <span v-if="isLoggedIn && currentUser" class="app-user-name">
+        <span v-if="isLoggedIn && currentUser" class="app-user-name app-header-desktop-item">
           {{ currentUser.name || currentUser.email }}
         </span>
-        <span v-if="isLoggedIn && currentGroup" class="app-current-group">
+        <span v-if="isLoggedIn && currentGroup" class="app-current-group app-header-desktop-item">
           {{ currentGroup.name }}
         </span>
         <button
@@ -119,12 +133,34 @@ function logout() {
         </button>
         <button
           v-else
-          class="app-auth-btn app-auth-btn--logout"
+          class="app-auth-btn app-auth-btn--logout app-header-desktop-item"
           type="button"
           @click="logout"
         >
           退出
         </button>
+        <div v-if="isLoggedIn" class="app-account-menu">
+          <button
+            class="app-account-trigger"
+            type="button"
+            :aria-expanded="isAccountMenuOpen"
+            aria-label="账户菜单"
+            @click="isAccountMenuOpen = !isAccountMenuOpen"
+          >
+            {{ accountInitial }}
+          </button>
+          <div v-if="isAccountMenuOpen" class="app-account-popover">
+            <div class="app-account-name">
+              {{ currentUser?.name || currentUser?.email }}
+            </div>
+            <div v-if="currentGroup" class="app-account-group">
+              {{ currentGroup.name }}
+            </div>
+            <button class="app-account-logout" type="button" @click="logout">
+              退出登录
+            </button>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -180,9 +216,11 @@ function logout() {
   font-weight: 700;
   color: var(--app-text-primary);
   letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 .app-header-right {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -247,6 +285,90 @@ function logout() {
 .app-auth-btn--logout:hover {
   background: var(--app-bg-page);
   color: var(--app-text-primary);
+}
+
+.app-account-menu {
+  display: none;
+  position: relative;
+}
+
+.app-account-trigger {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--app-border);
+  border-radius: 50%;
+  background: var(--app-primary);
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.app-account-popover {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: min(260px, calc(100vw - 24px));
+  padding: 12px;
+  border: 1px solid var(--app-border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.16);
+  z-index: 240;
+}
+
+.app-account-name,
+.app-account-group {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-account-name {
+  color: var(--app-text-primary);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.app-account-group {
+  margin-top: 4px;
+  color: var(--app-text-secondary);
+  font-size: 13px;
+}
+
+.app-account-logout {
+  width: 100%;
+  min-height: 40px;
+  margin-top: 12px;
+  border: 1px solid var(--app-border);
+  border-radius: 10px;
+  background: var(--app-bg-page);
+  color: var(--app-text-primary);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+@media (max-width: 600px) {
+  .app-header {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .app-logo {
+    font-size: 17px;
+  }
+
+  .app-header-desktop-item {
+    display: none;
+  }
+
+  .app-account-menu {
+    display: block;
+  }
 }
 
 /* ── 主内容区 ── */

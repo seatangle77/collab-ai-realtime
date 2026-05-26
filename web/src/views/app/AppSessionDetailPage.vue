@@ -700,6 +700,10 @@ function handleManualReconnect() {
 
 
 function handleSessionAction(command: string) {
+  if (command === 'debug-audio') {
+    openDebugFilePicker()
+    return
+  }
   if (command === 'edit') {
     void handleEditTitle()
     return
@@ -1662,14 +1666,16 @@ onUnmounted(() => {
       <div class="app-session-detail-header">
         <div class="app-session-detail-title-row">
           <button type="button" class="app-session-detail-back-btn" @click="goBack">‹</button>
-          <h2 class="app-session-detail-title">{{ session.session_title }}</h2>
-          <el-tag
-            class="app-session-detail-status-tag"
-            :type="session.status === 'ended' ? 'danger' : session.status === 'ongoing' ? 'success' : 'info'"
-            size="small"
-          >
-            {{ statusLabel }}
-          </el-tag>
+          <div class="app-session-detail-title-main">
+            <h2 class="app-session-detail-title">{{ session.session_title }}</h2>
+            <el-tag
+              class="app-session-detail-status-tag"
+              :type="session.status === 'ended' ? 'danger' : session.status === 'ongoing' ? 'success' : 'info'"
+              size="small"
+            >
+              {{ statusLabel }}
+            </el-tag>
+          </div>
         </div>
         <div class="app-session-detail-actions">
           <template v-if="isHost">
@@ -1684,15 +1690,6 @@ onUnmounted(() => {
                 <span class="app-session-detail-btn-icon" aria-hidden="true">▶</span>
                 发起
               </button>
-              <button
-                v-if="debugAudioEnabled"
-                type="button"
-                class="app-session-detail-secondary-btn app-session-detail-debug-btn"
-                :disabled="!canSelectInjectionFile"
-                @click="openDebugFilePicker"
-              >
-                {{ selectedInjectionFile ? '更换测试音频' : '选择测试音频' }}
-              </button>
               <el-dropdown trigger="click" @command="handleSessionAction">
                 <button
                   type="button"
@@ -1705,6 +1702,13 @@ onUnmounted(() => {
                 </button>
                 <template #dropdown>
                   <el-dropdown-menu>
+                    <el-dropdown-item
+                      v-if="debugAudioEnabled"
+                      command="debug-audio"
+                      :disabled="!canSelectInjectionFile"
+                    >
+                      {{ selectedInjectionFile ? '更换测试音频' : '选择测试音频' }}
+                    </el-dropdown-item>
                     <el-dropdown-item command="edit">修改标题</el-dropdown-item>
                     <el-dropdown-item command="cancel" class="app-session-detail-dropdown-danger">
                       取消会话
@@ -1723,15 +1727,6 @@ onUnmounted(() => {
                 <span class="app-session-detail-btn-icon" aria-hidden="true">⏹</span>
                 结束
               </button>
-              <button
-                v-if="debugAudioEnabled"
-                type="button"
-                class="app-session-detail-secondary-btn app-session-detail-debug-btn"
-                :disabled="!canUseFileInjection"
-                @click="openDebugFilePicker"
-              >
-                {{ selectedInjectionFile ? '更换测试音频' : '文件注入' }}
-              </button>
               <el-dropdown trigger="click" @command="handleSessionAction">
                 <button
                   type="button"
@@ -1744,6 +1739,13 @@ onUnmounted(() => {
                 </button>
                 <template #dropdown>
                   <el-dropdown-menu>
+                    <el-dropdown-item
+                      v-if="debugAudioEnabled"
+                      command="debug-audio"
+                      :disabled="!canUseFileInjection"
+                    >
+                      {{ selectedInjectionFile ? '更换测试音频' : '文件注入' }}
+                    </el-dropdown-item>
                     <el-dropdown-item command="edit">修改标题</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
@@ -1853,7 +1855,7 @@ onUnmounted(() => {
           class="app-session-detail-transcripts-empty"
         >
           <AppEmptyState
-            icon="📝"
+            icon="document"
             title="暂无讨论实录"
             description="会话开始后，转录内容会出现在这里。"
             compact
@@ -1995,48 +1997,62 @@ onUnmounted(() => {
 }
 
 .app-session-detail-header {
-  padding: 18px 20px;
+  padding: 16px;
   border-radius: var(--app-radius-card);
   background: var(--app-bg-elevated);
   border: 1px solid var(--app-border);
   box-shadow: var(--app-shadow-card);
-  margin-bottom: 20px;
+  margin-bottom: 14px;
 }
 
 .app-session-detail-title-row {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 10px;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.app-session-detail-title-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .app-session-detail-title {
   margin: 0;
-  font-size: var(--app-font-size-title);
-  font-weight: 600;
+  font-size: 22px;
+  line-height: 1.25;
+  font-weight: 700;
   color: var(--app-text-primary);
-  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .app-session-detail-status-tag {
   flex-shrink: 0;
+  margin-top: 3px;
 }
 
 .app-session-detail-actions {
   display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
+  gap: 8px;
   align-items: center;
 }
 
 .app-session-detail-primary-btn {
-  border-radius: var(--app-radius-pill);
+  min-height: 44px;
+  border-radius: var(--app-radius-md);
   border: 1px solid var(--app-primary);
-  padding: 6px 16px;
-  font-size: 13px;
+  padding: 0 18px;
+  font-size: 15px;
+  font-weight: 700;
   background: var(--app-primary);
   color: var(--app-bg-elevated);
   cursor: pointer;
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.18);
 }
 
 .app-session-detail-primary-btn:disabled {
@@ -2060,10 +2076,12 @@ onUnmounted(() => {
 }
 
 .app-session-detail-secondary-btn {
-  border-radius: var(--app-radius-pill);
+  min-height: 42px;
+  border-radius: var(--app-radius-md);
   border: 1px solid var(--app-border);
-  padding: 6px 14px;
-  font-size: 13px;
+  padding: 0 14px;
+  font-size: 15px;
+  font-weight: 600;
   background: var(--app-bg-elevated);
   color: var(--app-text-primary);
   cursor: pointer;
@@ -2079,17 +2097,22 @@ onUnmounted(() => {
 }
 
 .app-session-detail-danger-btn {
-  border-radius: var(--app-radius-pill);
+  min-height: 44px;
+  border-radius: var(--app-radius-md);
   border: 1px solid rgba(248, 113, 113, 0.5);
-  padding: 6px 14px;
-  font-size: 13px;
+  padding: 0 18px;
+  font-size: 15px;
+  font-weight: 700;
   background: var(--app-bg-elevated);
   color: #b91c1c;
   cursor: pointer;
 }
 
 .app-session-detail-danger-btn--primary {
-  margin-left: auto;
+  background: #b91c1c;
+  border-color: #b91c1c;
+  color: #fff;
+  box-shadow: 0 8px 20px rgba(185, 28, 28, 0.14);
 }
 
 .app-session-detail-danger-btn:hover:enabled {
@@ -2103,11 +2126,10 @@ onUnmounted(() => {
 }
 
 .app-session-detail-transcripts {
-  padding: 18px 20px;
+  padding: 16px;
   border-radius: var(--app-radius-card);
   background: var(--app-bg-elevated);
   border: 1px solid var(--app-border);
-  box-shadow: var(--app-shadow-card);
 }
 
 .app-session-detail-transcripts-header {
@@ -2502,8 +2524,8 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 44px;
+  height: 44px;
   border-radius: var(--app-radius-pill);
   border: 1px solid var(--app-border);
   background: var(--app-bg-elevated);
@@ -2518,5 +2540,50 @@ onUnmounted(() => {
 
 .app-session-detail-dropdown-danger {
   color: #b91c1c;
+}
+
+@media (max-width: 600px) {
+  .app-session-detail-page {
+    padding-top: 0;
+  }
+
+  .app-session-detail-header {
+    padding: 14px;
+    margin-bottom: 12px;
+  }
+
+  .app-session-detail-title-row {
+    margin-bottom: 12px;
+  }
+
+  .app-session-detail-title-main {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .app-session-detail-title {
+    font-size: 21px;
+  }
+
+  .app-session-detail-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    width: 100%;
+  }
+
+  .app-session-detail-actions > button:first-child {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .app-session-detail-more-btn {
+    width: 46px;
+    height: 46px;
+  }
+
+  .app-session-detail-transcripts {
+    padding: 14px;
+  }
 }
 </style>

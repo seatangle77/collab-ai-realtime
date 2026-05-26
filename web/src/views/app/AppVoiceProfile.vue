@@ -445,7 +445,7 @@ onBeforeUnmount(() => {
           <div class="samples-list">
             <AppEmptyState
               v-if="editableUrls.length === 0"
-              icon="🎙️"
+              icon="microphone"
               title="暂无样本"
               description="请先录音或上传音频文件。"
               compact

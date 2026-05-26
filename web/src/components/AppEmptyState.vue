@@ -1,5 +1,32 @@
 <script setup lang="ts">
-withDefaults(
+import { computed } from 'vue'
+import type { Component } from 'vue'
+import {
+  ChatLineRound,
+  Document,
+  FolderOpened,
+  Microphone,
+  User,
+} from '@element-plus/icons-vue'
+
+const iconMap: Record<string, Component> = {
+  chat: ChatLineRound,
+  document: Document,
+  empty: FolderOpened,
+  group: User,
+  microphone: Microphone,
+}
+
+const legacyIconMap: Record<string, keyof typeof iconMap> = {
+  '👥': 'group',
+  '🧑‍🤝‍🧑': 'group',
+  '📭': 'empty',
+  '🗂️': 'empty',
+  '📝': 'document',
+  '🎙️': 'microphone',
+}
+
+const props = withDefaults(
   defineProps<{
     icon?: string
     title: string
@@ -8,12 +35,17 @@ withDefaults(
     compact?: boolean
   }>(),
   {
-    icon: '📭',
+    icon: 'empty',
     description: '',
     actionLabel: '',
     compact: false,
   },
 )
+
+const emptyIcon = computed(() => {
+  const key = iconMap[props.icon] ? props.icon : legacyIconMap[props.icon] || 'empty'
+  return iconMap[key]
+})
 
 defineEmits<{
   (e: 'action'): void
@@ -22,7 +54,9 @@ defineEmits<{
 
 <template>
   <div class="app-empty-state" :class="{ 'app-empty-state--compact': compact }">
-    <div class="app-empty-state-icon" aria-hidden="true">{{ icon }}</div>
+    <div class="app-empty-state-icon" aria-hidden="true">
+      <component :is="emptyIcon" class="app-empty-state-icon-svg" />
+    </div>
     <p class="app-empty-state-title">{{ title }}</p>
     <p v-if="description" class="app-empty-state-description">{{ description }}</p>
     <button
@@ -45,8 +79,8 @@ defineEmits<{
   gap: 10px;
   padding: 40px 20px;
   border-radius: var(--app-radius-card);
-  background: var(--app-bg-elevated);
-  border: 1px dashed var(--app-border);
+  background: #fbfdff;
+  border: 1px solid var(--app-border);
 }
 
 .app-empty-state--compact {
@@ -54,8 +88,19 @@ defineEmits<{
 }
 
 .app-empty-state-icon {
-  font-size: 36px;
-  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--app-radius-pill);
+  background: var(--app-primary-soft);
+  color: var(--app-primary);
+}
+
+.app-empty-state-icon-svg {
+  width: 24px;
+  height: 24px;
 }
 
 .app-empty-state-title {

@@ -113,6 +113,8 @@ const filteredSessions = computed(() => {
   return sessions.value.filter((s) => s.status === 'ended')
 })
 
+const hasVisibleSessions = computed(() => filteredSessions.value.length > 0)
+
 function statusTagType(session: AppChatSession): 'warning' | 'primary' | 'info' {
   if (session.status === 'not_started') return 'warning'
   if (session.status === 'ongoing') return 'primary'
@@ -369,7 +371,7 @@ onMounted(() => {
 
     <div v-if="!hasCurrentGroup" class="app-sessions-empty-group">
       <AppEmptyState
-        icon="👥"
+        icon="group"
         title="你还没有加入任何群组"
         description="请先前往「我的群组」新建或加入一个群组，之后才能新建会话。"
         action-label="前往我的群组"
@@ -408,6 +410,7 @@ onMounted(() => {
         </div>
         <!-- 桌面端：Tab 同行显示 -->
         <button
+          v-if="hasVisibleSessions"
           type="button"
           class="app-sessions-create-btn app-sessions-new-btn-inline"
           aria-label="创建会话"
@@ -425,7 +428,7 @@ onMounted(() => {
         <!-- 空状态：用 el-empty + 内联新建按钮 -->
         <AppEmptyState
           v-else-if="filteredSessions.length === 0"
-          icon="🗂️"
+          icon="chat"
           title="暂无会话"
           description="当前筛选条件下还没有会话，点击下方按钮创建第一个。"
           action-label="新建会话"
@@ -506,7 +509,7 @@ onMounted(() => {
 
     <!-- 移动端 FAB 新建按钮 -->
     <button
-      v-if="hasCurrentGroup"
+      v-if="hasCurrentGroup && hasVisibleSessions"
       type="button"
       class="app-sessions-fab"
       @click="openCreateDialog"
@@ -515,7 +518,12 @@ onMounted(() => {
     </button>
 
     <!-- 新建会话弹窗 -->
-    <el-dialog v-model="createDialogVisible" title="新建会话" :width="'min(480px, 92vw)'">
+    <el-dialog
+      v-model="createDialogVisible"
+      class="app-mobile-sheet"
+      title="新建会话"
+      :width="'min(480px, 92vw)'"
+    >
       <el-form ref="createFormRef" :model="createForm" :rules="createRules" label-width="80px">
         <el-form-item label="所属群组" prop="groupId">
           <el-select
@@ -553,7 +561,12 @@ onMounted(() => {
     </el-dialog>
 
     <!-- 编辑会话弹窗 -->
-    <el-dialog v-model="editDialogVisible" title="编辑会话" :width="'min(480px, 92vw)'">
+    <el-dialog
+      v-model="editDialogVisible"
+      class="app-mobile-sheet"
+      title="编辑会话"
+      :width="'min(480px, 92vw)'"
+    >
       <el-form ref="editFormRef" :model="editForm" :rules="editRules" label-width="80px">
         <el-form-item label="会话标题" prop="sessionTitle">
           <el-input v-model="editForm.sessionTitle" placeholder="请输入新的会话标题" />
@@ -603,7 +616,6 @@ onMounted(() => {
 .app-sessions-empty-group {
   margin-top: 16px;
   border-radius: var(--app-radius-card);
-  box-shadow: var(--app-shadow-card);
 }
 
 .app-sessions-empty-text {

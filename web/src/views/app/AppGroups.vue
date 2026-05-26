@@ -338,6 +338,7 @@ onMounted(() => {
     <div class="app-groups-header">
       <h2 class="app-groups-title">我的群组</h2>
       <button
+        v-if="groups.length > 0"
         class="app-groups-create-btn"
         type="button"
         aria-label="创建群组"
@@ -352,7 +353,7 @@ onMounted(() => {
     <el-card class="app-groups-card app-groups-card--secondary" shadow="never">
       <AppEmptyState
         v-if="!groups.length && !loading"
-        icon="👥"
+        icon="group"
         title="你还没有加入任何群组"
         description="创建或加入一个群组后，就可以选择成员发起会话。"
         action-label="创建"
@@ -407,7 +408,7 @@ onMounted(() => {
           <div v-if="detailLoading" class="app-groups-members-loading">成员信息加载中...</div>
           <AppEmptyState
             v-else-if="activeGroupDetail.members.length === 0"
-            icon="🧑‍🤝‍🧑"
+            icon="group"
             title="群组内还没有成员"
             description="当前群组暂无可展示成员，稍后再回来看看。"
             compact
@@ -458,7 +459,7 @@ onMounted(() => {
         </template>
         <template v-else>
           <AppEmptyState
-            icon="📭"
+            icon="empty"
             title="尚未选择群组"
             description="创建或加入群组后，可以在这里查看成员。"
           />
@@ -494,7 +495,12 @@ onMounted(() => {
       </p>
     </el-card>
 
-    <el-dialog v-model="createDialogVisible" title="新建群组" :width="'min(480px, 92vw)'">
+    <el-dialog
+      v-model="createDialogVisible"
+      class="app-mobile-sheet"
+      title="新建群组"
+      :width="'min(480px, 92vw)'"
+    >
       <el-form ref="createFormRef" :model="createForm" :rules="createRules" label-width="80px">
         <el-form-item label="名称" prop="name">
           <el-input v-model="createForm.name" placeholder="请输入群组名称" />
@@ -577,8 +583,7 @@ onMounted(() => {
 }
 
 .app-groups-card--secondary {
-  border-style: dashed;
-  background: #fbfdff;
+  background: transparent;
 }
 
 .app-groups-empty {
