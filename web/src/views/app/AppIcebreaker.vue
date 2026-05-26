@@ -731,11 +731,6 @@ onUnmounted(() => {
             <p class="ib-score-comment-text">{{ scoreComment }}</p>
           </div>
 
-          <div v-if="polishedStory" class="ib-score-story-card">
-            <p class="ib-score-story-label">AI 整理版故事</p>
-            <p class="ib-score-story-text">{{ polishedStory }}</p>
-          </div>
-
           <!-- 故事表情包 -->
           <div v-if="scoreMeme" class="ib-score-meme">
             <div class="ib-score-meme-media" :style="{ background: scoreImageGradient }">
@@ -768,6 +763,11 @@ onUnmounted(() => {
               </div>
               <p class="ib-score-award-reason">{{ scoreMvpReason }}</p>
             </div>
+          </div>
+
+          <div v-if="polishedStory" class="ib-score-story-card">
+            <p class="ib-score-story-label">AI 整理版故事</p>
+            <p class="ib-score-story-text">{{ polishedStory }}</p>
           </div>
 
           <button class="ib-btn ib-btn--primary ib-btn--lg" @click="screen = 'done'">

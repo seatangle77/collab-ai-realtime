@@ -35,7 +35,7 @@ from .info_gap import router as info_gap_router
 from .concepts import router as concepts_router
 from .discussion_summary import router as discussion_summary_router
 from .window_metrics_api import router as window_metrics_router
-from .icebreaker import router as icebreaker_router
+from .icebreaker.router import router as icebreaker_router
 from .admin.push_queue import router as admin_push_queue_router
 from .admin.window_metrics import router as admin_window_metrics_router
 from .admin.discussion_summaries import router as admin_discussion_summaries_router

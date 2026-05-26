@@ -8,11 +8,11 @@ from pydantic import Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .api_model import ApiModel
-from .auth import get_current_user
-from .db import get_db
-from .icebreaker_ai import evaluate_icebreaker_story
-from .icebreaker_asr import (
+from ..api_model import ApiModel
+from ..auth import get_current_user
+from ..db import get_db
+from .ai import evaluate_icebreaker_story
+from .asr import (
     IcebreakerASRUnavailable,
     IcebreakerAudioDecodeError,
     transcribe_icebreaker_audio,

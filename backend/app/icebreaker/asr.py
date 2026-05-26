@@ -14,7 +14,7 @@ import urllib.error
 import urllib.request
 import uuid
 
-from .settings import tencent_asr_settings
+from ..settings import tencent_asr_settings
 
 logger = logging.getLogger(__name__)
 

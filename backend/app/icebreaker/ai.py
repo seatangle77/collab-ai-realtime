@@ -7,7 +7,7 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
-from .settings import QWEN_CHAT_EXTRA_BODY, nlp_settings
+from ..settings import QWEN_CHAT_EXTRA_BODY, nlp_settings
 
 logger = logging.getLogger(__name__)
 
