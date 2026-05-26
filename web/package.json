@@ -20,6 +20,7 @@
     "test:e2e:app-main": "playwright test tests/e2e/app-main.spec.ts",
     "test:e2e:app-groups": "playwright test tests/e2e/app-groups.spec.ts",
     "test:e2e:app-sessions": "playwright test tests/e2e/app-sessions.spec.ts",
+    "test:e2e:app-icebreaker": "playwright test tests/e2e/app-icebreaker.spec.ts",
     "test:e2e:app-voice-profile": "playwright test tests/e2e/app-voice-profile.spec.ts"
   },
   "dependencies": {

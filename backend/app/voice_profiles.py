@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from pydantic import Field, field_validator
+from pydantic import Field
 from .api_model import ApiModel
 from resemblyzer import VoiceEncoder, preprocess_wav
 from sqlalchemy import text
@@ -40,14 +40,6 @@ class VoiceProfileOut(ApiModel):
 
 class UpdateSamplesRequest(ApiModel):
     sample_audio_urls: list[str]
-
-    @field_validator("sample_audio_urls")
-    @classmethod
-    def validate_sample_audio_urls(cls, v: list[str]) -> list[str]:
-        max_samples = 5
-        if len(v) > max_samples:
-            raise ValueError(f"最多支持 {max_samples} 条语音样本")
-        return v
 
 
 class UploadAudioResponse(ApiModel):
@@ -359,12 +351,6 @@ async def upload_my_voice_sample(
     """
     user_id = current_user["id"]
     profile = await _get_or_create_profile(user_id=user_id, db=db)
-
-    if len(profile.sample_audio_urls) >= 5:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="最多支持 5 条语音样本",
-        )
 
     content_type = file.content_type or ""
     if not any(content_type.startswith(p) for p in ALLOWED_AUDIO_CONTENT_TYPE_PREFIXES):

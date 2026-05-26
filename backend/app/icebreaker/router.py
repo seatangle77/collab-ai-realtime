@@ -17,6 +17,7 @@ from .asr import (
     IcebreakerAudioDecodeError,
     transcribe_icebreaker_audio,
 )
+from .voice_sample import add_icebreaker_voice_sample
 
 router = APIRouter(prefix="/api/icebreaker", tags=["icebreaker"])
 logger = logging.getLogger(__name__)
@@ -55,6 +56,13 @@ class IcebreakerTranscribeResponse(ApiModel):
     text: str
 
 
+class IcebreakerVoiceSampleResponse(ApiModel):
+    text: str
+    voice_sample_added: bool = False
+    sample_url: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+
 async def _ensure_group_member(group_id: str, user_id: str, db: AsyncSession) -> None:
     result = await db.execute(
         text(
@@ -87,6 +95,26 @@ async def _get_active_group_member_ids(group_id: str, db: AsyncSession) -> set[s
         {"group_id": group_id},
     )
     return {str(row["user_id"]) for row in result.mappings().all()}
+
+
+async def _get_active_group_members(group_id: str, db: AsyncSession) -> dict[str, str]:
+    result = await db.execute(
+        text(
+            """
+            SELECT gm.user_id, ui.name AS user_name
+            FROM group_memberships gm
+            LEFT JOIN users_info ui ON ui.id = gm.user_id
+            WHERE gm.group_id = :group_id
+              AND gm.status = 'active'
+            """
+        ),
+        {"group_id": group_id},
+    )
+    members: dict[str, str] = {}
+    for row in result.mappings().all():
+        user_id = str(row["user_id"])
+        members[user_id] = str(row.get("user_name") or user_id)
+    return members
 
 
 @router.post("/transcribe", response_model=IcebreakerTranscribeResponse)
@@ -146,6 +174,85 @@ async def transcribe_icebreaker_turn(
         text_value[:80],
     )
     return IcebreakerTranscribeResponse(text=text_value)
+
+
+@router.post("/voice-sample", response_model=IcebreakerVoiceSampleResponse)
+async def upload_icebreaker_voice_sample(
+    group_id: str = Form(...),
+    user_id: str = Form(...),
+    source: str = Form(...),
+    mime_type: str = Form(...),
+    audio: UploadFile = File(...),
+    question_index: int | None = Form(None),
+    round: int | None = Form(None),
+    turn_index: int | None = Form(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: Mapping[str, Any] = Depends(get_current_user),
+) -> IcebreakerVoiceSampleResponse:
+    """
+    破冰专用声纹样本采集：转写录音，并将合格音频追加到现有个人声纹样本。
+    """
+    current_user_id = str(current_user["id"])
+    normalized_source = source.strip().lower()
+    if normalized_source not in {"intro", "story"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不支持的破冰录音来源")
+
+    await _ensure_group_member(group_id, current_user_id, db)
+    active_members = await _get_active_group_members(group_id, db)
+    if user_id not in active_members:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="破冰录音说话人不在该小组内")
+
+    audio_bytes = await audio.read()
+    logger.info(
+        "[IcebreakerAPI] voice_sample request group_id=%s user_id=%s source=%s question_index=%s round=%s turn_index=%s bytes=%d",
+        group_id,
+        user_id,
+        normalized_source,
+        question_index,
+        round,
+        turn_index,
+        len(audio_bytes),
+    )
+
+    try:
+        text_value = await transcribe_icebreaker_audio(
+            audio_bytes=audio_bytes,
+            mime_type=mime_type,
+            turn_id=f"{group_id}-{user_id}-{normalized_source}-q{question_index or 0}-r{round or 0}-t{turn_index or 0}",
+        )
+    except IcebreakerAudioDecodeError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="破冰录音解码失败") from exc
+    except IcebreakerASRUnavailable as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="破冰语音识别暂不可用") from exc
+
+    sample_result = await add_icebreaker_voice_sample(
+        db=db,
+        user_id=user_id,
+        group_id=group_id,
+        source=normalized_source,
+        audio_bytes=audio_bytes,
+        mime_type=mime_type,
+        text_value=text_value,
+        question_index=question_index,
+        round_no=round,
+        turn_index=turn_index,
+    )
+    warnings = list(sample_result.warnings)
+
+    logger.info(
+        "[IcebreakerAPI] voice_sample response group_id=%s user_id=%s added=%s warnings=%s text_preview=%s",
+        group_id,
+        user_id,
+        sample_result.voice_sample_added,
+        warnings,
+        text_value[:80],
+    )
+    return IcebreakerVoiceSampleResponse(
+        text=text_value,
+        voice_sample_added=sample_result.voice_sample_added,
+        sample_url=sample_result.sample_url,
+        warnings=warnings,
+    )
 
 
 @router.post("/evaluate", response_model=IcebreakerEvaluateResponse)

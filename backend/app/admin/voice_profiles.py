@@ -246,12 +246,6 @@ async def admin_update_samples(
     payload: AdminUpdateSamplesRequest,
     db: AsyncSession = Depends(get_db),
 ) -> VoiceProfileOut:
-    max_samples = 5
-    if len(payload.sample_audio_urls) > max_samples:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"最多支持 {max_samples} 条语音样本",
-        )
     result = await db.execute(
         text(
             """
@@ -389,12 +383,6 @@ async def admin_upload_audio_sample(
         )
 
     profile = _row_to_profile(row)
-
-    if len(profile.sample_audio_urls) >= 5:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="最多支持 5 条语音样本",
-        )
 
     content_type = file.content_type or ""
     if not any(content_type.startswith(p) for p in ALLOWED_AUDIO_CONTENT_TYPE_PREFIXES):

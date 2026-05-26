@@ -16,7 +16,7 @@ import type { IcebreakerMember, ScoreMeme } from './icebreaker/types'
 import { useAudioRecorder } from '../../composables/useAudioRecorder'
 import {
   evaluateIcebreakerStory,
-  transcribeIcebreakerTurn,
+  uploadIcebreakerVoiceSample,
 } from '../../api/appIcebreaker'
 import type { IcebreakerStoryTurnPayload } from '../../api/appIcebreaker'
 import { extractErrorMessage } from '../../utils/error'
@@ -90,6 +90,8 @@ const p1QuestionIdx = ref(0)
 const p1RecordState = ref<RecordState>('ready')
 const p1Saving = ref(false)
 const p1Countdown = ref(20)
+const p1SampleAdded = ref(false)
+const p1SampleWarnings = ref<string[]>([])
 let p1Interval: ReturnType<typeof setInterval> | null = null
 
 const p1Member = computed(() => members.value[p1MemberIdx.value] ?? FALLBACK_MEMBER)
@@ -125,15 +127,45 @@ async function stopRecording() {
   if (p1Saving.value) return
   stopP1Countdown()
   p1Saving.value = true
-  await endAudioCapture()
-  p1Saving.value = false
-  p1RecordState.value = 'saved'
+  try {
+    const audio = await endAudioCapture()
+    const groupId = currentGroupId()
+    if (!groupId || !p1Member.value.id || !audio) {
+      ElMessage.warning('这一题没有录到音频，可以重录')
+      p1RecordState.value = 'ready'
+      return
+    }
+
+    const result = await uploadIcebreakerVoiceSample({
+      groupId,
+      userId: p1Member.value.id,
+      source: 'intro',
+      questionIndex: p1QuestionIdx.value + 1,
+      mimeType: currentRecordingMimeType.value || audio.type || 'audio/webm',
+      audio,
+    })
+    p1SampleAdded.value = result.voice_sample_added
+    p1SampleWarnings.value = result.warnings || []
+    if (!result.voice_sample_added) {
+      ElMessage.warning(result.warnings?.[0] || '这段录音质量不太稳定，建议重录')
+    } else if (result.warnings?.length) {
+      ElMessage.warning(result.warnings[0])
+    }
+    p1RecordState.value = 'saved'
+  } catch (e) {
+    p1RecordState.value = 'ready'
+    ElMessage.error(extractErrorMessage(e) || '破冰声纹采样失败')
+  } finally {
+    p1Saving.value = false
+  }
 }
 
 async function reRecord() {
   stopP1Countdown()
   await endAudioCapture()
   p1Countdown.value = 20
+  p1SampleAdded.value = false
+  p1SampleWarnings.value = []
   p1RecordState.value = 'ready'
 }
 
@@ -143,6 +175,8 @@ function nextP1Question() {
     exiting.value = false
     p1RecordState.value = 'ready'
     p1Countdown.value = 20
+    p1SampleAdded.value = false
+    p1SampleWarnings.value = []
     if (p1QuestionIdx.value < P1_QUESTIONS_PER_MEMBER - 1) {
       p1QuestionIdx.value++
     } else if (p1MemberIdx.value < members.value.length - 1) {
@@ -158,6 +192,7 @@ function startPhase1() {
   if (members.value.length === 0) return
   p1MemberIdx.value = 0; p1QuestionIdx.value = 0
   p1RecordState.value = 'ready'; p1Countdown.value = 20
+  p1SampleAdded.value = false; p1SampleWarnings.value = []
   screen.value = 'phase1'
 }
 
@@ -221,9 +256,10 @@ function uploadStoryTurnInBackground(audio: Blob | null) {
 
   const mimeType = currentRecordingMimeType.value || audio.type || 'audio/webm'
   let task: Promise<void>
-  task = transcribeIcebreakerTurn({
+  task = uploadIcebreakerVoiceSample({
     groupId,
     userId: member.id,
+    source: 'story',
     round,
     turnIndex,
     mimeType,
@@ -399,6 +435,8 @@ function resetIcebreakerFlow() {
   p1RecordState.value = 'ready'
   p1Saving.value = false
   p1Countdown.value = 20
+  p1SampleAdded.value = false
+  p1SampleWarnings.value = []
   storyCurTurn.value = 0
   storyRecordState.value = 'ready'
   storySaving.value = false
@@ -558,8 +596,9 @@ onUnmounted(() => {
       <div v-else class="ib-saved-section">
         <div class="ib-save-banner">
           <span class="ib-save-icon">✓</span>
-          <span>{{ p1Member.name }} 的声音特征已记录</span>
+          <span>{{ p1SampleAdded ? '录得很好，继续下一题吧' : '这段录音质量不太稳定，建议重录' }}</span>
         </div>
+        <p v-if="p1SampleWarnings.length" class="ib-state-desc">{{ p1SampleWarnings[0] }}</p>
         <div class="ib-save-actions">
           <button class="ib-btn ib-btn--ghost" :disabled="p1Saving" @click="reRecord">↺ 重录这一题</button>
           <button class="ib-btn ib-btn--primary" @click="nextP1Question">

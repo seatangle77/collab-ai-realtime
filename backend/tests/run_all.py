@@ -28,6 +28,7 @@ TEST_SCRIPTS = [
     "test_sessions_flows.py",
     "test_app_sessions.py",
     "test_voice_profiles.py",
+    "test_icebreaker_voice_sample.py",
     "test_admin_voice_profiles.py",
     "test_admin_users.py",
     "test_admin_groups.py",
