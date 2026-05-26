@@ -10,8 +10,9 @@ import {
   createScoreDraft,
   pickStoryOpening,
 } from './icebreaker/content'
+import { pickIcebreakerMeme } from './icebreaker/memes'
 import { FALLBACK_MEMBER, useIcebreakerMembers } from './icebreaker/useIcebreakerMembers'
-import type { IcebreakerMember } from './icebreaker/types'
+import type { IcebreakerMember, ScoreMeme } from './icebreaker/types'
 import { useAudioRecorder } from '../../composables/useAudioRecorder'
 import {
   evaluateIcebreakerStory,
@@ -324,6 +325,7 @@ const scoreMvpReason = ref('')     // 得奖理由
 const scoreImageGradient = ref('') // 配图背景渐变
 const scoreImageEmoji = ref('')    // 配图主视觉
 const polishedStory = ref('')
+const scoreMeme = ref<ScoreMeme | null>(null)
 let scoringTimer: ReturnType<typeof setTimeout> | null = null
 const scoreMvpMember = computed(() => members.value[scoreMvpIdx.value] ?? FALLBACK_MEMBER)
 
@@ -352,6 +354,13 @@ async function startScoring() {
     scoreMvpTitle.value = result.mvp_title
     scoreMvpReason.value = result.mvp_reason
     scoreMvpIdx.value = Math.max(0, members.value.findIndex((member) => member.id === result.mvp_user_id))
+    scoreMeme.value = pickIcebreakerMeme({
+      score: result.score,
+      comment: result.comment,
+      mvpTitle: result.mvp_title,
+      mvpReason: result.mvp_reason,
+      story: result.polished_story,
+    })
   } catch (e) {
     const fallback = createScoreDraft()
     scoreValue.value = fallback.value
@@ -362,6 +371,13 @@ async function startScoring() {
     polishedStory.value = storyTurns.value.map((turn) => turn.text).join(' ')
     scoreImageGradient.value = fallback.imageStyle.gradient
     scoreImageEmoji.value = fallback.imageStyle.emoji
+    scoreMeme.value = pickIcebreakerMeme({
+      score: fallback.value,
+      comment: fallback.comment,
+      mvpTitle: fallback.mvpTitle,
+      mvpReason: fallback.mvpReason,
+      story: polishedStory.value,
+    })
     ElMessage.error(extractErrorMessage(e) || 'AI 评价失败，已展示本地兜底评价')
   } finally {
     scoringTimer = setTimeout(() => { scoringLoading.value = false }, 400)
@@ -390,6 +406,7 @@ function resetIcebreakerFlow() {
   storyTranscribeTasks.clear()
   storyCountdown.value = 30
   polishedStory.value = ''
+  scoreMeme.value = null
   scoringLoading.value = true
 }
 
@@ -719,11 +736,22 @@ onUnmounted(() => {
             <p class="ib-score-story-text">{{ polishedStory }}</p>
           </div>
 
-          <!-- AI 配图 -->
-          <div class="ib-score-image" :style="{ background: scoreImageGradient }">
-            <span class="ib-score-image-emoji">{{ scoreImageEmoji }}</span>
-            <p class="ib-score-image-caption">{{ storyOpening }}</p>
-            <span class="ib-score-image-badge">AI 配图</span>
+          <!-- 故事表情包 -->
+          <div v-if="scoreMeme" class="ib-score-meme">
+            <div class="ib-score-meme-media" :style="{ background: scoreImageGradient }">
+              <img
+                class="ib-score-meme-img"
+                :src="scoreMeme.imageUrl"
+                :alt="scoreMeme.label"
+                loading="lazy"
+              >
+              <span class="ib-score-meme-fallback">{{ scoreMeme.fallbackEmoji }}</span>
+            </div>
+            <div class="ib-score-meme-body">
+              <p class="ib-score-meme-label">本组故事表情</p>
+              <p class="ib-score-meme-title">{{ scoreMeme.label }}</p>
+              <p class="ib-score-meme-caption">{{ scoreMeme.mood }} · {{ storyOpening }}</p>
+            </div>
           </div>
 
           <!-- 最佳桥段奖 -->

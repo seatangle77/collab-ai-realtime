@@ -20,6 +20,15 @@ export interface ScoreImageStyle {
   emoji: string
 }
 
+export interface ScoreMeme {
+  id: string
+  label: string
+  mood: string
+  imageUrl: string
+  fallbackEmoji: string
+  keywords: string[]
+}
+
 export interface ScoreDraft {
   value: number
   comment: string
