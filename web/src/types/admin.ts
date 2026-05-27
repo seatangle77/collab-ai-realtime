@@ -29,6 +29,7 @@ export interface AdminGroup {
   name: string
   created_at: string
   is_active: boolean
+  condition: string
 }
 
 export interface AdminMembership {

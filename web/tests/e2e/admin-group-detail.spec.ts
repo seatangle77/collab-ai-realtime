@@ -169,6 +169,54 @@ test.describe('AdminGroupDetail - 群组信息卡', () => {
     await expect(dialog).toBeVisible()
   })
 
+  test('B-4-condition: 详情页信息卡显示 condition tag，默认为"智能眼镜"', async ({ page }) => {
+    const leader = await registerAndLogin('b4c-leader')
+    const groupId = await createGroup(leader.accessToken, `Condition默认Tag测试群-${Date.now()}`)
+
+    await loginAsAdminAndGoToDetail(page, groupId)
+    await expect(
+      page.locator('.admin-group-detail-name-row .el-tag').filter({ hasText: '智能眼镜' }),
+    ).toBeVisible()
+  })
+
+  test('B-4-condition-edit-no-assistance: 编辑条件为"无辅助"，tag 更新', async ({ page }) => {
+    const leader = await registerAndLogin('b4ce-na-leader')
+    const groupId = await createGroup(leader.accessToken, `Condition编辑无辅助测试群-${Date.now()}`)
+
+    await loginAsAdminAndGoToDetail(page, groupId)
+    await page.getByRole('button', { name: '编辑' }).first().click()
+
+    const dialog = page.getByRole('dialog', { name: '编辑群组' })
+    await expect(dialog).toBeVisible()
+    await dialog.locator('.el-form-item').filter({ hasText: '实验条件' }).locator('.el-select').click()
+    await page.getByRole('option', { name: /无辅助/ }).click()
+    await dialog.getByRole('button', { name: '保存' }).click()
+
+    await expect(page.getByText('更新群组成功')).toBeVisible()
+    await expect(
+      page.locator('.admin-group-detail-name-row .el-tag').filter({ hasText: '无辅助' }),
+    ).toBeVisible()
+  })
+
+  test('B-4-condition-edit-app: 编辑条件为"APP 通知"，tag 更新', async ({ page }) => {
+    const leader = await registerAndLogin('b4ce-app-leader')
+    const groupId = await createGroup(leader.accessToken, `Condition编辑APP测试群-${Date.now()}`)
+
+    await loginAsAdminAndGoToDetail(page, groupId)
+    await page.getByRole('button', { name: '编辑' }).first().click()
+
+    const dialog = page.getByRole('dialog', { name: '编辑群组' })
+    await expect(dialog).toBeVisible()
+    await dialog.locator('.el-form-item').filter({ hasText: '实验条件' }).locator('.el-select').click()
+    await page.getByRole('option', { name: /APP 通知/ }).click()
+    await dialog.getByRole('button', { name: '保存' }).click()
+
+    await expect(page.getByText('更新群组成功')).toBeVisible()
+    await expect(
+      page.locator('.admin-group-detail-name-row .el-tag').filter({ hasText: 'APP 通知' }),
+    ).toBeVisible()
+  })
+
   test('B-4: 编辑取消，名称不变', async ({ page }) => {
     const leader = await registerAndLogin('b4-leader')
     const groupName = `取消编辑测试群-${Date.now()}`

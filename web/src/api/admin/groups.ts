@@ -13,6 +13,7 @@ export interface ListAdminGroupsParams {
 export interface CreateAdminGroupPayload {
   name: string
   is_active?: boolean
+  condition?: string
 }
 
 export async function listAdminGroups(params: ListAdminGroupsParams): Promise<Page<AdminGroup>> {
@@ -44,6 +45,7 @@ export async function deleteAdminGroupsBatch(ids: string[]): Promise<BatchDelete
 export interface UpdateAdminGroupPayload {
   name?: string
   is_active?: boolean
+  condition?: string
 }
 
 export async function updateAdminGroup(id: string, payload: UpdateAdminGroupPayload): Promise<AdminGroup> {

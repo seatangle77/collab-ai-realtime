@@ -23,21 +23,27 @@ def _to_utc_naive(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
+VALID_CONDITIONS = {"no_assistance", "glasses", "app_notification"}
+
+
 class AdminGroupOut(ApiModel):
     id: str
     name: str
     created_at: datetime
     is_active: bool
+    condition: str
 
 
 class AdminGroupCreate(ApiModel):
     name: str
     is_active: bool = True
+    condition: str = "glasses"
 
 
 class AdminGroupUpdate(ApiModel):
     name: str | None = None
     is_active: bool | None = None
+    condition: str | None = None
 
 
 @router.get(
@@ -82,7 +88,7 @@ async def list_groups(
 
     query = text(
         f"""
-        SELECT id, name, created_at, is_active
+        SELECT id, name, created_at, is_active, condition
         FROM groups
         WHERE {where_sql}
         ORDER BY created_at DESC
@@ -113,17 +119,23 @@ async def create_group(
     payload: AdminGroupCreate,
     db: AsyncSession = Depends(get_db),
 ) -> AdminGroupOut:
+    if payload.condition not in VALID_CONDITIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"condition 无效，可选值：{sorted(VALID_CONDITIONS)}",
+        )
+
     group_id = f"g{uuid.uuid4().hex[:8]}"
 
     result = await db.execute(
         text(
             """
-            INSERT INTO groups (id, name, created_at, is_active)
-            VALUES (:id, :name, NOW(), :is_active)
-            RETURNING id, name, created_at, is_active
+            INSERT INTO groups (id, name, created_at, is_active, condition)
+            VALUES (:id, :name, NOW(), :is_active, :condition)
+            RETURNING id, name, created_at, is_active, condition
             """
         ),
-        {"id": group_id, "name": payload.name, "is_active": payload.is_active},
+        {"id": group_id, "name": payload.name, "is_active": payload.is_active, "condition": payload.condition},
     )
     row = result.mappings().first()
     await db.commit()
@@ -143,7 +155,7 @@ async def get_group_detail(
     result = await db.execute(
         text(
             """
-            SELECT id, name, created_at, is_active
+            SELECT id, name, created_at, is_active, condition
             FROM groups
             WHERE id = :id
             """
@@ -169,10 +181,16 @@ async def update_group(
     payload: AdminGroupUpdate,
     db: AsyncSession = Depends(get_db),
 ) -> AdminGroupOut:
-    if payload.name is None and payload.is_active is None:
+    if payload.name is None and payload.is_active is None and payload.condition is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="没有任何可更新字段",
+        )
+
+    if payload.condition is not None and payload.condition not in VALID_CONDITIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"condition 无效，可选值：{sorted(VALID_CONDITIONS)}",
         )
 
     sets: list[str] = []
@@ -184,6 +202,9 @@ async def update_group(
     if payload.is_active is not None:
         sets.append("is_active = :is_active")
         params["is_active"] = payload.is_active
+    if payload.condition is not None:
+        sets.append("condition = :condition")
+        params["condition"] = payload.condition
 
     set_sql = ", ".join(sets)
 
@@ -193,7 +214,7 @@ async def update_group(
             UPDATE groups
             SET {set_sql}
             WHERE id = :id
-            RETURNING id, name, created_at, is_active
+            RETURNING id, name, created_at, is_active, condition
             """
         ),
         params,

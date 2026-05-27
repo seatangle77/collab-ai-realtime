@@ -35,15 +35,26 @@ const sessionLoading = ref(false)
 // ── 编辑群组 dialog ───────────────────────────────────────
 const editGroupVisible = ref(false)
 const editGroupFormRef = ref<FormInstance>()
-const editGroupForm = reactive({ name: '', is_active: true })
+const editGroupForm = reactive({ name: '', is_active: true, condition: 'glasses' })
 const editGroupRules: FormRules<typeof editGroupForm> = {
   name: [{ required: true, message: '请输入群组名称', trigger: 'blur' }],
+}
+
+const conditionOptions = [
+  { label: '无辅助 (no_assistance)', value: 'no_assistance' },
+  { label: '智能眼镜 (glasses)', value: 'glasses' },
+  { label: 'APP 通知 (app_notification)', value: 'app_notification' },
+]
+
+function conditionLabel(val: string): string {
+  return conditionOptions.find(o => o.value === val)?.label ?? val
 }
 
 function openEditGroup() {
   if (!group.value) return
   editGroupForm.name = group.value.name
   editGroupForm.is_active = group.value.is_active
+  editGroupForm.condition = group.value.condition
   editGroupVisible.value = true
 }
 
@@ -55,6 +66,7 @@ async function submitEditGroup() {
       const updated = await updateAdminGroup(groupId, {
         name: editGroupForm.name,
         is_active: editGroupForm.is_active,
+        condition: editGroupForm.condition,
       })
       group.value = updated
       editGroupVisible.value = false
@@ -250,6 +262,9 @@ onMounted(async () => {
               <el-tag :type="group?.is_active ? 'success' : 'info'" size="small">
                 {{ group?.is_active ? '启用' : '停用' }}
               </el-tag>
+              <el-tag type="warning" size="small">
+                {{ group ? conditionLabel(group.condition) : '' }}
+              </el-tag>
             </div>
             <div class="admin-group-detail-meta">
               <span class="admin-group-detail-id">ID：{{ group?.id }}</span>
@@ -375,6 +390,16 @@ onMounted(async () => {
         </el-form-item>
         <el-form-item label="状态">
           <el-switch v-model="editGroupForm.is_active" active-text="启用" inactive-text="停用" />
+        </el-form-item>
+        <el-form-item label="实验条件">
+          <el-select v-model="editGroupForm.condition" style="width: 100%">
+            <el-option
+              v-for="opt in conditionOptions"
+              :key="opt.value"
+              :label="opt.label"
+              :value="opt.value"
+            />
+          </el-select>
         </el-form-item>
       </el-form>
       <template #footer>
