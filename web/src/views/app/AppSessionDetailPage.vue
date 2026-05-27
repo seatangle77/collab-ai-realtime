@@ -157,10 +157,6 @@ function sortPushLogs(items: PushLogItem[]): PushLogItem[] {
   return sortPushLogsByTriggeredAtDesc(items)
 }
 
-function isAiInterventionPushLog(item: PushLogItem): boolean {
-  return item.push_channel === 'web' && Boolean(item.state_id || item.analysis_run_id || item.analysis_window_start)
-}
-
 function mergePushLogs(existing: PushLogItem[], incoming: PushLogItem[]): { merged: PushLogItem[]; newItems: PushLogItem[] } {
   const byKey = new Map<string, PushLogItem>()
   const existingKeys = new Set(existing.map((item) => pushLogMergeKey(item)))
@@ -218,7 +214,7 @@ async function fetchSummaryHistory() {
   }
 }
 
-async function fetchPushLogs(options: { notifyNew?: boolean } = {}) {
+async function fetchPushLogs() {
   try {
     const data = await appHttp.get<PushLogItem[]>(
       `/api/sessions/${sessionId}/push-logs`,
@@ -226,7 +222,7 @@ async function fetchPushLogs(options: { notifyNew?: boolean } = {}) {
     const normalized = data
       .map((item) => normalizePushLog(item))
       .filter((item): item is PushLogItem => Boolean(item))
-    const { merged, newItems } = mergePushLogs(pushLogs.value, normalized)
+    const { merged } = mergePushLogs(pushLogs.value, normalized)
     pushLogs.value = merged
   } catch {
     // 静默失败，不覆盖已展示内容
@@ -247,7 +243,7 @@ async function fetchInfoGapButtons() {
   }
 }
 
-function handleInfoGapButtonClicked(buttonId: string, content: string, keyword: string) {
+function handleInfoGapButtonClicked(buttonId: string, content: string, _keyword: string) {
   infoGapButtons.value = infoGapButtons.value.map((button) => {
     if (button.id !== buttonId) return button
     return {
@@ -261,7 +257,7 @@ function handleInfoGapButtonClicked(buttonId: string, content: string, keyword: 
 function upsertPushEvent(push: PushLogItem) {
   const normalized = normalizePushLog(push)
   if (!normalized) return
-  const { merged, newItems } = mergePushLogs(pushLogs.value, [normalized])
+  const { merged } = mergePushLogs(pushLogs.value, [normalized])
   pushLogs.value = merged
 }
 

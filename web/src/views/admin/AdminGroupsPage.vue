@@ -36,10 +36,6 @@ const CONDITION_OPTIONS = [
   { label: 'APP 通知 (app_notification)', value: 'app_notification' },
 ]
 
-function conditionLabel(val: string): string {
-  return CONDITION_OPTIONS.find((o) => o.value === val)?.label ?? val
-}
-
 const editDialogVisible = ref(false)
 const editFormRef = ref<FormInstance>()
 const editForm = reactive({
