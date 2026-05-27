@@ -188,8 +188,40 @@ async def _run_background_tasks(
 
         await db.commit()
 
-        # 4. 发 JPush，根据结果更新 push_logs 状态
+        # 4. 发 JPush，根据结果更新 push_logs 状态（no_assistance 条件跳过）
         if not log_id:
+            return
+
+        group_condition = "glasses"
+        if session_id:
+            try:
+                cond_result = await db.execute(
+                    text(
+                        """
+                        SELECT g.condition
+                        FROM chat_sessions cs
+                        JOIN groups g ON cs.group_id = g.id
+                        WHERE cs.id = :session_id
+                        """
+                    ),
+                    {"session_id": session_id},
+                )
+                cond_row = cond_result.mappings().first()
+                if cond_row:
+                    group_condition = cond_row["condition"]
+            except Exception as e:
+                logger.warning("[concepts] 查询 group condition 失败: %s", e)
+
+        if group_condition == "no_assistance":
+            logger.info("[concepts] JPush 跳过 session_id=%s reason=no_assistance", session_id)
+            await db.execute(
+                text(
+                    "UPDATE push_logs SET delivery_status = 'skipped', "
+                    "delivery_reason = 'no_assistance' WHERE id = :id"
+                ),
+                {"id": log_id},
+            )
+            await db.commit()
             return
 
         if device_token:

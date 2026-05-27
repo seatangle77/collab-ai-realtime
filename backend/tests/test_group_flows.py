@@ -84,6 +84,10 @@ def scenario_list_my_groups_leader(ctx: Dict[str, Any]) -> bool:
     groups = r.json()
     found = next((g for g in groups if g["id"] == ctx["group_id"]), None)
     ok = bool(found) and found["my_role"] == "leader"
+    # 校验实验条件字段
+    if found:
+        valid_conditions = {"no_assistance", "glasses", "app_notification"}
+        ok &= found.get("condition", "__missing__") in valid_conditions
     return _log(ok, "leader /groups/my 场景", groups)
 
 

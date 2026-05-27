@@ -6,6 +6,7 @@ export interface AppGroup {
   name: string
   created_at: string
   is_active: boolean
+  condition?: string
 }
 
 export interface AppGroupSummary extends AppGroup {

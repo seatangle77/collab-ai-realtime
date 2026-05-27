@@ -29,6 +29,7 @@ class GroupSummary(ApiModel):
     is_active: bool
     member_count: int
     my_role: str
+    condition: str = "glasses"
 
 
 class GroupDiscoverItem(ApiModel):
@@ -152,6 +153,7 @@ async def list_my_groups(
                 g.name,
                 g.created_at,
                 g.is_active,
+                g.condition,
                 gm.role AS my_role,
                 COUNT(gm_all.user_id) AS member_count
             FROM group_memberships AS gm
@@ -162,7 +164,7 @@ async def list_my_groups(
             WHERE gm.user_id = :user_id
               AND gm.status = 'active'
               AND g.is_active = TRUE
-            GROUP BY g.id, g.name, g.created_at, g.is_active, gm.role
+            GROUP BY g.id, g.name, g.created_at, g.is_active, g.condition, gm.role
             ORDER BY g.created_at DESC
             """
         ),
@@ -177,6 +179,7 @@ async def list_my_groups(
             is_active=row["is_active"],
             member_count=row["member_count"],
             my_role=row["my_role"],
+            condition=row["condition"],
         )
         for row in rows
     ]

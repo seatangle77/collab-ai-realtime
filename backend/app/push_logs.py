@@ -28,6 +28,23 @@ VALID_DELIVERY_STATUSES = {"pending", "delivered", "failed", "skipped", "deferre
 JPUSH_NOTIFICATION_TITLE = ""
 
 
+async def _get_group_condition(session_id: str, db: AsyncSession) -> str:
+    """查询会话所属小组的实验条件，查不到时默认返回 'glasses'（保持现有行为）。"""
+    result = await db.execute(
+        text(
+            """
+            SELECT g.condition
+            FROM chat_sessions cs
+            JOIN groups g ON cs.group_id = g.id
+            WHERE cs.id = :session_id
+            """
+        ),
+        {"session_id": session_id},
+    )
+    row = result.mappings().first()
+    return row["condition"] if row else "glasses"
+
+
 def _mask_device_token(device_token: str) -> str:
     if len(device_token) <= 8:
         return "*" * len(device_token)
@@ -268,6 +285,7 @@ async def push_notify(
     )
 
     # 4. JPush：目标用户有 device_token 时额外推送，离线也通知
+    group_condition = await _get_group_condition(session_id, db)
     token_result = await db.execute(
         text("SELECT device_token FROM users_info WHERE id = :uid"),
         {"uid": body.target_user_id},
@@ -277,7 +295,14 @@ async def push_notify(
     jpush_attempted = False
     jpush_status = "no_device_token"
     jpush_reason: str | None = "no_device_token"
-    if device_token:
+    if group_condition == "no_assistance":
+        logger.info(
+            "%s [push_notify_jpush] session_id=%s target_user_id=%s action=skip reason=no_assistance",
+            WS_TRACE, session_id, body.target_user_id,
+        )
+        jpush_status = "skipped"
+        jpush_reason = "no_assistance"
+    elif device_token:
         logger.warning(
             "%s [push_notify_jpush] target_user_id=%s device_token=%s action=send",
             WS_TRACE,
@@ -404,26 +429,33 @@ async def group_notify(
 
     await db.commit()
 
-    # JPush：群组全部 active 成员并发推送，离线也通知
-    member_token_result = await db.execute(
-        text(
-            """
-            SELECT u.device_token
-            FROM group_memberships gm
-            JOIN users_info u ON u.id = gm.user_id
-            JOIN chat_sessions cs ON cs.group_id = gm.group_id
-            WHERE cs.id = :session_id
-              AND gm.status = 'active'
-              AND u.device_token IS NOT NULL
-            """
-        ),
-        {"session_id": session_id},
-    )
-    device_tokens = [row["device_token"] for row in member_token_result.mappings().all()]
-    if device_tokens:
-        await asyncio.gather(
-            *[_jpush_safe(token, body.content, JPUSH_NOTIFICATION_TITLE) for token in device_tokens]
+    # JPush：群组全部 active 成员并发推送，离线也通知（no_assistance 条件跳过）
+    group_condition = await _get_group_condition(session_id, db)
+    if group_condition == "no_assistance":
+        logger.info(
+            "%s [group_notify_jpush] session_id=%s action=skip reason=no_assistance",
+            WS_TRACE, session_id,
         )
+    else:
+        member_token_result = await db.execute(
+            text(
+                """
+                SELECT u.device_token
+                FROM group_memberships gm
+                JOIN users_info u ON u.id = gm.user_id
+                JOIN chat_sessions cs ON cs.group_id = gm.group_id
+                WHERE cs.id = :session_id
+                  AND gm.status = 'active'
+                  AND u.device_token IS NOT NULL
+                """
+            ),
+            {"session_id": session_id},
+        )
+        device_tokens = [row["device_token"] for row in member_token_result.mappings().all()]
+        if device_tokens:
+            await asyncio.gather(
+                *[_jpush_safe(token, body.content, JPUSH_NOTIFICATION_TITLE) for token in device_tokens]
+            )
 
     return {
         "id": first_log_id,

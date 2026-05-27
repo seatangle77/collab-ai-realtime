@@ -111,6 +111,11 @@ interface OfflineAudioSegment {
   retryCount: number
 }
 
+// ── 实验条件 ──────────────────────────────────────────────────────────────────
+/** 当前会话所在群组的实验条件，默认 glasses；no_assistance 时隐藏所有 AI UI */
+const groupCondition = ref<string>('glasses')
+const showAiUi = computed(() => groupCondition.value !== 'no_assistance')
+
 // ── 讨论摘要 ──────────────────────────────────────────────────────────────────
 const currentSummary = ref('')
 const summaryVersion = ref(0)
@@ -394,18 +399,28 @@ const isHost = computed(() => {
 })
 
 async function loadSession(): Promise<AppChatSession | null> {
-  // 优先从 history.state 拿
+  // 优先从 history.state 拿（但仍需请求 groups 以获取实验条件）
   const stateSession = (window.history.state as any)?.session as AppChatSession | undefined
-  if (stateSession && stateSession.id === sessionId) {
-    return stateSession
-  }
-  // fallback：遍历用户所有群组的 sessions
   try {
     const groups = await listMyGroups()
+
+    // 快捷路径：stateSession 有效时直接用 group_id 匹配 condition，跳过逐组 sessions 查询
+    if (stateSession && stateSession.id === sessionId) {
+      const group = groups.find((g) => g.id === stateSession.group_id)
+      if (group) {
+        groupCondition.value = group.condition ?? 'glasses'
+        return stateSession
+      }
+    }
+
+    // fallback：遍历用户所有群组的 sessions
     for (const g of groups) {
       const list = await listGroupSessions(g.id, { includeEnded: true }, { noRedirectOn401: true })
       const found = list.find((s) => s.id === sessionId)
-      if (found) return found
+      if (found) {
+        groupCondition.value = g.condition ?? 'glasses'
+        return found
+      }
     }
   } catch {
     // ignore
@@ -1385,7 +1400,9 @@ function buildTranscriptItems(transcriptItems: AppTranscript[], pushItems: PushL
   return result
 }
 
-const transcriptItems = computed(() => buildTranscriptItems(transcripts.value, pushLogs.value))
+const transcriptItems = computed(() =>
+  buildTranscriptItems(transcripts.value, showAiUi.value ? pushLogs.value : []),
+)
 const liveSegments = ref<Record<string, LiveTranscriptSegment>>({})
 const liveSegmentList = computed(() => Object.values(liveSegments.value))
 
@@ -1908,7 +1925,7 @@ onUnmounted(() => {
   </div>
 
   <AiInsightSheet
-    v-if="(session?.status === 'ongoing' || session?.status === 'ended') && (hasSummary || infoGapButtons.length > 0)"
+    v-if="showAiUi && (session?.status === 'ongoing' || session?.status === 'ended') && (hasSummary || infoGapButtons.length > 0)"
     :session-id="sessionId"
     :summary="currentSummary"
     :summary-version="summaryVersion"

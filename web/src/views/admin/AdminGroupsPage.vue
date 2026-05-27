@@ -30,12 +30,23 @@ const total = ref(0)
 const tableRef = ref<{ clearSelection: () => void } | null>(null)
 const selectedRows = ref<AdminGroup[]>([])
 
+const CONDITION_OPTIONS = [
+  { label: '无辅助 (no_assistance)', value: 'no_assistance' },
+  { label: '智能眼镜 (glasses)', value: 'glasses' },
+  { label: 'APP 通知 (app_notification)', value: 'app_notification' },
+]
+
+function conditionLabel(val: string): string {
+  return CONDITION_OPTIONS.find((o) => o.value === val)?.label ?? val
+}
+
 const editDialogVisible = ref(false)
 const editFormRef = ref<FormInstance>()
 const editForm = reactive({
   id: '',
   name: '',
   is_active: true,
+  condition: 'glasses',
 })
 
 const editRules: FormRules<typeof editForm> = {
@@ -47,6 +58,7 @@ const createFormRef = ref<FormInstance>()
 const createForm = reactive({
   name: '',
   is_active: true,
+  condition: 'glasses',
 })
 
 const createRules: FormRules<typeof createForm> = {
@@ -111,6 +123,7 @@ function openEditDialog(row: AdminGroup) {
   editForm.id = row.id
   editForm.name = row.name
   editForm.is_active = row.is_active
+  editForm.condition = row.condition ?? 'glasses'
   editDialogVisible.value = true
 }
 
@@ -122,6 +135,7 @@ async function submitEdit() {
       await updateAdminGroup(editForm.id, {
         name: editForm.name,
         is_active: editForm.is_active,
+        condition: editForm.condition,
       })
       ElMessage.success('更新群组成功')
       editDialogVisible.value = false
@@ -141,6 +155,7 @@ async function submitCreate() {
       await createAdminGroup({
         name: createForm.name,
         is_active: createForm.is_active,
+        condition: createForm.condition,
       })
       ElMessage.success('创建群组成功')
       createDialogVisible.value = false
@@ -211,6 +226,17 @@ function handleExportSelectedCsv() {
     ],
     rows: selectedRows.value,
   })
+}
+
+async function handleConditionChange(row: AdminGroup, newCondition: string) {
+  try {
+    await updateAdminGroup(row.id, { condition: newCondition })
+    row.condition = newCondition
+    ElMessage.success('实验条件已更新')
+  } catch (e: any) {
+    console.error(e)
+    ElMessage.error(e?.message || '更新实验条件失败')
+  }
 }
 
 async function handleDelete(row: AdminGroup) {
@@ -331,6 +357,18 @@ onMounted(() => {
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="实验条件" min-width="190">
+          <template #default="{ row }">
+            <el-select
+              :model-value="row.condition ?? 'glasses'"
+              size="small"
+              style="width: 100%"
+              @change="(val: string) => handleConditionChange(row, val)"
+            >
+              <el-option v-for="opt in CONDITION_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
+            </el-select>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" min-width="200" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="router.push('/admin/groups/' + row.id)">详情</el-button>
@@ -361,6 +399,11 @@ onMounted(() => {
         <el-form-item label="状态">
           <el-switch v-model="editForm.is_active" active-text="启用" inactive-text="停用" />
         </el-form-item>
+        <el-form-item label="实验条件">
+          <el-select v-model="editForm.condition" style="width: 100%">
+            <el-option v-for="opt in CONDITION_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
+          </el-select>
+        </el-form-item>
       </el-form>
       <template #footer>
         <span class="dialog-footer">
@@ -377,6 +420,11 @@ onMounted(() => {
         </el-form-item>
         <el-form-item label="状态">
           <el-switch v-model="createForm.is_active" active-text="启用" inactive-text="停用" />
+        </el-form-item>
+        <el-form-item label="实验条件">
+          <el-select v-model="createForm.condition" style="width: 100%">
+            <el-option v-for="opt in CONDITION_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
+          </el-select>
         </el-form-item>
       </el-form>
       <template #footer>

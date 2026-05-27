@@ -53,7 +53,6 @@ const menuGroups = computed<AdminMenuGroup[]>(() => [
 
 const collapsed = ref(false)
 const activePath = computed(() => route.path)
-
 function go(path: string) {
   if (path !== route.path) {
     router.push(path)
@@ -63,13 +62,19 @@ function go(path: string) {
 
 <template>
   <el-container class="admin-layout">
-    <el-aside :width="collapsed ? '0px' : '220px'" class="admin-sidebar" style="overflow: hidden; transition: width 0.2s;">
-      <div class="admin-logo">Collab AI Admin</div>
+    <el-aside :width="collapsed ? '0px' : '252px'" class="admin-sidebar">
+      <div class="admin-brand">
+        <div class="admin-brand-mark">CA</div>
+        <div>
+          <div class="admin-logo">Collab AI</div>
+          <div class="admin-logo-subtitle">Admin Console</div>
+        </div>
+      </div>
       <el-menu
         :default-active="activePath"
-        background-color="#111827"
+        background-color="transparent"
         text-color="#e5e7eb"
-        active-text-color="#f97316"
+        active-text-color="#166534"
         class="admin-menu"
       >
         <el-menu-item-group
@@ -88,11 +93,8 @@ function go(path: string) {
         </el-menu-item-group>
       </el-menu>
     </el-aside>
-    <el-container>
-      <el-header class="admin-header">
-        <el-button :icon="collapsed ? Expand : Fold" circle size="small" @click="collapsed = !collapsed" />
-        <h1 class="admin-header-title">管理后台</h1>
-      </el-header>
+    <el-container class="admin-main-shell">
+      <el-button class="admin-sidebar-toggle" :icon="collapsed ? Expand : Fold" circle @click="collapsed = !collapsed" />
       <el-main class="admin-content">
         <RouterView />
       </el-main>
@@ -102,56 +104,144 @@ function go(path: string) {
 
 <style scoped>
 .admin-layout {
+  height: 100vh;
   min-height: 100vh;
+  background: #f4f6fb;
+  color: #172033;
+  font-size: 15px;
+  overflow: hidden;
 }
 
 .admin-sidebar {
   display: flex;
   flex-direction: column;
-  padding: 12px 8px;
-  background: #111827;
-  color: #e5e7eb;
+  overflow: hidden;
+  padding: 18px 14px;
+  background:
+    linear-gradient(180deg, rgba(34, 197, 94, 0.10), rgba(34, 197, 94, 0) 32%),
+    #152033;
+  color: #f8fafc;
+  transition: width 0.2s ease;
+  box-shadow: 12px 0 30px rgba(15, 23, 42, 0.08);
 }
 
-.admin-logo {
-  font-size: 18px;
-  font-weight: 600;
-  padding: 10px 12px 16px;
-}
-
-.admin-menu {
-  border-right: none;
-}
-
-:deep(.el-menu-item-group__title) {
-  padding: 10px 12px 6px;
-  color: #9ca3af;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-}
-
-:deep(.el-menu-item-group__title + ul) {
-  margin-bottom: 10px;
-}
-
-.admin-header {
+.admin-brand {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 20px;
-  background: #ffffff;
-  border-bottom: 1px solid #e5e7eb;
+  padding: 6px 8px 20px;
 }
 
-.admin-header-title {
-  margin: 0;
-  font-size: 18px;
+.admin-brand-mark {
+  display: grid;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #152033;
+  font-size: 14px;
+  font-weight: 800;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+}
+
+.admin-logo {
+  font-size: 17px;
+  font-weight: 750;
+  line-height: 1.1;
+}
+
+.admin-logo-subtitle {
+  margin-top: 3px;
+  color: #9fb0c7;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.admin-menu {
+  flex: 1;
+  border-right: none;
+  background: transparent;
+  overflow-y: auto;
+}
+
+:deep(.el-menu) {
+  background: transparent;
+}
+
+:deep(.el-menu-item-group__title) {
+  padding: 16px 10px 8px;
+  color: #8ea0bb;
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+:deep(.el-menu-item-group__title + ul) {
+  margin-bottom: 8px;
+}
+
+:deep(.el-menu-item) {
+  height: 42px;
+  margin: 2px 0;
+  border-radius: 8px;
+  color: #d8e0ea;
+  font-size: 15px;
   font-weight: 600;
+  line-height: 42px;
+}
+
+:deep(.el-menu-item:hover) {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+:deep(.el-menu-item.is-active) {
+  background: #ffffff;
+  color: #166534;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16);
+}
+
+.admin-main-shell {
+  position: relative;
+  min-width: 0;
+}
+
+.admin-sidebar-toggle {
+  position: absolute;
+  z-index: 20;
+  top: 18px;
+  left: 20px;
+  --el-button-size: 38px;
+  background: rgba(255, 255, 255, 0.94);
+  border-color: #d8e1ee;
+  color: #324055;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.12);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
 .admin-content {
-  padding: 16px 20px 24px;
-  background: #f5f5f7;
+  height: 100vh;
+  padding: 24px 28px 32px 76px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.76), rgba(244, 246, 251, 0) 220px),
+    #f4f6fb;
+  overflow: auto;
+}
+
+@media (max-width: 900px) {
+  .admin-content {
+    padding: 18px 16px 28px 66px;
+  }
+
+  .admin-sidebar-toggle {
+    top: 14px;
+    left: 14px;
+  }
 }
 </style>

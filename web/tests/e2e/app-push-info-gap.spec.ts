@@ -240,7 +240,7 @@ test.describe('InfoGapButtons - 信息缺口关键词按钮', () => {
 
     await expect(page.locator('.ai-sheet')).toBeVisible({ timeout: 5000 })
     await expect(page.locator('.ai-sheet__preview')).toContainText('机器学习', { timeout: 5000 })
-    await page.waitForTimeout(150)
+    await expect(page.locator('.ai-sheet__handle-bar')).toBeVisible({ timeout: 5000 })
     await page.locator('.ai-sheet__handle-bar').click()
     await expect(page.locator('.info-gap-btn').filter({ hasText: '机器学习' }).first()).toBeVisible({ timeout: 5000 })
     await expect(page.locator('.info-gap-btn').filter({ hasText: '深度学习' }).first()).toBeVisible({ timeout: 5000 })
@@ -284,7 +284,7 @@ test.describe('InfoGapButtons - 信息缺口关键词按钮', () => {
 
     await expect(page.locator('.ai-sheet')).toBeVisible({ timeout: 3000 })
     await expect(page.locator('.ai-sheet__preview')).toContainText('可点击词')
-    await page.waitForTimeout(150)
+    await expect(page.locator('.ai-sheet__handle-bar')).toBeVisible({ timeout: 5000 })
     await page.locator('.ai-sheet__handle-bar').click()
     const btn = page.locator('.info-gap-btn').filter({ hasText: '可点击词' }).first()
     await expect(btn).toBeVisible({ timeout: 3000 })
@@ -313,6 +313,7 @@ test.describe('InfoGapButtons - 信息缺口关键词按钮', () => {
       type: 'info_gap_button',
       data: { buttons: [{ id: 'btn_req_005', keyword: '请求验证', skw_score: 0.2 }] },
     })
+    await expect(page.locator('.ai-sheet__handle-bar')).toBeVisible({ timeout: 5000 })
     await page.locator('.ai-sheet__handle-bar').click()
     await page.locator('.info-gap-btn').filter({ hasText: '请求验证' }).click()
     await page.waitForTimeout(500)
@@ -342,7 +343,7 @@ test.describe('InfoGapButtons - 信息缺口关键词按钮', () => {
 
     await expect(page.locator('.ai-sheet')).toBeVisible({ timeout: 5000 })
     await expect(page.locator('.ai-sheet__preview')).toContainText('失败词', { timeout: 5000 })
-    await page.waitForTimeout(150)
+    await expect(page.locator('.ai-sheet__handle-bar')).toBeVisible({ timeout: 5000 })
     await page.locator('.ai-sheet__handle-bar').click()
     const btn = page.locator('.info-gap-btn').filter({ hasText: '失败词' }).first()
     await expect(btn).toBeVisible({ timeout: 3000 })
@@ -366,6 +367,7 @@ test.describe('InfoGapButtons - 信息缺口关键词按钮', () => {
       type: 'info_gap_button',
       data: { buttons: [{ id: 'btn_dup_007', keyword: '重复词', skw_score: 0.2 }] },
     })
+    await expect(page.locator('.ai-sheet__handle-bar')).toBeVisible({ timeout: 5000 })
     await page.locator('.ai-sheet__handle-bar').click()
     await expect(page.locator('.info-gap-btn').filter({ hasText: '重复词' })).toBeVisible({ timeout: 5000 })
     // 再推一次相同 id
@@ -390,6 +392,7 @@ test.describe('InfoGapButtons - 信息缺口关键词按钮', () => {
       type: 'info_gap_button',
       data: { buttons: [{ id: 'btn_end_008', keyword: '结束后词', skw_score: 0.2 }] },
     })
+    await expect(page.locator('.ai-sheet__handle-bar')).toBeVisible({ timeout: 5000 })
     await page.locator('.ai-sheet__handle-bar').click()
     await expect(page.locator('.info-gap-btn').filter({ hasText: '结束后词' })).toBeVisible({ timeout: 5000 })
 
@@ -398,10 +401,9 @@ test.describe('InfoGapButtons - 信息缺口关键词按钮', () => {
       type: 'session_ended',
       data: { session_id: sessionId, reason: 'host_ended' },
     })
-    await page.waitForTimeout(500)
 
-    await expect(page.locator('.info-gap-btn')).toHaveCount(0)
-    await expect(page.locator('.ai-sheet__readonly-pill').filter({ hasText: '结束后词' })).toBeVisible()
+    await expect(page.locator('.info-gap-btn')).toHaveCount(0, { timeout: 5000 })
+    await expect(page.locator('.ai-sheet__readonly-pill').filter({ hasText: '结束后词' })).toBeVisible({ timeout: 10000 })
   })
 })
 
@@ -460,6 +462,66 @@ test.describe('GET summary - API 集成', () => {
       headers: { Authorization: `Bearer ${outsider.token}` },
     })
     expect(res.status()).toBe(403)
+  })
+})
+
+// ══════════════════════════════════════════════════════════════════════════════
+// F. no_assistance 条件 — AI UI 隐藏
+// ══════════════════════════════════════════════════════════════════════════════
+
+test.describe('no_assistance 条件 - AI UI 全部隐藏', () => {
+  /** 拦截 /api/groups/my，把指定 groupId 的 condition 覆盖为目标值 */
+  async function patchGroupCondition(
+    page: import('@playwright/test').Page,
+    groupId: string,
+    condition: string,
+  ) {
+    await page.route('**/api/groups/my', async (route) => {
+      const response = await route.fetch()
+      const body = (await response.json()) as Record<string, unknown>[]
+      const patched = body.map((g) =>
+        (g as any).id === groupId ? { ...g, condition } : g,
+      )
+      await route.fulfill({ response, body: JSON.stringify(patched) })
+    })
+  }
+
+  test('F-1: condition=no_assistance → push_notification WS 消息不显示 AI 卡片', async ({ page }) => {
+    await patchWsForCapture(page)
+    const user = await registerAndLogin('f1')
+    const { groupId, sessionId } = await createGroupAndSession(user.token, 'f1')
+    await patchGroupCondition(page, groupId, 'no_assistance')
+
+    await loginViaUI(page, user)
+    await page.goto(`/app/sessions/${sessionId}`)
+    await page.waitForTimeout(2000)
+
+    await injectWsMessage(page, {
+      type: 'push_notification',
+      data: { content: '无辅助条件不应显示', target_user_id: user.userId },
+    })
+    await page.waitForTimeout(500)
+
+    await expect(page.locator('.app-session-detail-ai-card')).toHaveCount(0)
+  })
+
+  test('F-2: condition=no_assistance → info_gap_button WS 消息不显示 AiInsightSheet', async ({ page }) => {
+    await patchWsForCapture(page)
+    const user = await registerAndLogin('f2')
+    const { groupId, sessionId } = await createGroupAndSession(user.token, 'f2')
+    await patchGroupCondition(page, groupId, 'no_assistance')
+
+    await loginViaUI(page, user)
+    await page.goto(`/app/sessions/${sessionId}`)
+    await page.waitForTimeout(2000)
+
+    await injectWsMessage(page, {
+      type: 'info_gap_button',
+      data: { buttons: [{ id: 'btn_f2_001', keyword: '无辅助关键词', skw_score: 0.2 }] },
+    })
+    await page.waitForTimeout(500)
+
+    await expect(page.locator('.ai-sheet')).toHaveCount(0)
   })
 })
 

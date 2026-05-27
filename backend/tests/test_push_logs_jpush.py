@@ -82,6 +82,7 @@ def test_push_notify_calls_jpush_when_target_has_device_token(monkeypatch: pytes
         [
             ("INSERT INTO push_logs", [{"triggered_at": triggered_at}]),
             ("UPDATE push_logs SET delivery_status", []),
+            ("g.condition", [{"condition": "glasses"}]),
             ("SELECT device_token FROM users_info", [{"device_token": "dev-token-u1"}]),
         ]
     )
@@ -106,7 +107,7 @@ def test_push_notify_calls_jpush_when_target_has_device_token(monkeypatch: pytes
     assert resp["jpush_status"] == "sent"
     assert resp["jpush_reason"] is None
     assert ws_calls and ws_calls[0][0:2] == ("s1", "u1")
-    assert jpush_calls == [("dev-token-u1", "请主动补充理由", "AI 讨论建议")]
+    assert jpush_calls == [("dev-token-u1", "请主动补充理由", "")]
     assert db.commits == 2
 
 
@@ -116,6 +117,7 @@ def test_push_notify_skips_jpush_when_target_has_no_device_token(monkeypatch: py
         [
             ("INSERT INTO push_logs", [{"triggered_at": datetime(2026, 4, 23, 12, 5, 0)}]),
             ("UPDATE push_logs SET delivery_status", []),
+            ("g.condition", [{"condition": "glasses"}]),
             ("SELECT device_token FROM users_info", [{"device_token": None}]),
         ]
     )
@@ -185,6 +187,7 @@ def test_push_notify_writes_queue_id_to_push_logs_insert(monkeypatch: pytest.Mon
             ("FROM push_queue", []),
             ("INSERT INTO push_logs", [{"triggered_at": triggered_at}]),
             ("UPDATE push_logs SET delivery_status", []),
+            ("g.condition", [{"condition": "glasses"}]),
             ("SELECT device_token FROM users_info", [{"device_token": None}]),
         ]
     )
@@ -216,6 +219,7 @@ def test_push_notify_writes_null_queue_id_when_not_provided(monkeypatch: pytest.
         [
             ("INSERT INTO push_logs", [{"triggered_at": triggered_at}]),
             ("UPDATE push_logs SET delivery_status", []),
+            ("g.condition", [{"condition": "glasses"}]),
             ("SELECT device_token FROM users_info", [{"device_token": None}]),
         ]
     )
@@ -250,6 +254,7 @@ def test_push_notify_ghost_queue_id_does_not_raise(monkeypatch: pytest.MonkeyPat
             ("FROM push_queue", []),
             ("INSERT INTO push_logs", [{"triggered_at": triggered_at}]),
             ("UPDATE push_logs SET delivery_status", []),
+            ("g.condition", [{"condition": "glasses"}]),
             ("SELECT device_token FROM users_info", [{"device_token": None}]),
         ]
     )
@@ -280,6 +285,7 @@ def test_push_notify_copies_content_embedding_from_push_queue(monkeypatch: pytes
             ("FROM push_queue", [{"status": "pending", "content_embedding": embedding}]),
             ("INSERT INTO push_logs", [{"triggered_at": triggered_at}]),
             ("UPDATE push_logs SET delivery_status", []),
+            ("g.condition", [{"condition": "glasses"}]),
             ("SELECT device_token FROM users_info", [{"device_token": None}]),
         ]
     )
@@ -312,6 +318,7 @@ def test_push_notify_writes_null_embedding_when_no_queue_id(monkeypatch: pytest.
         [
             ("INSERT INTO push_logs", [{"triggered_at": triggered_at}]),
             ("UPDATE push_logs SET delivery_status", []),
+            ("g.condition", [{"condition": "glasses"}]),
             ("SELECT device_token FROM users_info", [{"device_token": None}]),
         ]
     )
@@ -341,6 +348,7 @@ def test_group_notify_calls_jpush_for_all_active_member_tokens(monkeypatch: pyte
     db = _FakeDB(
         [
             ("INSERT INTO push_logs", []),
+            ("g.condition", [{"condition": "glasses"}]),
             (
                 "SELECT u.device_token",
                 [
@@ -372,9 +380,9 @@ def test_group_notify_calls_jpush_for_all_active_member_tokens(monkeypatch: pyte
     assert resp["online_connections"] == 2
     assert ws_send_calls == [("s-group", "u-online-1"), ("s-group", "u-online-2")]
     assert jpush_calls == [
-        ("tok-online-1", "大家先对齐一下当前的目标", "AI 讨论建议"),
-        ("tok-offline-1", "大家先对齐一下当前的目标", "AI 讨论建议"),
-        ("tok-online-2", "大家先对齐一下当前的目标", "AI 讨论建议"),
+        ("tok-online-1", "大家先对齐一下当前的目标", ""),
+        ("tok-offline-1", "大家先对齐一下当前的目标", ""),
+        ("tok-online-2", "大家先对齐一下当前的目标", ""),
     ]
     assert db.commits == 1
 
@@ -384,6 +392,7 @@ def test_group_notify_skips_jpush_when_no_active_member_tokens(monkeypatch: pyte
     db = _FakeDB(
         [
             ("INSERT INTO push_logs", []),
+            ("g.condition", [{"condition": "glasses"}]),
             ("SELECT u.device_token", []),
         ]
     )
@@ -413,6 +422,7 @@ def test_group_notify_keeps_success_when_jpush_sender_raises(monkeypatch: pytest
     db = _FakeDB(
         [
             ("INSERT INTO push_logs", []),
+            ("g.condition", [{"condition": "glasses"}]),
             (
                 "SELECT u.device_token",
                 [
@@ -445,11 +455,74 @@ def test_group_notify_keeps_success_when_jpush_sender_raises(monkeypatch: pytest
     assert sent_tokens == ["tok-ok", "tok-fail"]
 
 
+def test_push_notify_skips_jpush_when_condition_is_no_assistance(monkeypatch: pytest.MonkeyPatch) -> None:
+    """no_assistance 条件下，即使用户有 device_token，JPush 也不应发送。"""
+    jpush_calls: list[tuple[str, str, str]] = []
+    triggered_at = datetime(2026, 4, 23, 12, 0, 0)
+    db = _FakeDB(
+        [
+            ("INSERT INTO push_logs", [{"triggered_at": triggered_at}]),
+            ("UPDATE push_logs SET delivery_status", []),
+            ("g.condition", [{"condition": "no_assistance"}]),
+            ("SELECT device_token FROM users_info", [{"device_token": "dev-token-u99"}]),
+        ]
+    )
+
+    async def _fake_send_to_user(session_id: str, user_id: str, message: dict[str, Any]) -> bool:
+        return True
+
+    async def _fake_jpush(device_token: str, content: str, title: str) -> tuple[bool, None]:
+        jpush_calls.append((device_token, content, title))
+        return True, None
+
+    monkeypatch.setattr(push_logs.ws_manager, "send_to_user", _fake_send_to_user)
+    monkeypatch.setattr(push_logs, "_jpush_safe", _fake_jpush)
+
+    payload = push_logs.PushNotifyIn(target_user_id="u99", content="无辅助不应推送")
+    resp = _run(push_logs.push_notify("s-no-assist", payload, db))
+
+    assert jpush_calls == [], "no_assistance 条件下不应调用 JPush"
+    assert resp["jpush_attempted"] is False
+    assert resp["jpush_status"] == "skipped"
+    assert resp["jpush_reason"] == "no_assistance"
+
+
+def test_group_notify_skips_jpush_when_condition_is_no_assistance(monkeypatch: pytest.MonkeyPatch) -> None:
+    """no_assistance 条件下，group_notify 的 JPush 完全跳过，不查 device_token。"""
+    jpush_calls: list[tuple[str, str, str]] = []
+    db = _FakeDB(
+        [
+            ("INSERT INTO push_logs", []),
+            ("g.condition", [{"condition": "no_assistance"}]),
+        ]
+    )
+
+    monkeypatch.setattr(push_logs.ws_manager, "get_online_user_ids", lambda _session_id: ["u1", "u2"])
+
+    async def _fake_send_to_user(session_id: str, user_id: str, message: dict[str, Any]) -> bool:
+        return True
+
+    async def _fake_jpush(device_token: str, content: str, title: str) -> tuple[bool, None]:
+        jpush_calls.append((device_token, content, title))
+        return True, None
+
+    monkeypatch.setattr(push_logs.ws_manager, "send_to_user", _fake_send_to_user)
+    monkeypatch.setattr(push_logs, "_jpush_safe", _fake_jpush)
+
+    payload = push_logs.GroupNotifyIn(content="无辅助群发不应推送极光")
+    resp = _run(push_logs.group_notify("s-group-no-assist", payload, db))
+
+    assert jpush_calls == [], "no_assistance 条件下不应调用 JPush"
+    assert resp["delivered_count"] == 2
+    assert resp["online_connections"] == 2
+
+
 def test_group_notify_tracks_per_user_delivery_status(monkeypatch: pytest.MonkeyPatch) -> None:
     """u1 发送成功，u2 发送失败，两条 push_log 状态应各自独立记录。"""
     db = _FakeDB(
         [
             ("INSERT INTO push_logs", []),
+            ("g.condition", [{"condition": "glasses"}]),
             ("SELECT u.device_token", []),
         ]
     )
