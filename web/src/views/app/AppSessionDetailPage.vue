@@ -22,7 +22,6 @@ import {
 } from '../../api/appSessions'
 import { listMyGroups } from '../../api/appGroups'
 import { extractErrorMessage } from '../../utils/error'
-import PushNotification from '../../components/PushNotification.vue'
 import { type InfoGapButton } from '../../components/InfoGapButtons.vue'
 import AiInsightSheet from '../../components/AiInsightSheet.vue'
 import { appHttp } from '../../api/appHttp'
@@ -112,25 +111,11 @@ interface OfflineAudioSegment {
   retryCount: number
 }
 
-// ── 推送通知 ──────────────────────────────────────────────────────────────────
-const pushContent = ref('')
-const pushTitle = ref('AI 建议')
-const pushVisible = ref(false)
-
-function showPushNotification(content: string, _triggeredAt?: string | null, title = 'AI 建议') {
-  pushTitle.value = title
-  pushContent.value = content
-  pushVisible.value = false
-  // 强制触发 watch（即使上一条还没消失也能重新触发）
-  requestAnimationFrame(() => { pushVisible.value = true })
-}
-
 // ── 讨论摘要 ──────────────────────────────────────────────────────────────────
 const currentSummary = ref('')
 const summaryVersion = ref(0)
 const summaryHistory = ref<SummaryHistoryItem[]>([])
 const pushLogs = ref<PushLogItem[]>([])
-const seenPushNotificationKeys = new Set<string>()
 
 function normalizeInfoGapButton(button: InfoGapButton): InfoGapButton {
   return {
@@ -203,15 +188,6 @@ function mergePushLogs(existing: PushLogItem[], incoming: PushLogItem[]): { merg
   }
 }
 
-function maybeNotifyNewPush(item: PushLogItem) {
-  const key = pushLogMergeKey(item)
-  if (seenPushNotificationKeys.has(key)) return
-  seenPushNotificationKeys.add(key)
-  if (item.push_content) {
-    showPushNotification(item.push_content, item.triggered_at)
-  }
-}
-
 async function fetchLatestSummary() {
   try {
     const data = await appHttp.get<{ content: string; version: number }>(
@@ -247,10 +223,6 @@ async function fetchPushLogs(options: { notifyNew?: boolean } = {}) {
       .filter((item): item is PushLogItem => Boolean(item))
     const { merged, newItems } = mergePushLogs(pushLogs.value, normalized)
     pushLogs.value = merged
-    if (options.notifyNew) {
-      const latestNew = sortPushLogs(newItems).find((item) => !isAiInterventionPushLog(item))
-      if (latestNew) maybeNotifyNewPush(latestNew)
-    }
   } catch {
     // 静默失败，不覆盖已展示内容
   }
@@ -279,7 +251,6 @@ function handleInfoGapButtonClicked(buttonId: string, content: string, keyword: 
       viewed: true,
     }
   })
-  if (content) showPushNotification(`${keyword}：${content}`, null, '概念解释')
 }
 
 function upsertPushEvent(push: PushLogItem) {
@@ -287,8 +258,6 @@ function upsertPushEvent(push: PushLogItem) {
   if (!normalized) return
   const { merged, newItems } = mergePushLogs(pushLogs.value, [normalized])
   pushLogs.value = merged
-  const latestNew = sortPushLogs(newItems)[0]
-  if (latestNew) maybeNotifyNewPush(latestNew)
 }
 
 function upsertLivePushEvent(params: {
@@ -1650,13 +1619,6 @@ onUnmounted(() => {
 
 <template>
   <div class="app-session-detail-page">
-    <!-- 推送消息 Toast（fixed 定位，不占文档流） -->
-    <PushNotification
-      :title="pushTitle"
-      :content="pushContent"
-      :visible="pushVisible"
-      @dismissed="pushVisible = false"
-    />
 
     <div v-if="pageLoading" class="app-session-detail-loading">正在加载会话详情...</div>
 

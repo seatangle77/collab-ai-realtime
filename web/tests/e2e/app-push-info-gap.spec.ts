@@ -159,11 +159,11 @@ async function patchWsForCapture(page: import('@playwright/test').Page) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// A. PushNotification 组件
+// A. push_notification WS 消息处理（Toast 已移除，仅验证时间线 AI 卡片）
 // ══════════════════════════════════════════════════════════════════════════════
 
-test.describe('PushNotification - 推送消息 Toast', () => {
-  test('A-1: 收到 push_notification WS 消息 → Toast 显示推送内容', async ({ page }) => {
+test.describe('push_notification WS 消息处理', () => {
+  test('A-1: 收到 push_notification WS 消息 → AI 卡片出现在讨论时间线', async ({ page }) => {
     await patchWsForCapture(page)
     const user = await registerAndLogin('a1')
     const { sessionId } = await createGroupAndSession(user.token, 'a1')
@@ -176,71 +176,11 @@ test.describe('PushNotification - 推送消息 Toast', () => {
       data: { content: '大家可以深入讨论一下这个观点', target_user_id: user.userId },
     })
 
-    await expect(page.locator('.push-notification')).toBeVisible({ timeout: 3000 })
-    await expect(page.locator('.push-content')).toContainText('大家可以深入讨论一下这个观点')
+    await expect(page.locator('.push-notification')).toHaveCount(0)
     await expect(page.locator('.app-session-detail-ai-card')).toContainText('大家可以深入讨论一下这个观点')
   })
 
-  test('A-2: Toast 在 3~5 秒后自动消失', async ({ page }) => {
-    await patchWsForCapture(page)
-    const user = await registerAndLogin('a2')
-    const { sessionId } = await createGroupAndSession(user.token, 'a2')
-    await loginViaUI(page, user)
-    await page.goto(`/app/sessions/${sessionId}`)
-    await page.waitForTimeout(2000)
-
-    await injectWsMessage(page, {
-      type: 'push_notification',
-      data: { content: '短暂提示', target_user_id: user.userId },
-    })
-    await expect(page.locator('.push-notification')).toBeVisible({ timeout: 3000 })
-    // 等待 5.5s 后应该消失
-    await page.waitForTimeout(5500)
-    await expect(page.locator('.push-notification')).not.toBeVisible()
-  })
-
-  test('A-3: Toast 不遮挡操作（pointer-events: none）', async ({ page }) => {
-    await patchWsForCapture(page)
-    const user = await registerAndLogin('a3')
-    const { sessionId } = await createGroupAndSession(user.token, 'a3')
-    await loginViaUI(page, user)
-    await page.goto(`/app/sessions/${sessionId}`)
-    await page.waitForTimeout(2000)
-
-    await injectWsMessage(page, {
-      type: 'push_notification',
-      data: { content: '不阻断操作的提示', target_user_id: user.userId },
-    })
-    await expect(page.locator('.push-notification')).toBeVisible({ timeout: 3000 })
-
-    const pointerEvents = await page.locator('.push-notification').evaluate(
-      (el) => window.getComputedStyle(el).pointerEvents,
-    )
-    expect(pointerEvents).toBe('none')
-  })
-
-  test('A-4: 连续收到两条推送 → 第二条覆盖第一条重新计时', async ({ page }) => {
-    await patchWsForCapture(page)
-    const user = await registerAndLogin('a4')
-    const { sessionId } = await createGroupAndSession(user.token, 'a4')
-    await loginViaUI(page, user)
-    await page.goto(`/app/sessions/${sessionId}`)
-    await page.waitForTimeout(2000)
-
-    await injectWsMessage(page, {
-      type: 'push_notification',
-      data: { content: '第一条推送', target_user_id: user.userId },
-    })
-    await page.waitForTimeout(1000)
-    await injectWsMessage(page, {
-      type: 'push_notification',
-      data: { content: '第二条推送', target_user_id: user.userId },
-    })
-
-    await expect(page.locator('.push-content')).toContainText('第二条推送', { timeout: 2000 })
-  })
-
-  test('A-5: content 为空字符串 → Toast 不显示（或显示但内容空）', async ({ page }) => {
+  test('A-5: content 为空字符串 → AI 卡片不出现', async ({ page }) => {
     await patchWsForCapture(page)
     const user = await registerAndLogin('a5')
     const { sessionId } = await createGroupAndSession(user.token, 'a5')
@@ -252,11 +192,9 @@ test.describe('PushNotification - 推送消息 Toast', () => {
       type: 'push_notification',
       data: { content: '', target_user_id: user.userId },
     })
-    // 空内容不应触发显示
+
     await page.waitForTimeout(500)
-    const visible = await page.locator('.push-notification').isVisible()
-    // 空 content 时 showPushNotification 不被调用（因为 if(d.content) 判断）
-    expect(visible).toBe(false)
+    await expect(page.locator('.app-session-detail-ai-card')).toHaveCount(0)
   })
 
   test('A-6: 发给其他用户的 push_notification 不会插入当前用户实录', async ({ page }) => {
