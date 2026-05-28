@@ -11,6 +11,7 @@ from statistics import mean, median, stdev
 from typing import Any, Literal
 
 from ..api_model import ApiModel
+from .stats_utils import MetricConditionStats, PostHocPairResult, _cohens_d, _eta_squared, _epsilon_squared, _stats_for
 
 try:
     from scipy.stats import f_oneway, kruskal, mannwhitneyu, norm as _scipy_norm, shapiro, ttest_ind, tukey_hsd
@@ -97,16 +98,6 @@ class CoiSessionObservation(ApiModel):
     weighted_score: float
 
 
-class MetricConditionStats(ApiModel):
-    condition: str
-    n: int
-    mean: float | None = None
-    sd: float | None = None
-    median: float | None = None
-    min: float | None = None
-    max: float | None = None
-
-
 class MetricSummary(ApiModel):
     metric: str
     label: str
@@ -149,15 +140,6 @@ class StatisticalTestResult(ApiModel):
     note: str
 
 
-class PostHocPairResult(ApiModel):
-    condition_a: str
-    condition_b: str
-    mean_diff: float | None = None
-    p_value_adjusted: float | None = None
-    significant: bool | None = None
-    alpha: float = 0.05
-
-
 class PostHocResult(ApiModel):
     metric: str
     label: str
@@ -186,20 +168,6 @@ class CoiAnalysisResult(ApiModel):
 
 def _round(value: float) -> float:
     return round(value, 4)
-
-
-def _stats_for(values: list[float], condition: str) -> MetricConditionStats:
-    if not values:
-        return MetricConditionStats(condition=condition, n=0)
-    return MetricConditionStats(
-        condition=condition,
-        n=len(values),
-        mean=_round(mean(values)),
-        sd=_round(stdev(values)) if len(values) > 1 else 0.0,
-        median=_round(median(values)),
-        min=_round(min(values)),
-        max=_round(max(values)),
-    )
 
 
 def _normality_for(
@@ -269,34 +237,6 @@ def _recommend_test(
         normality_assumption_met=False if all_checked else None, conditions=conditions,
         note="至少一个条件未通过或无法完成正态性检查，建议使用 Kruskal-Wallis",
     )
-
-
-def _cohens_d(a: list[float], b: list[float]) -> float | None:
-    if len(a) < 2 or len(b) < 2:
-        return None
-    pooled_var = ((len(a) - 1) * stdev(a) ** 2 + (len(b) - 1) * stdev(b) ** 2) / (len(a) + len(b) - 2)
-    if pooled_var <= 0:
-        return None
-    return (mean(b) - mean(a)) / math.sqrt(pooled_var)
-
-
-def _eta_squared(groups: list[list[float]]) -> float | None:
-    values = [v for g in groups for v in g]
-    if len(values) <= 1:
-        return None
-    grand = mean(values)
-    ss_between = sum(len(g) * (mean(g) - grand) ** 2 for g in groups if g)
-    ss_total = sum((v - grand) ** 2 for v in values)
-    if ss_total <= 0:
-        return None
-    return ss_between / ss_total
-
-
-def _epsilon_squared(h: float, k: int, n: int) -> float | None:
-    denom = n - k
-    if denom <= 0:
-        return None
-    return max(0.0, (h - k + 1) / denom)
 
 
 def _run_statistical_test(
@@ -564,7 +504,7 @@ def build_coi_analysis(
         MetricSummary(
             metric=m,
             label=COI_METRIC_LABELS[m],
-            conditions=[_stats_for(values_by_metric_condition[m][c], c) for c in conditions],
+            conditions=[_stats_for(values_by_metric_condition[m][c], c, ndigits=4) for c in conditions],
         )
         for m in COI_METRICS
     ]

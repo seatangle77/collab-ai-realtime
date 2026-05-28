@@ -6,6 +6,7 @@ from statistics import mean, median, stdev
 from typing import Any, Literal
 
 from ..api_model import ApiModel
+from .stats_utils import MetricConditionStats, PostHocPairResult, _cohens_d, _eta_squared, _epsilon_squared, _stats_for
 
 try:
     from scipy.stats import f_oneway, kruskal, mannwhitneyu, norm as _scipy_norm, shapiro, ttest_ind, tukey_hsd
@@ -62,16 +63,6 @@ class TaskScoreObservation(ApiModel):
     strong_synergy: float
 
 
-class MetricConditionStats(ApiModel):
-    condition: str
-    n: int
-    mean: float | None = None
-    sd: float | None = None
-    median: float | None = None
-    min: float | None = None
-    max: float | None = None
-
-
 class MetricSummary(ApiModel):
     metric: str
     label: str
@@ -122,15 +113,6 @@ PostHocStatus = Literal["ok", "not_applicable", "insufficient_data", "dependency
 PostHocMethod = Literal["tukey_hsd", "dunn_bonferroni"]
 
 
-class PostHocPairResult(ApiModel):
-    condition_a: str
-    condition_b: str
-    mean_diff: float | None = None
-    p_value_adjusted: float | None = None
-    significant: bool | None = None
-    alpha: float = 0.05
-
-
 class PostHocResult(ApiModel):
     metric: str
     label: str
@@ -157,21 +139,6 @@ class TaskScoreAnalysisResult(ApiModel):
 
 def _round(value: float) -> float:
     return round(value, 3)
-
-
-def _stats_for(values: list[float], condition: str) -> MetricConditionStats:
-    if not values:
-        return MetricConditionStats(condition=condition, n=0)
-
-    return MetricConditionStats(
-        condition=condition,
-        n=len(values),
-        mean=_round(mean(values)),
-        sd=_round(stdev(values)) if len(values) > 1 else 0.0,
-        median=_round(median(values)),
-        min=_round(min(values)),
-        max=_round(max(values)),
-    )
 
 
 def _role_for_metric(metric: str) -> MetricRole:
@@ -293,39 +260,6 @@ def _recommend_test_for_metric(
     )
 
 
-def _cohens_d(first: list[float], second: list[float]) -> float | None:
-    if len(first) < 2 or len(second) < 2:
-        return None
-    first_sd = stdev(first)
-    second_sd = stdev(second)
-    pooled_variance = (
-        ((len(first) - 1) * first_sd**2 + (len(second) - 1) * second_sd**2)
-        / (len(first) + len(second) - 2)
-    )
-    if pooled_variance <= 0:
-        return None
-    return (mean(second) - mean(first)) / math.sqrt(pooled_variance)
-
-
-def _eta_squared(groups: list[list[float]]) -> float | None:
-    values = [value for group in groups for value in group]
-    if len(values) <= 1:
-        return None
-    grand_mean = mean(values)
-    ss_between = sum(len(group) * (mean(group) - grand_mean) ** 2 for group in groups if group)
-    ss_total = sum((value - grand_mean) ** 2 for value in values)
-    if ss_total <= 0:
-        return None
-    return ss_between / ss_total
-
-
-def _epsilon_squared(h_statistic: float, group_count: int, total_n: int) -> float | None:
-    denominator = total_n - group_count
-    if denominator <= 0:
-        return None
-    return max(0.0, (h_statistic - group_count + 1) / denominator)
-
-
 def _statistical_test_for_metric(
     *,
     metric: str,
@@ -362,7 +296,7 @@ def _statistical_test_for_metric(
             statistic=_round(float(statistic)),
             p_value=_round(float(p_value)),
             effect_size_name="Cohen's d",
-            effect_size=_round(_cohens_d(groups[0], groups[1])) if _cohens_d(groups[0], groups[1]) is not None else None,
+            effect_size=_round(d) if (d := _cohens_d(groups[0], groups[1])) is not None else None,
             status="ok",
             note="使用 Welch independent-samples t-test；Cohen's d 为第二条件均值减第一条件均值",
         )
@@ -392,7 +326,7 @@ def _statistical_test_for_metric(
             statistic=_round(float(statistic)),
             p_value=_round(float(p_value)),
             effect_size_name="eta squared",
-            effect_size=_round(_eta_squared(groups)) if _eta_squared(groups) is not None else None,
+            effect_size=_round(eta) if (eta := _eta_squared(groups)) is not None else None,
             status="ok",
             note="若 p < 0.05，后续可补 Tukey HSD 事后检验",
         )
@@ -406,9 +340,7 @@ def _statistical_test_for_metric(
             statistic=_round(float(statistic)),
             p_value=_round(float(p_value)),
             effect_size_name="epsilon squared",
-            effect_size=_round(_epsilon_squared(float(statistic), len(groups), sum(len(group) for group in groups)))
-            if _epsilon_squared(float(statistic), len(groups), sum(len(group) for group in groups)) is not None
-            else None,
+            effect_size=_round(eps) if (eps := _epsilon_squared(float(statistic), len(groups), sum(len(g) for g in groups))) is not None else None,
             status="ok",
             note="若 p < 0.05，后续可补 Dunn + Bonferroni 事后检验",
         )
@@ -454,11 +386,7 @@ def _dunn_bonferroni_pairs(
         n_i, n_j = len(groups[i]), len(groups[j])
         se = math.sqrt((n_total * (n_total + 1) / 12) * (1 / n_i + 1 / n_j))
         if se == 0:
-            pairs.append(PostHocPairResult(
-                condition_a=conditions[i],
-                condition_b=conditions[j],
-                status="calculation_error",  # type: ignore[call-arg]
-            ))
+            pairs.append(PostHocPairResult(condition_a=conditions[i], condition_b=conditions[j]))
             continue
         z = abs(group_mean_ranks[i] - group_mean_ranks[j]) / se
         p_raw = 2 * (1 - _scipy_norm.cdf(z))
