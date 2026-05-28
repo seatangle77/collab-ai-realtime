@@ -213,6 +213,11 @@ const routes: RouteRecordRaw[] = [
         name: 'AdminCoiUtterances',
         component: () => import('../views/admin/AdminCoiUtterancesPage.vue'),
       },
+      {
+        path: 'coi-analysis',
+        name: 'AdminCoiAnalysis',
+        component: () => import('../views/admin/AdminCoiAnalysisPage.vue'),
+      },
     ],
   },
 ]
