@@ -56,6 +56,8 @@ from .audio_segments import (
     ensure_offline_audio_segments_table,
     router as offline_audio_segments_router,
 )
+from .questionnaire import router as questionnaire_router
+from .admin.questionnaire_entries import router as admin_questionnaire_entries_router
 
 app = FastAPI()
 
@@ -113,6 +115,8 @@ app.include_router(concepts_router)
 app.include_router(discussion_summary_router)
 app.include_router(window_metrics_router)
 app.include_router(icebreaker_router)
+app.include_router(questionnaire_router)
+app.include_router(admin_questionnaire_entries_router)
 app.include_router(test_seed_router)
 app.include_router(vad_router)
 app.include_router(offline_audio_segments_router)

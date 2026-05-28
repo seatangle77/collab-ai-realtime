@@ -67,6 +67,11 @@ const routes: RouteRecordRaw[] = [
         name: 'AppSessionDetail',
         component: () => import('../views/app/AppSessionDetailPage.vue'),
       },
+      {
+        path: 'survey',
+        name: 'AppSurvey',
+        component: () => import('../views/app/AppSurvey.vue'),
+      },
     ],
   },
   // 管理后台路由
@@ -192,6 +197,11 @@ const routes: RouteRecordRaw[] = [
         path: 'task-score-report',
         name: 'AdminTaskScoreReport',
         component: () => import('../views/admin/AdminTaskScoreReportPage.vue'),
+      },
+      {
+        path: 'questionnaire-entries',
+        name: 'AdminQuestionnaireEntries',
+        component: () => import('../views/admin/AdminQuestionnaireEntriesPage.vue'),
       },
     ],
   },

@@ -2,7 +2,7 @@
 import { useRoute, useRouter } from 'vue-router'
 import { computed, ref, watch } from 'vue'
 import type { Component } from 'vue'
-import { HomeFilled, User, ChatLineRound, Microphone, Sunny } from '@element-plus/icons-vue'
+import { HomeFilled, User, ChatLineRound, Microphone, Sunny, EditPen } from '@element-plus/icons-vue'
 import { Capacitor } from '@capacitor/core'
 
 const router = useRouter()
@@ -35,6 +35,7 @@ const tabs: TabItem[] = [
   { path: '/app/sessions', label: '会话', icon: ChatLineRound },
   { path: '/app/voice-profile', label: '声纹', icon: Microphone },
   ...(!isNative ? [{ path: '/app/icebreaker', label: '破冰', icon: Sunny }] : []),
+  { path: '/app/survey', label: '量表', icon: EditPen },
 ]
 
 function isTabActive(tabPath: string): boolean {
@@ -53,6 +54,9 @@ function isTabActive(tabPath: string): boolean {
   }
   if (tabPath === '/app/icebreaker') {
     return p.startsWith('/app/icebreaker')
+  }
+  if (tabPath === '/app/survey') {
+    return p.startsWith('/app/survey')
   }
   return false
 }
