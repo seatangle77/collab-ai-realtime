@@ -16,7 +16,7 @@ export interface Page<T> {
 export interface AdminUser {
   id: string
   name: string
-  email: string
+  email: string | null
   device_token: string | null
   created_at: string
   group_ids?: string[]

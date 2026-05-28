@@ -8,7 +8,6 @@ const router = useRouter()
 const route = useRoute()
 
 const name = ref('')
-const email = ref('')
 const password = ref('')
 const confirmPassword = ref('')
 const loading = ref(false)
@@ -20,11 +19,7 @@ async function handleSubmit() {
   success.value = ''
 
   if (!name.value.trim()) {
-    error.value = '请输入昵称'
-    return
-  }
-  if (!email.value.trim()) {
-    error.value = '请输入邮箱'
+    error.value = '请输入用户名'
     return
   }
   if (!password.value || password.value.length !== 4) {
@@ -40,10 +35,9 @@ async function handleSubmit() {
   try {
     await appRegister({
       name: name.value.trim(),
-      email: email.value.trim(),
       password: password.value,
     })
-    success.value = '注册成功，请使用该邮箱和密码登录'
+    success.value = '注册成功，请使用用户名和密码登录'
     setTimeout(() => {
       const redirect = (route.query.redirect as string | undefined) || '/app'
       router.push({ path: '/app/login', query: { redirect } })
@@ -65,28 +59,17 @@ function goLogin() {
   <div class="auth-page">
     <div class="auth-card">
       <h1 class="auth-title">创建账号</h1>
-      <p class="auth-subtitle">注册成为 Collab AI 用户，开始协作与会话</p>
+      <p class="auth-subtitle">设置用户名和密码，开始使用 Collab AI</p>
 
       <form class="auth-form" @submit.prevent="handleSubmit">
         <label class="auth-label">
-          昵称
+          用户名
           <input
             v-model="name"
             class="auth-input"
             type="text"
-            placeholder="你的称呼"
-            autocomplete="name"
-          />
-        </label>
-
-        <label class="auth-label">
-          邮箱
-          <input
-            v-model="email"
-            class="auth-input"
-            type="email"
-            placeholder="you@example.com"
-            autocomplete="email"
+            placeholder="你的用户名"
+            autocomplete="username"
           />
         </label>
 

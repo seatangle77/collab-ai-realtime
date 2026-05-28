@@ -3,32 +3,30 @@ import { test, expect } from '@playwright/test'
 const API_BASE = process.env.API_BASE_URL || 'http://localhost:8000'
 const ADMIN_TOKEN = process.env.ADMIN_API_KEY || 'TestAdminKey123'
 
-// 通过 API 注册测试用户，返回 email / password / userId
-async function registerUserForE2E(): Promise<{ email: string; password: string; userId: string }> {
+// 通过 API 注册测试用户，返回 name / password / userId
+async function registerUserForE2E(): Promise<{ name: string; password: string; userId: string }> {
   const name = `用户${Date.now()}`
-  const email = `app-e2e-${Date.now()}@example.com`
   const password = '1234'
 
   const res = await fetch(`${API_BASE}/api/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, email, password }),
+    body: JSON.stringify({ name, password }),
   })
   if (!res.ok) {
     const text = await res.text()
     throw new Error(`注册测试用户失败: ${res.status} - ${text}`)
   }
 
-  // 登录取 userId（register 只返回消息，login 返回 user 对象）
   const loginRes = await fetch(`${API_BASE}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ name, password }),
   })
   if (!loginRes.ok) throw new Error('测试用户登录失败')
   const loginData = await loginRes.json()
 
-  return { email, password, userId: loginData.user.id }
+  return { name, password, userId: loginData.user.id }
 }
 
 // 通过 admin API 标记用户需要改密
@@ -45,11 +43,9 @@ test.describe('App 用户注册与登录', () => {
     await page.goto('/app/register')
 
     const name = `用户${Date.now()}`
-    const email = `app-e2e-${Date.now()}@example.com`
     const password = '1234'
 
-    await page.getByLabel('昵称').fill(name)
-    await page.getByLabel('邮箱').fill(email)
+    await page.getByLabel('用户名').fill(name)
     await page.getByPlaceholder('4 位密码').fill(password)
     await page.getByPlaceholder('再次输入密码').fill(password)
 
@@ -60,12 +56,12 @@ test.describe('App 用户注册与登录', () => {
   })
 
   test('2. 未登录访问受保护页面会被重定向到登录，登录后跳回原页面', async ({ page }) => {
-    const { email, password } = await registerUserForE2E()
+    const { name, password } = await registerUserForE2E()
 
     await page.goto('/app/groups')
     await expect(page).toHaveURL(/\/app\/login/)
 
-    await page.getByLabel('邮箱').fill(email)
+    await page.getByLabel('用户名').fill(name)
     await page.getByLabel('密码').fill(password)
     await page.getByRole('button', { name: '登录' }).click()
 
@@ -73,10 +69,10 @@ test.describe('App 用户注册与登录', () => {
   })
 
   test('3. 错误密码登录失败并显示错误提示', async ({ page }) => {
-    const { email } = await registerUserForE2E()
+    const { name } = await registerUserForE2E()
 
     await page.goto('/app/login')
-    await page.getByLabel('邮箱').fill(email)
+    await page.getByLabel('用户名').fill(name)
     await page.getByLabel('密码').fill('9999')
     await page.getByRole('button', { name: '登录' }).click()
 
@@ -85,10 +81,10 @@ test.describe('App 用户注册与登录', () => {
   })
 
   test('4. 登录成功后刷新页面仍保持在受保护页面', async ({ page }) => {
-    const { email, password } = await registerUserForE2E()
+    const { name, password } = await registerUserForE2E()
 
     await page.goto('/app/login')
-    await page.getByLabel('邮箱').fill(email)
+    await page.getByLabel('用户名').fill(name)
     await page.getByLabel('密码').fill(password)
     await page.getByRole('button', { name: '登录' }).click()
 
@@ -98,15 +94,16 @@ test.describe('App 用户注册与登录', () => {
   })
 
   test('5. 退出登录后再次访问受保护页面会被拦截', async ({ page }) => {
-    const { email, password } = await registerUserForE2E()
+    const { name, password } = await registerUserForE2E()
 
     await page.goto('/app/login')
-    await page.getByLabel('邮箱').fill(email)
+    await page.getByLabel('用户名').fill(name)
     await page.getByLabel('密码').fill(password)
     await page.getByRole('button', { name: '登录' }).click()
 
     await expect(page).toHaveURL(/\/app\/?$/)
-    await page.getByRole('button', { name: '退出登录' }).click()
+    // 桌面端按钮文字为"退出"，移动端下拉菜单才是"退出登录"
+    await page.getByRole('button', { name: '退出' }).first().click()
     await expect(page).toHaveURL(/\/app\/login/)
 
     await page.goto('/app/groups')
@@ -116,17 +113,12 @@ test.describe('App 用户注册与登录', () => {
   test('6. 注册表单校验 - 必填项与密码一致性', async ({ page }) => {
     await page.goto('/app/register')
 
-    // 昵称为空
+    // 用户名为空
     await page.getByRole('button', { name: '注册' }).click()
-    await expect(page.getByText('请输入昵称')).toBeVisible()
-
-    // 邮箱为空
-    await page.getByLabel('昵称').fill('校验用户')
-    await page.getByRole('button', { name: '注册' }).click()
-    await expect(page.getByText('请输入邮箱')).toBeVisible()
+    await expect(page.getByText('请输入用户名')).toBeVisible()
 
     // 密码不等于 4 位
-    await page.getByLabel('邮箱').fill('validate@example.com')
+    await page.getByLabel('用户名').fill('校验用户')
     await page.getByPlaceholder('4 位密码').fill('123')
     await page.getByPlaceholder('再次输入密码').fill('123')
     await page.getByRole('button', { name: '注册' }).click()
@@ -139,12 +131,11 @@ test.describe('App 用户注册与登录', () => {
     await expect(page.getByText('两次输入的密码不一致')).toBeVisible()
   })
 
-  test('7. 注册失败 - 重复邮箱', async ({ page }) => {
-    const { email, password } = await registerUserForE2E()
+  test('7. 注册失败 - 重复用户名', async ({ page }) => {
+    const { name, password } = await registerUserForE2E()
 
     await page.goto('/app/register')
-    await page.getByLabel('昵称').fill('重复用户')
-    await page.getByLabel('邮箱').fill(email)
+    await page.getByLabel('用户名').fill(name)
     await page.getByPlaceholder('4 位密码').fill(password)
     await page.getByPlaceholder('再次输入密码').fill(password)
     await page.getByRole('button', { name: '注册' }).click()
@@ -153,11 +144,9 @@ test.describe('App 用户注册与登录', () => {
     await expect(page).toHaveURL(/\/app\/register/)
   })
 
-  test('8. 登录失败 - 未注册邮箱', async ({ page }) => {
-    const email = `not-exist-${Date.now()}@example.com`
-
+  test('8. 登录失败 - 不存在的用户名', async ({ page }) => {
     await page.goto('/app/login')
-    await page.getByLabel('邮箱').fill(email)
+    await page.getByLabel('用户名').fill(`不存在用户${Date.now()}`)
     await page.getByLabel('密码').fill('9999')
     await page.getByRole('button', { name: '登录' }).click()
 
@@ -166,10 +155,10 @@ test.describe('App 用户注册与登录', () => {
   })
 
   test('9. 已登录用户访问登录/注册页会被重定向到首页', async ({ page }) => {
-    const { email, password } = await registerUserForE2E()
+    const { name, password } = await registerUserForE2E()
 
     await page.goto('/app/login')
-    await page.getByLabel('邮箱').fill(email)
+    await page.getByLabel('用户名').fill(name)
     await page.getByLabel('密码').fill(password)
     await page.getByRole('button', { name: '登录' }).click()
 
@@ -183,11 +172,11 @@ test.describe('App 用户注册与登录', () => {
   })
 
   test('10. 登录后 password_needs_reset=true 跳转到改密页', async ({ page }) => {
-    const { email, password, userId } = await registerUserForE2E()
+    const { name, password, userId } = await registerUserForE2E()
     await markPasswordReset(userId)
 
     await page.goto('/app/login')
-    await page.getByLabel('邮箱').fill(email)
+    await page.getByLabel('用户名').fill(name)
     await page.getByLabel('密码').fill(password)
     await page.getByRole('button', { name: '登录' }).click()
 
@@ -196,19 +185,17 @@ test.describe('App 用户注册与登录', () => {
 })
 
 test.describe.serial('AppChangePassword · 修改密码页', () => {
-  // 每个用例都需要一个已登录且需要改密的用户
   async function setupUserNeedingPasswordReset(page: import('@playwright/test').Page) {
-    const { email, password, userId } = await registerUserForE2E()
+    const { name, password, userId } = await registerUserForE2E()
     await markPasswordReset(userId)
 
-    // 通过 UI 登录（会自动跳到改密页）
     await page.goto('/app/login')
-    await page.getByLabel('邮箱').fill(email)
+    await page.getByLabel('用户名').fill(name)
     await page.getByLabel('密码').fill(password)
     await page.getByRole('button', { name: '登录' }).click()
     await expect(page).toHaveURL(/\/app\/change-password/)
 
-    return { email, password }
+    return { name, password }
   }
 
   test('1. 旧密码为空 → 显示错误提示', async ({ page }) => {
@@ -292,7 +279,6 @@ test.describe.serial('AppChangePassword · 修改密码页', () => {
     await expect(page.getByText('密码修改成功')).toBeVisible()
     await expect(page).toHaveURL(/\/app\/?$/, { timeout: 5000 })
 
-    // 手动访问 change-password，应正常显示（不会被重定向回来）
     await page.goto('/app/change-password')
     await expect(page).toHaveURL(/\/app\/change-password/)
     await expect(page.getByRole('button', { name: '保存新密码' })).toBeVisible()

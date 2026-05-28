@@ -28,7 +28,6 @@ def scenario_register_success(ctx: Dict[str, Any]) -> bool:
         f"{BASE_URL}/api/auth/register",
         json={
             "name": ctx["name"],
-            "email": ctx["email"],
             "password": ctx["password"],
             "device_token": ctx["device_token"],
         },
@@ -36,44 +35,31 @@ def scenario_register_success(ctx: Dict[str, Any]) -> bool:
     if resp.status_code != 200:
         return _log(False, "注册失败（期望 200）", resp.json())
     data = resp.json()
-    ok = data.get("email") == ctx["email"]
+    ok = data.get("name") == ctx["name"]
     if ok:
         ctx["user_id"] = data.get("id")
     return _log(ok, "注册成功场景", data)
 
 
-def scenario_register_duplicate_email(ctx: Dict[str, Any]) -> bool:
+def scenario_register_duplicate_name(ctx: Dict[str, Any]) -> bool:
     resp = requests.post(
         f"{BASE_URL}/api/auth/register",
         json={
             "name": ctx["name"],
-            "email": ctx["email"],
             "password": ctx["password"],
         },
     )
     ok = resp.status_code == 400
-    return _log(ok, "重复邮箱注册应返回 400 场景", {"status": resp.status_code, "body": resp.json()})
-
-
-def scenario_register_invalid_email() -> bool:
-    ok = True
-    for bad_email in ["notanemail", "@nodomain.com", "missing_at_sign", "a@", ""]:
-        resp = requests.post(
-            f"{BASE_URL}/api/auth/register",
-            json={"name": "Test", "email": bad_email, "password": "1234"},
-        )
-        passed = resp.status_code in (400, 422)
-        ok &= _log(passed, f"邮箱格式非法应返回 400/422：email={bad_email!r}", {"status": resp.status_code})
-    return ok
+    return _log(ok, "重复用户名注册应返回 400 场景", {"status": resp.status_code, "body": resp.json()})
 
 
 def scenario_register_password_wrong_length() -> bool:
     ok = True
-    base_email = f"pwlen_{uuid.uuid4().hex[:6]}@example.com"
+    base_name = f"pwlen_{uuid.uuid4().hex[:6]}"
     for pwd, label in [("123", "3位"), ("12345", "5位"), ("", "空字符串")]:
         resp = requests.post(
             f"{BASE_URL}/api/auth/register",
-            json={"name": "Test", "email": base_email, "password": pwd},
+            json={"name": base_name, "password": pwd},
         )
         passed = resp.status_code in (400, 422)
         ok &= _log(passed, f"密码长度不合法应返回 400/422：password={pwd!r}({label})", {"status": resp.status_code})
@@ -83,13 +69,10 @@ def scenario_register_password_wrong_length() -> bool:
 def scenario_register_missing_required_fields() -> bool:
     ok = True
     # 缺 name
-    resp = requests.post(f"{BASE_URL}/api/auth/register", json={"email": "a@b.com", "password": "1234"})
+    resp = requests.post(f"{BASE_URL}/api/auth/register", json={"password": "1234"})
     ok &= _log(resp.status_code == 422, "缺 name 字段应返回 422", {"status": resp.status_code})
-    # 缺 email
-    resp = requests.post(f"{BASE_URL}/api/auth/register", json={"name": "Test", "password": "1234"})
-    ok &= _log(resp.status_code == 422, "缺 email 字段应返回 422", {"status": resp.status_code})
     # 缺 password
-    resp = requests.post(f"{BASE_URL}/api/auth/register", json={"name": "Test", "email": "a@b.com"})
+    resp = requests.post(f"{BASE_URL}/api/auth/register", json={"name": "Test"})
     ok &= _log(resp.status_code == 422, "缺 password 字段应返回 422", {"status": resp.status_code})
     return ok
 
@@ -141,13 +124,13 @@ def scenario_register_does_not_create_membership(ctx: Dict[str, Any]) -> bool:
 def scenario_login_success(ctx: Dict[str, Any]) -> bool:
     resp = requests.post(
         f"{BASE_URL}/api/auth/login",
-        json={"email": ctx["email"], "password": ctx["password"]},
+        json={"name": ctx["name"], "password": ctx["password"]},
     )
     if resp.status_code != 200:
         return _log(False, "登录失败（期望 200）", resp.json())
     data = resp.json()
     token = data.get("access_token")
-    ok = bool(token) and data.get("user", {}).get("email") == ctx["email"]
+    ok = bool(token) and data.get("user", {}).get("name") == ctx["name"]
     if ok:
         ctx["access_token"] = token
     return _log(ok, "登录成功场景", data)
@@ -156,19 +139,19 @@ def scenario_login_success(ctx: Dict[str, Any]) -> bool:
 def scenario_login_wrong_password(ctx: Dict[str, Any]) -> bool:
     resp = requests.post(
         f"{BASE_URL}/api/auth/login",
-        json={"email": ctx["email"], "password": "0000"},
+        json={"name": ctx["name"], "password": "0000"},
     )
     ok = resp.status_code == 401
     return _log(ok, "登录密码错误应返回 401 场景", {"status": resp.status_code, "body": resp.json()})
 
 
-def scenario_login_nonexistent_email() -> bool:
+def scenario_login_nonexistent_name() -> bool:
     resp = requests.post(
         f"{BASE_URL}/api/auth/login",
-        json={"email": f"no_{uuid.uuid4().hex[:6]}@example.com", "password": "1234"},
+        json={"name": f"nouser_{uuid.uuid4().hex[:6]}", "password": "1234"},
     )
     ok = resp.status_code == 401
-    return _log(ok, "登录邮箱不存在应返回 401 场景", {"status": resp.status_code})
+    return _log(ok, "登录用户名不存在应返回 401 场景", {"status": resp.status_code})
 
 
 def scenario_login_returns_password_needs_reset(ctx: Dict[str, Any]) -> bool:
@@ -186,7 +169,7 @@ def scenario_login_returns_password_needs_reset(ctx: Dict[str, Any]) -> bool:
 
     resp = requests.post(
         f"{BASE_URL}/api/auth/login",
-        json={"email": ctx["email"], "password": ctx["password"]},
+        json={"name": ctx["name"], "password": ctx["password"]},
     )
     if resp.status_code != 200:
         return _log(False, "标记后登录失败（期望 200）", resp.json())
@@ -209,7 +192,7 @@ def scenario_me_with_valid_token(ctx: Dict[str, Any]) -> bool:
     if resp.status_code != 200:
         return _log(False, "带合法 token 调 /me 失败（期望 200）", resp.json())
     data = resp.json()
-    ok = data.get("email") == ctx["email"]
+    ok = data.get("name") == ctx["name"]
     return _log(ok, "获取当前用户信息场景", data)
 
 
@@ -275,7 +258,7 @@ def scenario_change_password_clears_reset_flag(ctx: Dict[str, Any]) -> bool:
     ctx["password"] = new_password
     ctx["access_token"] = requests.post(
         f"{BASE_URL}/api/auth/login",
-        json={"email": ctx["email"], "password": new_password},
+        json={"name": ctx["name"], "password": new_password},
     ).json().get("access_token", ctx["access_token"])
     return ok
 
@@ -285,7 +268,7 @@ def scenario_change_password_old_login_fails(ctx: Dict[str, Any]) -> bool:
     old_password = "1234"  # 最初注册密码
     resp = requests.post(
         f"{BASE_URL}/api/auth/login",
-        json={"email": ctx["email"], "password": old_password},
+        json={"name": ctx["name"], "password": old_password},
     )
     ok = resp.status_code == 401
     return _log(ok, "改密码后旧密码登录应返回 401 场景", {"status": resp.status_code})
@@ -295,7 +278,7 @@ def scenario_change_password_new_login_succeeds(ctx: Dict[str, Any]) -> bool:
     """改完密码后，用新密码可以正常登录。"""
     resp = requests.post(
         f"{BASE_URL}/api/auth/login",
-        json={"email": ctx["email"], "password": ctx["password"]},
+        json={"name": ctx["name"], "password": ctx["password"]},
     )
     if resp.status_code != 200:
         return _log(False, "改密码后新密码登录失败（期望 200）", resp.json())
@@ -311,8 +294,7 @@ def run_all() -> bool:
     print("=== 开始 Auth 注册/登录流程测试 ===\n")
 
     ctx: Dict[str, Any] = {
-        "name": f"James Lin {RUN_ID}",
-        "email": f"test_{uuid.uuid4().hex[:8]}@example.com",
+        "name": f"JamesLin{RUN_ID}",
         "password": "1234",
         "device_token": f"device-auth-{uuid.uuid4().hex[:8]}",
     }
@@ -320,18 +302,17 @@ def run_all() -> bool:
     ok = True
 
     print("-- 注册 --")
-    ok &= scenario_register_invalid_email()
     ok &= scenario_register_password_wrong_length()
     ok &= scenario_register_missing_required_fields()
     ok &= scenario_register_success(ctx)
-    ok &= scenario_register_duplicate_email(ctx)
+    ok &= scenario_register_duplicate_name(ctx)
     ok &= scenario_register_does_not_create_default_group(ctx)
     ok &= scenario_register_does_not_create_membership(ctx)
 
     print("\n-- 登录 --")
     ok &= scenario_login_success(ctx)
     ok &= scenario_login_wrong_password(ctx)
-    ok &= scenario_login_nonexistent_email()
+    ok &= scenario_login_nonexistent_name()
 
     print("\n-- /me --")
     ok &= scenario_me_with_valid_token(ctx)

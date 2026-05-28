@@ -3,13 +3,12 @@ import type { AdminUser } from '../types/admin'
 
 export interface AppRegisterPayload {
   name: string
-  email: string
   password: string
   device_token?: string | null
 }
 
 export interface AppLoginPayload {
-  email: string
+  name: string
   password: string
 }
 

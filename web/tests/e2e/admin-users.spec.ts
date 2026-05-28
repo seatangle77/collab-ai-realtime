@@ -290,36 +290,35 @@ test.describe('Admin 用户管理 - 边界与异常', () => {
     await expect(dialog).toBeVisible()
   })
 
-  test('创建用户 - 重复邮箱时后端报错并前端提示', async ({ page }) => {
+  test('创建用户 - 重复用户名时后端报错并前端提示', async ({ page }) => {
     await loginAsAdmin(page)
-    const dupEmail = `e2e-dup-${Date.now()}@example.com`
+    const dupName = `DupUser${Date.now()}`
 
     await page.getByRole('button', { name: '新建用户' }).click()
     let dialog = page.getByRole('dialog', { name: '新建用户' })
-    await dialog.getByLabel('姓名').fill('First')
-    await dialog.getByLabel('邮箱').fill(dupEmail)
+    await dialog.getByLabel('姓名').fill(dupName)
     await dialog.getByLabel('密码').fill('1234')
     await dialog.getByRole('button', { name: '创建' }).click()
     await expect(page.getByText('创建用户成功')).toBeVisible()
 
     await page.getByRole('button', { name: '新建用户' }).click()
     dialog = page.getByRole('dialog', { name: '新建用户' })
-    await dialog.getByLabel('姓名').fill('Second')
-    await dialog.getByLabel('邮箱').fill(dupEmail)
+    await dialog.getByLabel('姓名').fill(dupName)
     await dialog.getByLabel('密码').fill('5678')
     await dialog.getByRole('button', { name: '创建' }).click()
 
-    await expect(page.getByText('邮箱已被注册')).toBeVisible({ timeout: 8000 })
+    await expect(page.getByText('用户名已被注册')).toBeVisible({ timeout: 8000 })
   })
 
   test('标记用户下次必须修改密码后密码状态为需修改', async ({ page }) => {
     await loginAsAdmin(page)
-    const email = `e2e-mark-reset-${Date.now()}@example.com`
+    const now = Date.now()
+    const email = `e2e-mark-reset-${now}@example.com`
 
     // 创建一个新用户
     await page.getByRole('button', { name: '新建用户' }).click()
     let dialog = page.getByRole('dialog', { name: '新建用户' })
-    await dialog.getByLabel('姓名').fill('MarkReset')
+    await dialog.getByLabel('姓名').fill(`MarkReset${now}`)
     await dialog.getByLabel('邮箱').fill(email)
     await dialog.getByLabel('密码').fill('1234')
     await dialog.getByRole('button', { name: '创建' }).click()
@@ -347,12 +346,13 @@ test.describe('Admin 用户管理 - 边界与异常', () => {
 
   test('标记需改密码 - 取消确认时不应更改密码状态', async ({ page }) => {
     await loginAsAdmin(page)
-    const email = `e2e-mark-reset-cancel-${Date.now()}@example.com`
+    const now = Date.now()
+    const email = `e2e-mark-reset-cancel-${now}@example.com`
 
-    // 创建一个新用户，默认密码状态为“正常”
+    // 创建一个新用户，默认密码状态为”正常”
     await page.getByRole('button', { name: '新建用户' }).click()
     let dialog = page.getByRole('dialog', { name: '新建用户' })
-    await dialog.getByLabel('姓名').fill('MarkResetCancel')
+    await dialog.getByLabel('姓名').fill(`MarkResetCancel${now}`)
     await dialog.getByLabel('邮箱').fill(email)
     await dialog.getByLabel('密码').fill('1234')
     await dialog.getByRole('button', { name: '创建' }).click()
@@ -377,12 +377,13 @@ test.describe('Admin 用户管理 - 边界与异常', () => {
 
   test('标记需改密码 - 接口失败时提示错误且状态保持正常', async ({ page }) => {
     await loginAsAdmin(page)
-    const email = `e2e-mark-reset-fail-${Date.now()}@example.com`
+    const now = Date.now()
+    const email = `e2e-mark-reset-fail-${now}@example.com`
 
     // 创建用户
     await page.getByRole('button', { name: '新建用户' }).click()
     let dialog = page.getByRole('dialog', { name: '新建用户' })
-    await dialog.getByLabel('姓名').fill('MarkResetFail')
+    await dialog.getByLabel('姓名').fill(`MarkResetFail${now}`)
     await dialog.getByLabel('邮箱').fill(email)
     await dialog.getByLabel('密码').fill('1234')
     await dialog.getByRole('button', { name: '创建' }).click()
@@ -440,10 +441,11 @@ test.describe('Admin 用户管理 - 边界与异常', () => {
 
   test('编辑用户 - 姓名为空时表单校验阻止保存', async ({ page }) => {
     await loginAsAdmin(page)
-    const email = `e2e-edit-validation-${Date.now()}@example.com`
+    const now = Date.now()
+    const email = `e2e-edit-validation-${now}@example.com`
     await page.getByRole('button', { name: '新建用户' }).click()
     const createDialog = page.getByRole('dialog', { name: '新建用户' })
-    await createDialog.getByLabel('姓名').fill('Original')
+    await createDialog.getByLabel('姓名').fill(`Original${now}`)
     await createDialog.getByLabel('邮箱').fill(email)
     await createDialog.getByLabel('密码').fill('1234')
     await createDialog.getByRole('button', { name: '创建' }).click()
@@ -464,10 +466,11 @@ test.describe('Admin 用户管理 - 边界与异常', () => {
 
   test('删除 - 取消删除时用户仍在列表中', async ({ page }) => {
     await loginAsAdmin(page)
-    const email = `e2e-cancel-delete-${Date.now()}@example.com`
+    const now = Date.now()
+    const email = `e2e-cancel-delete-${now}@example.com`
     await page.getByRole('button', { name: '新建用户' }).click()
     const createDialog = page.getByRole('dialog', { name: '新建用户' })
-    await createDialog.getByLabel('姓名').fill('Keep')
+    await createDialog.getByLabel('姓名').fill(`Keep${now}`)
     await createDialog.getByLabel('邮箱').fill(email)
     await createDialog.getByLabel('密码').fill('1234')
     await createDialog.getByRole('button', { name: '创建' }).click()
@@ -497,7 +500,7 @@ test.describe('Admin 用户管理 - 边界与异常', () => {
     const now = Date.now()
     const email1 = `e2e-batch-del-1-${now}@example.com`
     const email2 = `e2e-batch-del-2-${now}@example.com`
-    for (const [email, name] of [[email1, 'Batch1'], [email2, 'Batch2']] as const) {
+    for (const [email, name] of [[email1, `Batch1${now}`], [email2, `Batch2${now}`]] as const) {
       await page.getByRole('button', { name: '新建用户' }).click()
       const dialog = page.getByRole('dialog', { name: '新建用户' })
       await dialog.getByLabel('姓名').fill(name)
@@ -533,9 +536,9 @@ test.describe('Admin 用户管理 - 边界与异常', () => {
 
     // 创建三条用户
     for (const [email, name] of [
-      [email1, 'Export1'],
-      [email2, 'Export2'],
-      [email3, 'Export3'],
+      [email1, `Export1${now}`],
+      [email2, `Export2${now}`],
+      [email3, `Export3${now}`],
     ] as const) {
       await page.getByRole('button', { name: '新建用户' }).click()
       const dialog = page.getByRole('dialog', { name: '新建用户' })
@@ -612,12 +615,13 @@ test.describe('Admin 用户管理 - 边界与异常', () => {
 test.describe('Admin 用户管理 - 模拟登录', () => {
   test('模拟登录 - 成功以该用户身份在新页面打开 App', async ({ page, context }) => {
     await loginAsAdmin(page)
-    const email = `e2e-impersonate-${Date.now()}@example.com`
+    const now = Date.now()
+    const email = `e2e-impersonate-${now}@example.com`
 
     // 创建一个新用户
     await page.getByRole('button', { name: '新建用户' }).click()
     const dialog = page.getByRole('dialog', { name: '新建用户' })
-    await dialog.getByLabel('姓名').fill('ImpersonateUser')
+    await dialog.getByLabel('姓名').fill(`ImpersonateUser${now}`)
     await dialog.getByLabel('邮箱').fill(email)
     await dialog.getByLabel('密码').fill('1234')
     await dialog.getByRole('button', { name: '创建' }).click()
@@ -645,12 +649,13 @@ test.describe('Admin 用户管理 - 模拟登录', () => {
 
   test('模拟登录 - 接口失败时给出错误提示且不应打开新页面', async ({ page, context }) => {
     await loginAsAdmin(page)
-    const email = `e2e-impersonate-fail-${Date.now()}@example.com`
+    const now = Date.now()
+    const email = `e2e-impersonate-fail-${now}@example.com`
 
     // 创建一个新用户
     await page.getByRole('button', { name: '新建用户' }).click()
     const dialog = page.getByRole('dialog', { name: '新建用户' })
-    await dialog.getByLabel('姓名').fill('ImpersonateFail')
+    await dialog.getByLabel('姓名').fill(`ImpersonateFail${now}`)
     await dialog.getByLabel('邮箱').fill(email)
     await dialog.getByLabel('密码').fill('1234')
     await dialog.getByRole('button', { name: '创建' }).click()
@@ -708,11 +713,12 @@ test.describe('Admin 用户管理 - 查询条件与组合', () => {
   })
 
   test('单条件 - 按设备 Token 模糊查询能命中', async ({ page }) => {
-    const unique = `dt${Date.now()}`
-    const email = `e2e-dt-q-${Date.now()}@example.com`
+    const now = Date.now()
+    const unique = `dt${now}`
+    const email = `e2e-dt-q-${now}@example.com`
     await page.getByRole('button', { name: '新建用户' }).click()
     const dialog = page.getByRole('dialog', { name: '新建用户' })
-    await dialog.getByLabel('姓名').fill('DeviceUser')
+    await dialog.getByLabel('姓名').fill(`DeviceUser${now}`)
     await dialog.getByLabel('邮箱').fill(email)
     await dialog.getByLabel('密码').fill('1234')
     await dialog.getByLabel('设备 Token').fill(`token-${unique}-suffix`)
@@ -748,10 +754,11 @@ test.describe('Admin 用户管理 - 查询条件与组合', () => {
   })
 
   test('组合 - 邮箱对但姓名不匹配时无结果', async ({ page }) => {
-    const email = `e2e-combo-nomatch-${Date.now()}@example.com`
+    const now = Date.now()
+    const email = `e2e-combo-nomatch-${now}@example.com`
     await page.getByRole('button', { name: '新建用户' }).click()
     const dialog = page.getByRole('dialog', { name: '新建用户' })
-    await dialog.getByLabel('姓名').fill('RealName')
+    await dialog.getByLabel('姓名').fill(`RealName${now}`)
     await dialog.getByLabel('邮箱').fill(email)
     await dialog.getByLabel('密码').fill('1234')
     await dialog.getByRole('button', { name: '创建' }).click()
@@ -764,11 +771,12 @@ test.describe('Admin 用户管理 - 查询条件与组合', () => {
   })
 
   test('组合 - 邮箱+设备 Token 同时满足时命中', async ({ page }) => {
-    const tokenPart = `tcombo${Date.now()}`
-    const email = `e2e-tcombo-${Date.now()}@example.com`
+    const now = Date.now()
+    const tokenPart = `tcombo${now}`
+    const email = `e2e-tcombo-${now}@example.com`
     await page.getByRole('button', { name: '新建用户' }).click()
     const dialog = page.getByRole('dialog', { name: '新建用户' })
-    await dialog.getByLabel('姓名').fill('TCombo')
+    await dialog.getByLabel('姓名').fill(`TCombo${now}`)
     await dialog.getByLabel('邮箱').fill(email)
     await dialog.getByLabel('密码').fill('1234')
     await dialog.getByLabel('设备 Token').fill(`dev-${tokenPart}`)
@@ -782,10 +790,11 @@ test.describe('Admin 用户管理 - 查询条件与组合', () => {
   })
 
   test('组合 - 邮箱对但设备 Token 不匹配时无结果', async ({ page }) => {
-    const email = `e2e-tnomatch-${Date.now()}@example.com`
+    const now = Date.now()
+    const email = `e2e-tnomatch-${now}@example.com`
     await page.getByRole('button', { name: '新建用户' }).click()
     const dialog = page.getByRole('dialog', { name: '新建用户' })
-    await dialog.getByLabel('姓名').fill('TNoMatch')
+    await dialog.getByLabel('姓名').fill(`TNoMatch${now}`)
     await dialog.getByLabel('邮箱').fill(email)
     await dialog.getByLabel('密码').fill('1234')
     await dialog.getByRole('button', { name: '创建' }).click()
@@ -805,10 +814,11 @@ test.describe('Admin 用户管理 - 查询条件与组合', () => {
   })
 
   test('边界 - 邮箱只输部分（模糊）能命中', async ({ page }) => {
-    const email = `e2e-fuzzy-${Date.now()}@example.com`
+    const now = Date.now()
+    const email = `e2e-fuzzy-${now}@example.com`
     await page.getByRole('button', { name: '新建用户' }).click()
     const dialog = page.getByRole('dialog', { name: '新建用户' })
-    await dialog.getByLabel('姓名').fill('Fuzzy')
+    await dialog.getByLabel('姓名').fill(`Fuzzy${now}`)
     await dialog.getByLabel('邮箱').fill(email)
     await dialog.getByLabel('密码').fill('1234')
     await dialog.getByRole('button', { name: '创建' }).click()
@@ -821,10 +831,11 @@ test.describe('Admin 用户管理 - 查询条件与组合', () => {
 
   // ---------- 创建时间范围查询 ----------
   test('创建时间 - 范围包含该用户时能命中', async ({ page }) => {
-    const email = `e2e-time-hit-${Date.now()}@example.com`
+    const now = Date.now()
+    const email = `e2e-time-hit-${now}@example.com`
     await page.getByRole('button', { name: '新建用户' }).click()
     const dialog = page.getByRole('dialog', { name: '新建用户' })
-    await dialog.getByLabel('姓名').fill('TimeHit')
+    await dialog.getByLabel('姓名').fill(`TimeHit${now}`)
     await dialog.getByLabel('邮箱').fill(email)
     await dialog.getByLabel('密码').fill('1234')
     await dialog.getByRole('button', { name: '创建' }).click()
@@ -845,10 +856,11 @@ test.describe('Admin 用户管理 - 查询条件与组合', () => {
   })
 
   test('创建时间 - 范围完全在创建时间之后时无结果', async ({ page }) => {
-    const email = `e2e-time-after-${Date.now()}@example.com`
+    const now = Date.now()
+    const email = `e2e-time-after-${now}@example.com`
     await page.getByRole('button', { name: '新建用户' }).click()
     const dialog = page.getByRole('dialog', { name: '新建用户' })
-    await dialog.getByLabel('姓名').fill('TimeAfter')
+    await dialog.getByLabel('姓名').fill(`TimeAfter${now}`)
     await dialog.getByLabel('邮箱').fill(email)
     await dialog.getByLabel('密码').fill('1234')
     await dialog.getByRole('button', { name: '创建' }).click()
@@ -868,10 +880,11 @@ test.describe('Admin 用户管理 - 查询条件与组合', () => {
   })
 
   test('创建时间 - 范围完全在创建时间之前时无结果', async ({ page }) => {
-    const email = `e2e-time-before-${Date.now()}@example.com`
+    const now = Date.now()
+    const email = `e2e-time-before-${now}@example.com`
     await page.getByRole('button', { name: '新建用户' }).click()
     const dialog = page.getByRole('dialog', { name: '新建用户' })
-    await dialog.getByLabel('姓名').fill('TimeBefore')
+    await dialog.getByLabel('姓名').fill(`TimeBefore${now}`)
     await dialog.getByLabel('邮箱').fill(email)
     await dialog.getByLabel('密码').fill('1234')
     await dialog.getByRole('button', { name: '创建' }).click()
@@ -891,10 +904,11 @@ test.describe('Admin 用户管理 - 查询条件与组合', () => {
   })
 
   test('创建时间 - 时间范围与邮箱组合同时满足时命中', async ({ page }) => {
-    const email = `e2e-time-combo-${Date.now()}@example.com`
+    const now = Date.now()
+    const email = `e2e-time-combo-${now}@example.com`
     await page.getByRole('button', { name: '新建用户' }).click()
     const dialog = page.getByRole('dialog', { name: '新建用户' })
-    await dialog.getByLabel('姓名').fill('TimeCombo')
+    await dialog.getByLabel('姓名').fill(`TimeCombo${now}`)
     await dialog.getByLabel('邮箱').fill(email)
     await dialog.getByLabel('密码').fill('1234')
     await dialog.getByRole('button', { name: '创建' }).click()
@@ -915,10 +929,11 @@ test.describe('Admin 用户管理 - 查询条件与组合', () => {
   })
 
   test('创建时间 - 时间范围对但邮箱不匹配时无结果', async ({ page }) => {
-    const email = `e2e-time-email-nomatch-${Date.now()}@example.com`
+    const now = Date.now()
+    const email = `e2e-time-email-nomatch-${now}@example.com`
     await page.getByRole('button', { name: '新建用户' }).click()
     const dialog = page.getByRole('dialog', { name: '新建用户' })
-    await dialog.getByLabel('姓名').fill('TimeEmailNoMatch')
+    await dialog.getByLabel('姓名').fill(`TimeEmailNoMatch${now}`)
     await dialog.getByLabel('邮箱').fill(email)
     await dialog.getByLabel('密码').fill('1234')
     await dialog.getByRole('button', { name: '创建' }).click()
@@ -938,10 +953,11 @@ test.describe('Admin 用户管理 - 查询条件与组合', () => {
   })
 
   test('创建时间 - 不选时间只填其他条件时正常查', async ({ page }) => {
-    const email = `e2e-time-empty-${Date.now()}@example.com`
+    const now = Date.now()
+    const email = `e2e-time-empty-${now}@example.com`
     await page.getByRole('button', { name: '新建用户' }).click()
     const dialog = page.getByRole('dialog', { name: '新建用户' })
-    await dialog.getByLabel('姓名').fill('TimeEmpty')
+    await dialog.getByLabel('姓名').fill(`TimeEmpty${now}`)
     await dialog.getByLabel('邮箱').fill(email)
     await dialog.getByLabel('密码').fill('1234')
     await dialog.getByRole('button', { name: '创建' }).click()

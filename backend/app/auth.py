@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
@@ -24,25 +23,22 @@ JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-me")
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 小时
 
-_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-
 
 class RegisterRequest(ApiModel):
     name: str
-    email: str
     password: str
     device_token: str | None = None
 
 
 class LoginRequest(ApiModel):
-    email: str
+    name: str
     password: str
 
 
 class UserOut(ApiModel):
     id: str
     name: str
-    email: str
+    email: str | None = None
     device_token: str | None = None
     created_at: datetime
     password_needs_reset: bool = False
@@ -108,21 +104,17 @@ async def get_current_user(
 
 @router.post("/register", response_model=UserOut)
 async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db)) -> UserOut:
-    # 邮箱格式校验
-    if not _EMAIL_RE.match(payload.email):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="邮箱格式不正确")
-
     # 密码长度校验：恰好 4 位
     if len(payload.password) != 4:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="密码必须为 4 位")
 
-    # 邮箱唯一性
+    # 用户名唯一性
     existing = await db.execute(
-        text("SELECT id FROM users_info WHERE email = :email"),
-        {"email": payload.email},
+        text("SELECT id FROM users_info WHERE name = :name"),
+        {"name": payload.name},
     )
     if existing.first():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="邮箱已被注册")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="用户名已被注册")
 
     now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
     user_id = f"u{uuid.uuid4().hex[:8]}"
@@ -131,15 +123,14 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
     result = await db.execute(
         text(
             """
-            INSERT INTO users_info (id, name, email, device_token, password_hash, created_at)
-            VALUES (:id, :name, :email, :device_token, :password_hash, :created_at)
+            INSERT INTO users_info (id, name, device_token, password_hash, created_at)
+            VALUES (:id, :name, :device_token, :password_hash, :created_at)
             RETURNING id, name, email, device_token, created_at, password_needs_reset
             """
         ),
         {
             "id": user_id,
             "name": payload.name,
-            "email": payload.email,
             "device_token": payload.device_token,
             "password_hash": _hash_password(payload.password),
             "created_at": now_utc,
@@ -158,17 +149,17 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)) -> To
             """
             SELECT id, name, email, device_token, created_at, password_hash, password_needs_reset
             FROM users_info
-            WHERE email = :email
+            WHERE name = :name
             """
         ),
-        {"email": payload.email},
+        {"name": payload.name},
     )
     row = result.mappings().first()
     if not row:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="邮箱或密码错误")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户名或密码错误")
 
     if not _verify_password(payload.password, row["password_hash"]):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="邮箱或密码错误")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户名或密码错误")
 
     user_data = {
         "id": row["id"],

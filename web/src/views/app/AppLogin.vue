@@ -9,7 +9,7 @@ import { extractErrorMessage } from '../../utils/error'
 const router = useRouter()
 const route = useRoute()
 
-const email = ref('')
+const name = ref('')
 const password = ref('')
 const loading = ref(false)
 const deviceTokenLoading = ref(false)
@@ -23,15 +23,15 @@ const localNotificationError = ref('')
 
 async function handleSubmit() {
   error.value = ''
-  if (!email.value.trim() || !password.value) {
-    error.value = '请输入邮箱和密码'
+  if (!name.value.trim() || !password.value) {
+    error.value = '请输入用户名和密码'
     return
   }
 
   loading.value = true
   try {
     const res = await appLogin({
-      email: email.value.trim(),
+      name: name.value.trim(),
       password: password.value,
     })
     if (typeof window !== 'undefined') {
@@ -107,17 +107,17 @@ async function sendLocalNotification() {
   <div class="auth-page">
     <div class="auth-card">
       <h1 class="auth-title">用户登录</h1>
-      <p class="auth-subtitle">使用注册邮箱登录 Collab AI</p>
+      <p class="auth-subtitle">使用用户名登录 Collab AI</p>
 
       <form class="auth-form" @submit.prevent="handleSubmit">
         <label class="auth-label">
-          邮箱
+          用户名
           <input
-            v-model="email"
+            v-model="name"
             class="auth-input"
-            type="email"
-            placeholder="you@example.com"
-            autocomplete="email"
+            type="text"
+            placeholder="你的用户名"
+            autocomplete="username"
           />
         </label>
 

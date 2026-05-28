@@ -14,6 +14,17 @@ export interface ListAdminUsersParams {
   group_id?: string
 }
 
+export interface CreateAdminUserPayload {
+  name: string
+  email?: string | null
+  password: string
+  device_token?: string | null
+}
+
+export async function createAdminUser(payload: CreateAdminUserPayload): Promise<AdminUser> {
+  return http.post<AdminUser>('/api/admin/users/', payload)
+}
+
 export async function listAdminUsers(params: ListAdminUsersParams): Promise<Page<AdminUser>> {
   const query = new URLSearchParams()
   if (params.page) query.set('page', String(params.page))

@@ -21,12 +21,10 @@ def _log(ok: bool, message: str, extra: Any | None = None) -> bool:
 
 
 def register_dummy_user(label: str) -> Dict[str, Any]:
-    email = f"admin_test_{label}_{uuid.uuid4().hex[:6]}@example.com"
     r = requests.post(
         f"{BASE_URL}/api/auth/register",
         json={
-            "name": f"User {label} {RUN_ID}",
-            "email": email,
+            "name": f"User{label}{RUN_ID}",
             "password": "1234",
             "device_token": f"device-{label}-{uuid.uuid4().hex[:8]}",
         },
@@ -60,7 +58,7 @@ def setup_users(ctx: Dict[str, Any]) -> bool:
     for label in ["A", "B", "C"]:
         users.append(register_dummy_user(label))
     ctx["users"] = users
-    return _log(True, "准备阶段：成功注册 3 个测试用户", [u["email"] for u in users])
+    return _log(True, "准备阶段：成功注册 3 个测试用户", [u["name"] for u in users])
 
 
 # ────────────────────────────────────────────────────────────
@@ -81,20 +79,19 @@ def scenario_admin_missing_or_wrong_token() -> bool:
 # ────────────────────────────────────────────────────────────
 
 def scenario_admin_create_user_success(ctx: Dict[str, Any]) -> bool:
-    email = f"created_{uuid.uuid4().hex[:6]}@example.com"
-    name = f"Created User {RUN_ID}"
+    name = f"CreatedUser{RUN_ID}"
     r = requests.post(
         f"{BASE_URL}/api/admin/users/",
-        json={"name": name, "email": email, "password": "1234"},
+        json={"name": name, "password": "1234"},
         headers=ADMIN_HEADERS,
     )
     if r.status_code != 200:
         return _log(False, "admin 创建用户失败（期望 200）", {"status": r.status_code, "body": r.text})
     data = r.json()
-    ok = data.get("email") == email and data.get("name") == name
+    ok = data.get("name") == name
     if ok:
         ctx["created_user_id"] = data["id"]
-        ctx["created_user_email"] = email
+        ctx["created_user_name"] = name
     return _log(ok, "admin 创建用户成功场景", data)
 
 
@@ -111,24 +108,24 @@ def scenario_admin_create_user_does_not_create_default_group(ctx: Dict[str, Any]
     return _log(ok, "admin 创建用户不自动生成默认群组场景", data)
 
 
-def scenario_admin_create_user_duplicate_email(ctx: Dict[str, Any]) -> bool:
-    email = ctx.get("created_user_email") or ctx["users"][0]["email"]
+def scenario_admin_create_user_duplicate_name(ctx: Dict[str, Any]) -> bool:
+    name = ctx.get("created_user_name") or ctx["users"][0]["name"]
     r = requests.post(
         f"{BASE_URL}/api/admin/users/",
-        json={"name": "Dup", "email": email, "password": "1234"},
+        json={"name": name, "password": "1234"},
         headers=ADMIN_HEADERS,
     )
     ok = r.status_code == 400
-    return _log(ok, "admin 创建用户重复邮箱应返回 400", {"status": r.status_code, "body": r.text})
+    return _log(ok, "admin 创建用户重复用户名应返回 400", {"status": r.status_code, "body": r.text})
 
 
 def scenario_admin_create_user_invalid_password() -> bool:
     ok = True
-    base_email = f"inv_{uuid.uuid4().hex[:6]}@example.com"
+    base_name = f"InvPwd{uuid.uuid4().hex[:6]}"
     for pwd, label in [("123", "3位"), ("12345", "5位")]:
         r = requests.post(
             f"{BASE_URL}/api/admin/users/",
-            json={"name": "Test", "email": base_email, "password": pwd},
+            json={"name": base_name, "password": pwd},
             headers=ADMIN_HEADERS,
         )
         ok &= _log(r.status_code == 400, f"admin 创建用户密码{label}应返回 400", {"status": r.status_code})
@@ -142,28 +139,22 @@ def scenario_admin_create_user_invalid_password() -> bool:
 def scenario_admin_list_users_basic(ctx: Dict[str, Any]) -> bool:
     r = requests.get(
         f"{BASE_URL}/api/admin/users",
-        params={"page": 1, "page_size": 10, "email": "admin_test_"},
+        params={"page": 1, "page_size": 10, "name": RUN_ID},
         headers=ADMIN_HEADERS,
     )
     if r.status_code != 200:
         return _log(False, "admin 列出用户失败（期望 200）", {"status": r.status_code, "body": r.text})
     data = r.json()
     ok = isinstance(data.get("items"), list) and isinstance(data.get("meta"), dict)
-    emails = {u["email"] for u in ctx["users"]}
-    returned_emails = {item["email"] for item in data["items"]}
-    ok &= bool(emails & returned_emails)
+    names = {u["name"] for u in ctx["users"]}
+    returned_names = {item["name"] for item in data["items"]}
+    ok &= bool(names & returned_names)
     return _log(ok, "admin 基础分页列出用户场景", data)
 
 
 def scenario_admin_list_users_with_filters(ctx: Dict[str, Any]) -> bool:
     ok = True
     target = ctx["users"][0]
-
-    # 按 email 过滤
-    r = requests.get(f"{BASE_URL}/api/admin/users",
-                     params={"email": target["email"][:10]}, headers=ADMIN_HEADERS)
-    ok &= _log(r.status_code == 200 and target["email"] in {i["email"] for i in r.json()["items"]},
-               "admin 按 email 过滤用户场景")
 
     # 按 name 过滤
     r = requests.get(f"{BASE_URL}/api/admin/users",
@@ -180,7 +171,7 @@ def scenario_admin_list_users_with_filters(ctx: Dict[str, Any]) -> bool:
 
     # 不存在的关键词 → 空结果
     r = requests.get(f"{BASE_URL}/api/admin/users",
-                     params={"email": f"NOEMAIL_{uuid.uuid4().hex}"}, headers=ADMIN_HEADERS)
+                     params={"name": f"NOUSER_{uuid.uuid4().hex}"}, headers=ADMIN_HEADERS)
     ok &= _log(r.status_code == 200 and r.json()["items"] == [],
                "admin 过滤无结果返回空列表场景")
     return ok
@@ -190,7 +181,7 @@ def scenario_admin_list_pagination(ctx: Dict[str, Any]) -> bool:
     ok = True
     # page_size=1 应只返回 1 条
     r = requests.get(f"{BASE_URL}/api/admin/users",
-                     params={"email": "admin_test_", "page": 1, "page_size": 1},
+                     params={"name": RUN_ID, "page": 1, "page_size": 1},
                      headers=ADMIN_HEADERS)
     ok &= _log(r.status_code == 200 and len(r.json()["items"]) <= 1,
                "admin 分页 page_size=1 场景")
@@ -262,7 +253,7 @@ def scenario_admin_get_user_detail(ctx: Dict[str, Any]) -> bool:
     if r.status_code != 200:
         return _log(False, "admin 获取用户详情失败（期望 200）", {"status": r.status_code, "body": r.text})
     data = r.json()
-    ok = data["id"] == target["id"] and data["email"] == target["email"]
+    ok = data["id"] == target["id"] and data["name"] == target["name"]
     # 详情接口应包含 group 字段，新用户可以尚未加入任何群组。
     ok &= isinstance(data.get("group_ids"), list)
     ok &= isinstance(data.get("group_names"), list)
@@ -500,7 +491,7 @@ def scenario_admin_mark_password_reset_not_found() -> bool:
 def scenario_admin_export_csv_basic(ctx: Dict[str, Any]) -> bool:
     r = requests.get(
         f"{BASE_URL}/api/admin/users/export",
-        params={"email": "admin_test_"},
+        params={"name": RUN_ID},
         headers=ADMIN_HEADERS,
     )
     if r.status_code != 200:
@@ -515,9 +506,9 @@ def scenario_admin_export_csv_basic(ctx: Dict[str, Any]) -> bool:
     # 含标准列
     for col in ["id", "name", "email", "device_token", "password_needs_reset", "created_at"]:
         ok &= _log(col in header, f"CSV header 含 {col} 列", {"header": header})
-    # 包含已知用户 email
-    known_email = ctx["users"][0]["email"]
-    ok &= _log(known_email in r.text, f"CSV 包含已知用户 email={known_email}")
+    # 包含已知用户 name
+    known_name = ctx["users"][0]["name"]
+    ok &= _log(known_name in r.text, f"CSV 包含已知用户 name={known_name}")
     return _log(ok, "admin 导出 CSV 基础场景")
 
 
@@ -525,7 +516,7 @@ def scenario_admin_export_csv_with_filter(ctx: Dict[str, Any]) -> bool:
     target = ctx["users"][0]
     r = requests.get(
         f"{BASE_URL}/api/admin/users/export",
-        params={"email": target["email"]},
+        params={"name": target["name"]},
         headers=ADMIN_HEADERS,
     )
     if r.status_code != 200:
@@ -533,11 +524,11 @@ def scenario_admin_export_csv_with_filter(ctx: Dict[str, Any]) -> bool:
     lines = [ln for ln in r.text.strip().splitlines() if ln]
     ok = True
     # header + 1 条数据
-    ok &= _log(len(lines) == 2, "admin 带 email 过滤 CSV 应只有 header+1 行", {"line_count": len(lines)})
-    ok &= _log(target["email"] in lines[1], "数据行包含目标 email", {"data_line": lines[1] if len(lines) > 1 else ""})
+    ok &= _log(len(lines) == 2, "admin 带 name 过滤 CSV 应只有 header+1 行", {"line_count": len(lines)})
+    ok &= _log(target["name"] in lines[1], "数据行包含目标 name", {"data_line": lines[1] if len(lines) > 1 else ""})
     # groups 列存在于 header
     ok &= _log("groups" in lines[0], "CSV header 含 groups 列")
-    return _log(ok, "admin 带 email 过滤导出 CSV 场景", {"lines": lines})
+    return _log(ok, "admin 带 name 过滤导出 CSV 场景", {"lines": lines})
 
 
 def scenario_admin_export_csv_no_token() -> bool:
@@ -651,7 +642,7 @@ def run_all() -> bool:
     print("\n-- 创建用户 --")
     ok &= scenario_admin_create_user_success(ctx)
     ok &= scenario_admin_create_user_does_not_create_default_group(ctx)
-    ok &= scenario_admin_create_user_duplicate_email(ctx)
+    ok &= scenario_admin_create_user_duplicate_name(ctx)
     ok &= scenario_admin_create_user_invalid_password()
 
     print("\n-- 列表 & 过滤 --")

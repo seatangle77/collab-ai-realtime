@@ -31,7 +31,7 @@ def _to_utc_naive(dt: datetime) -> datetime:
 class AdminUserOut(ApiModel):
     id: str
     name: str
-    email: str
+    email: str | None = None
     device_token: str | None = None
     created_at: datetime
     group_ids: list[str] = []
@@ -41,7 +41,7 @@ class AdminUserOut(ApiModel):
 
 class AdminUserCreate(ApiModel):
     name: str
-    email: str
+    email: str | None = None
     password: str
     device_token: str | None = None
 
@@ -227,11 +227,11 @@ async def create_user(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="密码必须为 4 位")
 
     existing = await db.execute(
-        text("SELECT id FROM users_info WHERE email = :email"),
-        {"email": payload.email},
+        text("SELECT id FROM users_info WHERE name = :name"),
+        {"name": payload.name},
     )
     if existing.first():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="邮箱已被注册")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="用户名已被注册")
 
     now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
     new_user_id = f"u{uuid.uuid4().hex[:8]}"

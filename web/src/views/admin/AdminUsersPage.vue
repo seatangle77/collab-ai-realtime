@@ -3,8 +3,7 @@ import { onMounted, reactive, ref } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { AdminUser } from '../../types/admin'
-import { listAdminUsers, deleteAdminUser, deleteAdminUsersBatch, updateAdminUser } from '../../api/admin/users'
-import { registerUser } from '../../api/auth'
+import { listAdminUsers, createAdminUser, deleteAdminUser, deleteAdminUsersBatch, updateAdminUser } from '../../api/admin/users'
 import { formatDateTimeToCST, parseUtcApiDate } from '../../utils/datetime'
 import { exportRowsToCsv } from '../../utils/csv'
 
@@ -63,7 +62,6 @@ const editForm = reactive({
 const createRules: FormRules<typeof createForm> = {
   name: [{ required: true, message: '请输入姓名', trigger: 'blur' }],
   email: [
-    { required: true, message: '请输入邮箱', trigger: 'blur' },
     { type: 'email', message: '邮箱格式不正确', trigger: ['blur', 'change'] },
   ],
   password: [
@@ -190,11 +188,11 @@ async function submitCreate() {
   await createFormRef.value.validate(async (valid) => {
     if (!valid) return
     try {
-      await registerUser({
+      await createAdminUser({
         name: createForm.name,
-        email: createForm.email,
+        email: createForm.email || null,
         password: createForm.password,
-        device_token: createForm.device_token || undefined,
+        device_token: createForm.device_token || null,
       })
       ElMessage.success('创建用户成功')
       createDialogVisible.value = false

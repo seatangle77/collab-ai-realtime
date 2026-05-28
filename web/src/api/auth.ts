@@ -3,7 +3,7 @@ import type { AdminUser } from '../types/admin'
 
 export interface RegisterUserPayload {
   name: string
-  email: string
+  email?: string | null
   password: string
   device_token?: string | null
 }
