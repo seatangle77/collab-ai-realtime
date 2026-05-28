@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { Check } from '@element-plus/icons-vue'
+import { Check, Close } from '@element-plus/icons-vue'
 import type { AdminGroup } from '../../../types/admin'
 import { conditionLabel, selectedGroupNames } from './reportHelpers'
 
@@ -104,20 +104,23 @@ watch(groupSearchText, (value) => {
             {{ selectedGroupIdsByCondition[condition]?.length ?? 0 }} / {{ groupOptionsByCondition[condition]?.length ?? 0 }}
           </el-tag>
         </div>
-        <button
-          class="sample-select-trigger"
-          type="button"
-          :disabled="loadingGroups"
-          @click="openSampleDialog(condition)"
-        >
-          <span>{{ selectedGroupIdsByCondition[condition]?.length ? selectedNames(condition) : '下拉选择小组' }}</span>
-          <span class="sample-select-arrow">⌄</span>
-        </button>
-        <div class="sample-summary">{{ selectedNames(condition) }}</div>
-        <div class="sample-actions">
-          <el-button :disabled="(selectedGroupIdsByCondition[condition]?.length ?? 0) === 0" @click="selectedGroupIdsByCondition[condition] = []">
-            清空
-          </el-button>
+        <div class="sample-trigger-row">
+          <button
+            class="sample-select-trigger"
+            type="button"
+            :disabled="loadingGroups"
+            @click="openSampleDialog(condition)"
+          >
+            <span>{{ selectedGroupIdsByCondition[condition]?.length ? selectedNames(condition) : '点击选择小组' }}</span>
+            <span class="sample-select-arrow">⌄</span>
+          </button>
+          <el-button
+            :icon="Close"
+            circle
+            size="small"
+            :disabled="(selectedGroupIdsByCondition[condition]?.length ?? 0) === 0"
+            @click="selectedGroupIdsByCondition[condition] = []"
+          />
         </div>
       </div>
     </div>
@@ -182,50 +185,59 @@ watch(groupSearchText, (value) => {
   gap: 8px;
 }
 
+.card-title strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1e2d40;
+}
+
 .card-title span,
-.sample-summary,
 .dialog-footer {
-  color: #748197;
-  font-size: 13px;
+  color: #64748b;
+  font-size: 12px;
 }
 
 .sample-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(220px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 12px 20px;
 }
 
 .sample-field {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
   min-width: 0;
-  padding: 14px;
-  border: 1px solid #e3e9f2;
-  border-radius: 8px;
-  background: #f8fafc;
 }
 
 .sample-field label {
   color: #324055;
-  font-size: 14px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.sample-trigger-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .sample-select-trigger {
   display: flex;
-  width: 100%;
-  min-height: 42px;
+  flex: 1;
+  min-width: 0;
+  min-height: 32px;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 0 12px;
+  gap: 8px;
+  padding: 0 10px;
   border: 1px solid #d8e1ee;
-  border-radius: 8px;
+  border-radius: 6px;
   background: #ffffff;
   color: #172033;
   cursor: pointer;
   font: inherit;
+  font-size: 13px;
   text-align: left;
 }
 
@@ -243,11 +255,7 @@ watch(groupSearchText, (value) => {
 .sample-select-arrow {
   flex: 0 0 auto;
   color: #8a97aa;
-  font-size: 18px;
-}
-
-.sample-actions .el-button {
-  width: 100%;
+  font-size: 16px;
 }
 
 .sample-dialog-toolbar {

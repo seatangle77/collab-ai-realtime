@@ -85,12 +85,19 @@ function statusLabel(status: QPostHocResult['status']): string {
 .card-title {
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.card-title strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1e2d40;
 }
 
 .card-title span {
-  color: #748197;
-  font-size: 13px;
+  color: #64748b;
+  font-size: 12px;
 }
 
 .post-hoc-section {
@@ -128,7 +135,7 @@ function statusLabel(status: QPostHocResult['status']): string {
   background: #f8fafc;
   color: #324055;
   font-size: 13px;
-  font-weight: 750;
+  font-weight: 600;
 }
 
 .pair-table {

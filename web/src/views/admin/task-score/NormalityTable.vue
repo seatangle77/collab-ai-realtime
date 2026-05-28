@@ -56,9 +56,15 @@ defineProps<{
   gap: 12px;
 }
 
+.card-title strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1e2d40;
+}
+
 .card-title span {
-  color: #748197;
-  font-size: 13px;
+  color: #64748b;
+  font-size: 12px;
 }
 
 .compact-table :deep(.el-table__cell) {
@@ -69,6 +75,6 @@ defineProps<{
   background: #f8fafc;
   color: #324055;
   font-size: 13px;
-  font-weight: 750;
+  font-weight: 600;
 }
 </style>

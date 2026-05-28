@@ -75,9 +75,15 @@ function barStyle(metric: MetricSummary, condition: string) {
   gap: 12px;
 }
 
+.card-title strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1e2d40;
+}
+
 .card-title span,
 .chart-label {
-  color: #748197;
+  color: #64748b;
   font-size: 12px;
 }
 
@@ -99,7 +105,7 @@ function barStyle(metric: MetricSummary, condition: string) {
   margin-bottom: 10px;
   color: #172033;
   font-size: 13px;
-  font-weight: 760;
+  font-weight: 700;
 }
 
 .chart-row {
@@ -113,7 +119,7 @@ function barStyle(metric: MetricSummary, condition: string) {
 .chart-value {
   color: #172033;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 600;
   text-align: right;
 }
 

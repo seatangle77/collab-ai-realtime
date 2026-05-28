@@ -70,6 +70,6 @@ defineProps<{
   background: #f8fafc;
   color: #324055;
   font-size: 13px;
-  font-weight: 750;
+  font-weight: 600;
 }
 </style>

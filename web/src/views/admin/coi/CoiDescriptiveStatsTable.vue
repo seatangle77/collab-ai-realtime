@@ -86,7 +86,7 @@ defineProps<{
   background: #f8fafc;
   color: #324055;
   font-size: 13px;
-  font-weight: 750;
+  font-weight: 600;
 }
 
 .metric-label {
@@ -130,7 +130,7 @@ defineProps<{
 .diff-cell strong {
   color: #172033;
   font-size: 13px;
-  font-weight: 760;
+  font-weight: 700;
 }
 
 .diff-cell span {

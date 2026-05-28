@@ -78,10 +78,16 @@ defineProps<{
   gap: 12px;
 }
 
+.card-title strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1e2d40;
+}
+
 .card-title span,
 .stat-cell span,
 .diff-cell span {
-  color: #748197;
+  color: #64748b;
   font-size: 12px;
 }
 
@@ -93,7 +99,7 @@ defineProps<{
   background: #f8fafc;
   color: #324055;
   font-size: 13px;
-  font-weight: 750;
+  font-weight: 600;
 }
 
 .metric-cell,
@@ -108,7 +114,7 @@ defineProps<{
 .diff-cell strong {
   color: #172033;
   font-size: 13px;
-  font-weight: 760;
+  font-weight: 700;
 }
 
 .stat-cell {

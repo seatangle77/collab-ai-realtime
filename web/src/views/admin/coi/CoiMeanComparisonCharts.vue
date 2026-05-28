@@ -94,7 +94,7 @@ function barStyle(metric: MetricSummary, condition: string) {
   margin-bottom: 10px;
   color: #172033;
   font-size: 13px;
-  font-weight: 760;
+  font-weight: 700;
 }
 
 .chart-row {
@@ -145,7 +145,7 @@ function barStyle(metric: MetricSummary, condition: string) {
 .chart-value {
   color: #172033;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 600;
   text-align: right;
 }
 

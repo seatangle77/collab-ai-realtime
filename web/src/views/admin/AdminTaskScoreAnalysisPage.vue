@@ -625,7 +625,7 @@ onMounted(() => {
   margin: 0;
   color: #172033;
   font-size: 24px;
-  font-weight: 760;
+  font-weight: 700;
 }
 
 .page-header p {
@@ -808,7 +808,7 @@ onMounted(() => {
   border-radius: 50%;
   background: #eef6f0;
   color: #166534;
-  font-weight: 750;
+  font-weight: 600;
 }
 
 .member-name {

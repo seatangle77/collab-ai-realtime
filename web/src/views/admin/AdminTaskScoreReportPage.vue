@@ -154,7 +154,7 @@ onMounted(fetchGroups)
 </script>
 
 <template>
-  <div class="task-score-report-page">
+  <div class="analysis-page">
     <div class="page-header">
       <div>
         <h1>任务分数分析</h1>
@@ -247,89 +247,12 @@ onMounted(fetchGroups)
   </div>
 </template>
 
+<style>
+@import './admin-analysis.css';
+</style>
+
 <style scoped>
-.task-score-report-page {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.page-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.page-header h1 {
-  margin: 0;
-  color: #172033;
-  font-size: 24px;
-  font-weight: 760;
-}
-
-.page-header p {
-  margin: 6px 0 0;
-  color: #627089;
-  font-size: 14px;
-}
-
-.page-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.page-actions .el-button + .el-button {
-  margin-left: 0;
-}
-
-.control-card,
-.summary-card {
-  border: 1px solid #e3e9f2;
-  border-radius: 8px;
-}
-
 .control-form {
-  display: grid;
   grid-template-columns: minmax(220px, 0.8fr) minmax(280px, 1.1fr) minmax(260px, 1fr);
-  gap: 12px 18px;
-}
-
-.control-form :deep(.el-form-item) {
-  margin-bottom: 0;
-}
-
-.control-form :deep(.el-select) {
-  width: 100%;
-}
-
-.summary-card {
-  min-height: 112px;
-}
-
-.summary-label {
-  color: #718098;
-  font-size: 14px;
-  font-weight: 650;
-}
-
-.summary-value {
-  margin-top: 12px;
-  color: #172033;
-  font-size: 34px;
-  font-weight: 780;
-}
-
-@media (max-width: 1100px) {
-  .control-form {
-    grid-template-columns: 1fr;
-  }
-
-  .page-header {
-    flex-direction: column;
-    align-items: stretch;
-  }
 }
 </style>
