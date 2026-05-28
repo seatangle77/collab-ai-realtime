@@ -58,6 +58,7 @@ const menuGroups = computed<AdminMenuGroup[]>(() => [
       { path: '/admin/questionnaire-report', label: '量表分析' },
       { path: '/admin/coi-utterances', label: 'CoI 发言编码' },
       { path: '/admin/coi-analysis', label: 'CoI 认知参与度分析' },
+      { path: '/admin/ena-analysis', label: 'ENA 认知过程网络分析' },
     ],
   },
 ])

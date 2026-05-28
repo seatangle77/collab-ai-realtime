@@ -206,10 +206,10 @@ async def import_from_transcripts(
                 """
                 INSERT INTO coi_utterances
                     (id, session_id, group_id, speaker, speaker_user_id,
-                     content, source_transcript_ids, order_index, created_at)
+                     content, source_transcript_ids, order_index, start_time, created_at)
                 VALUES
                     (:id, :session_id, :group_id, :speaker, :speaker_user_id,
-                     :content, :source_transcript_ids, :order_index, NOW())
+                     :content, :source_transcript_ids, :order_index, :start_time, NOW())
                 """
             ),
             {
@@ -221,6 +221,7 @@ async def import_from_transcripts(
                 "content": tr["text"],
                 "source_transcript_ids": [tid],
                 "order_index": next_index,
+                "start_time": tr["start"],
             },
         )
         next_index += 1

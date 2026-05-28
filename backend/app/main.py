@@ -61,6 +61,7 @@ from .admin.questionnaire_entries import router as admin_questionnaire_entries_r
 from .admin.questionnaire_analysis import router as admin_questionnaire_analysis_router
 from .admin.coi_utterances import router as admin_coi_utterances_router
 from .admin.coi_analysis import router as admin_coi_analysis_router
+from .admin.ena_analysis import router as admin_ena_analysis_router
 
 app = FastAPI()
 
@@ -123,6 +124,7 @@ app.include_router(admin_questionnaire_entries_router)
 app.include_router(admin_questionnaire_analysis_router)
 app.include_router(admin_coi_utterances_router)
 app.include_router(admin_coi_analysis_router)
+app.include_router(admin_ena_analysis_router)
 app.include_router(test_seed_router)
 app.include_router(vad_router)
 app.include_router(offline_audio_segments_router)

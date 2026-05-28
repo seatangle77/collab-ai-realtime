@@ -218,6 +218,11 @@ const routes: RouteRecordRaw[] = [
         name: 'AdminCoiAnalysis',
         component: () => import('../views/admin/AdminCoiAnalysisPage.vue'),
       },
+      {
+        path: 'ena-analysis',
+        name: 'AdminEnaAnalysis',
+        component: () => import('../views/admin/AdminEnaAnalysisPage.vue'),
+      },
     ],
   },
 ]

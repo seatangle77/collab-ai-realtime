@@ -1,0 +1,211 @@
+<script setup lang="ts">
+import { computed, onMounted, reactive, ref } from 'vue'
+import { ElMessage } from 'element-plus'
+import { Download, Printer, Refresh } from '@element-plus/icons-vue'
+import { createEnaAnalysis, type EnaAnalysisMode, type EnaAnalysisResult } from '../../api/admin/ena-analysis'
+import { listAdminGroups } from '../../api/admin/groups'
+import type { AdminGroup } from '../../types/admin'
+import SampleSelector from './task-score/SampleSelector.vue'
+import EnaDescriptiveStatsTable from './ena/EnaDescriptiveStatsTable.vue'
+import EnaNormalityTable from './ena/EnaNormalityTable.vue'
+import EnaInferentialStatsTable from './ena/EnaInferentialStatsTable.vue'
+import EnaPostHocTable from './ena/EnaPostHocTable.vue'
+import EnaNetworkChart from './ena/EnaNetworkChart.vue'
+import { buildEnaReportHtml, conditionLabel, modeDescription } from './ena/reportHelpers'
+
+const mode = ref<EnaAnalysisMode>('two_conditions')
+const loading = ref(false)
+const loadingGroups = ref(false)
+const groups = ref<AdminGroup[]>([])
+const report = ref<EnaAnalysisResult | null>(null)
+
+const selectedGroupIdsByCondition = reactive<Record<string, string[]>>({
+  no_assistance: [],
+  glasses: [],
+  app_notification: [],
+})
+
+const conditionColumns = computed(() =>
+  mode.value === 'two_conditions'
+    ? ['no_assistance', 'glasses']
+    : ['no_assistance', 'glasses', 'app_notification'],
+)
+
+const groupOptionsByCondition = computed(() => {
+  const grouped: Record<string, AdminGroup[]> = {
+    no_assistance: [],
+    glasses: [],
+    app_notification: [],
+  }
+  for (const group of groups.value) {
+    if (grouped[group.condition]) grouped[group.condition].push(group)
+  }
+  return grouped
+})
+
+const missingSelectedConditions = computed(() =>
+  conditionColumns.value.filter((c) => (selectedGroupIdsByCondition[c]?.length ?? 0) === 0),
+)
+
+async function fetchGroups() {
+  loadingGroups.value = true
+  try {
+    const res = await listAdminGroups({ page: 1, page_size: 200 })
+    groups.value = res.items
+  } catch (e: any) {
+    ElMessage.error(e?.message || '加载群组失败')
+  } finally {
+    loadingGroups.value = false
+  }
+}
+
+async function fetchReport() {
+  if (missingSelectedConditions.value.length > 0) {
+    ElMessage.warning(`请为 ${missingSelectedConditions.value.map(conditionLabel).join('、')} 选择要纳入分析的小组`)
+    return
+  }
+  loading.value = true
+  try {
+    report.value = await createEnaAnalysis({
+      mode: mode.value,
+      group_ids_by_condition: Object.fromEntries(
+        conditionColumns.value.map((c) => [c, selectedGroupIdsByCondition[c] ?? []]),
+      ),
+    })
+  } catch (e: any) {
+    ElMessage.error(e?.message || '生成 ENA 分析失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+function ensureReportReady(): boolean {
+  if (!report.value) { ElMessage.warning('请先生成分析结果'); return false }
+  return true
+}
+
+function downloadHtmlReport() {
+  if (!ensureReportReady()) return
+  const html = buildEnaReportHtml(report.value!, mode.value, conditionColumns.value)
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `ena-analysis-report-${new Date().toISOString().slice(0, 10)}.html`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function printReportAsPdf() {
+  if (!ensureReportReady()) return
+  const w = window.open('', '_blank')
+  if (!w) { ElMessage.error('浏览器阻止了打印窗口，请允许弹窗后重试'); return }
+  const html = buildEnaReportHtml(report.value!, mode.value, conditionColumns.value)
+  w.document.open()
+  w.document.write(html)
+  w.document.close()
+  w.focus()
+  w.setTimeout(() => { w.print() }, 300)
+}
+
+onMounted(fetchGroups)
+</script>
+
+<template>
+  <div class="analysis-page">
+    <div class="page-header">
+      <div>
+        <h1>ENA 认知过程网络分析</h1>
+        <p>基于已编码的 CoI 发言，用 2 分钟滑动时间窗口计算话语共现强度，分析不同条件下的认知过程连接模式。</p>
+      </div>
+      <div class="page-actions">
+        <el-button :icon="Download" :disabled="!report" @click="downloadHtmlReport">下载 HTML 报告</el-button>
+        <el-button :icon="Printer" :disabled="!report" @click="printReportAsPdf">打印 / PDF</el-button>
+        <el-button :icon="Refresh" :loading="loading" type="primary" @click="fetchReport">生成分析</el-button>
+      </div>
+    </div>
+
+    <el-card class="control-card" shadow="never">
+      <el-form label-width="86px" class="control-form">
+        <el-form-item label="分析模式">
+          <el-segmented
+            v-model="mode"
+            :options="[
+              { label: '两条件', value: 'two_conditions' },
+              { label: '三条件', value: 'three_conditions' },
+            ]"
+          />
+        </el-form-item>
+        <el-form-item label="当前口径">
+          <el-tag size="large">{{ modeDescription(mode) }}</el-tag>
+        </el-form-item>
+        <el-form-item label="窗口设置">
+          <el-tag size="large" type="info">2 分钟窗口 · 30 秒步长</el-tag>
+        </el-form-item>
+      </el-form>
+    </el-card>
+
+    <SampleSelector
+      v-model="selectedGroupIdsByCondition"
+      :condition-columns="conditionColumns"
+      :group-options-by-condition="groupOptionsByCondition"
+      :loading-groups="loadingGroups"
+    />
+
+    <!-- 统计概览 -->
+    <el-row :gutter="16">
+      <el-col :xs="24" :md="8">
+        <el-card class="summary-card" shadow="never">
+          <div class="summary-label">纳入会话数</div>
+          <div class="summary-value">{{ report?.total_sessions ?? 0 }}</div>
+        </el-card>
+      </el-col>
+      <el-col v-for="condition in conditionColumns" :key="condition" :xs="24" :md="8">
+        <el-card class="summary-card" shadow="never">
+          <div class="summary-label">{{ conditionLabel(condition) }}</div>
+          <div class="summary-value">{{ report?.sessions_by_condition[condition] ?? 0 }}</div>
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <!-- 分析结果 -->
+    <EnaDescriptiveStatsTable
+      :loading="loading"
+      :metrics="report?.metrics ?? []"
+      :condition-columns="conditionColumns"
+      :mode="mode"
+    />
+
+    <EnaNormalityTable
+      :loading="loading"
+      :items="report?.normality ?? []"
+    />
+
+    <EnaInferentialStatsTable
+      :loading="loading"
+      :tests="report?.statistical_tests ?? []"
+    />
+
+    <EnaPostHocTable
+      v-if="mode === 'three_conditions'"
+      :loading="loading"
+      :post-hoc-tests="report?.post_hoc_tests ?? []"
+    />
+
+    <EnaNetworkChart
+      v-if="report && report.networks.length > 0"
+      :networks="report.networks"
+      :diff-network="report.diff_network"
+    />
+  </div>
+</template>
+
+<style>
+@import './admin-analysis.css';
+</style>
+
+<style scoped>
+.control-form {
+  grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr);
+}
+</style>
