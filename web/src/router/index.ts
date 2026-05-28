@@ -203,6 +203,11 @@ const routes: RouteRecordRaw[] = [
         name: 'AdminQuestionnaireEntries',
         component: () => import('../views/admin/AdminQuestionnaireEntriesPage.vue'),
       },
+      {
+        path: 'questionnaire-report',
+        name: 'AdminQuestionnaireReport',
+        component: () => import('../views/admin/AdminQuestionnaireReportPage.vue'),
+      },
     ],
   },
 ]
