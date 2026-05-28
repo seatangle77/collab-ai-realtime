@@ -15,6 +15,7 @@ setuptools>=68,<81
 resemblyzer
 webrtcvad
 numpy
+scipy
 librosa
 soundfile
 

@@ -183,6 +183,16 @@ const routes: RouteRecordRaw[] = [
         name: 'AdminKeywordRecallAnalysis',
         component: () => import('../views/admin/AdminKeywordRecallAnalysisPage.vue'),
       },
+      {
+        path: 'task-score-analysis',
+        name: 'AdminTaskScoreAnalysis',
+        component: () => import('../views/admin/AdminTaskScoreAnalysisPage.vue'),
+      },
+      {
+        path: 'task-score-report',
+        name: 'AdminTaskScoreReport',
+        component: () => import('../views/admin/AdminTaskScoreReportPage.vue'),
+      },
     ],
   },
 ]

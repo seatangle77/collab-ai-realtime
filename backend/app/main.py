@@ -50,6 +50,8 @@ from .admin.test_seed import router as test_seed_router
 from .vad import router as vad_router
 from .admin.ai_push_analysis import router as admin_ai_push_analysis_router
 from .admin.info_gap_recall_analysis import router as admin_info_gap_recall_analysis_router
+from .admin.task_score_analysis import router as admin_task_score_analysis_router
+from .admin.task_score_entries import router as admin_task_score_entries_router
 from .audio_segments import (
     ensure_offline_audio_segments_table,
     router as offline_audio_segments_router,
@@ -102,6 +104,8 @@ app.include_router(admin_window_metrics_batch_reasoning_router)
 app.include_router(admin_speech_transcripts_router)
 app.include_router(admin_ai_push_analysis_router)
 app.include_router(admin_info_gap_recall_analysis_router)
+app.include_router(admin_task_score_analysis_router)
+app.include_router(admin_task_score_entries_router)
 app.include_router(ws_sessions_router)
 app.include_router(nlp_router)
 app.include_router(info_gap_router)

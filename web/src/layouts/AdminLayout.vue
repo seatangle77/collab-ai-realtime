@@ -43,6 +43,13 @@ const menuGroups = computed<AdminMenuGroup[]>(() => [
     ],
   },
   {
+    label: '数据分析',
+    items: [
+      { path: '/admin/task-score-analysis', label: '任务分数录入' },
+      { path: '/admin/task-score-report', label: '任务分数分析' },
+    ],
+  },
+  {
     label: '推送管理',
     items: [
       { path: '/admin/push-queue', label: '推送队列' },
