@@ -282,13 +282,18 @@ router.beforeEach((to, _from, next) => {
   // 未登录访问受保护的 /app 路由时，跳转到登录页
   if (to.path.startsWith('/app') && !publicAppPaths.includes(to.path) && to.path !== '/app/change-password') {
     if (!token) {
-      next({
-        path: '/app/login',
-        query: {
-          redirect: to.fullPath,
-        },
-      })
-      return
+      // 管理员从后台进入破冰页：有管理员 token 且带 admin=1 参数，直接放行
+      const isAdminIcebreaker =
+        to.path === '/app/icebreaker' &&
+        to.query.admin === '1' &&
+        !!window.localStorage.getItem('admin_api_key')
+      if (!isAdminIcebreaker) {
+        next({
+          path: '/app/login',
+          query: { redirect: to.fullPath },
+        })
+        return
+      }
     }
   }
 

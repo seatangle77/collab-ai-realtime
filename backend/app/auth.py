@@ -18,6 +18,7 @@ from .db import get_db
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 security = HTTPBearer(auto_error=True)
+security_optional = HTTPBearer(auto_error=False)
 
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-me")
 JWT_ALGORITHM = "HS256"
@@ -100,6 +101,34 @@ async def get_current_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在或已被删除")
     return user
+
+
+async def get_optional_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security_optional),
+    db: AsyncSession = Depends(get_db),
+) -> Mapping[str, Any] | None:
+    """与 get_current_user 相同，但没有 token 时返回 None 而不是抛出异常。"""
+    if credentials is None:
+        return None
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        user_id: str | None = payload.get("sub")
+        if user_id is None:
+            raise JWTError("Missing subject")
+    except JWTError:
+        return None
+    result = await db.execute(
+        text(
+            """
+            SELECT id, name, email, device_token, created_at, password_needs_reset
+            FROM users_info
+            WHERE id = :user_id
+            """
+        ),
+        {"user_id": user_id},
+    )
+    return result.mappings().first() or None
 
 
 @router.post("/register", response_model=UserOut)

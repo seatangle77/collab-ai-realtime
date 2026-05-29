@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import './icebreaker/AppIcebreaker.css'
 import {
@@ -18,10 +18,23 @@ import {
   evaluateIcebreakerStory,
   uploadIcebreakerVoiceSample,
 } from '../../api/appIcebreaker'
+import {
+  adminEvaluateIcebreakerStory,
+  adminUploadIcebreakerVoiceSample,
+} from '../../api/adminIcebreaker'
 import type { IcebreakerStoryTurnPayload } from '../../api/appIcebreaker'
 import { extractErrorMessage } from '../../utils/error'
 
 const router = useRouter()
+const route = useRoute()
+
+// 管理员模式：从 URL query 读取 group_id 和 admin 标记
+const isAdminMode = route.query.admin === '1'
+const queryGroupId = typeof route.query.group_id === 'string' ? route.query.group_id : undefined
+
+// 根据模式选择对应的 API 函数
+const uploadVoiceSample = isAdminMode ? adminUploadIcebreakerVoiceSample : uploadIcebreakerVoiceSample
+const evaluateStory = isAdminMode ? adminEvaluateIcebreakerStory : evaluateIcebreakerStory
 
 const {
   pageLoading,
@@ -30,7 +43,10 @@ const {
   currentGroupName,
   members,
   loadIcebreakerMembers,
-} = useIcebreakerMembers(resetIcebreakerFlow)
+} = useIcebreakerMembers(resetIcebreakerFlow, {
+  groupId: queryGroupId,
+  isAdmin: isAdminMode,
+})
 
 const p1MemberQuestions = ref<string[][]>([])
 const storyOpening = pickStoryOpening()
@@ -136,7 +152,7 @@ async function stopRecording() {
       return
     }
 
-    const result = await uploadIcebreakerVoiceSample({
+    const result = await uploadVoiceSample({
       groupId,
       userId: p1Member.value.id,
       source: 'intro',
@@ -256,7 +272,7 @@ function uploadStoryTurnInBackground(audio: Blob | null) {
 
   const mimeType = currentRecordingMimeType.value || audio.type || 'audio/webm'
   let task: Promise<void>
-  task = uploadIcebreakerVoiceSample({
+  task = uploadVoiceSample({
     groupId,
     userId: member.id,
     source: 'story',
@@ -375,7 +391,7 @@ async function startScoring() {
     if (storyTurns.value.length === 0) {
       throw new Error('还没有可用于评价的故事文本')
     }
-    const result = await evaluateIcebreakerStory({
+    const result = await evaluateStory({
       group_id: currentGroupId(),
       story_opening: storyOpening,
       members: members.value.map((member) => ({

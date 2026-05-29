@@ -3,13 +3,14 @@ from __future__ import annotations
 import logging
 from typing import Any, Mapping
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
 from pydantic import Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..admin.deps import ADMIN_API_KEY
 from ..api_model import ApiModel
-from ..auth import get_current_user
+from ..auth import get_optional_current_user
 from ..db import get_db
 from .ai import evaluate_icebreaker_story
 from .asr import (
@@ -21,6 +22,11 @@ from .voice_sample import add_icebreaker_voice_sample
 
 router = APIRouter(prefix="/api/icebreaker", tags=["icebreaker"])
 logger = logging.getLogger(__name__)
+
+
+def _is_admin(x_admin_token: str | None = Header(default=None, alias="X-Admin-Token")) -> bool:
+    """判断请求是否来自管理员（携带有效的 X-Admin-Token）。"""
+    return x_admin_token == ADMIN_API_KEY
 
 
 class IcebreakerMember(ApiModel):
@@ -126,22 +132,27 @@ async def transcribe_icebreaker_turn(
     mime_type: str = Form(...),
     audio: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-    current_user: Mapping[str, Any] = Depends(get_current_user),
+    is_admin: bool = Depends(_is_admin),
+    current_user: Mapping[str, Any] | None = Depends(get_optional_current_user),
 ) -> IcebreakerTranscribeResponse:
     """
     破冰单段录音临时转写。
     不入库，不写 speech_transcripts，不接正式讨论 session。
+    管理员（X-Admin-Token）可直接调用，无需用户 token。
     """
-    current_user_id = str(current_user["id"])
+    if not is_admin:
+        if current_user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="未登录")
+        await _ensure_group_member(group_id, str(current_user["id"]), db)
     logger.info(
-        "[IcebreakerAPI] transcribe request group_id=%s user_id=%s round=%s turn_index=%s mime_type=%s",
+        "[IcebreakerAPI] transcribe request group_id=%s user_id=%s round=%s turn_index=%s mime_type=%s is_admin=%s",
         group_id,
         user_id,
         round,
         turn_index,
         mime_type,
+        is_admin,
     )
-    await _ensure_group_member(group_id, current_user_id, db)
     active_member_ids = await _get_active_group_member_ids(group_id, db)
     if user_id not in active_member_ids:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="破冰录音说话人不在该小组内")
@@ -187,17 +198,21 @@ async def upload_icebreaker_voice_sample(
     round: int | None = Form(None),
     turn_index: int | None = Form(None),
     db: AsyncSession = Depends(get_db),
-    current_user: Mapping[str, Any] = Depends(get_current_user),
+    is_admin: bool = Depends(_is_admin),
+    current_user: Mapping[str, Any] | None = Depends(get_optional_current_user),
 ) -> IcebreakerVoiceSampleResponse:
     """
     破冰专用声纹样本采集：转写录音，并将合格音频追加到现有个人声纹样本。
+    管理员（X-Admin-Token）可直接调用，无需用户 token。
     """
-    current_user_id = str(current_user["id"])
     normalized_source = source.strip().lower()
     if normalized_source not in {"intro", "story"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不支持的破冰录音来源")
 
-    await _ensure_group_member(group_id, current_user_id, db)
+    if not is_admin:
+        if current_user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="未登录")
+        await _ensure_group_member(group_id, str(current_user["id"]), db)
     active_members = await _get_active_group_members(group_id, db)
     if user_id not in active_members:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="破冰录音说话人不在该小组内")
@@ -259,22 +274,26 @@ async def upload_icebreaker_voice_sample(
 async def evaluate_icebreaker(
     payload: IcebreakerEvaluateRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: Mapping[str, Any] = Depends(get_current_user),
+    is_admin: bool = Depends(_is_admin),
+    current_user: Mapping[str, Any] | None = Depends(get_optional_current_user),
 ) -> IcebreakerEvaluateResponse:
     """
     破冰故事接龙 AI 评价。
     只消费前端提交的临时文本，不入库，不进入核心讨论分析链路。
+    管理员（X-Admin-Token）可直接调用，无需用户 token。
     """
-    current_user_id = str(current_user["id"])
+    if not is_admin:
+        if current_user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="未登录")
+        await _ensure_group_member(payload.group_id, str(current_user["id"]), db)
     logger.info(
-        "[IcebreakerAPI] evaluate request group_id=%s requester=%s members=%d turns=%d story_len=%d",
+        "[IcebreakerAPI] evaluate request group_id=%s is_admin=%s members=%d turns=%d story_len=%d",
         payload.group_id,
-        current_user_id,
+        is_admin,
         len(payload.members),
         len(payload.turns),
         len(payload.story_opening or ""),
     )
-    await _ensure_group_member(payload.group_id, current_user_id, db)
 
     active_member_ids = await _get_active_group_member_ids(payload.group_id, db)
     turn_user_ids = {turn.user_id for turn in payload.turns}

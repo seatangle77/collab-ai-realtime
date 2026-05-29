@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { getGroupDetail, listMyGroups } from '../../../api/appGroups'
 import type { AppGroupMember } from '../../../api/appGroups'
+import { listAdminMemberships } from '../../../api/admin/memberships'
 import { extractErrorMessage } from '../../../utils/error'
 import type { AppCurrentGroup, IcebreakerGroup, IcebreakerMember } from './types'
 
@@ -61,7 +62,10 @@ async function resolveCurrentGroup(): Promise<AppCurrentGroup | null> {
   return nextGroup
 }
 
-export function useIcebreakerMembers(onLoaded: () => void) {
+export function useIcebreakerMembers(
+  onLoaded: () => void,
+  options?: { groupId?: string; isAdmin?: boolean },
+) {
   const pageLoading = ref(true)
   const pageError = ref('')
   const currentGroup = ref<IcebreakerGroup | null>(null)
@@ -72,6 +76,32 @@ export function useIcebreakerMembers(onLoaded: () => void) {
     pageLoading.value = true
     pageError.value = ''
     try {
+      // 管理员模式：直接用传入的 groupId，调管理员接口获取成员
+      if (options?.isAdmin && options.groupId) {
+        const result = await listAdminMemberships({ group_id: options.groupId, page_size: 100 })
+        const activeItems = result.items.filter((m) => m.status === 'active')
+        if (activeItems.length === 0) {
+          pageError.value = '该小组暂无活跃成员。'
+          members.value = []
+          return
+        }
+        const groupName = activeItems[0]?.group_name ?? options.groupId
+        currentGroupName.value = groupName
+        currentGroup.value = { id: options.groupId, name: groupName }
+        members.value = activeItems.map((m) => {
+          const name = m.user_name || m.user_id
+          return {
+            id: m.user_id,
+            name,
+            initial: name.trim().slice(0, 1).toUpperCase() || '?',
+            bg: AVATAR_COLORS[hashString(m.user_id) % AVATAR_COLORS.length]!,
+          }
+        })
+        onLoaded()
+        return
+      }
+
+      // 用户模式：从 localStorage 读当前小组
       const group = await resolveCurrentGroup()
       if (!group) {
         pageError.value = '你还没有加入小组，先创建或加入一个 3 人小组后再开始破冰。'

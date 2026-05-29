@@ -369,6 +369,7 @@ onMounted(() => {
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="router.push('/admin/groups/' + row.id)">详情</el-button>
             <el-button type="primary" link size="small" @click="openEditDialog(row)">编辑</el-button>
+            <el-button type="success" link size="small" @click="router.push('/app/icebreaker?group_id=' + row.id + '&admin=1')">破冰</el-button>
             <el-button type="danger" link size="small" @click="handleDelete(row)">删除</el-button>
           </template>
         </el-table-column>
