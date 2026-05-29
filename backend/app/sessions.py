@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Mapping
 from datetime import datetime
 import uuid
+
+_logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from jose import JWTError, jwt
@@ -15,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .auth import get_current_user
 from .db import get_db
 from .groups import _get_group_or_404
+from .session_recordings import finalize_session_recording
 from .ws_manager import ws_manager
 from .ws_protocol import build_session_ended
 
@@ -588,6 +592,10 @@ async def end_session(
         ),
     )
     await ws_manager.close_session_connections(session_id, code=1000, reason="host_ended")
+    try:
+        await finalize_session_recording(session_id)
+    except Exception:
+        _logger.exception("finalize_session_recording 失败 session_id=%s", session_id)
     await destroy_audio_service(session_id)
     return ChatSessionOut.model_validate(dict(row))
 
@@ -652,5 +660,9 @@ async def end_session_beacon(
         ),
     )
     await ws_manager.close_session_connections(session_id, code=1000, reason="host_ended")
+    try:
+        await finalize_session_recording(session_id)
+    except Exception:
+        _logger.exception("finalize_session_recording 失败 session_id=%s", session_id)
     await destroy_audio_service(session_id)
     return {"ok": True}

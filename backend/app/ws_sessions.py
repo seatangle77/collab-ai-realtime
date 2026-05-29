@@ -18,6 +18,7 @@ from .audio.audio_service import (
 )
 from .auth import JWT_ALGORITHM, JWT_SECRET_KEY
 from .db import get_sessionmaker
+from .session_recordings import finalize_session_recording, save_session_audio_chunk
 from .ws_manager import ws_manager
 from .ws_protocol import (
     build_connected,
@@ -110,6 +111,10 @@ async def _auto_end_session(session_id: str) -> bool:
         ended = (result.rowcount or 0) > 0
     if not ended:
         return False
+    try:
+        await finalize_session_recording(session_id)
+    except Exception:
+        _logger.exception("finalize_session_recording 失败 session_id=%s", session_id)
     await destroy_audio_service(session_id)
     _logger.info("会话已自动结束 session_id=%s", session_id)
     return True
@@ -341,6 +346,17 @@ async def ws_session_endpoint(
                     mime_type,
                     len(audio_bytes),
                 )
+
+                try:
+                    await save_session_audio_chunk(
+                        session_id,
+                        user_id=user_id or "unknown_user",
+                        seq=seq,
+                        mime_type=mime_type,
+                        audio_bytes=audio_bytes,
+                    )
+                except Exception:
+                    _logger.exception("保存会话录音失败 session_id=%s seq=%s", session_id, seq)
 
                 # 先回 ACK
                 await websocket.send_json(build_audio_chunk_ack(seq))

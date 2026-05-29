@@ -19,6 +19,10 @@ secrets.env
 # Local voice sample audio (generated at runtime/tests)
 local-voice-audio/
 backend/local-voice-audio/
+local-user-voice-profiles/
+backend/local-user-voice-profiles/
+recordings/
+local-session-full-recordings/
 
 # Claude / AI assistant metadata
 .claude/

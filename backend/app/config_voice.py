@@ -8,7 +8,7 @@ from pathlib import Path
 # - 本地开发默认使用项目下的 ./local-voice-audio
 # - 线上部署时建议通过环境变量 VOICE_AUDIO_BASE_DIR 配置为挂载的对象存储目录（如 /cos/voice-profiles）
 VOICE_AUDIO_BASE_DIR: Path = Path(
-    os.getenv("VOICE_AUDIO_BASE_DIR", "./local-voice-audio")
+    os.getenv("VOICE_AUDIO_BASE_DIR", "./local-user-voice-profiles")
 ).resolve()
 
 

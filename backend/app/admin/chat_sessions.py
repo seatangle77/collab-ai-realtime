@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 import uuid
 from datetime import datetime, timezone
+
+_logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from ..api_model import ApiModel
@@ -12,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..audio.audio_service import destroy_audio_service
 from ..db import get_db
 from ..groups import _get_group_or_404
+from ..session_recordings import finalize_session_recording
 from ..ws_manager import ws_manager
 from ..ws_protocol import build_session_ended
 from .deps import require_admin
@@ -368,6 +372,10 @@ async def end_chat_session_by_admin(
         build_session_ended({"session_id": session_id, "reason": "admin_ended"}),
     )
     await ws_manager.close_session_connections(session_id, code=1000, reason="admin_ended")
+    try:
+        await finalize_session_recording(session_id)
+    except Exception:
+        _logger.exception("finalize_session_recording 失败 session_id=%s", session_id)
     await destroy_audio_service(session_id)
     return AdminChatSessionOut.model_validate(dict(row))
 

@@ -4,6 +4,9 @@ set -e
 
 export TZ=Asia/Shanghai
 export APP_ENV=production
+export VOICE_AUDIO_BASE_DIR=/cos/user-voice-profiles
+export VOICE_AUDIO_PUBLIC_BASE_URL=https://collabai.site/audio/voice-profiles
+export SESSION_RECORDINGS_DIR=/cos/session-full-recordings
 
 ROOT_DIR="/root/workspace/collab-ai-realtime"
 LOG_DIR="$ROOT_DIR/logs"
