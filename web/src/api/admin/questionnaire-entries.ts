@@ -30,7 +30,12 @@ export interface QuestionnaireEntryListResult {
 export async function listQuestionnaireEntries(
   params?: QuestionnaireEntryListParams,
 ): Promise<QuestionnaireEntryListResult> {
-  return http.get<QuestionnaireEntryListResult>('/api/admin/questionnaire-entries', { params })
+  const query = params ? '?' + new URLSearchParams(
+    Object.entries(params)
+      .filter(([, v]) => v !== undefined)
+      .map(([k, v]) => [k, String(v)])
+  ).toString() : ''
+  return http.get<QuestionnaireEntryListResult>(`/api/admin/questionnaire-entries${query}`)
 }
 
 export async function deleteQuestionnaireEntry(userId: string): Promise<void> {

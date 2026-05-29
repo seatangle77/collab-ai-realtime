@@ -38,7 +38,7 @@ const groupOptionsByCondition = computed(() => {
     app_notification: [],
   }
   for (const group of groups.value) {
-    if (grouped[group.condition]) grouped[group.condition].push(group)
+    grouped[group.condition]?.push(group)
   }
   return grouped
 })

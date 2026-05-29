@@ -247,14 +247,18 @@ const reordering = ref(false)
 async function moveUp(index: number) {
   if (index === 0) return
   const arr = [...utterances.value]
-  ;[arr[index - 1], arr[index]] = [arr[index], arr[index - 1]]
+  const tmp = arr[index - 1] as CoiUtterance
+  arr[index - 1] = arr[index] as CoiUtterance
+  arr[index] = tmp
   await applyReorder(arr)
 }
 
 async function moveDown(index: number) {
   if (index === utterances.value.length - 1) return
   const arr = [...utterances.value]
-  ;[arr[index], arr[index + 1]] = [arr[index + 1], arr[index]]
+  const tmp = arr[index] as CoiUtterance
+  arr[index] = arr[index + 1] as CoiUtterance
+  arr[index + 1] = tmp
   await applyReorder(arr)
 }
 

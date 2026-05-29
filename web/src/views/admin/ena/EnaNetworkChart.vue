@@ -36,8 +36,8 @@ function networkEdges(net: EnaNetworkCondition, isDiff = false) {
   const weights = net.edges.map((e) => Math.abs(isDiff ? (e.weight_diff ?? 0) : e.weight))
   const maxW = Math.max(...weights, 0.001)
   return net.edges.map((e) => {
-    const src = NODE_POSITIONS[e.source]
-    const tgt = NODE_POSITIONS[e.target]
+    const src = NODE_POSITIONS[e.source]!
+    const tgt = NODE_POSITIONS[e.target]!
     const w = isDiff ? Math.abs(e.weight_diff ?? 0) : e.weight
     const stroke = edgeStroke(w, maxW)
     const color = isDiff
@@ -45,6 +45,10 @@ function networkEdges(net: EnaNetworkCondition, isDiff = false) {
       : w < 0.01 ? '#e5e7eb' : '#6b7280'
     return { ...e, x1: src.x, y1: src.y, x2: tgt.x, y2: tgt.y, stroke, color }
   })
+}
+
+function nodePos(node: string): { x: number; y: number } {
+  return NODE_POSITIONS[node] ?? { x: 150, y: 150 }
 }
 
 const conditionNetworks = computed(() =>
@@ -116,8 +120,8 @@ const COI_LABELS: Record<string, string> = {
           <!-- Nodes -->
           <g v-for="node in net.nodes" :key="node">
             <circle
-              :cx="NODE_POSITIONS[node].x"
-              :cy="NODE_POSITIONS[node].y"
+              :cx="nodePos(node).x"
+              :cy="nodePos(node).y"
               :r="NODE_RADIUS"
               :fill="COI_NODE_COLORS[node]"
               fill-opacity="0.15"
@@ -125,20 +129,20 @@ const COI_LABELS: Record<string, string> = {
               stroke-width="2"
             />
             <text
-              :x="NODE_POSITIONS[node].x"
-              :y="NODE_POSITIONS[node].y - 5"
+              :x="nodePos(node).x"
+              :y="nodePos(node).y - 5"
               text-anchor="middle"
               font-size="12"
               font-weight="700"
               :fill="COI_NODE_COLORS[node]"
             >{{ node }}</text>
             <text
-              :x="NODE_POSITIONS[node].x"
-              :y="NODE_POSITIONS[node].y + 10"
+              :x="nodePos(node).x"
+              :y="nodePos(node).y + 10"
               text-anchor="middle"
               font-size="9"
               fill="#6b7280"
-            >{{ COI_LABELS[node].split('\n')[1] }}</text>
+            >{{ COI_LABELS[node]?.split('\n')[1] }}</text>
           </g>
         </svg>
         <!-- Legend table below each network -->
@@ -178,8 +182,8 @@ const COI_LABELS: Record<string, string> = {
           >{{ (e.weight_diff ?? 0) > 0 ? '+' : '' }}{{ (e.weight_diff ?? 0).toFixed(2) }}</text>
           <g v-for="node in diffNetwork.nodes" :key="node">
             <circle
-              :cx="NODE_POSITIONS[node].x"
-              :cy="NODE_POSITIONS[node].y"
+              :cx="nodePos(node).x"
+              :cy="nodePos(node).y"
               :r="NODE_RADIUS"
               :fill="COI_NODE_COLORS[node]"
               fill-opacity="0.15"
@@ -187,20 +191,20 @@ const COI_LABELS: Record<string, string> = {
               stroke-width="2"
             />
             <text
-              :x="NODE_POSITIONS[node].x"
-              :y="NODE_POSITIONS[node].y - 5"
+              :x="nodePos(node).x"
+              :y="nodePos(node).y - 5"
               text-anchor="middle"
               font-size="12"
               font-weight="700"
               :fill="COI_NODE_COLORS[node]"
             >{{ node }}</text>
             <text
-              :x="NODE_POSITIONS[node].x"
-              :y="NODE_POSITIONS[node].y + 10"
+              :x="nodePos(node).x"
+              :y="nodePos(node).y + 10"
               text-anchor="middle"
               font-size="9"
               fill="#6b7280"
-            >{{ COI_LABELS[node].split('\n')[1] }}</text>
+            >{{ COI_LABELS[node]?.split('\n')[1] }}</text>
           </g>
         </svg>
         <!-- Diff legend -->

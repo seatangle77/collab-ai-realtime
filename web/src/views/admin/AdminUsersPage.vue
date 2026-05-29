@@ -207,7 +207,7 @@ async function submitCreate() {
 function openEditDialog(row: AdminUser) {
   editForm.id = row.id
   editForm.name = row.name
-  editForm.email = row.email
+  editForm.email = row.email ?? ''
   editForm.device_token = row.device_token
   editDialogVisible.value = true
 }

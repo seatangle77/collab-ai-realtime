@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { ElMessage, ElTabs, ElTabPane, ElRate } from 'element-plus'
+import { ElMessage, ElTabs, ElTabPane } from 'element-plus'
 import {
   fetchScaleMeta,
   fetchMyEntry,
