@@ -239,6 +239,47 @@ async def discover_groups(
     return [GroupDiscoverItem.model_validate(dict(row)) for row in rows]
 
 
+@router.get("/public", response_model=list[GroupDiscoverItem])
+async def list_public_groups(
+    name: str | None = None,
+    limit: int = Query(200, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+) -> list[GroupDiscoverItem]:
+    """
+    登录页使用的公开小组列表。
+    用户还没有 token 时也需要先选择本次登录要进入的小组。
+    """
+    where_clauses = ["g.is_active = TRUE"]
+    params: dict[str, Any] = {"limit": limit}
+
+    if name:
+        where_clauses.append("g.name ILIKE :name")
+        params["name"] = f"%{name}%"
+
+    where_sql = " AND ".join(where_clauses)
+    query = text(
+        f"""
+        SELECT
+            g.id,
+            g.name,
+            g.created_at,
+            g.is_active,
+            COUNT(gm_all.user_id) AS member_count
+        FROM groups AS g
+        LEFT JOIN group_memberships AS gm_all
+            ON gm_all.group_id = g.id AND gm_all.status = 'active'
+        WHERE {where_sql}
+        GROUP BY g.id, g.name, g.created_at, g.is_active
+        ORDER BY g.created_at DESC
+        LIMIT :limit
+        """
+    )
+
+    result = await db.execute(query, params)
+    rows = result.mappings().all()
+    return [GroupDiscoverItem.model_validate(dict(row)) for row in rows]
+
+
 @router.get("/{group_id}", response_model=GroupDetail)
 async def get_group(
     group_id: str,
@@ -312,8 +353,6 @@ async def join_group(
         {"group_id": group_id},
     )
     member_count = count_result.scalar_one()
-    if member_count >= MAX_GROUP_MEMBERS:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="群组人数已满")
 
     # 是否已有 membership
     membership_result = await db.execute(
@@ -333,6 +372,10 @@ async def join_group(
             # 已经在群里，直接返回详情
             return await _get_group_detail(group_id, current_user["id"], db)
 
+    if member_count >= MAX_GROUP_MEMBERS:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="群组人数已满")
+
+    if membership:
         # 从 left / inactive 变为 active
         await db.execute(
             text(

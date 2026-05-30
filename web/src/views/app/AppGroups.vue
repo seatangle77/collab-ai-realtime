@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, RefreshRight, SwitchButton } from '@element-plus/icons-vue'
+import { RefreshRight, SwitchButton } from '@element-plus/icons-vue'
 import AppEmptyState from '../../components/AppEmptyState.vue'
 import {
   type AppGroupDetail,
@@ -164,10 +164,11 @@ async function loadGroupDetail(groupId: string) {
   }
 }
 
-function openCreateDialog() {
-  createForm.name = ''
-  createDialogVisible.value = true
-}
+// 用户端暂时屏蔽新建群组入口；保留创建逻辑，后续如需恢复按钮可重新启用。
+// function openCreateDialog() {
+//   createForm.name = ''
+//   createDialogVisible.value = true
+// }
 
 async function submitCreate() {
   if (!createFormRef.value) return
@@ -337,7 +338,8 @@ onMounted(() => {
   <div class="app-groups">
     <div class="app-groups-header">
       <h2 class="app-groups-title">我的群组</h2>
-      <button
+      <!-- 用户端暂时屏蔽新建群组按钮；后台管理员负责创建群组。 -->
+      <!-- <button
         v-if="groups.length > 0"
         class="app-groups-create-btn"
         type="button"
@@ -347,10 +349,18 @@ onMounted(() => {
         <el-icon class="app-groups-create-icon" :size="24">
           <Plus />
         </el-icon>
-      </button>
+      </button> -->
     </div>
 
     <el-card class="app-groups-card app-groups-card--secondary" shadow="never">
+      <AppEmptyState
+        v-if="!groups.length && !loading"
+        icon="group"
+        title="你还没有加入任何群组"
+        description="请先加入管理员创建的群组，然后选择本次要使用的群组。"
+        compact
+      />
+      <!-- 原用户端创建入口暂时屏蔽，保留代码便于后续恢复。
       <AppEmptyState
         v-if="!groups.length && !loading"
         icon="group"
@@ -360,6 +370,7 @@ onMounted(() => {
         compact
         @action="openCreateDialog"
       />
+      -->
 
       <div v-else class="app-groups-list" :class="{ 'is-loading': loading }">
         <div
@@ -461,7 +472,7 @@ onMounted(() => {
           <AppEmptyState
             icon="empty"
             title="尚未选择群组"
-            description="创建或加入群组后，可以在这里查看成员。"
+            description="请选择或加入管理员创建的群组后，可以在这里查看成员。"
           />
         </template>
       </div>

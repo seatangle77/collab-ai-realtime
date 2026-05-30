@@ -76,19 +76,19 @@ export function useIcebreakerMembers(
     pageLoading.value = true
     pageError.value = ''
     try {
-      // 管理员模式：直接用传入的 groupId，调管理员接口获取成员
+      // 管理员模式：只要求小组已有 3 名成员，不按 active/left/kicked 状态拦截。
       if (options?.isAdmin && options.groupId) {
         const result = await listAdminMemberships({ group_id: options.groupId, page_size: 100 })
-        const activeItems = result.items.filter((m) => m.status === 'active')
-        if (activeItems.length === 0) {
-          pageError.value = '该小组暂无活跃成员。'
+        const groupMembers = result.items
+        if (groupMembers.length < 3) {
+          pageError.value = '该小组成员不足 3 人。'
           members.value = []
           return
         }
-        const groupName = activeItems[0]?.group_name ?? options.groupId
+        const groupName = groupMembers[0]?.group_name ?? options.groupId
         currentGroupName.value = groupName
         currentGroup.value = { id: options.groupId, name: groupName }
-        members.value = activeItems.map((m) => {
+        members.value = groupMembers.map((m) => {
           const name = m.user_name || m.user_id
           return {
             id: m.user_id,

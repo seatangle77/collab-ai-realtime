@@ -88,14 +88,15 @@ async def _ensure_group_member(group_id: str, user_id: str, db: AsyncSession) ->
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问该小组破冰")
 
 
-async def _get_active_group_member_ids(group_id: str, db: AsyncSession) -> set[str]:
+async def _get_group_member_ids(group_id: str, db: AsyncSession, *, active_only: bool = True) -> set[str]:
+    status_clause = "AND status = 'active'" if active_only else ""
     result = await db.execute(
         text(
-            """
+            f"""
             SELECT user_id
             FROM group_memberships
             WHERE group_id = :group_id
-              AND status = 'active'
+              {status_clause}
             """
         ),
         {"group_id": group_id},
@@ -103,15 +104,16 @@ async def _get_active_group_member_ids(group_id: str, db: AsyncSession) -> set[s
     return {str(row["user_id"]) for row in result.mappings().all()}
 
 
-async def _get_active_group_members(group_id: str, db: AsyncSession) -> dict[str, str]:
+async def _get_group_members(group_id: str, db: AsyncSession, *, active_only: bool = True) -> dict[str, str]:
+    status_clause = "AND gm.status = 'active'" if active_only else ""
     result = await db.execute(
         text(
-            """
+            f"""
             SELECT gm.user_id, ui.name AS user_name
             FROM group_memberships gm
             LEFT JOIN users_info ui ON ui.id = gm.user_id
             WHERE gm.group_id = :group_id
-              AND gm.status = 'active'
+              {status_clause}
             """
         ),
         {"group_id": group_id},
@@ -153,8 +155,8 @@ async def transcribe_icebreaker_turn(
         mime_type,
         is_admin,
     )
-    active_member_ids = await _get_active_group_member_ids(group_id, db)
-    if user_id not in active_member_ids:
+    member_ids = await _get_group_member_ids(group_id, db, active_only=not is_admin)
+    if user_id not in member_ids:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="破冰录音说话人不在该小组内")
 
     audio_bytes = await audio.read()
@@ -213,8 +215,8 @@ async def upload_icebreaker_voice_sample(
         if current_user is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="未登录")
         await _ensure_group_member(group_id, str(current_user["id"]), db)
-    active_members = await _get_active_group_members(group_id, db)
-    if user_id not in active_members:
+    members = await _get_group_members(group_id, db, active_only=not is_admin)
+    if user_id not in members:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="破冰录音说话人不在该小组内")
 
     audio_bytes = await audio.read()
@@ -295,14 +297,14 @@ async def evaluate_icebreaker(
         len(payload.story_opening or ""),
     )
 
-    active_member_ids = await _get_active_group_member_ids(payload.group_id, db)
+    member_ids = await _get_group_member_ids(payload.group_id, db, active_only=not is_admin)
     turn_user_ids = {turn.user_id for turn in payload.turns}
-    if not turn_user_ids.issubset(active_member_ids):
+    if not turn_user_ids.issubset(member_ids):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="接龙记录包含非本组成员")
 
     member_items = [member.model_dump() for member in payload.members]
     if not member_items:
-        member_items = [{"user_id": uid, "user_name": uid} for uid in sorted(active_member_ids)]
+        member_items = [{"user_id": uid, "user_name": uid} for uid in sorted(member_ids)]
 
     result = await evaluate_icebreaker_story(
         story_opening=payload.story_opening,

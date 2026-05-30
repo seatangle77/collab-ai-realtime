@@ -2,6 +2,8 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { appLogin } from '../../api/appAuth'
+import { joinGroup, listPublicGroups } from '../../api/appGroups'
+import type { AppDiscoverGroup } from '../../api/appGroups'
 import {
   DEFAULT_EXPERIMENT_DEVICE_TOKEN,
   EXPERIMENT_DEVICES,
@@ -19,6 +21,9 @@ const currentDeviceToken = ref('')
 const selectedDeviceToken = ref<string>(DEFAULT_EXPERIMENT_DEVICE_TOKEN)
 const loading = ref(false)
 const error = ref('')
+const groupLoading = ref(false)
+const loginGroups = ref<AppDiscoverGroup[]>([])
+const selectedLoginGroupId = ref(loadCurrentGroupFromStorage()?.id ?? '')
 
 const deviceOptions = computed(() => {
   const token = currentDeviceToken.value
@@ -35,7 +40,52 @@ const deviceOptions = computed(() => {
   return EXPERIMENT_DEVICES
 })
 
+interface AppCurrentGroup {
+  id: string
+  name: string
+}
+
+function loadCurrentGroupFromStorage(): AppCurrentGroup | null {
+  if (typeof window === 'undefined') return null
+  const raw = window.localStorage.getItem('app_current_group')
+  if (!raw) return null
+  try {
+    return JSON.parse(raw) as AppCurrentGroup
+  } catch {
+    return null
+  }
+}
+
+function saveCurrentGroupToStorage(group: AppCurrentGroup | null) {
+  if (typeof window === 'undefined') return
+  if (!group) {
+    window.localStorage.removeItem('app_current_group')
+  } else {
+    window.localStorage.setItem('app_current_group', JSON.stringify(group))
+  }
+}
+
+async function loadLoginGroups() {
+  groupLoading.value = true
+  try {
+    const groups = await listPublicGroups()
+    loginGroups.value = groups
+
+    const storedId = selectedLoginGroupId.value
+    const storedStillExists = storedId && groups.some((g) => g.id === storedId)
+    if (!storedStillExists) {
+      selectedLoginGroupId.value = groups[0]?.id ?? ''
+    }
+  } catch (e) {
+    console.error(e)
+  } finally {
+    groupLoading.value = false
+  }
+}
+
 onMounted(async () => {
+  void loadLoginGroups()
+
   try {
     const token = await getJPushDeviceToken()
     if (token) {
@@ -53,6 +103,10 @@ async function handleSubmit() {
     error.value = '请输入用户名和密码'
     return
   }
+  if (loginGroups.value.length > 0 && !selectedLoginGroupId.value) {
+    error.value = '请选择本次登录要进入的小组'
+    return
+  }
 
   loading.value = true
   try {
@@ -64,13 +118,19 @@ async function handleSubmit() {
     if (typeof window !== 'undefined') {
       window.localStorage.setItem('app_access_token', res.access_token)
       window.localStorage.setItem('app_user', JSON.stringify(res.user))
-      window.localStorage.removeItem('app_current_group')
     }
 
     const needsReset = !!res.user.password_needs_reset
     if (needsReset) {
       await router.push('/app/change-password')
       return
+    }
+
+    if (selectedLoginGroupId.value) {
+      const detail = await joinGroup(selectedLoginGroupId.value)
+      saveCurrentGroupToStorage({ id: detail.group.id, name: detail.group.name })
+    } else {
+      saveCurrentGroupToStorage(null)
     }
 
     const redirect = (route.query.redirect as string | undefined) || '/app'
@@ -116,6 +176,22 @@ function goRegister() {
             placeholder="4 位密码"
             autocomplete="current-password"
           />
+        </label>
+
+        <label class="auth-label">
+          本次登录小组
+          <select v-model="selectedLoginGroupId" class="auth-input" :disabled="groupLoading || !loginGroups.length">
+            <option value="" disabled>
+              {{ groupLoading ? '小组加载中...' : '请选择小组' }}
+            </option>
+            <option
+              v-for="group in loginGroups"
+              :key="group.id"
+              :value="group.id"
+            >
+              {{ group.name }}（{{ group.member_count }} 人）
+            </option>
+          </select>
         </label>
 
         <label class="auth-label">
