@@ -32,6 +32,11 @@ const routes: RouteRecordRaw[] = [
     name: 'AppSelectGroup',
     component: () => import('../views/app/AppSelectGroup.vue'),
   },
+  {
+    path: '/app/icebreaker',
+    name: 'AppIcebreaker',
+    component: () => import('../views/app/AppIcebreaker.vue'),
+  },
   // 用户端 APP 路由
   {
     path: '/app',
@@ -61,11 +66,6 @@ const routes: RouteRecordRaw[] = [
         path: 'voice-profile',
         name: 'AppVoiceProfile',
         component: () => import('../views/app/AppVoiceProfile.vue'),
-      },
-      {
-        path: 'icebreaker',
-        name: 'AppIcebreaker',
-        component: () => import('../views/app/AppIcebreaker.vue'),
       },
       {
         path: 'sessions/:id',
@@ -262,6 +262,18 @@ router.beforeEach((to, _from, next) => {
     }
   }
 
+  if (to.path === '/app/icebreaker') {
+    if (!window.localStorage.getItem('admin_api_key')) {
+      next({
+        path: '/admin/login',
+        query: { redirect: to.fullPath },
+      })
+      return
+    }
+    next()
+    return
+  }
+
   // 已登录用户访问登录/注册页
   if (token && publicAppPaths.includes(to.path)) {
     if (needsReset) {
@@ -287,18 +299,11 @@ router.beforeEach((to, _from, next) => {
   // 未登录访问受保护的 /app 路由时，跳转到登录页
   if (to.path.startsWith('/app') && !publicAppPaths.includes(to.path) && to.path !== '/app/change-password') {
     if (!token) {
-      // 管理员从后台进入破冰页：有管理员 token 且带 admin=1 参数，直接放行
-      const isAdminIcebreaker =
-        to.path === '/app/icebreaker' &&
-        to.query.admin === '1' &&
-        !!window.localStorage.getItem('admin_api_key')
-      if (!isAdminIcebreaker) {
-        next({
-          path: '/app/login',
-          query: { redirect: to.fullPath },
-        })
-        return
-      }
+      next({
+        path: '/app/login',
+        query: { redirect: to.fullPath },
+      })
+      return
     }
   }
 

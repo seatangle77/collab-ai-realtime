@@ -235,6 +235,11 @@ async function handleConditionChange(row: AdminGroup, newCondition: string) {
   }
 }
 
+function openIcebreakerPage(row: AdminGroup) {
+  const url = `/app/icebreaker?group_id=${encodeURIComponent(row.id)}`
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
+
 async function handleDelete(row: AdminGroup) {
   try {
     await ElMessageBox.confirm(`确认删除群组「${row.name}」吗？该操作不可恢复。`, '删除确认', {
@@ -369,7 +374,7 @@ onMounted(() => {
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="router.push('/admin/groups/' + row.id)">详情</el-button>
             <el-button type="primary" link size="small" @click="openEditDialog(row)">编辑</el-button>
-            <el-button type="success" link size="small" @click="router.push('/app/icebreaker?group_id=' + row.id + '&admin=1')">破冰</el-button>
+            <el-button type="success" link size="small" @click="openIcebreakerPage(row)">破冰</el-button>
             <el-button type="danger" link size="small" @click="handleDelete(row)">删除</el-button>
           </template>
         </el-table-column>

@@ -4,7 +4,9 @@ import { useRouter } from 'vue-router'
 
 const router = useRouter()
 
-const token = ref(localStorage.getItem('admin_api_key') ?? '')
+const DEFAULT_ADMIN_API_KEY = 'TestAdminKey123'
+
+const token = ref(localStorage.getItem('admin_api_key') ?? DEFAULT_ADMIN_API_KEY)
 const error = ref('')
 const loading = ref(false)
 
@@ -145,4 +147,3 @@ async function handleSubmit() {
   cursor: default;
 }
 </style>
-

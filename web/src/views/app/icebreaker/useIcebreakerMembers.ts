@@ -77,7 +77,13 @@ export function useIcebreakerMembers(
     pageError.value = ''
     try {
       // 管理员模式：只要求小组已有 3 名成员，不按 active/left/kicked 状态拦截。
-      if (options?.isAdmin && options.groupId) {
+      if (options?.isAdmin) {
+        if (!options.groupId) {
+          pageError.value = '缺少小组 ID，请从后台群组管理页进入破冰。'
+          members.value = []
+          return
+        }
+
         const result = await listAdminMemberships({ group_id: options.groupId, page_size: 100 })
         const groupMembers = result.items
         if (groupMembers.length < 3) {

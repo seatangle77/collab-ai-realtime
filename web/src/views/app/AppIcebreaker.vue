@@ -15,10 +15,6 @@ import { FALLBACK_MEMBER, useIcebreakerMembers } from './icebreaker/useIcebreake
 import type { IcebreakerMember, ScoreMeme } from './icebreaker/types'
 import { useAudioRecorder } from '../../composables/useAudioRecorder'
 import {
-  evaluateIcebreakerStory,
-  uploadIcebreakerVoiceSample,
-} from '../../api/appIcebreaker'
-import {
   adminEvaluateIcebreakerStory,
   adminUploadIcebreakerVoiceSample,
 } from '../../api/adminIcebreaker'
@@ -28,13 +24,9 @@ import { extractErrorMessage } from '../../utils/error'
 const router = useRouter()
 const route = useRoute()
 
-// 管理员模式：从 URL query 读取 group_id 和 admin 标记
-const isAdminMode = route.query.admin === '1'
 const queryGroupId = typeof route.query.group_id === 'string' ? route.query.group_id : undefined
-
-// 根据模式选择对应的 API 函数
-const uploadVoiceSample = isAdminMode ? adminUploadIcebreakerVoiceSample : uploadIcebreakerVoiceSample
-const evaluateStory = isAdminMode ? adminEvaluateIcebreakerStory : evaluateIcebreakerStory
+const uploadVoiceSample = adminUploadIcebreakerVoiceSample
+const evaluateStory = adminEvaluateIcebreakerStory
 
 const {
   pageLoading,
@@ -45,7 +37,7 @@ const {
   loadIcebreakerMembers,
 } = useIcebreakerMembers(resetIcebreakerFlow, {
   groupId: queryGroupId,
-  isAdmin: isAdminMode,
+  isAdmin: true,
 })
 
 const p1MemberQuestions = ref<string[][]>([])
@@ -481,7 +473,7 @@ onUnmounted(() => {
     <div v-if="pageLoading" class="ib-screen ib-state">
       <div class="ib-state-icon">🧊</div>
       <p class="ib-state-title">正在加载小组成员</p>
-      <p class="ib-state-desc">破冰名单会自动关联你当前的小组。</p>
+      <p class="ib-state-desc">破冰名单会自动关联后台选择的小组。</p>
     </div>
 
     <div v-else-if="pageError" class="ib-screen ib-state">
@@ -489,7 +481,7 @@ onUnmounted(() => {
       <p class="ib-state-title">暂时不能开始破冰</p>
       <p class="ib-state-desc">{{ pageError }}</p>
       <div class="ib-state-actions">
-        <button class="ib-btn ib-btn--primary" @click="router.push('/app/groups')">去小组页</button>
+        <button class="ib-btn ib-btn--primary" @click="router.push('/admin/groups')">返回群组管理</button>
         <button class="ib-btn ib-btn--ghost" @click="loadIcebreakerMembers">重新加载</button>
       </div>
     </div>
@@ -849,8 +841,8 @@ onUnmounted(() => {
       </div>
 
       <div class="ib-done-actions">
-        <button class="ib-btn ib-btn--primary ib-btn--lg" @click="router.push('/app/sessions')">
-          进入讨论
+        <button class="ib-btn ib-btn--primary ib-btn--lg" @click="router.push('/admin/groups')">
+          返回群组管理
         </button>
         <button class="ib-btn ib-btn--ghost" @click="screen = 'intro'">再来一次</button>
       </div>
