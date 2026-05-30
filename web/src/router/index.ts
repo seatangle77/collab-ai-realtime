@@ -27,6 +27,11 @@ const routes: RouteRecordRaw[] = [
     name: 'AppChangePassword',
     component: () => import('../views/app/AppChangePassword.vue'),
   },
+  {
+    path: '/app/select-group',
+    name: 'AppSelectGroup',
+    component: () => import('../views/app/AppSelectGroup.vue'),
+  },
   // 用户端 APP 路由
   {
     path: '/app',

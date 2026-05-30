@@ -82,12 +82,3 @@ export async function listDiscoverGroups(params: ListDiscoverGroupsParams = {}):
   const url = '/api/groups/discover' + (qs ? `?${qs}` : '')
   return appHttp.get<AppDiscoverGroup[]>(url)
 }
-
-export async function listPublicGroups(params: ListDiscoverGroupsParams = {}): Promise<AppDiscoverGroup[]> {
-  const query = new URLSearchParams()
-  if (params.name) query.set('name', params.name)
-  if (params.limit) query.set('limit', String(params.limit))
-  const qs = query.toString()
-  const url = '/api/groups/public' + (qs ? `?${qs}` : '')
-  return appHttp.get<AppDiscoverGroup[]>(url)
-}

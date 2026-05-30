@@ -103,7 +103,8 @@ function logout() {
   if (typeof window !== 'undefined') {
     window.localStorage.removeItem('app_access_token')
     window.localStorage.removeItem('app_user')
-    window.localStorage.removeItem('app_current_group')
+    // 保留当前小组，让再次登录后的选组页默认显示上次选择的小组。
+    // window.localStorage.removeItem('app_current_group')
   }
   router.push('/app/login')
 }
