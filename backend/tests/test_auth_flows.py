@@ -122,17 +122,23 @@ def scenario_register_does_not_create_membership(ctx: Dict[str, Any]) -> bool:
 # ────────────────────────────────────────────────────────────
 
 def scenario_login_success(ctx: Dict[str, Any]) -> bool:
+    login_device_token = "login_device_token_override"
     resp = requests.post(
         f"{BASE_URL}/api/auth/login",
-        json={"name": ctx["name"], "password": ctx["password"]},
+        json={"name": ctx["name"], "password": ctx["password"], "device_token": login_device_token},
     )
     if resp.status_code != 200:
         return _log(False, "登录失败（期望 200）", resp.json())
     data = resp.json()
     token = data.get("access_token")
-    ok = bool(token) and data.get("user", {}).get("name") == ctx["name"]
+    ok = (
+        bool(token)
+        and data.get("user", {}).get("name") == ctx["name"]
+        and data.get("user", {}).get("device_token") == login_device_token
+    )
     if ok:
         ctx["access_token"] = token
+        ctx["device_token"] = login_device_token
     return _log(ok, "登录成功场景", data)
 
 

@@ -34,6 +34,7 @@ class RegisterRequest(ApiModel):
 class LoginRequest(ApiModel):
     name: str
     password: str
+    device_token: str | None = None
 
 
 class UserOut(ApiModel):
@@ -190,11 +191,26 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)) -> To
     if not _verify_password(payload.password, row["password_hash"]):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户名或密码错误")
 
+    device_token = row["device_token"]
+    if payload.device_token is not None:
+        await db.execute(
+            text(
+                """
+                UPDATE users_info
+                SET device_token = :device_token
+                WHERE id = :id
+                """
+            ),
+            {"id": row["id"], "device_token": payload.device_token},
+        )
+        await db.commit()
+        device_token = payload.device_token
+
     user_data = {
         "id": row["id"],
         "name": row["name"],
         "email": row["email"],
-        "device_token": row["device_token"],
+        "device_token": device_token,
         "created_at": row["created_at"],
         "password_needs_reset": row.get("password_needs_reset", False),
     }

@@ -10,6 +10,7 @@ export interface AppRegisterPayload {
 export interface AppLoginPayload {
   name: string
   password: string
+  device_token?: string | null
 }
 
 export interface AppTokenResponse {
@@ -38,4 +39,3 @@ export async function fetchAppMe(): Promise<AdminUser> {
 export async function changeAppPassword(payload: ChangePasswordPayload): Promise<AdminUser> {
   return appHttp.post<AdminUser>('/api/auth/change-password', payload, { noRedirectOn401: true })
 }
-

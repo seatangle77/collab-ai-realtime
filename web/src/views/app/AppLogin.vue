@@ -1,7 +1,13 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { appLogin } from '../../api/appAuth'
+import {
+  DEFAULT_EXPERIMENT_DEVICE_TOKEN,
+  EXPERIMENT_DEVICES,
+  isKnownExperimentDeviceToken,
+} from '../../constants/experimentDevices'
+import { getJPushDeviceToken } from '../../native/jpushDevice'
 import { extractErrorMessage } from '../../utils/error'
 
 const router = useRouter()
@@ -9,8 +15,37 @@ const route = useRoute()
 
 const name = ref('')
 const password = ref('')
+const currentDeviceToken = ref('')
+const selectedDeviceToken = ref<string>(DEFAULT_EXPERIMENT_DEVICE_TOKEN)
 const loading = ref(false)
 const error = ref('')
+
+const deviceOptions = computed(() => {
+  const token = currentDeviceToken.value
+  if (token && !isKnownExperimentDeviceToken(token)) {
+    return [
+      {
+        key: 'current_app_device',
+        label: '当前手机设备',
+        deviceToken: token,
+      },
+      ...EXPERIMENT_DEVICES,
+    ]
+  }
+  return EXPERIMENT_DEVICES
+})
+
+onMounted(async () => {
+  try {
+    const token = await getJPushDeviceToken()
+    if (token) {
+      currentDeviceToken.value = token
+      selectedDeviceToken.value = token
+    }
+  } catch {
+    selectedDeviceToken.value = DEFAULT_EXPERIMENT_DEVICE_TOKEN
+  }
+})
 
 async function handleSubmit() {
   error.value = ''
@@ -24,6 +59,7 @@ async function handleSubmit() {
     const res = await appLogin({
       name: name.value.trim(),
       password: password.value,
+      device_token: selectedDeviceToken.value,
     })
     if (typeof window !== 'undefined') {
       window.localStorage.setItem('app_access_token', res.access_token)
@@ -80,6 +116,19 @@ function goRegister() {
             placeholder="4 位密码"
             autocomplete="current-password"
           />
+        </label>
+
+        <label class="auth-label">
+          当前手机设备
+          <select v-model="selectedDeviceToken" class="auth-input">
+            <option
+              v-for="device in deviceOptions"
+              :key="device.key"
+              :value="device.deviceToken"
+            >
+              {{ device.label }}
+            </option>
+          </select>
         </label>
 
         <p v-if="error" class="auth-error">
