@@ -336,6 +336,7 @@ async def ws_session_endpoint(
                 seq = _data.get("seq")
                 audio_b64 = _data.get("audio_b64")
                 mime_type = _data.get("mime_type", "audio/webm")
+                duration_ms = _data.get("duration_ms")
                 audio_bytes = base64.b64decode(audio_b64)
                 recv_started = time.perf_counter()
 
@@ -354,6 +355,7 @@ async def ws_session_endpoint(
                         seq=seq,
                         mime_type=mime_type,
                         audio_bytes=audio_bytes,
+                        duration_ms=duration_ms,
                     )
                 except Exception:
                     _logger.exception("保存会话录音失败 session_id=%s seq=%s", session_id, seq)

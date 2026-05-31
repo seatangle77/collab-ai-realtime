@@ -59,6 +59,157 @@ ALLOWED_AUDIO_CONTENT_TYPE_PREFIXES: tuple[str, ...] = (
 )
 
 
+def _audio_extension_from_content_type(content_type: str) -> str:
+    normalized = content_type.split(";", 1)[0].strip().lower()
+    if normalized == "audio/mpeg":
+        return ".mp3"
+    if normalized in {"audio/wav", "audio/x-wav"}:
+        return ".wav"
+    if normalized == "audio/ogg":
+        return ".ogg"
+    if normalized in {"audio/mp4", "audio/x-m4a"}:
+        return ".m4a"
+    if normalized == "audio/aac":
+        return ".aac"
+    if normalized == "audio/flac":
+        return ".flac"
+    return ".webm"
+
+
+def _probe_audio_duration_ms(path: Path) -> int | None:
+    if shutil.which("ffprobe") is None:
+        return None
+
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=nw=1:nk=1",
+                str(path),
+            ],
+            capture_output=True,
+            timeout=15,
+            check=False,
+        )
+        if result.returncode == 0:
+            value = result.stdout.decode("utf-8", errors="ignore").strip()
+            if value and value.upper() != "N/A":
+                duration_sec = float(value)
+                if duration_sec > 0:
+                    return int(round(duration_sec * 1000))
+    except Exception as exc:
+        logger.warning("[VoiceProfile] ffprobe duration failed path=%s error=%s", path, exc)
+
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "a:0",
+                "-show_entries",
+                "packet=pts_time,duration_time",
+                "-of",
+                "csv=p=0",
+                str(path),
+            ],
+            capture_output=True,
+            timeout=20,
+            check=False,
+        )
+        if result.returncode != 0:
+            return None
+        last_end_sec: float | None = None
+        for line in result.stdout.decode("utf-8", errors="ignore").splitlines():
+            parts = [part.strip() for part in line.split(",")]
+            if len(parts) < 2:
+                continue
+            try:
+                pts = float(parts[0])
+                duration = float(parts[1])
+            except ValueError:
+                continue
+            last_end_sec = pts + duration
+        if last_end_sec and last_end_sec > 0:
+            return int(round(last_end_sec * 1000))
+    except Exception as exc:
+        logger.warning("[VoiceProfile] ffprobe packet duration failed path=%s error=%s", path, exc)
+    return None
+
+
+def _remux_audio_file(path: Path) -> bool:
+    if path.suffix.lower() not in {".webm", ".m4a", ".mp4", ".ogg"}:
+        return False
+    if shutil.which("ffmpeg") is None:
+        return False
+
+    temp_path = path.with_name(f"{path.stem}.remuxing{path.suffix}")
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-i",
+                str(path),
+                "-map",
+                "0",
+                "-c",
+                "copy",
+                str(temp_path),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=30,
+            check=False,
+        )
+        if result.returncode != 0 or not temp_path.exists() or temp_path.stat().st_size == 0:
+            stderr = result.stderr.decode("utf-8", errors="ignore")[:500]
+            logger.warning("[VoiceProfile] 音频重封装失败 path=%s stderr=%s", path, stderr)
+            return False
+        temp_path.replace(path)
+        return True
+    except Exception as exc:
+        logger.warning("[VoiceProfile] 音频重封装异常 path=%s error=%s", path, exc)
+        return False
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+def _write_voice_audio_metadata(
+    audio_path: Path,
+    *,
+    user_id: str,
+    content_type: str,
+    public_url: str,
+    uploaded_by: str,
+) -> None:
+    remuxed = _remux_audio_file(audio_path)
+    duration_ms = _probe_audio_duration_ms(audio_path)
+    payload = {
+        "user_id": user_id,
+        "recording_file": audio_path.name,
+        "public_url": public_url,
+        "mime_type": content_type,
+        "duration_ms": duration_ms,
+        "duration_sec": round(duration_ms / 1000, 3) if duration_ms is not None else None,
+        "file_size_bytes": audio_path.stat().st_size if audio_path.exists() else 0,
+        "uploaded_by": uploaded_by,
+        "remuxed": remuxed,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    metadata_path = audio_path.with_suffix(f"{audio_path.suffix}.json")
+    metadata_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
 def _utc_now_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -359,19 +510,7 @@ async def upload_my_voice_sample(
             detail=f"不支持的音频格式: {content_type}",
         )
 
-    ext = ".webm"
-    if file.content_type == "audio/mpeg":
-        ext = ".mp3"
-    elif file.content_type in {"audio/wav", "audio/x-wav"}:
-        ext = ".wav"
-    elif file.content_type == "audio/ogg":
-        ext = ".ogg"
-    elif file.content_type in {"audio/mp4", "audio/x-m4a"}:
-        ext = ".m4a"
-    elif file.content_type == "audio/aac":
-        ext = ".aac"
-    elif file.content_type == "audio/flac":
-        ext = ".flac"
+    ext = _audio_extension_from_content_type(content_type)
 
     filename = f"{uuid.uuid4().hex}{ext}"
 
@@ -387,4 +526,12 @@ async def upload_my_voice_sample(
         file.file.close()
 
     public_url = f"{VOICE_AUDIO_PUBLIC_BASE_URL}/{user_id}/{filename}"
+    await asyncio.to_thread(
+        _write_voice_audio_metadata,
+        dest_path,
+        user_id=user_id,
+        content_type=content_type,
+        public_url=public_url,
+        uploaded_by=user_id,
+    )
     return UploadAudioResponse(url=public_url)

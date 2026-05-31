@@ -18,9 +18,11 @@ from ..db import get_db
 from ..voice_profiles import (
     ALLOWED_AUDIO_CONTENT_TYPE_PREFIXES,
     VoiceProfileOut,
+    _audio_extension_from_content_type,
     _generate_embedding,
     _row_to_profile,
     _url_to_local_path,
+    _write_voice_audio_metadata,
 )
 from .deps import require_admin
 from .schemas import BatchDeleteRequest, BatchDeleteResponse, Page, PageMeta
@@ -391,13 +393,7 @@ async def admin_upload_audio_sample(
             detail=f"不支持的音频格式: {content_type}",
         )
 
-    ext = ".webm"
-    if file.content_type == "audio/mpeg":
-        ext = ".mp3"
-    elif file.content_type == "audio/wav":
-        ext = ".wav"
-    elif file.content_type == "audio/ogg":
-        ext = ".ogg"
+    ext = _audio_extension_from_content_type(content_type)
 
     filename = f"{profile.user_id}-{datetime.now(timezone.utc).timestamp():.0f}{ext}"
 
@@ -413,4 +409,12 @@ async def admin_upload_audio_sample(
         file.file.close()
 
     public_url = f"{VOICE_AUDIO_PUBLIC_BASE_URL}/{profile.user_id}/{filename}"
+    await asyncio.to_thread(
+        _write_voice_audio_metadata,
+        dest_path,
+        user_id=profile.user_id,
+        content_type=content_type,
+        public_url=public_url,
+        uploaded_by="admin",
+    )
     return AdminUploadAudioResponse(url=public_url)
