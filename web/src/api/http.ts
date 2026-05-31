@@ -16,8 +16,9 @@ async function request<T>(url: string, init: RequestInit = {}, config: HttpConfi
   const baseURL = finalConfig.baseURL ?? ''
   const token = getAdminToken()
 
+  const isFormData = init.body instanceof FormData
   const headers: HeadersInit = {
-    'Content-Type': 'application/json',
+    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
     ...(init.headers ?? {}),
   }
 
@@ -56,7 +57,7 @@ export const http = {
       url,
       {
         method: 'POST',
-        body: body != null ? JSON.stringify(body) : undefined,
+        body: body instanceof FormData ? body : body != null ? JSON.stringify(body) : undefined,
       },
       config,
     ),
@@ -65,7 +66,7 @@ export const http = {
       url,
       {
         method: 'PUT',
-        body: body != null ? JSON.stringify(body) : undefined,
+        body: body instanceof FormData ? body : body != null ? JSON.stringify(body) : undefined,
       },
       config,
     ),
@@ -74,7 +75,7 @@ export const http = {
       url,
       {
         method: 'PATCH',
-        body: body != null ? JSON.stringify(body) : undefined,
+        body: body instanceof FormData ? body : body != null ? JSON.stringify(body) : undefined,
       },
       config,
     ),
