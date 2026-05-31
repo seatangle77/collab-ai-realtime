@@ -77,6 +77,11 @@ const editRules: FormRules<typeof editForm> = {
   session_title: [{ required: true, message: '请输入会话标题', trigger: 'blur' }],
 }
 
+function openSessionControl(row: AdminChatSession) {
+  const route = router.resolve(`/admin/session-control/${row.id}`)
+  window.open(route.href, '_blank', 'noopener')
+}
+
 async function fetchSessions() {
   loading.value = true
   try {
@@ -516,7 +521,7 @@ onMounted(() => {
               type="success"
               link
               size="small"
-              @click="router.push('/admin/session-control/' + row.id)"
+              @click="openSessionControl(row)"
             >控制台</el-button>
             <el-button type="primary" link size="small" @click="router.push('/admin/chat-sessions/' + row.id)">详情</el-button>
             <el-button type="primary" link size="small" @click="openEditDialog(row)">编辑</el-button>
