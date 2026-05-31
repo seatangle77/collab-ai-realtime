@@ -148,6 +148,17 @@ function formatHistoryTime(value?: string | null): string {
   margin: 0 auto;
 }
 
+.ai-sheet::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -3px;
+  height: 3px;
+  background: var(--app-bg-elevated, #fff);
+  pointer-events: none;
+}
+
 .ai-sheet__handle-bar {
   display: flex;
   justify-content: center;
