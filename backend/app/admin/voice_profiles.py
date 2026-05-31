@@ -19,10 +19,10 @@ from ..voice_profiles import (
     ALLOWED_AUDIO_CONTENT_TYPE_PREFIXES,
     VoiceProfileOut,
     _audio_extension_from_content_type,
+    _finalize_voice_audio_file,
     _generate_embedding,
     _row_to_profile,
     _url_to_local_path,
-    _write_voice_audio_metadata,
 )
 from .deps import require_admin
 from .schemas import BatchDeleteRequest, BatchDeleteResponse, Page, PageMeta
@@ -410,7 +410,7 @@ async def admin_upload_audio_sample(
 
     public_url = f"{VOICE_AUDIO_PUBLIC_BASE_URL}/{profile.user_id}/{filename}"
     await asyncio.to_thread(
-        _write_voice_audio_metadata,
+        _finalize_voice_audio_file,
         dest_path,
         user_id=profile.user_id,
         content_type=content_type,

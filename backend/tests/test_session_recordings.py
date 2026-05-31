@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from datetime import datetime
 
 from backend.app import session_recordings
@@ -18,6 +17,14 @@ def test_session_recording_writes_single_audio_file(tmp_path, monkeypatch):
 
     monkeypatch.setattr(session_recordings, "SESSION_RECORDINGS_DIR", tmp_path)
     monkeypatch.setattr(session_recordings, "_get_session_recording_meta", fake_meta)
+    captured: dict[str, object] = {}
+
+    def fake_remux(path, *, metadata=None):
+        captured["path"] = path
+        captured["metadata"] = metadata
+        return True
+
+    monkeypatch.setattr(session_recordings, "_remux_recording_file", fake_remux)
     session_recordings._session_files.clear()
     session_recordings._session_locks.clear()
 
@@ -44,15 +51,15 @@ def test_session_recording_writes_single_audio_file(tmp_path, monkeypatch):
 
     session_file = tmp_path / "20260529-143012_第三组_测试_sesabc123.webm"
     assert session_file.read_bytes() == b"abcdef"
-    sidecar = json.loads((tmp_path / "20260529-143012_第三组_测试_sesabc123.webm.json").read_text())
-    assert sidecar["session_id"] == "sesabc123"
-    assert sidecar["recording_file"] == session_file.name
-    assert sidecar["mime_type"] == "audio/webm"
-    assert sidecar["duration_ms"] == 2500
-    assert sidecar["duration_sec"] == 2.5
-    assert sidecar["chunk_count"] == 2
-    assert sidecar["byte_count"] == 6
-    assert sidecar["file_size_bytes"] == 6
-    assert sidecar["first_seq"] == 1
-    assert sidecar["last_seq"] == 2
+    assert captured["path"] == session_file
+    metadata = captured["metadata"]
+    assert metadata["session_id"] == "sesabc123"
+    assert metadata["mime_type"] == "audio/webm"
+    assert metadata["duration_ms"] == 2500
+    assert metadata["duration_sec"] == 2.5
+    assert metadata["chunk_count"] == 2
+    assert metadata["byte_count"] == 6
+    assert metadata["first_seq"] == 1
+    assert metadata["last_seq"] == 2
+    assert not (tmp_path / "20260529-143012_第三组_测试_sesabc123.webm.json").exists()
     assert not (tmp_path / "20260529-143012_第三组_测试_sesabc123").exists()

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import re
@@ -163,29 +162,34 @@ def _update_session_stats(
         stats["duration_ms"] += duration_ms
 
 
-def _write_recording_sidecar(session_file: Path, *, session_id: str, stats: Mapping[str, Any] | None) -> None:
-    if not stats:
-        return
+def _metadata_args(metadata: Mapping[str, Any] | None) -> list[str]:
+    args: list[str] = []
+    if not metadata:
+        return args
+    for key, value in metadata.items():
+        if value is None:
+            continue
+        args.extend(["-metadata", f"{key}={value}"])
+    return args
 
+
+def _session_recording_metadata(session_id: str, stats: Mapping[str, Any] | None) -> dict[str, Any]:
+    stats = stats or {}
     duration_ms = int(stats.get("duration_ms") or 0)
-    payload = {
+    return {
         "session_id": session_id,
-        "recording_file": session_file.name,
         "mime_type": stats.get("mime_type"),
-        "duration_ms": duration_ms,
+        "duration_ms": duration_ms or None,
         "duration_sec": round(duration_ms / 1000, 3) if duration_ms > 0 else None,
-        "chunk_count": stats.get("chunk_count", 0),
-        "byte_count": stats.get("byte_count", session_file.stat().st_size if session_file.exists() else 0),
-        "file_size_bytes": session_file.stat().st_size if session_file.exists() else 0,
+        "chunk_count": stats.get("chunk_count"),
+        "byte_count": stats.get("byte_count"),
         "first_seq": stats.get("first_seq"),
         "last_seq": stats.get("last_seq"),
         "finalized_at": datetime.now(timezone.utc).isoformat(),
     }
-    sidecar_file = session_file.with_suffix(f"{session_file.suffix}.json")
-    sidecar_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def _remux_recording_file(session_file: Path) -> bool:
+def _remux_recording_file(session_file: Path, *, metadata: Mapping[str, Any] | None = None) -> bool:
     if session_file.suffix.lower() not in {".webm", ".m4a", ".mp4", ".ogg"}:
         return False
     if shutil.which("ffmpeg") is None:
@@ -206,8 +210,9 @@ def _remux_recording_file(session_file: Path) -> bool:
                 "0",
                 "-c",
                 "copy",
-                str(temp_file),
-            ],
+            ]
+            + _metadata_args(metadata)
+            + [str(temp_file)],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=30,
@@ -265,12 +270,10 @@ async def finalize_session_recording(session_id: str) -> Path | None:
             if session_file is None or not session_file.exists():
                 return None
             stats = _session_stats.get(session_id)
-            await asyncio.to_thread(_remux_recording_file, session_file)
             await asyncio.to_thread(
-                _write_recording_sidecar,
+                _remux_recording_file,
                 session_file,
-                session_id=session_id,
-                stats=stats,
+                metadata=_session_recording_metadata(session_id, stats),
             )
             return session_file
         finally:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import sys
 import types
 
@@ -13,14 +12,21 @@ sys.modules.setdefault("resemblyzer", resemblyzer_stub)
 from backend.app import voice_profiles
 
 
-def test_voice_audio_metadata_sidecar_is_written(tmp_path, monkeypatch):
+def test_voice_audio_metadata_is_embedded_without_sidecar(tmp_path, monkeypatch):
     audio_path = tmp_path / "sample.webm"
     audio_path.write_bytes(b"fake-audio")
 
-    monkeypatch.setattr(voice_profiles, "_remux_audio_file", lambda path: True)
+    captured: dict[str, object] = {}
+
+    def fake_remux(path, *, metadata=None):
+        captured["path"] = path
+        captured["metadata"] = metadata
+        return True
+
+    monkeypatch.setattr(voice_profiles, "_remux_audio_file", fake_remux)
     monkeypatch.setattr(voice_profiles, "_probe_audio_duration_ms", lambda path: 1234)
 
-    voice_profiles._write_voice_audio_metadata(
+    voice_profiles._finalize_voice_audio_file(
         audio_path,
         user_id="user-1",
         content_type="audio/webm;codecs=opus",
@@ -28,15 +34,15 @@ def test_voice_audio_metadata_sidecar_is_written(tmp_path, monkeypatch):
         uploaded_by="user-1",
     )
 
-    metadata = json.loads((tmp_path / "sample.webm.json").read_text())
+    assert captured["path"] == audio_path
+    metadata = captured["metadata"]
     assert metadata["user_id"] == "user-1"
-    assert metadata["recording_file"] == "sample.webm"
     assert metadata["mime_type"] == "audio/webm;codecs=opus"
     assert metadata["duration_ms"] == 1234
     assert metadata["duration_sec"] == 1.234
     assert metadata["file_size_bytes"] == 10
     assert metadata["uploaded_by"] == "user-1"
-    assert metadata["remuxed"] is True
+    assert not (tmp_path / "sample.webm.json").exists()
 
 
 def test_audio_extension_from_content_type_handles_codecs():

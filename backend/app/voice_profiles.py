@@ -143,7 +143,18 @@ def _probe_audio_duration_ms(path: Path) -> int | None:
     return None
 
 
-def _remux_audio_file(path: Path) -> bool:
+def _metadata_args(metadata: Mapping[str, Any] | None) -> list[str]:
+    args: list[str] = []
+    if not metadata:
+        return args
+    for key, value in metadata.items():
+        if value is None:
+            continue
+        args.extend(["-metadata", f"{key}={value}"])
+    return args
+
+
+def _remux_audio_file(path: Path, *, metadata: Mapping[str, Any] | None = None) -> bool:
     if path.suffix.lower() not in {".webm", ".m4a", ".mp4", ".ogg"}:
         return False
     if shutil.which("ffmpeg") is None:
@@ -164,8 +175,9 @@ def _remux_audio_file(path: Path) -> bool:
                 "0",
                 "-c",
                 "copy",
-                str(temp_path),
-            ],
+            ]
+            + _metadata_args(metadata)
+            + [str(temp_path)],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=30,
@@ -184,7 +196,7 @@ def _remux_audio_file(path: Path) -> bool:
         temp_path.unlink(missing_ok=True)
 
 
-def _write_voice_audio_metadata(
+def _finalize_voice_audio_file(
     audio_path: Path,
     *,
     user_id: str,
@@ -192,22 +204,38 @@ def _write_voice_audio_metadata(
     public_url: str,
     uploaded_by: str,
 ) -> None:
-    remuxed = _remux_audio_file(audio_path)
+    metadata = _voice_audio_metadata_payload(
+        audio_path,
+        user_id=user_id,
+        content_type=content_type,
+        public_url=public_url,
+        uploaded_by=uploaded_by,
+    )
+    _remux_audio_file(
+        audio_path,
+        metadata=metadata,
+    )
+
+
+def _voice_audio_metadata_payload(
+    audio_path: Path,
+    *,
+    user_id: str,
+    content_type: str,
+    public_url: str,
+    uploaded_by: str,
+) -> dict[str, Any]:
     duration_ms = _probe_audio_duration_ms(audio_path)
-    payload = {
+    return {
         "user_id": user_id,
-        "recording_file": audio_path.name,
         "public_url": public_url,
         "mime_type": content_type,
         "duration_ms": duration_ms,
         "duration_sec": round(duration_ms / 1000, 3) if duration_ms is not None else None,
         "file_size_bytes": audio_path.stat().st_size if audio_path.exists() else 0,
         "uploaded_by": uploaded_by,
-        "remuxed": remuxed,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "finalized_at": datetime.now(timezone.utc).isoformat(),
     }
-    metadata_path = audio_path.with_suffix(f"{audio_path.suffix}.json")
-    metadata_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _utc_now_naive() -> datetime:
@@ -527,7 +555,7 @@ async def upload_my_voice_sample(
 
     public_url = f"{VOICE_AUDIO_PUBLIC_BASE_URL}/{user_id}/{filename}"
     await asyncio.to_thread(
-        _write_voice_audio_metadata,
+        _finalize_voice_audio_file,
         dest_path,
         user_id=user_id,
         content_type=content_type,
