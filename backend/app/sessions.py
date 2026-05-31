@@ -43,6 +43,7 @@ class ChatSessionOut(ApiModel):
     started_at: datetime | None = None
     ended_at: datetime | None = None
     created_by: str | None = None
+    admin_controlled: bool = False
 
 
 @router.post(
@@ -90,7 +91,7 @@ async def create_session(
                 """
                 INSERT INTO chat_sessions (id, group_id, created_at, last_updated, session_title, status, created_by)
                 VALUES (:id, :group_id, NOW(), NOW(), :title, 'not_started', :created_by)
-                RETURNING id, group_id, created_at, last_updated, session_title, status, started_at, ended_at, created_by
+                RETURNING id, group_id, created_at, last_updated, session_title, status, started_at, ended_at, created_by, admin_controlled
                 """
             ),
             {"id": session_id, "group_id": group_id, "title": payload.session_title, "created_by": current_user["id"]},
@@ -129,7 +130,7 @@ async def create_session(
                     :ended_at,
                     :created_by
                 )
-                RETURNING id, group_id, created_at, last_updated, session_title, status, started_at, ended_at, created_by
+                RETURNING id, group_id, created_at, last_updated, session_title, status, started_at, ended_at, created_by, admin_controlled
                 """
             ),
             {
@@ -182,7 +183,7 @@ async def list_group_sessions(
     if include_ended:
         query = text(
             """
-            SELECT id, group_id, created_at, last_updated, session_title, status, started_at, ended_at, created_by
+            SELECT id, group_id, created_at, last_updated, session_title, status, started_at, ended_at, created_by, admin_controlled
             FROM chat_sessions
             WHERE group_id = :group_id
             ORDER BY last_updated DESC, created_at DESC
@@ -191,7 +192,7 @@ async def list_group_sessions(
     else:
         query = text(
             """
-            SELECT id, group_id, created_at, last_updated, session_title, status, started_at, ended_at, created_by
+            SELECT id, group_id, created_at, last_updated, session_title, status, started_at, ended_at, created_by, admin_controlled
             FROM chat_sessions
             WHERE group_id = :group_id
               AND status != 'ended'
@@ -234,7 +235,7 @@ async def _get_session_and_group(
     result = await db.execute(
         text(
             """
-            SELECT id, group_id, created_at, last_updated, session_title, status, started_at, ended_at, created_by
+            SELECT id, group_id, created_at, last_updated, session_title, status, started_at, ended_at, created_by, admin_controlled
             FROM chat_sessions
             WHERE id = :session_id
             """
@@ -400,7 +401,7 @@ async def update_session(
                     last_updated = COALESCE(:last_updated, last_updated),
                     ended_at = COALESCE(:ended_at, ended_at)
                 WHERE id = :session_id
-                RETURNING id, group_id, created_at, last_updated, session_title, status, started_at, ended_at, created_by
+                RETURNING id, group_id, created_at, last_updated, session_title, status, started_at, ended_at, created_by, admin_controlled
 """
             ),
             {
@@ -420,7 +421,7 @@ async def update_session(
                 SET session_title = :title,
                     last_updated = NOW()
                 WHERE id = :session_id
-                RETURNING id, group_id, created_at, last_updated, session_title, status, started_at, ended_at, created_by
+                RETURNING id, group_id, created_at, last_updated, session_title, status, started_at, ended_at, created_by, admin_controlled
 """
             ),
             {"session_id": session_id, "title": new_title},
@@ -488,7 +489,7 @@ async def start_session(
                 started_at = NOW(),
                 last_updated = NOW()
             WHERE id = :session_id
-            RETURNING id, group_id, created_at, last_updated, session_title, status, started_at, ended_at, created_by
+            RETURNING id, group_id, created_at, last_updated, session_title, status, started_at, ended_at, created_by, admin_controlled
             """
         ),
         {"session_id": session_id},
@@ -574,7 +575,7 @@ async def end_session(
                 ended_at = NOW(),
                 last_updated = NOW()
             WHERE id = :session_id
-            RETURNING id, group_id, created_at, last_updated, session_title, status, started_at, ended_at, created_by
+            RETURNING id, group_id, created_at, last_updated, session_title, status, started_at, ended_at, created_by, admin_controlled
             """
         ),
         {"session_id": session_id},

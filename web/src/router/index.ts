@@ -184,6 +184,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('../views/admin/AdminChatSessionDetailPage.vue'),
       },
       {
+        path: 'session-control/:id',
+        name: 'AdminSessionControl',
+        component: () => import('../views/admin/AdminSessionControlPage.vue'),
+      },
+      {
         path: 'ai-push-analysis',
         name: 'AdminAiPushAnalysis',
         component: () => import('../views/admin/AdminAiPushAnalysisPage.vue'),

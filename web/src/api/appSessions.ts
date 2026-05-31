@@ -11,6 +11,7 @@ export interface AppChatSession {
   started_at?: string | null
   ended_at?: string | null
   created_by?: string | null
+  admin_controlled?: boolean
 }
 
 export interface AppTranscript {

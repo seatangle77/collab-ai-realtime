@@ -342,9 +342,9 @@ const statusLabel = computed(() => {
 })
 
 const launching = ref(false)
-const canStart = computed(() => session.value?.status === 'not_started' && !launching.value)
-const canCancel = computed(() => session.value?.status === 'not_started')
-const canEnd = computed(() => session.value?.status === 'ongoing')
+const canStart = computed(() => session.value?.status === 'not_started' && !launching.value && !isAdminControlled.value)
+const canCancel = computed(() => session.value?.status === 'not_started' && !isAdminControlled.value)
+const canEnd = computed(() => session.value?.status === 'ongoing' && !isAdminControlled.value)
 const canStartRecording = computed(() => {
   return isHost.value
     && session.value?.status === 'ongoing'
@@ -389,8 +389,12 @@ const shouldShowWsStatus = computed(() => {
   return session.value?.status === 'ongoing' && wsStatus.value !== 'connected'
 })
 
+/** 管理员通过后台发起的会话，admin_controlled = true */
+const isAdminControlled = computed(() => session.value?.admin_controlled === true)
+
 const isHost = computed(() => {
-  if (!session.value?.created_by) return true // 老数据兼容
+  if (isAdminControlled.value) return false        // 管理员控制的会话，用户均不是 host
+  if (!session.value?.created_by) return true      // 老数据兼容
   return currentUser.value?.id === session.value.created_by
 })
 

@@ -509,8 +509,15 @@ onMounted(() => {
             {{ formatDateTimeToCST(row.ended_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" min-width="220" fixed="right">
+        <el-table-column label="操作" min-width="280" fixed="right">
           <template #default="{ row }">
+            <el-button
+              v-if="row.status === 'not_started' || row.status === 'ongoing'"
+              type="success"
+              link
+              size="small"
+              @click="router.push('/admin/session-control/' + row.id)"
+            >控制台</el-button>
             <el-button type="primary" link size="small" @click="router.push('/admin/chat-sessions/' + row.id)">详情</el-button>
             <el-button type="primary" link size="small" @click="openEditDialog(row)">编辑</el-button>
             <el-button v-if="row.status === 'ongoing'" type="warning" link size="small" @click="handleEnd(row)">结束</el-button>

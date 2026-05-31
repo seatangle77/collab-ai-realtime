@@ -41,6 +41,7 @@ class AdminChatSessionOut(ApiModel):
     status: str | None = None
     started_at: datetime | None = None
     ended_at: datetime | None = None
+    admin_controlled: bool = False
 
 
 class AdminChatSessionUpdate(ApiModel):
@@ -143,6 +144,7 @@ async def list_chat_sessions(
             cs.status,
             cs.started_at,
             cs.ended_at,
+            cs.admin_controlled,
             g.name AS group_name
         FROM chat_sessions cs
         JOIN groups g ON g.id = cs.group_id
@@ -200,7 +202,7 @@ async def create_chat_session(
             """
             INSERT INTO chat_sessions (id, group_id, session_title, created_at, last_updated, status, ended_at)
             VALUES (:id, :group_id, :title, :created_at, :last_updated, :status, :ended_at)
-            RETURNING id, group_id, session_title, created_at, last_updated, status, started_at, ended_at
+            RETURNING id, group_id, session_title, created_at, last_updated, status, started_at, ended_at, admin_controlled
             """
         ),
         {
@@ -240,7 +242,8 @@ async def get_chat_session_detail(
                 cs.last_updated,
                 cs.status,
                 cs.started_at,
-                cs.ended_at
+                cs.ended_at,
+                cs.admin_controlled
             FROM chat_sessions cs
             JOIN groups g ON g.id = cs.group_id
             WHERE cs.id = :id
@@ -309,7 +312,7 @@ async def update_chat_session(
             UPDATE chat_sessions
             SET {set_sql}
             WHERE id = :id
-            RETURNING id, group_id, session_title, created_at, last_updated, status, started_at, ended_at
+            RETURNING id, group_id, session_title, created_at, last_updated, status, started_at, ended_at, admin_controlled
             """
         ),
         params,
@@ -323,6 +326,59 @@ async def update_chat_session(
 
     await db.commit()
     return AdminChatSessionOut.model_validate(dict(row))
+
+
+@router.post(
+    "/{session_id}/start",
+    response_model=AdminChatSessionOut,
+    dependencies=[Depends(require_admin)],
+)
+async def start_chat_session_by_admin(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> AdminChatSessionOut:
+    """管理员发起会话：不检查创建人或群组成员身份。同一群组只能有一个 ongoing 会话。"""
+    session_row = await db.execute(
+        text(
+            "SELECT id, group_id, status FROM chat_sessions WHERE id = :id"
+        ),
+        {"id": session_id},
+    )
+    row = session_row.mappings().first()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在")
+    if row["status"] != "not_started":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅未开始的会话可以发起")
+
+    ongoing = await db.execute(
+        text(
+            """
+            SELECT 1 FROM chat_sessions
+            WHERE group_id = :group_id AND status = 'ongoing' AND id != :session_id
+            """
+        ),
+        {"group_id": row["group_id"], "session_id": session_id},
+    )
+    if ongoing.first():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该群组已有进行中的会话")
+
+    result = await db.execute(
+        text(
+            """
+            UPDATE chat_sessions
+            SET status = 'ongoing',
+                started_at = NOW(),
+                last_updated = NOW(),
+                admin_controlled = true
+            WHERE id = :id
+            RETURNING id, group_id, session_title, created_at, last_updated, status, started_at, ended_at, admin_controlled, admin_controlled
+            """
+        ),
+        {"id": session_id},
+    )
+    await db.commit()
+    updated = result.mappings().one()
+    return AdminChatSessionOut.model_validate(dict(updated))
 
 
 @router.post(
@@ -344,7 +400,7 @@ async def end_chat_session_by_admin(
                 active_ws_count = 0
             WHERE id = :id
               AND status = 'ongoing'
-            RETURNING id, group_id, session_title, created_at, last_updated, status, started_at, ended_at
+            RETURNING id, group_id, session_title, created_at, last_updated, status, started_at, ended_at, admin_controlled
             """
         ),
         {"id": session_id},

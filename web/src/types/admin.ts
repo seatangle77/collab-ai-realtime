@@ -53,6 +53,7 @@ export interface AdminChatSession {
   status: 'not_started' | 'ongoing' | 'ended' | null
   started_at: string | null
   ended_at: string | null
+  admin_controlled: boolean
 }
 
 export interface AdminTranscript {

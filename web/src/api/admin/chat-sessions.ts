@@ -77,3 +77,7 @@ export async function deleteAdminChatSessionsBatch(ids: string[]): Promise<Batch
 export async function getAdminChatSession(id: string): Promise<AdminChatSession> {
   return http.get<AdminChatSession>(`/api/admin/chat-sessions/${id}`)
 }
+
+export async function startAdminChatSession(id: string): Promise<AdminChatSession> {
+  return http.post<AdminChatSession>(`/api/admin/chat-sessions/${id}/start`)
+}
