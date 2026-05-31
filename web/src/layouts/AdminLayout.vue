@@ -24,7 +24,6 @@ const menuGroups = computed<AdminMenuGroup[]>(() => [
       { path: '/admin/groups', label: '群组管理' },
       { path: '/admin/memberships', label: '成员关系' },
       { path: '/admin/chat-sessions', label: '会话管理' },
-      { path: '/admin/session-control', label: '会话控制台' },
       { path: '/admin/voice-profiles', label: '声纹管理' },
       { path: '/admin/speech-transcripts', label: '语音转写' },
     ],
