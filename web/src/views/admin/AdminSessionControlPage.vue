@@ -271,7 +271,7 @@ async function sendAudioChunk(blob: Blob, mimeType = blob.type || 'audio/webm') 
     const buffer = await blob.arrayBuffer()
     const bytes = new Uint8Array(buffer)
     let binary = ''
-    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!)
     const audio_b64 = btoa(binary)
     ws.send(JSON.stringify({ type: 'audio_chunk', data: { seq: chunkSeq++, audio_b64, mime_type: mimeType } }))
   } catch { /* ignore */ }
@@ -380,7 +380,7 @@ const AVATAR_COLORS = [
 function avatarColor(key: string): string {
   let h = 0
   for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) | 0
-  return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length] ?? AVATAR_COLORS[0]
+  return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length] ?? AVATAR_COLORS[0] ?? '#3b82f6'
 }
 
 function transcriptTimeLabel(t: AdminTranscript): string {
