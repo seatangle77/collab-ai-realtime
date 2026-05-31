@@ -394,8 +394,9 @@ const isAdminControlled = computed(() => session.value?.admin_controlled === tru
 
 const isHost = computed(() => {
   if (isAdminControlled.value) return false        // 管理员控制的会话，用户均不是 host
-  if (!session.value?.created_by) return true      // 老数据兼容
-  return currentUser.value?.id === session.value.created_by
+  const createdBy = session.value?.created_by
+  if (!createdBy) return false                     // created_by 为空：管理员创建的或老数据，均不作为 host
+  return currentUser.value?.id === createdBy
 })
 
 async function loadSession(): Promise<AppChatSession | null> {
