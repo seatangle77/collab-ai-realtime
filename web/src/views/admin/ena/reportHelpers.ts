@@ -263,7 +263,7 @@ export function buildEnaReportHtml(
   <h1>ENA 认知过程网络分析报告</h1>
   <div class="meta">生成时间：${escapeHtml(generatedAt)}</div>
   <div class="meta">分析模式：${escapeHtml(modeDescription(mode))}；纳入会话数：${report.total_sessions}</div>
-  <p class="note">基于 CoI 编码结果，使用 2 分钟滑动时间窗口（步长 30s）计算话语类别共现强度，重点分析 EX-IN、IN-RE 及高阶认知连接。</p>
+  <p class="note">基于 CoI 编码结果，使用 2 分钟滑动时间窗口（步长 30s）计算话语类别共现强度，重点分析 EX-IN、IN-RE 及高阶认知连接。正态性使用 Shapiro-Wilk test；两条件选用 Welch t-test 或 Mann-Whitney U test；三条件使用 one-way ANOVA（附 Levene 方差齐性检验）或 Kruskal-Wallis。本报告为探索性分析，未对各连接强度指标之间做跨指标多重比较校正。</p>
   <h2>1. 描述性统计</h2>
   <table><thead>${descriptiveHeader()}</thead><tbody>${descriptiveRows}</tbody></table>
   <h2>2. 正态性检查（Shapiro-Wilk）</h2>

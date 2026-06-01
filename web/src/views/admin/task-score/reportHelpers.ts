@@ -371,8 +371,9 @@ export function buildTaskScoreReportHtml(params: BuildReportHtmlParams): string 
   <div class="meta">生成时间：${escapeHtml(generatedAt)}</div>
   <div class="meta">分析模式：${escapeHtml(modeDescription(mode))}；任务：${escapeHtml(taskLabel)}；纳入记录数：${report.total_entries}</div>
   <h2>1. 分析方法</h2>
-  <p class="note">任务分数越低表示表现越好。弱协同值 = AIS - GS；强协同值 = Best IS - GS。协同值为正表示小组最终表现优于对应个人基线，协同值为负表示可能存在过程损失。</p>
-  <p class="note">主要结果指标为 GS、弱协同值、强协同值；AIS 和 Best IS 用于检查不同条件下讨论前个人基线是否接近。正态性使用 Shapiro-Wilk test；两条件根据正态性使用 Welch independent-samples t-test 或 Mann-Whitney U test；三条件使用 one-way ANOVA 或 Kruskal-Wallis。</p>
+  <p class="note">任务分数越低表示表现越好（分数越低，小组排序越接近标准答案）。弱协同值 = AIS − GS；强协同值 = Best IS − GS。弱协同值正数表示小组优于成员平均个人水平，负数表示过程损失；强协同值正数表示小组甚至超越组内最佳成员，负数（较常见）表示未能充分利用最强成员。</p>
+  <p class="note">主要结果指标为 GS、弱协同值、强协同值；AIS 和 Best IS 仅用于检查不同条件下讨论前个人基线是否接近（基线检查）。正态性使用 Shapiro-Wilk test；两条件根据正态性选用 Welch independent-samples t-test 或 Mann-Whitney U test；三条件使用 one-way ANOVA（附 Levene 方差齐性检验）或 Kruskal-Wallis。Effect size 使用 Hedges' g（t-test）、rank-biserial r（Mann-Whitney）、eta squared（ANOVA）、epsilon squared（Kruskal-Wallis）。</p>
+  <p class="note">本报告为探索性分析，未对各主要结果指标之间做跨指标多重比较校正（如 Bonferroni / FDR）。如用于正式发表，建议补充说明或进行校正。</p>
   <h2>2. 样本选择</h2>
   <table><thead><tr><th>条件</th><th>小组数</th><th>小组</th></tr></thead><tbody>${sampleRows}</tbody></table>
   <h2>3. 描述性统计</h2>
@@ -386,14 +387,15 @@ export function buildTaskScoreReportHtml(params: BuildReportHtmlParams): string 
   <h2>5. 报告结果与可视化</h2>
   <p class="section-note">箱线图展示主要结果指标在各条件下的分布；p 值与 effect size 见下方推断统计表。</p>
   ${report.charts?.box_plots ? `<img src="${report.charts.box_plots}" style="max-width:100%;display:block;margin:10px 0 18px;border-radius:6px" alt="箱线图">` : taskScoreBoxPlotsHtml(report, conditionColumns)}
+  <p class="note">须轴为实际最小/最大值（非 Tukey 1.5×IQR 风格）。</p>
   <h2>6. 推断统计</h2>
   <h3>主要结果指标</h3>
   <table><thead><tr><th>指标</th><th>检验</th><th>统计量</th><th>值</th><th>p</th><th>Effect size</th><th>值</th><th>状态</th><th>说明</th></tr></thead><tbody>${inferentialRows(primaryTests)}</tbody></table>
   <h3>基线检查指标</h3>
   <table><thead><tr><th>指标</th><th>检验</th><th>统计量</th><th>值</th><th>p</th><th>Effect size</th><th>值</th><th>状态</th><th>说明</th></tr></thead><tbody>${inferentialRows(baselineTests)}</tbody></table>
-  <h2>7. 事后检验（Post-hoc）</h2>
+  ${mode !== 'two_conditions' ? `<h2>7. 事后检验（Post-hoc）</h2>
   <p class="section-note">仅三条件且全局检验 p &lt; 0.05 时执行；Tukey HSD 用于 ANOVA，Dunn + Bonferroni 用于 Kruskal-Wallis。均值差 = 条件 B 均值 − 条件 A 均值。</p>
-  ${postHocSection(report.post_hoc_tests.filter(t => t.role === 'primary'))}
+  ${postHocSection(report.post_hoc_tests.filter(t => t.role === 'primary'))}` : ''}
   <h2>8. 备注</h2>
   <p class="note">本报告为即时计算结果，未自动入库。若用于正式论文或归档，建议保存本报告 HTML/PDF，并记录所选小组样本。</p>
 </body>

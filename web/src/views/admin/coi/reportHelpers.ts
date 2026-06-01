@@ -259,6 +259,7 @@ export function buildCoiReportHtml(
   <div class="meta">分析模式：${escapeHtml(modeDescription(mode))}；纳入会话数：${report.total_sessions}</div>
   <h2>1. 分析方法</h2>
   <p class="note">基于 CoI 框架 Cognitive Presence 维度对已编码发言进行量化分析。权重：TE=1, EX=2, IN=3, RE=4。高阶认知参与比例 = (IN+RE) / 总有效认知话语数。加权得分 = Σ(类别数×权重) / 总有效认知话语数。只纳入全部发言已编码的会话。</p>
+  <p class="note">正态性使用 Shapiro-Wilk test；两条件选用 Welch t-test 或 Mann-Whitney U test；三条件使用 one-way ANOVA（附 Levene 方差齐性检验）或 Kruskal-Wallis。Effect size 使用 Hedges' g、rank-biserial r、eta squared 或 epsilon squared。本报告为探索性分析，未对各指标之间做跨指标多重比较校正。</p>
   <h2>2. 样本选择</h2>
   <table><thead><tr><th>条件</th><th>小组数</th><th>小组</th></tr></thead><tbody>${sampleRows}</tbody></table>
   <h2>3. 排除会话</h2>

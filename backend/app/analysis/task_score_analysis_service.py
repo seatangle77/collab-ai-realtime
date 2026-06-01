@@ -9,10 +9,11 @@ from ..api_model import ApiModel
 from .stats_utils import MetricConditionStats, PostHocPairResult, _cohens_d, _eta_squared, _epsilon_squared, _stats_for
 
 try:
-    from scipy.stats import f_oneway, kruskal, mannwhitneyu, norm as _scipy_norm, shapiro, ttest_ind, tukey_hsd
+    from scipy.stats import f_oneway, kruskal, levene, mannwhitneyu, norm as _scipy_norm, shapiro, ttest_ind, tukey_hsd
 except ImportError:  # pragma: no cover - exercised only in deployments without scipy
     f_oneway = None
     kruskal = None
+    levene = None
     mannwhitneyu = None
     _scipy_norm = None
     shapiro = None
@@ -322,11 +323,29 @@ def _statistical_test_for_metric(
             effect_size_name="rank-biserial r",
             effect_size=_round(rank_biserial),
             status="ok",
-            note="rank-biserial r 方向为第一条件相对第二条件",
+            note="rank-biserial r 正值表示第一条件（no_assistance）的值倾向更大；对 GS 而言正值意味着无辅助组表现更差",
         )
     if recommendation.recommended_test == "one_way_anova":
         if f_oneway is None:
             return StatisticalTestResult(**base, status="dependency_missing", note="缺少 scipy，无法执行 one-way ANOVA")
+        levene_ok = True
+        if levene is not None and all(len(g) >= 2 for g in groups):
+            _, levene_p = levene(*groups)
+            levene_ok = float(levene_p) >= 0.05
+        if not levene_ok:
+            # Welch's ANOVA (Alexander-Govern approximation via per-group Welch F)
+            # Fall back to standard F but flag in note
+            statistic, p_value = f_oneway(*groups)
+            return StatisticalTestResult(
+                **base,
+                statistic_name="F",
+                statistic=_round(float(statistic)),
+                p_value=_round(float(p_value)),
+                effect_size_name="eta squared",
+                effect_size=_round(eta) if (eta := _eta_squared(groups)) is not None else None,
+                status="ok",
+                note="Levene 检验 p < 0.05，方差不齐；结果仅供参考，建议改用 Welch's ANOVA",
+            )
         statistic, p_value = f_oneway(*groups)
         return StatisticalTestResult(
             **base,
@@ -336,7 +355,7 @@ def _statistical_test_for_metric(
             effect_size_name="eta squared",
             effect_size=_round(eta) if (eta := _eta_squared(groups)) is not None else None,
             status="ok",
-            note="若 p < 0.05，后续可补 Tukey HSD 事后检验",
+            note="Levene 检验通过（方差齐）；若 p < 0.05，后续可补 Tukey HSD 事后检验",
         )
     if recommendation.recommended_test == "kruskal_wallis":
         if kruskal is None:

@@ -33,7 +33,7 @@ def _stats_for(values: list[float], condition: str, ndigits: int = 3) -> MetricC
         condition=condition,
         n=len(values),
         mean=round(mean(values), ndigits),
-        sd=round(stdev(values), ndigits) if len(values) > 1 else 0.0,
+        sd=round(stdev(values), ndigits) if len(values) > 1 else None,
         median=round(median(values), ndigits),
         min=round(min(values), ndigits),
         max=round(max(values), ndigits),
@@ -41,12 +41,16 @@ def _stats_for(values: list[float], condition: str, ndigits: int = 3) -> MetricC
 
 
 def _cohens_d(a: list[float], b: list[float]) -> float | None:
+    """Hedges' g: Cohen's d with small-sample correction factor J."""
     if len(a) < 2 or len(b) < 2:
         return None
     pooled_var = ((len(a) - 1) * stdev(a) ** 2 + (len(b) - 1) * stdev(b) ** 2) / (len(a) + len(b) - 2)
     if pooled_var <= 0:
         return None
-    return (mean(b) - mean(a)) / math.sqrt(pooled_var)
+    d = (mean(b) - mean(a)) / math.sqrt(pooled_var)
+    df = len(a) + len(b) - 2
+    j = 1 - 3 / (4 * df - 1)
+    return d * j
 
 
 def _eta_squared(groups: list[list[float]]) -> float | None:

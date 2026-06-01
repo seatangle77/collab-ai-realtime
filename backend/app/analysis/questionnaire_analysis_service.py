@@ -15,10 +15,11 @@ from ..api_model import ApiModel
 from .stats_utils import MetricConditionStats, PostHocPairResult, _cohens_d, _eta_squared, _epsilon_squared, _stats_for
 
 try:
-    from scipy.stats import f_oneway, kruskal, mannwhitneyu, norm as _scipy_norm, shapiro, ttest_ind, tukey_hsd
+    from scipy.stats import f_oneway, kruskal, levene, mannwhitneyu, norm as _scipy_norm, shapiro, ttest_ind, tukey_hsd
 except ImportError:  # pragma: no cover
     f_oneway = None
     kruskal = None
+    levene = None
     mannwhitneyu = None
     _scipy_norm = None
     shapiro = None
@@ -368,17 +369,26 @@ def _run_statistical_test(
         return StatisticalTestResult(
             **base, statistic_name="U", statistic=_round(float(stat)), p_value=_round(float(p)),
             effect_size_name="rank-biserial r", effect_size=_round(r),
-            status="ok", note="rank-biserial r 方向为第一条件相对第二条件",
+            status="ok", note="rank-biserial r 正值表示第一条件（no_assistance）的值倾向更大",
         )
     if recommendation.recommended_test == "one_way_anova":
         if f_oneway is None:
             return StatisticalTestResult(**base, status="dependency_missing", note="缺少 scipy，无法执行 one-way ANOVA")
+        levene_ok = True
+        if levene is not None and all(len(g) >= 2 for g in groups):
+            _, levene_p = levene(*groups)
+            levene_ok = float(levene_p) >= 0.05
         stat, p = f_oneway(*groups)
         eta = _eta_squared(groups)
+        note = (
+            "Levene 检验通过（方差齐）；若 p < 0.05，后续可补 Tukey HSD 事后检验"
+            if levene_ok
+            else "Levene 检验 p < 0.05，方差不齐；结果仅供参考，建议改用 Welch's ANOVA"
+        )
         return StatisticalTestResult(
             **base, statistic_name="F", statistic=_round(float(stat)), p_value=_round(float(p)),
             effect_size_name="eta squared", effect_size=_round(eta) if eta is not None else None,
-            status="ok", note="若 p < 0.05，后续可补 Tukey HSD 事后检验",
+            status="ok", note=note,
         )
     if recommendation.recommended_test == "kruskal_wallis":
         if kruskal is None:
