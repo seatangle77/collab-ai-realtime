@@ -171,7 +171,7 @@ onMounted(() => {
             </el-form-item>
           </el-col>
           <el-col :span="4">
-            <el-form-item label=" ">
+            <el-form-item label-width="0">
               <el-button type="primary" @click="handleSearch">查询</el-button>
               <el-button @click="handleReset">重置</el-button>
             </el-form-item>

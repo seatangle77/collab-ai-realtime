@@ -106,6 +106,7 @@ export interface QuestionnaireAnalysisResult {
   test_recommendations: QStatisticalTestRecommendation[]
   statistical_tests: QStatisticalTestResult[]
   post_hoc_tests: QPostHocResult[]
+  charts: Record<string, string>
 }
 
 export interface CreateQuestionnaireAnalysisPayload {

@@ -385,7 +385,7 @@ export function buildTaskScoreReportHtml(params: BuildReportHtmlParams): string 
   <table><thead><tr><th>指标</th><th>条件</th><th>n</th><th>W</th><th>p</th><th>判断</th><th>说明</th></tr></thead><tbody>${normalityRows(baselineNormality)}</tbody></table>
   <h2>5. 报告结果与可视化</h2>
   <p class="section-note">箱线图展示主要结果指标在各条件下的分布；p 值与 effect size 见下方推断统计表。</p>
-  ${taskScoreBoxPlotsHtml(report, conditionColumns)}
+  ${report.charts?.box_plots ? `<img src="${report.charts.box_plots}" style="max-width:100%;display:block;margin:10px 0 18px;border-radius:6px" alt="箱线图">` : taskScoreBoxPlotsHtml(report, conditionColumns)}
   <h2>6. 推断统计</h2>
   <h3>主要结果指标</h3>
   <table><thead><tr><th>指标</th><th>检验</th><th>统计量</th><th>值</th><th>p</th><th>Effect size</th><th>值</th><th>状态</th><th>说明</th></tr></thead><tbody>${inferentialRows(primaryTests)}</tbody></table>

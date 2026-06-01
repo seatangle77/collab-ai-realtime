@@ -109,6 +109,7 @@ export interface EnaAnalysisResult {
   post_hoc_tests: EnaPostHocResult[]
   networks: EnaNetworkCondition[]
   diff_network: EnaNetworkCondition | null
+  charts: Record<string, string>
 }
 
 export interface CreateEnaAnalysisPayload {

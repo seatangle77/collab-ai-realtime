@@ -24,6 +24,14 @@ except ImportError:  # pragma: no cover
     ttest_ind = None
     tukey_hsd = None
 
+try:
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from .chart_utils import condition_color, condition_label as _cond_label, fig_to_base64, annotate_pvalue, legend_handles, _apply_base_style
+    _CHARTS_AVAILABLE = True
+except ImportError:
+    _CHARTS_AVAILABLE = False
+
 
 # ─────────────────────────────────────────────────────────────────
 # Type aliases
@@ -160,6 +168,85 @@ class CoiAnalysisResult(ApiModel):
     statistical_tests: list[StatisticalTestResult]
     post_hoc_tests: list[PostHocResult]
     observations: list[CoiSessionObservation]
+    charts: dict[str, str] = {}
+
+
+# ─────────────────────────────────────────────────────────────────
+# Chart generation
+# ─────────────────────────────────────────────────────────────────
+
+_COI_CATEGORY_COLORS = {
+    "te_ratio": "#888888",
+    "ex_ratio": "#1f77b4",
+    "in_ratio": "#2ca02c",
+    "re_ratio": "#d62728",
+}
+_COI_CATEGORY_LABELS = {
+    "te_ratio": "Triggering",
+    "ex_ratio": "Exploration",
+    "in_ratio": "Integration",
+    "re_ratio": "Resolution",
+}
+
+
+def _generate_coi_charts(
+    values_by_metric_condition: dict[str, dict[str, list[float]]],
+    conditions: list[str],
+    statistical_tests: list["StatisticalTestResult"],
+) -> dict[str, str]:
+    if not _CHARTS_AVAILABLE:
+        return {}
+    try:
+        from statistics import mean as _mean
+        p_by_metric = {t.metric: t.p_value for t in statistical_tests}
+        category_metrics = ["te_ratio", "ex_ratio", "in_ratio", "re_ratio"]
+        cond_labels = [_cond_label(c) for c in conditions]
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, max(3, len(conditions) * 1.2 + 2)))
+        fig.patch.set_facecolor("white")
+
+        # --- Left: stacked horizontal bar (composition) ---
+        _apply_base_style(ax1)
+        lefts = np.zeros(len(conditions))
+        for m in category_metrics:
+            vals = np.array([
+                _mean(values_by_metric_condition[m].get(c, [0.0])) if values_by_metric_condition[m].get(c) else 0.0
+                for c in conditions
+            ])
+            ax1.barh(cond_labels, vals, left=lefts, color=_COI_CATEGORY_COLORS[m],
+                     label=_COI_CATEGORY_LABELS[m], height=0.5)
+            lefts += vals
+        ax1.set_xlim(0, 1)
+        ax1.set_xlabel("Proportion", fontsize=10)
+        ax1.set_title("CoI 话语结构比例", fontsize=12, fontweight="bold")
+        ax1.legend(loc="lower right", fontsize=9, framealpha=0.6)
+        ax1.grid(axis="x", linestyle="--", linewidth=0.6, color="#cccccc")
+        ax1.spines["top"].set_visible(False)
+        ax1.spines["right"].set_visible(False)
+
+        # --- Right: higher-order ratio bar ---
+        _apply_base_style(ax2)
+        ho_vals = [
+            _mean(values_by_metric_condition["higher_order_ratio"].get(c, [0.0]))
+            if values_by_metric_condition["higher_order_ratio"].get(c) else 0.0
+            for c in conditions
+        ]
+        bars = ax2.barh(cond_labels, ho_vals, color=[condition_color(c) for c in conditions], height=0.5)
+        for bar, val in zip(bars, ho_vals):
+            ax2.text(val + 0.01, bar.get_y() + bar.get_height() / 2,
+                     f"{val:.3f}", va="center", fontsize=9, fontweight="bold")
+        ax2.set_xlim(0, 1)
+        ax2.set_xlabel("Proportion", fontsize=10)
+        ax2.set_title("高阶认知参与比例 (IN+RE)", fontsize=12, fontweight="bold")
+        p_ho = p_by_metric.get("higher_order_ratio")
+        annotate_pvalue(ax2, p_ho, x=0.5, y=0.97)
+        ax2.spines["top"].set_visible(False)
+        ax2.spines["right"].set_visible(False)
+
+        fig.tight_layout(pad=2.0)
+        return {"composition": fig_to_base64(fig)}
+    except Exception:
+        return {}
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -562,4 +649,5 @@ def build_coi_analysis(
         statistical_tests=statistical_tests,
         post_hoc_tests=post_hoc_tests,
         observations=observations,
+        charts=_generate_coi_charts(values_by_metric_condition, conditions, statistical_tests),
     )

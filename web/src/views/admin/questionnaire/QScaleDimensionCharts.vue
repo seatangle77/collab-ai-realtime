@@ -6,6 +6,7 @@ const props = defineProps<{
   metrics: QMetricSummary[]
   conditionColumns: string[]
   scale: QuestionnaireScaleKind
+  charts?: Record<string, string>
 }>()
 
 const CONDITION_COLORS: Record<string, string> = {
@@ -50,7 +51,16 @@ function barStyle(metric: QMetricSummary, condition: string) {
       </div>
     </template>
 
-    <div class="scale-chart">
+    <!-- matplotlib 图（优先） -->
+    <img
+      v-if="charts?.['dimension_bars']"
+      :src="charts['dimension_bars']"
+      alt="量表维度分组柱状图"
+      style="width: 100%; display: block; border-radius: 4px;"
+    />
+
+    <!-- 旧 CSS 兜底 -->
+    <div v-else class="scale-chart">
       <div v-for="metric in visibleMetrics()" :key="metric.metric" class="dimension-group">
         <div class="bars">
           <div v-for="condition in conditionColumns" :key="condition" class="bar-wrap">

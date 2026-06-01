@@ -8,6 +8,7 @@ type PlotMetricKey = 'gs' | 'weak_synergy' | 'strong_synergy'
 const props = defineProps<{
   observations: TaskScoreObservation[]
   conditionColumns: string[]
+  charts?: Record<string, string>
 }>()
 
 const PLOT_METRICS: Array<{ key: PlotMetricKey; label: string; note: string }> = [
@@ -124,7 +125,16 @@ function conditionColor(condition: string): string {
       </div>
     </template>
 
-    <div class="boxplot-grid">
+    <!-- matplotlib 图（优先） -->
+    <img
+      v-if="charts?.['box_plots']"
+      :src="charts['box_plots']"
+      alt="主要结果箱线图"
+      style="width: 100%; display: block; border-radius: 4px;"
+    />
+
+    <!-- 旧 SVG 兜底 -->
+    <div v-else class="boxplot-grid">
       <div v-for="plot in plots" :key="plot.key" class="boxplot-panel">
         <div class="boxplot-title">{{ plot.label }}</div>
         <svg class="boxplot-svg" viewBox="0 0 420 230" role="img" :aria-label="plot.label">

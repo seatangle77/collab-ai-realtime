@@ -225,6 +225,7 @@ onMounted(fetchGroups)
     <TaskScoreBoxPlots
       :observations="report?.observations ?? []"
       :condition-columns="conditionColumns"
+      :charts="report?.charts ?? {}"
     />
 
     <NormalityTable

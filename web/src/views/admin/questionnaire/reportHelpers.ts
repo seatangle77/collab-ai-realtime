@@ -245,12 +245,12 @@ export function buildQuestionnaireReportHtml(
   <table><thead><tr><th>指标</th><th>条件</th><th>n</th><th>W</th><th>p</th><th>判断</th><th>说明</th></tr></thead><tbody>${normalityRows}</tbody></table>
   <h2>4. 报告结果与可视化</h2>
   <p class="note">图表展示各量表维度在不同条件下的平均分；p 值与 effect size 见下方推断统计表。</p>
-  ${questionnaireChartHtml(report, scale, conditionColumns)}
+  ${report.charts?.dimension_bars ? `<img src="${report.charts.dimension_bars}" style="max-width:100%;display:block;margin:10px 0 18px;border-radius:6px" alt="维度柱状图">` : questionnaireChartHtml(report, scale, conditionColumns)}
   <h2>5. 推断统计</h2>
   <table><thead><tr><th>指标</th><th>检验</th><th>统计量</th><th>p</th><th>Effect size</th><th>状态</th><th>说明</th></tr></thead><tbody>${inferentialRows}</tbody></table>
-  <h2>6. 事后检验（Post-hoc）</h2>
+  ${mode !== 'two_conditions' ? `<h2>6. 事后检验（Post-hoc）</h2>
   <p class="note">仅三条件且全局检验 p &lt; 0.05 时执行；Tukey HSD 用于 ANOVA，Dunn + Bonferroni 用于 Kruskal-Wallis。</p>
-  ${postHocSection}
+  ${postHocSection}` : ''}
 </body>
 </html>`
 }

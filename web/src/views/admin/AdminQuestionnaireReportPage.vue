@@ -213,6 +213,7 @@ onMounted(fetchGroups)
       :metrics="report?.metrics ?? []"
       :condition-columns="conditionColumns"
       :scale="scale"
+      :charts="report?.charts ?? {}"
     />
 
     <QPostHocTable

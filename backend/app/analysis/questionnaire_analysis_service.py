@@ -25,6 +25,13 @@ except ImportError:  # pragma: no cover
     ttest_ind = None
     tukey_hsd = None
 
+try:
+    import matplotlib.pyplot as plt
+    from .chart_utils import fig_to_base64, draw_grouped_bars
+    _CHARTS_AVAILABLE = True
+except ImportError:
+    _CHARTS_AVAILABLE = False
+
 
 # ─────────────────────────────────────────────────────────────────
 # Type aliases
@@ -184,6 +191,7 @@ class QuestionnaireAnalysisResult(ApiModel):
     statistical_tests: list[StatisticalTestResult]
     post_hoc_tests: list[PostHocResult]
     observations: list[QuestionnaireObservation]
+    charts: dict[str, str] = {}
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -480,6 +488,52 @@ def _run_post_hoc(
 
 
 # ─────────────────────────────────────────────────────────────────
+# Chart generation
+# ─────────────────────────────────────────────────────────────────
+
+def _generate_questionnaire_charts(
+    scale: ScaleKind,
+    values_by_metric_condition: dict[str, dict[str, list[float]]],
+    conditions: list[str],
+    statistical_tests: list["StatisticalTestResult"],
+    labels: dict[str, str],
+) -> dict[str, str]:
+    if not _CHARTS_AVAILABLE:
+        return {}
+    try:
+        # Exclude total_avg from chart
+        chart_metrics = [m for m in (SRCC_METRICS if scale == "srcc" else PCS_METRICS) if m != "total_avg"]
+        p_by_metric = {t.metric: t.p_value for t in statistical_tests}
+
+        means: dict[str, dict[str, float]] = {}
+        errors: dict[str, dict[str, float]] = {}
+        for m in chart_metrics:
+            means[m] = {}
+            errors[m] = {}
+            for c in conditions:
+                vals = values_by_metric_condition[m].get(c, [])
+                means[m][c] = mean(vals) if vals else 0.0
+                errors[m][c] = stdev(vals) if len(vals) >= 2 else 0.0
+
+        fig, ax = plt.subplots(figsize=(max(7, len(chart_metrics) * 2.2), 5))
+        fig.patch.set_facecolor("white")
+        draw_grouped_bars(
+            ax=ax,
+            means=means,
+            errors=errors,
+            metric_labels={m: labels[m] for m in chart_metrics},
+            conditions=conditions,
+            title="SRCC 各维度平均分" if scale == "srcc" else "PCS 各维度平均分",
+            ylabel="平均分（SD 误差线）",
+            p_values=p_by_metric,
+        )
+        fig.tight_layout(pad=2.0)
+        return {"dimension_bars": fig_to_base64(fig)}
+    except Exception:
+        return {}
+
+
+# ─────────────────────────────────────────────────────────────────
 # Build observation from DB row
 # ─────────────────────────────────────────────────────────────────
 
@@ -626,4 +680,5 @@ def build_questionnaire_analysis(
         statistical_tests=statistical_tests,
         post_hoc_tests=post_hoc_tests,
         observations=observations,
+        charts=_generate_questionnaire_charts(scale, values_by_metric_condition, conditions, statistical_tests, labels),
     )

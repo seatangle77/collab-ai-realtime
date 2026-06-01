@@ -269,7 +269,7 @@ export function buildCoiReportHtml(
   <table><thead><tr><th>指标</th><th>条件</th><th>n</th><th>W</th><th>p</th><th>判断</th><th>说明</th></tr></thead><tbody>${normalityRows}</tbody></table>
   <h2>6. 报告结果与可视化</h2>
   <p class="note">图表展示各条件的 CoI 话语结构，以及 Integration + Resolution 所占的高阶认知参与比例；p 值与 effect size 见下方推断统计表。</p>
-  ${coiCompositionChartsHtml(report, conditionColumns)}
+  ${report.charts?.composition ? `<img src="${report.charts.composition}" style="max-width:100%;display:block;margin:10px 0 18px;border-radius:6px" alt="CoI 话语结构图">` : coiCompositionChartsHtml(report, conditionColumns)}
   <h2>7. 推断统计</h2>
   <table><thead><tr><th>指标</th><th>检验</th><th>统计量</th><th>值</th><th>p</th><th>Effect size</th><th>值</th><th>状态</th><th>说明</th></tr></thead><tbody>${inferentialRows}</tbody></table>
   <h2>8. 事后检验（Post-hoc）</h2>

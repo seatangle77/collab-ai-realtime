@@ -5,6 +5,7 @@ import { conditionLabel, formatNumber, statFor } from './reportHelpers'
 const props = defineProps<{
   metrics: MetricSummary[]
   conditionColumns: string[]
+  charts?: Record<string, string>
 }>()
 
 const CATEGORY_METRICS = [
@@ -42,7 +43,16 @@ function highOrderStyle(condition: string) {
       </div>
     </template>
 
-    <div class="composition-grid">
+    <!-- matplotlib 图（优先） -->
+    <img
+      v-if="charts?.['composition']"
+      :src="charts['composition']"
+      alt="CoI 话语结构与高阶认知参与"
+      style="width: 100%; display: block; border-radius: 4px;"
+    />
+
+    <!-- 旧 CSS 兜底 -->
+    <div v-else class="composition-grid">
       <section class="chart-panel">
         <div class="chart-title">四类 CoI 话语比例</div>
         <div class="stacked-chart">

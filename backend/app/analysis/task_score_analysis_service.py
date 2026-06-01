@@ -19,6 +19,13 @@ except ImportError:  # pragma: no cover - exercised only in deployments without 
     ttest_ind = None
     tukey_hsd = None
 
+try:
+    import matplotlib.pyplot as plt
+    from .chart_utils import condition_color, condition_label as _cond_label, fig_to_base64, draw_boxplot
+    _CHARTS_AVAILABLE = True
+except ImportError:
+    _CHARTS_AVAILABLE = False
+
 
 AnalysisMode = Literal["two_conditions", "three_conditions"]
 TaskFilter = Literal["all", "moon_survival", "lost_at_sea", "winter_survival"]
@@ -135,6 +142,7 @@ class TaskScoreAnalysisResult(ApiModel):
     statistical_tests: list[StatisticalTestResult]
     post_hoc_tests: list[PostHocResult]
     observations: list[TaskScoreObservation]
+    charts: dict[str, str] = {}
 
 
 def _round(value: float) -> float:
@@ -471,6 +479,41 @@ def _post_hoc_for_metric(
         return PostHocResult(**base, status="calculation_error", note=f"Dunn test 计算错误：{exc}")
 
 
+def _generate_task_score_charts(
+    observations: list["TaskScoreObservation"],
+    conditions: list[str],
+    statistical_tests: list["StatisticalTestResult"],
+) -> dict[str, str]:
+    if not _CHARTS_AVAILABLE:
+        return {}
+    try:
+        p_by_metric = {t.metric: t.p_value for t in statistical_tests}
+        plot_metrics = [
+            ("gs",            "GS 小组最终分",             "Score (lower = better)"),
+            ("weak_synergy",  "弱协同值 (AIS − GS)",       "Synergy Score"),
+            ("strong_synergy","强协同值 (Best IS − GS)",    "Synergy Score"),
+        ]
+        fig, axes = plt.subplots(1, 3, figsize=(13, 5))
+        fig.patch.set_facecolor("white")
+        for ax, (metric, title, ylabel) in zip(axes, plot_metrics):
+            data_by_condition = {
+                c: [getattr(obs, metric) for obs in observations if obs.condition == c]
+                for c in conditions
+            }
+            draw_boxplot(
+                ax=ax,
+                data_by_condition=data_by_condition,
+                conditions=conditions,
+                title=title,
+                ylabel=ylabel,
+                p_value=p_by_metric.get(metric),
+            )
+        fig.tight_layout(pad=2.0)
+        return {"box_plots": fig_to_base64(fig)}
+    except Exception:
+        return {}
+
+
 def _value_from_result(result_json: dict[str, Any], metric: str) -> float:
     value = result_json.get(metric)
     if value is None:
@@ -586,4 +629,5 @@ def build_task_score_analysis(
         statistical_tests=statistical_tests,
         post_hoc_tests=post_hoc_tests,
         observations=observations,
+        charts=_generate_task_score_charts(observations, conditions, statistical_tests),
     )

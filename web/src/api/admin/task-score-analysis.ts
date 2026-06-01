@@ -113,6 +113,7 @@ export interface TaskScoreAnalysisResult {
   statistical_tests: StatisticalTestResult[]
   post_hoc_tests: PostHocResult[]
   observations: TaskScoreObservation[]
+  charts: Record<string, string>
 }
 
 export interface GetTaskScoreAnalysisParams {

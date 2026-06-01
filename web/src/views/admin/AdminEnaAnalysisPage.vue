@@ -196,6 +196,7 @@ onMounted(fetchGroups)
       v-if="report && report.networks.length > 0"
       :networks="report.networks"
       :diff-network="report.diff_network"
+      :charts="report?.charts ?? {}"
     />
   </div>
 </template>

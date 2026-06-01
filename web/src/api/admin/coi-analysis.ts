@@ -92,6 +92,7 @@ export interface CoiAnalysisResult {
   normality: NormalityConditionResult[]
   statistical_tests: StatisticalTestResult[]
   post_hoc_tests: PostHocResult[]
+  charts: Record<string, string>
 }
 
 export interface CreateCoiAnalysisPayload {

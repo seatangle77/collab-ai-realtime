@@ -6,6 +6,7 @@ import { conditionLabel } from './reportHelpers'
 const props = defineProps<{
   networks: EnaNetworkCondition[]   // one or two condition networks
   diffNetwork: EnaNetworkCondition | null
+  charts?: Record<string, string>
 }>()
 
 // Fixed node positions in a diamond layout (cx, cy) within a 300×300 viewport
@@ -86,7 +87,16 @@ const COI_LABELS: Record<string, string> = {
       </div>
     </template>
 
-    <div class="networks-row">
+    <!-- matplotlib 图（优先） -->
+    <img
+      v-if="charts?.['networks']"
+      :src="charts['networks']"
+      alt="ENA 认知过程网络图"
+      style="width: 100%; display: block; border-radius: 4px;"
+    />
+
+    <!-- 旧 SVG 兜底 -->
+    <div v-else class="networks-row">
       <!-- Per-condition networks -->
       <div
         v-for="{ net, edges } in conditionNetworks"

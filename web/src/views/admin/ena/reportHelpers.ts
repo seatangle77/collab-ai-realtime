@@ -270,7 +270,7 @@ export function buildEnaReportHtml(
   <table><thead><tr><th>指标</th><th>条件</th><th>n</th><th>W</th><th>p</th><th>判断</th><th>说明</th></tr></thead><tbody>${normalityRows}</tbody></table>
   <h2>3. 报告结果与可视化</h2>
   <p class="note">网络图展示 CoI 阶段之间的共现连接强度；p 值与 effect size 见下方推断统计表。</p>
-  ${enaNetworkChartsHtml(report)}
+  ${report.charts?.networks ? `<img src="${report.charts.networks}" style="max-width:100%;display:block;margin:10px 0 18px;border-radius:6px" alt="ENA 网络图">` : enaNetworkChartsHtml(report)}
   <h2>4. 推断统计</h2>
   <table><thead><tr><th>指标</th><th>检验</th><th>统计量</th><th>p</th><th>Effect size</th><th>状态</th><th>说明</th></tr></thead><tbody>${inferentialRows}</tbody></table>
   <h2>5. 事后检验（Post-hoc）</h2>

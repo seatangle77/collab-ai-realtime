@@ -27,6 +27,15 @@ except ImportError:  # pragma: no cover
     kruskal = None
     tukey_hsd = None
 
+try:
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as mpatches
+    import numpy as np
+    from .chart_utils import condition_label as _cond_label, fig_to_base64, annotate_pvalue, pvalue_label, _apply_base_style
+    _CHARTS_AVAILABLE = True
+except ImportError:
+    _CHARTS_AVAILABLE = False
+
 
 # ─────────────────────────────────────────────────────────────────
 # Constants
@@ -160,6 +169,104 @@ class EnaAnalysisResult(ApiModel):
     post_hoc_tests: list[EnaPostHocResult]
     networks: list[EnaNetworkCondition]     # one per condition
     diff_network: EnaNetworkCondition | None  # only for two_conditions
+    charts: dict[str, str] = {}
+
+
+# ─────────────────────────────────────────────────────────────────
+# Chart generation
+# ─────────────────────────────────────────────────────────────────
+
+_NODE_POS = {"TE": (0.5, 0.88), "EX": (0.08, 0.44), "IN": (0.92, 0.44), "RE": (0.5, 0.0)}
+_NODE_COLORS = {"TE": "#e69f00", "EX": "#1f77b4", "IN": "#9467bd", "RE": "#2ca02c"}
+_NODE_LABELS_ZH = {"TE": "TE\n触发", "EX": "EX\n探索", "IN": "IN\n整合", "RE": "RE\n解决"}
+
+
+def _draw_ena_network(ax: "plt.Axes", network: "EnaNetworkCondition", title: str, is_diff: bool = False) -> None:
+    ax.set_xlim(-0.15, 1.15)
+    ax.set_ylim(-0.2, 1.1)
+    ax.set_aspect("equal")
+    ax.axis("off")
+    ax.set_title(title, fontsize=10, fontweight="bold", pad=6)
+
+    weights = [abs(e.weight_diff if is_diff else e.weight) for e in network.edges]
+    max_w = max(weights) if any(w > 0 for w in weights) else 1.0
+
+    for edge in network.edges:
+        w = abs(edge.weight_diff if is_diff else edge.weight)
+        if w < 0.001:
+            continue
+        x0, y0 = _NODE_POS.get(edge.source, (0.5, 0.5))
+        x1, y1 = _NODE_POS.get(edge.target, (0.5, 0.5))
+        lw = max(0.5, (w / max_w) * 8)
+        if is_diff:
+            diff_val = edge.weight_diff or 0.0
+            color = "#1f77b4" if diff_val > 0.01 else ("#d62728" if diff_val < -0.01 else "#cccccc")
+        else:
+            color = "#888888"
+        ax.plot([x0, x1], [y0, y1], color=color, linewidth=lw, alpha=0.75, zorder=1)
+        mx, my = (x0 + x1) / 2, (y0 + y1) / 2
+        val = edge.weight_diff if is_diff else edge.weight
+        if val is not None and abs(val) >= 0.03:
+            txt = f"{val:+.2f}" if is_diff else f"{val:.2f}"
+            ax.text(mx, my + 0.04, txt, ha="center", va="bottom", fontsize=7.5,
+                    color="#333333", zorder=4)
+
+    for node in network.nodes:
+        x, y = _NODE_POS.get(node, (0.5, 0.5))
+        circle = mpatches.FancyBboxPatch(
+            (x - 0.09, y - 0.09), 0.18, 0.18,
+            boxstyle="round,pad=0.01",
+            facecolor=_NODE_COLORS.get(node, "#888888"),
+            edgecolor="white", linewidth=1.5, zorder=3,
+        )
+        ax.add_patch(circle)
+        ax.text(x, y, _NODE_LABELS_ZH.get(node, node), ha="center", va="center",
+                fontsize=8.5, fontweight="bold", color="white", zorder=5)
+
+
+def _generate_ena_charts(
+    networks: list["EnaNetworkCondition"],
+    diff_network: "EnaNetworkCondition | None",
+    statistical_tests: list["EnaStatTestResult"],
+) -> dict[str, str]:
+    if not _CHARTS_AVAILABLE:
+        return {}
+    try:
+        all_nets = list(networks) + ([diff_network] if diff_network else [])
+        n_cols = len(all_nets)
+        if n_cols == 0:
+            return {}
+
+        fig, axes = plt.subplots(1, n_cols, figsize=(n_cols * 4.2, 4.5))
+        fig.patch.set_facecolor("white")
+        if n_cols == 1:
+            axes = [axes]
+
+        for ax, net in zip(axes, networks):
+            _draw_ena_network(ax, net, _cond_label(net.condition), is_diff=False)
+
+        if diff_network is not None:
+            _draw_ena_network(axes[-1], diff_network, "差异图 (B − A)", is_diff=True)
+            legend_items = [
+                mpatches.Patch(color="#1f77b4", label="B 更强 (>0.01)"),
+                mpatches.Patch(color="#d62728", label="A 更强 (<-0.01)"),
+                mpatches.Patch(color="#cccccc", label="差异 < 0.01"),
+            ]
+            axes[-1].legend(handles=legend_items, loc="lower center",
+                            fontsize=8, framealpha=0.6, ncol=1)
+
+        p_by_metric = {t.metric: t.p_value for t in statistical_tests}
+        p_lines = [
+            f"{ENA_METRIC_LABELS[m]}: {pvalue_label(p_by_metric.get(m))}"
+            for m in ENA_METRICS
+        ]
+        fig.text(0.5, 0.01, "  |  ".join(p_lines), ha="center", va="bottom",
+                 fontsize=8.5, color="#555555")
+
+        fig.tight_layout(pad=1.5, rect=(0, 0.06, 1, 1))
+        return {"networks": fig_to_base64(fig)}
+    except Exception:
+        return {}
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -605,4 +712,5 @@ def build_ena_analysis(
         post_hoc_tests=post_hoc,
         networks=networks,
         diff_network=diff_network,
+        charts=_generate_ena_charts(networks, diff_network, stat_tests),
     )

@@ -230,6 +230,7 @@ onMounted(fetchGroups)
       v-if="report && report.metrics.length > 0"
       :metrics="report.metrics"
       :condition-columns="conditionColumns"
+      :charts="report?.charts ?? {}"
     />
   </div>
 </template>
