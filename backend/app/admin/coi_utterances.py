@@ -221,7 +221,7 @@ async def import_from_transcripts(
                 "content": tr["text"],
                 "source_transcript_ids": [tid],
                 "order_index": next_index,
-                "start_time": tr["start"],
+                "start_time": tr["start"].timestamp() if tr["start"] else None,
             },
         )
         next_index += 1

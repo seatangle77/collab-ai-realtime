@@ -217,6 +217,7 @@ onMounted(fetchGroups)
     />
 
     <QPostHocTable
+      v-if="mode === 'three_conditions'"
       :loading="loading"
       :post-hoc-tests="report?.post_hoc_tests ?? []"
     />
