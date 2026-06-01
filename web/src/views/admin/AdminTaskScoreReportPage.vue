@@ -12,10 +12,10 @@ import {
 import type { AdminGroup } from '../../types/admin'
 import DescriptiveStatsTable from './task-score/DescriptiveStatsTable.vue'
 import InferentialStatsTable from './task-score/InferentialStatsTable.vue'
-import MeanComparisonCharts from './task-score/MeanComparisonCharts.vue'
 import NormalityTable from './task-score/NormalityTable.vue'
 import PostHocTable from './task-score/PostHocTable.vue'
 import SampleSelector from './task-score/SampleSelector.vue'
+import TaskScoreBoxPlots from './task-score/TaskScoreBoxPlots.vue'
 import {
   TASK_OPTIONS,
   buildTaskScoreReportHtml,
@@ -48,7 +48,6 @@ const baselineStatisticalTests = computed(() =>
   report.value?.statistical_tests.filter((item) => item.role === 'baseline') ?? [],
 )
 const postHocTests = computed(() => report.value?.post_hoc_tests ?? [])
-const primaryVisualMetrics = computed(() => descriptiveMetrics.value.filter((metric) => metric.role === 'primary'))
 const conditionColumns = computed(() =>
   filters.mode === 'two_conditions'
     ? ['no_assistance', 'glasses']
@@ -223,8 +222,8 @@ onMounted(fetchGroups)
       :mode="filters.mode"
     />
 
-    <MeanComparisonCharts
-      :metrics="primaryVisualMetrics"
+    <TaskScoreBoxPlots
+      :observations="report?.observations ?? []"
       :condition-columns="conditionColumns"
     />
 

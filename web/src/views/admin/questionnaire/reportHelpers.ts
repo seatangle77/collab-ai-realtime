@@ -102,6 +102,57 @@ function escapeHtml(value: unknown): string {
     .replace(/'/g, '&#039;')
 }
 
+const CONDITION_COLORS: Record<string, string> = {
+  no_assistance: '#64748b',
+  glasses: '#2563eb',
+  app_notification: '#16a34a',
+}
+
+function questionnaireChartHtml(
+  report: QuestionnaireAnalysisResult,
+  scale: QuestionnaireScaleKind,
+  conditionColumns: string[],
+): string {
+  const metrics = report.metrics.filter((metric) => metric.metric !== 'total_avg')
+  const values = metrics.flatMap((metric) =>
+    conditionColumns
+      .map((condition) => statFor(metric, condition)?.mean ?? null)
+      .filter((value): value is number => value !== null),
+  )
+  const maxValue = Math.max(1, ...values)
+  const chartTitle = scale === 'srcc' ? 'SRCC 四维度分组柱状图' : 'PCS 两维度分组柱状图'
+  const groups = metrics.map((metric) => {
+    const bars = conditionColumns.map((condition) => {
+      const value = statFor(metric, condition)?.mean ?? null
+      const height = value === null ? 0 : Math.max(2, (value / maxValue) * 180)
+      const color = CONDITION_COLORS[condition] ?? '#64748b'
+      return `
+        <div class="q-bar-wrap">
+          <div class="q-bar-value">${escapeHtml(formatNumber(value))}</div>
+          <div class="q-bar" style="height:${height}px;background:${color}"></div>
+        </div>
+      `
+    }).join('')
+    return `
+      <div class="q-dimension">
+        <div class="q-bars">${bars}</div>
+        <div class="q-label">${escapeHtml(metric.label)}</div>
+      </div>
+    `
+  }).join('')
+  const legend = conditionColumns.map((condition) => `
+    <span class="legend-item"><i style="background:${CONDITION_COLORS[condition] ?? '#64748b'}"></i>${escapeHtml(conditionLabel(condition))}</span>
+  `).join('')
+
+  return `
+    <div class="chart-card">
+      <h3>${escapeHtml(chartTitle)}</h3>
+      <div class="q-chart">${groups}</div>
+      <div class="legend">${legend}</div>
+    </div>
+  `
+}
+
 export function buildQuestionnaireReportHtml(
   report: QuestionnaireAnalysisResult,
   mode: QuestionnaireAnalysisMode,
@@ -165,6 +216,19 @@ export function buildQuestionnaireReportHtml(
     table { width: 100%; margin: 10px 0 18px; border-collapse: collapse; font-size: 12px; page-break-inside: avoid; }
     th, td { padding: 7px 8px; border: 1px solid #d1d5db; text-align: left; vertical-align: top; }
     th { background: #f3f4f6; font-weight: 700; }
+    .chart-card { padding: 10px; border: 1px solid #d1d5db; border-radius: 8px; background: #f8fafc; page-break-inside: avoid; }
+    .chart-card h3 { margin-top: 0; }
+    .q-chart { display: grid; grid-template-columns: repeat(${scale === 'srcc' ? 4 : 2}, minmax(0, 1fr)); gap: 12px; margin-top: 10px; }
+    .q-dimension { display: grid; grid-template-rows: 210px auto; gap: 8px; padding: 10px; border: 1px solid #dbe3ef; border-radius: 8px; background: #fff; }
+    .q-bars { display: flex; align-items: end; justify-content: center; gap: 8px; height: 210px; border-bottom: 1px solid #cbd5e1; }
+    .q-bar-wrap { display: flex; flex-direction: column; align-items: center; justify-content: end; width: 34px; height: 100%; }
+    .q-bar { width: 24px; min-height: 2px; border-radius: 5px 5px 0 0; }
+    .q-bar-value { margin-bottom: 4px; color: #172033; font-size: 11px; font-weight: 700; }
+    .q-label { min-height: 34px; color: #172033; font-size: 12px; font-weight: 700; line-height: 1.35; text-align: center; }
+    .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+    .legend-item { display: inline-flex; align-items: center; gap: 5px; color: #64748b; font-size: 11px; }
+    .legend-item i { width: 9px; height: 9px; border-radius: 50%; }
+    @media (max-width: 900px) { .q-chart { grid-template-columns: 1fr; } }
     @media print { body { margin: 18mm; } h2 { page-break-after: avoid; } }
   </style>
 </head>
@@ -179,9 +243,12 @@ export function buildQuestionnaireReportHtml(
   <table><thead><tr><th>维度</th><th>题项数</th><th>n</th><th>α</th><th>说明</th></tr></thead><tbody>${reliabilityRows}</tbody></table>
   <h2>3. 正态性检查（Shapiro-Wilk）</h2>
   <table><thead><tr><th>指标</th><th>条件</th><th>n</th><th>W</th><th>p</th><th>判断</th><th>说明</th></tr></thead><tbody>${normalityRows}</tbody></table>
-  <h2>4. 推断统计</h2>
+  <h2>4. 报告结果与可视化</h2>
+  <p class="note">图表展示各量表维度在不同条件下的平均分；p 值与 effect size 见下方推断统计表。</p>
+  ${questionnaireChartHtml(report, scale, conditionColumns)}
+  <h2>5. 推断统计</h2>
   <table><thead><tr><th>指标</th><th>检验</th><th>统计量</th><th>p</th><th>Effect size</th><th>状态</th><th>说明</th></tr></thead><tbody>${inferentialRows}</tbody></table>
-  <h2>5. 事后检验（Post-hoc）</h2>
+  <h2>6. 事后检验（Post-hoc）</h2>
   <p class="note">仅三条件且全局检验 p &lt; 0.05 时执行；Tukey HSD 用于 ANOVA，Dunn + Bonferroni 用于 Kruskal-Wallis。</p>
   ${postHocSection}
 </body>

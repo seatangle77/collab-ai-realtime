@@ -104,6 +104,71 @@ function escapeHtml(value: unknown): string {
     .replace(/'/g, '&#039;')
 }
 
+const COI_COMPOSITION_METRICS = [
+  { key: 'te_ratio', label: 'Triggering', color: '#64748b' },
+  { key: 'ex_ratio', label: 'Exploration', color: '#2563eb' },
+  { key: 'in_ratio', label: 'Integration', color: '#16a34a' },
+  { key: 're_ratio', label: 'Resolution', color: '#dc2626' },
+]
+
+function metricMean(report: CoiAnalysisResult, metricKey: string, condition: string): number {
+  const metric = report.metrics.find((item) => item.metric === metricKey)
+  if (!metric) return 0
+  return statFor(metric, condition)?.mean ?? 0
+}
+
+function coiCompositionChartsHtml(report: CoiAnalysisResult, conditionColumns: string[]): string {
+  const barWidth = 420
+  const compositionRows = conditionColumns.map((condition) => {
+    let offset = 0
+    const segments = COI_COMPOSITION_METRICS.map((metric) => {
+      const value = Math.max(0, metricMean(report, metric.key, condition))
+      const width = value * barWidth
+      const segment = `<rect x="${offset}" y="0" width="${width}" height="20" fill="${metric.color}"><title>${escapeHtml(metric.label)}: ${escapeHtml(formatNumber(value))}</title></rect>`
+      offset += width
+      return segment
+    }).join('')
+    return `
+      <div class="coi-chart-row">
+        <div class="coi-chart-label">${escapeHtml(conditionLabel(condition))}</div>
+        <svg class="coi-stacked-bar" viewBox="0 0 ${barWidth} 20" role="img" aria-label="${escapeHtml(conditionLabel(condition))} CoI 话语比例">
+          <rect x="0" y="0" width="${barWidth}" height="20" rx="10" fill="#e8eef7"></rect>
+          ${segments}
+        </svg>
+      </div>
+    `
+  }).join('')
+
+  const highOrderRows = conditionColumns.map((condition) => {
+    const value = Math.max(0, metricMean(report, 'higher_order_ratio', condition))
+    return `
+      <div class="coi-chart-row coi-chart-row--with-value">
+        <div class="coi-chart-label">${escapeHtml(conditionLabel(condition))}</div>
+        <div class="coi-bar-track"><div class="coi-bar-fill" style="width:${Math.max(1, value * 100)}%"></div></div>
+        <div class="coi-chart-value">${escapeHtml(formatNumber(value))}</div>
+      </div>
+    `
+  }).join('')
+
+  const legend = COI_COMPOSITION_METRICS.map((metric) => `
+    <span class="legend-item"><i style="background:${metric.color}"></i>${escapeHtml(metric.label)}</span>
+  `).join('')
+
+  return `
+    <div class="coi-chart-grid">
+      <div class="chart-card">
+        <h3>四类 CoI 话语比例</h3>
+        ${compositionRows}
+        <div class="legend">${legend}</div>
+      </div>
+      <div class="chart-card">
+        <h3>高阶认知参与比例（IN + RE）</h3>
+        ${highOrderRows}
+      </div>
+    </div>
+  `
+}
+
 export function buildCoiReportHtml(
   report: CoiAnalysisResult,
   mode: CoiAnalysisMode,
@@ -171,6 +236,20 @@ export function buildCoiReportHtml(
     table { width: 100%; margin: 10px 0 18px; border-collapse: collapse; font-size: 12px; page-break-inside: avoid; }
     th, td { padding: 7px 8px; border: 1px solid #d1d5db; text-align: left; vertical-align: top; }
     th { background: #f3f4f6; font-weight: 700; }
+    .coi-chart-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 12px; margin: 10px 0 18px; }
+    .chart-card { padding: 10px; border: 1px solid #d1d5db; border-radius: 8px; background: #f8fafc; page-break-inside: avoid; }
+    .chart-card h3 { margin-top: 0; }
+    .coi-chart-row { display: grid; grid-template-columns: 88px minmax(0, 1fr); align-items: center; gap: 8px; margin: 9px 0; }
+    .coi-chart-row--with-value { grid-template-columns: 88px minmax(0, 1fr) 46px; }
+    .coi-chart-label { color: #64748b; font-size: 12px; }
+    .coi-stacked-bar { display: block; width: 100%; height: 20px; overflow: hidden; border-radius: 999px; }
+    .coi-bar-track { height: 18px; overflow: hidden; border-radius: 999px; background: #e8eef7; }
+    .coi-bar-fill { height: 18px; border-radius: 999px; background: #16a34a; }
+    .coi-chart-value { color: #172033; font-size: 12px; font-weight: 700; text-align: right; }
+    .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+    .legend-item { display: inline-flex; align-items: center; gap: 5px; color: #64748b; font-size: 11px; }
+    .legend-item i { width: 9px; height: 9px; border-radius: 50%; }
+    @media (max-width: 900px) { .coi-chart-grid { grid-template-columns: 1fr; } }
     @media print { body { margin: 18mm; } h2 { page-break-after: avoid; } }
   </style>
 </head>
@@ -188,9 +267,12 @@ export function buildCoiReportHtml(
   <table><thead>${descriptiveHeader()}</thead><tbody>${descriptiveRows}</tbody></table>
   <h2>5. 正态性检查（Shapiro-Wilk）</h2>
   <table><thead><tr><th>指标</th><th>条件</th><th>n</th><th>W</th><th>p</th><th>判断</th><th>说明</th></tr></thead><tbody>${normalityRows}</tbody></table>
-  <h2>6. 推断统计</h2>
+  <h2>6. 报告结果与可视化</h2>
+  <p class="note">图表展示各条件的 CoI 话语结构，以及 Integration + Resolution 所占的高阶认知参与比例；p 值与 effect size 见下方推断统计表。</p>
+  ${coiCompositionChartsHtml(report, conditionColumns)}
+  <h2>7. 推断统计</h2>
   <table><thead><tr><th>指标</th><th>检验</th><th>统计量</th><th>值</th><th>p</th><th>Effect size</th><th>值</th><th>状态</th><th>说明</th></tr></thead><tbody>${inferentialRows}</tbody></table>
-  <h2>7. 事后检验（Post-hoc）</h2>
+  <h2>8. 事后检验（Post-hoc）</h2>
   <p class="note">仅三条件且全局检验 p &lt; 0.05 时执行；Tukey HSD 用于 ANOVA，Dunn + Bonferroni 用于 Kruskal-Wallis。</p>
   ${postHocSection}
 </body>

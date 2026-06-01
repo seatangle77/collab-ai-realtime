@@ -6,6 +6,7 @@ import type {
   StatisticalTestResult,
   TaskScoreAnalysisMode,
   TaskScoreAnalysisResult,
+  TaskScoreObservation,
   TaskScoreAnalysisTaskId,
 } from '../../../api/admin/task-score-analysis'
 import type { AdminGroup } from '../../../types/admin'
@@ -115,6 +116,109 @@ function escapeHtml(value: unknown): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;')
+}
+
+type PlotMetricKey = 'gs' | 'weak_synergy' | 'strong_synergy'
+
+const TASK_SCORE_PLOT_METRICS: Array<{ key: PlotMetricKey; label: string; note: string }> = [
+  { key: 'gs', label: 'GS 小组最终分数', note: '任务分数越低表示小组最终表现越好。' },
+  { key: 'weak_synergy', label: '弱协同值（AIS - GS）', note: '正值表示小组表现优于成员平均个人水平。' },
+  { key: 'strong_synergy', label: '强协同值（Best IS - GS）', note: '正值表示小组表现优于组内最佳个人水平。' },
+]
+
+interface ReportBoxStats {
+  n: number
+  min: number
+  q1: number
+  median: number
+  q3: number
+  max: number
+}
+
+function percentile(sorted: number[], p: number): number {
+  if (sorted.length === 0) return 0
+  if (sorted.length === 1) return sorted[0]!
+  const pos = (sorted.length - 1) * p
+  const lower = Math.floor(pos)
+  const upper = Math.ceil(pos)
+  if (lower === upper) return sorted[lower]!
+  return sorted[lower]! + (sorted[upper]! - sorted[lower]!) * (pos - lower)
+}
+
+function boxStats(values: number[]): ReportBoxStats | null {
+  const sorted = [...values].sort((a, b) => a - b)
+  if (sorted.length === 0) return null
+  return {
+    n: sorted.length,
+    min: sorted[0]!,
+    q1: percentile(sorted, 0.25),
+    median: percentile(sorted, 0.5),
+    q3: percentile(sorted, 0.75),
+    max: sorted[sorted.length - 1]!,
+  }
+}
+
+function taskScoreBoxPlotSvg(
+  observations: TaskScoreObservation[],
+  conditionColumns: string[],
+  metric: { key: PlotMetricKey; label: string; note: string },
+): string {
+  const boxes = conditionColumns.map((condition) => ({
+    condition,
+    stats: boxStats(observations.filter((obs) => obs.condition === condition).map((obs) => obs[metric.key])),
+  }))
+  const values = boxes.flatMap((box) => box.stats ? [box.stats.min, box.stats.q1, box.stats.median, box.stats.q3, box.stats.max] : [])
+  if (values.length === 0) {
+    return `<div class="chart-card"><h3>${escapeHtml(metric.label)}</h3><p class="note">暂无可绘制数据。</p></div>`
+  }
+  const rawMin = Math.min(...values)
+  const rawMax = Math.max(...values)
+  const span = rawMax - rawMin || Math.max(1, Math.abs(rawMax) || 1)
+  const min = rawMin - span * 0.12
+  const max = rawMax + span * 0.12
+  const y = (value: number) => 190 - ((value - min) / (max - min || 1)) * 150
+  const x = (index: number) => boxes.length <= 1 ? 360 : 120 + index * (480 / (boxes.length - 1))
+  const color = (condition: string) => condition === 'glasses' ? '#2563eb' : condition === 'app_notification' ? '#16a34a' : '#64748b'
+  const tickValues = [max, (min + max) / 2, min]
+  const ticks = tickValues.map((tick) => `
+    <line x1="72" x2="660" y1="${y(tick)}" y2="${y(tick)}" class="grid-line" />
+    <text x="62" y="${y(tick) + 4}" text-anchor="end" class="tick-label">${escapeHtml(formatNumber(tick))}</text>
+  `).join('')
+  const boxShapes = boxes.map((box, index) => {
+    if (!box.stats) return ''
+    const cx = x(index)
+    const top = y(box.stats.q3)
+    const height = Math.max(4, y(box.stats.q1) - y(box.stats.q3))
+    return `
+      <line x1="${cx}" x2="${cx}" y1="${y(box.stats.min)}" y2="${y(box.stats.max)}" class="whisker" />
+      <line x1="${cx - 24}" x2="${cx + 24}" y1="${y(box.stats.min)}" y2="${y(box.stats.min)}" class="whisker" />
+      <line x1="${cx - 24}" x2="${cx + 24}" y1="${y(box.stats.max)}" y2="${y(box.stats.max)}" class="whisker" />
+      <rect x="${cx - 32}" y="${top}" width="64" height="${height}" rx="4" fill="${color(box.condition)}" fill-opacity="0.78" />
+      <line x1="${cx - 32}" x2="${cx + 32}" y1="${y(box.stats.median)}" y2="${y(box.stats.median)}" class="median-line" />
+      <text x="${cx}" y="218" text-anchor="middle" class="condition-label">${escapeHtml(conditionLabel(box.condition))}</text>
+      <text x="${cx}" y="236" text-anchor="middle" class="tick-label">n=${box.stats.n}</text>
+    `
+  }).join('')
+  return `
+    <div class="chart-card">
+      <h3>${escapeHtml(metric.label)}</h3>
+      <svg class="boxplot-svg" viewBox="0 0 720 250" role="img" aria-label="${escapeHtml(metric.label)}">
+        <line x1="72" y1="40" x2="72" y2="190" class="axis-line" />
+        <line x1="72" y1="190" x2="660" y2="190" class="axis-line" />
+        ${ticks}
+        ${boxShapes}
+      </svg>
+      <p class="note">${escapeHtml(metric.note)}</p>
+    </div>
+  `
+}
+
+function taskScoreBoxPlotsHtml(report: TaskScoreAnalysisResult, conditionColumns: string[]): string {
+  return `
+    <div class="chart-grid">
+      ${TASK_SCORE_PLOT_METRICS.map((metric) => taskScoreBoxPlotSvg(report.observations, conditionColumns, metric)).join('')}
+    </div>
+  `
 }
 
 interface BuildReportHtmlParams {
@@ -249,6 +353,16 @@ export function buildTaskScoreReportHtml(params: BuildReportHtmlParams): string 
     .numeric td, .numeric th { text-align: right; }
     .numeric th:first-child, .numeric td:first-child, .numeric td:nth-child(2), .numeric th:nth-child(2) { text-align: left; }
     .section-note { color: #6b7280; font-size: 12px; }
+    .chart-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 10px 0 18px; }
+    .chart-card { padding: 10px; border: 1px solid #d1d5db; border-radius: 8px; background: #f8fafc; page-break-inside: avoid; }
+    .chart-card h3 { margin-top: 0; }
+    .boxplot-svg { width: 100%; height: auto; }
+    .axis-line, .whisker { stroke: #64748b; stroke-width: 1.4; }
+    .grid-line { stroke: #d9e2ef; stroke-width: 1; }
+    .median-line { stroke: #111827; stroke-width: 2; }
+    .tick-label, .condition-label { fill: #64748b; font-size: 11px; }
+    .condition-label { fill: #172033; font-weight: 700; }
+    @media (max-width: 900px) { .chart-grid { grid-template-columns: 1fr; } }
     @media print { body { margin: 18mm; } h2 { page-break-after: avoid; } }
   </style>
 </head>
@@ -269,15 +383,18 @@ export function buildTaskScoreReportHtml(params: BuildReportHtmlParams): string 
   <table><thead><tr><th>指标</th><th>条件</th><th>n</th><th>W</th><th>p</th><th>判断</th><th>说明</th></tr></thead><tbody>${normalityRows(primaryNormality)}</tbody></table>
   <h3>基线检查指标</h3>
   <table><thead><tr><th>指标</th><th>条件</th><th>n</th><th>W</th><th>p</th><th>判断</th><th>说明</th></tr></thead><tbody>${normalityRows(baselineNormality)}</tbody></table>
-  <h2>5. 推断统计</h2>
+  <h2>5. 报告结果与可视化</h2>
+  <p class="section-note">箱线图展示主要结果指标在各条件下的分布；p 值与 effect size 见下方推断统计表。</p>
+  ${taskScoreBoxPlotsHtml(report, conditionColumns)}
+  <h2>6. 推断统计</h2>
   <h3>主要结果指标</h3>
   <table><thead><tr><th>指标</th><th>检验</th><th>统计量</th><th>值</th><th>p</th><th>Effect size</th><th>值</th><th>状态</th><th>说明</th></tr></thead><tbody>${inferentialRows(primaryTests)}</tbody></table>
   <h3>基线检查指标</h3>
   <table><thead><tr><th>指标</th><th>检验</th><th>统计量</th><th>值</th><th>p</th><th>Effect size</th><th>值</th><th>状态</th><th>说明</th></tr></thead><tbody>${inferentialRows(baselineTests)}</tbody></table>
-  <h2>6. 事后检验（Post-hoc）</h2>
+  <h2>7. 事后检验（Post-hoc）</h2>
   <p class="section-note">仅三条件且全局检验 p &lt; 0.05 时执行；Tukey HSD 用于 ANOVA，Dunn + Bonferroni 用于 Kruskal-Wallis。均值差 = 条件 B 均值 − 条件 A 均值。</p>
   ${postHocSection(report.post_hoc_tests.filter(t => t.role === 'primary'))}
-  <h2>7. 备注</h2>
+  <h2>8. 备注</h2>
   <p class="note">本报告为即时计算结果，未自动入库。若用于正式论文或归档，建议保存本报告 HTML/PDF，并记录所选小组样本。</p>
 </body>
 </html>`

@@ -16,6 +16,7 @@ import QReliabilityTable from './questionnaire/QReliabilityTable.vue'
 import QNormalityTable from './questionnaire/QNormalityTable.vue'
 import QInferentialStatsTable from './questionnaire/QInferentialStatsTable.vue'
 import QPostHocTable from './questionnaire/QPostHocTable.vue'
+import QScaleDimensionCharts from './questionnaire/QScaleDimensionCharts.vue'
 import { buildQuestionnaireReportHtml, conditionLabel, modeDescription, scaleLabel } from './questionnaire/reportHelpers'
 
 const scale = ref<QuestionnaireScaleKind>('srcc')
@@ -206,6 +207,12 @@ onMounted(fetchGroups)
     <QInferentialStatsTable
       :loading="loading"
       :tests="report?.statistical_tests ?? []"
+    />
+
+    <QScaleDimensionCharts
+      :metrics="report?.metrics ?? []"
+      :condition-columns="conditionColumns"
+      :scale="scale"
     />
 
     <QPostHocTable

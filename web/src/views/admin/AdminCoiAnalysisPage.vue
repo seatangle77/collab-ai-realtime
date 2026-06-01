@@ -10,7 +10,7 @@ import CoiDescriptiveStatsTable from './coi/CoiDescriptiveStatsTable.vue'
 import CoiNormalityTable from './coi/CoiNormalityTable.vue'
 import CoiInferentialStatsTable from './coi/CoiInferentialStatsTable.vue'
 import CoiPostHocTable from './coi/CoiPostHocTable.vue'
-import CoiMeanComparisonCharts from './coi/CoiMeanComparisonCharts.vue'
+import CoiCompositionCharts from './coi/CoiCompositionCharts.vue'
 import { buildCoiReportHtml, conditionLabel, modeDescription } from './coi/reportHelpers'
 
 const mode = ref<CoiAnalysisMode>('two_conditions')
@@ -226,7 +226,7 @@ onMounted(fetchGroups)
       :post-hoc-tests="report?.post_hoc_tests ?? []"
     />
 
-    <CoiMeanComparisonCharts
+    <CoiCompositionCharts
       v-if="report && report.metrics.length > 0"
       :metrics="report.metrics"
       :condition-columns="conditionColumns"

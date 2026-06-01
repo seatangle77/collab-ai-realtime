@@ -5,6 +5,7 @@ import type {
   EnaStatTestResult,
   EnaPostHocResult,
   EnaAnalysisResult,
+  EnaNetworkCondition,
 } from '../../../api/admin/ena-analysis'
 
 export const CONDITION_LABELS: Record<string, string> = {
@@ -106,6 +107,93 @@ function escapeHtml(value: unknown): string {
     .replace(/'/g, '&#039;')
 }
 
+const NODE_POSITIONS: Record<string, { x: number; y: number }> = {
+  TE: { x: 150, y: 42 },
+  EX: { x: 42, y: 160 },
+  IN: { x: 258, y: 160 },
+  RE: { x: 150, y: 278 },
+}
+
+const NODE_COLORS: Record<string, string> = {
+  TE: '#f59e0b',
+  EX: '#3b82f6',
+  IN: '#8b5cf6',
+  RE: '#10b981',
+}
+
+const NODE_LABELS: Record<string, string> = {
+  TE: '触发事件',
+  EX: '探索',
+  IN: '整合',
+  RE: '解决',
+}
+
+function edgeStroke(weight: number, maxWeight: number): number {
+  if (maxWeight <= 0) return 0.5
+  return Math.max(0.5, (weight / maxWeight) * 16)
+}
+
+function diffColor(diff: number): string {
+  if (diff > 0.01) return '#2563eb'
+  if (diff < -0.01) return '#dc2626'
+  return '#d1d5db'
+}
+
+function networkSvg(net: EnaNetworkCondition, isDiff = false): string {
+  const weights = net.edges.map((edge) => Math.abs(isDiff ? (edge.weight_diff ?? 0) : edge.weight))
+  const maxWeight = Math.max(...weights, 0.001)
+  const edges = net.edges.map((edge) => {
+    const source = NODE_POSITIONS[edge.source] ?? { x: 150, y: 160 }
+    const target = NODE_POSITIONS[edge.target] ?? { x: 150, y: 160 }
+    const weight = isDiff ? Math.abs(edge.weight_diff ?? 0) : edge.weight
+    const color = isDiff ? diffColor(edge.weight_diff ?? 0) : weight < 0.01 ? '#e5e7eb' : '#6b7280'
+    const label = isDiff
+      ? `${(edge.weight_diff ?? 0) > 0 ? '+' : ''}${formatNumber(edge.weight_diff ?? 0)}`
+      : formatNumber(edge.weight)
+    const showLabel = isDiff ? Math.abs(edge.weight_diff ?? 0) >= 0.05 : edge.weight >= 0.05
+    return `
+      <line x1="${source.x}" y1="${source.y}" x2="${target.x}" y2="${target.y}" stroke="${color}" stroke-width="${edgeStroke(weight, maxWeight)}" stroke-linecap="round" opacity="0.85" />
+      ${showLabel ? `<text x="${(source.x + target.x) / 2}" y="${(source.y + target.y) / 2 - 4}" text-anchor="middle" class="edge-label">${escapeHtml(label)}</text>` : ''}
+    `
+  }).join('')
+  const nodes = net.nodes.map((node) => {
+    const pos = NODE_POSITIONS[node] ?? { x: 150, y: 160 }
+    const color = NODE_COLORS[node] ?? '#64748b'
+    return `
+      <g>
+        <circle cx="${pos.x}" cy="${pos.y}" r="28" fill="${color}" fill-opacity="0.15" stroke="${color}" stroke-width="2" />
+        <text x="${pos.x}" y="${pos.y - 5}" text-anchor="middle" class="node-code" fill="${color}">${escapeHtml(node)}</text>
+        <text x="${pos.x}" y="${pos.y + 10}" text-anchor="middle" class="node-label">${escapeHtml(NODE_LABELS[node] ?? node)}</text>
+      </g>
+    `
+  }).join('')
+  const title = isDiff ? '差异图（条件B − 条件A）' : conditionLabel(net.condition)
+  return `
+    <div class="network-card">
+      <h3>${escapeHtml(title)}</h3>
+      <svg class="network-svg" viewBox="0 0 300 320" role="img" aria-label="${escapeHtml(title)}">
+        ${edges}
+        ${nodes}
+      </svg>
+    </div>
+  `
+}
+
+function enaNetworkChartsHtml(report: EnaAnalysisResult): string {
+  const conditionNetworks = report.networks.map((net) => networkSvg(net)).join('')
+  const diffNetwork = report.diff_network ? networkSvg(report.diff_network, true) : ''
+  const diffLegend = report.diff_network
+    ? '<p class="note">差异图中蓝色表示条件 B 连接更强，红色表示条件 A 连接更强，灰色表示差异小于 0.01。</p>'
+    : '<p class="note">三条件主报告展示各条件网络图；不生成两两差异网络图。</p>'
+  return `
+    <div class="network-grid">
+      ${conditionNetworks}
+      ${diffNetwork}
+    </div>
+    ${diffLegend}
+  `
+}
+
 export function buildEnaReportHtml(
   report: EnaAnalysisResult,
   mode: EnaAnalysisMode,
@@ -160,6 +248,14 @@ export function buildEnaReportHtml(
     table { width: 100%; margin: 10px 0 18px; border-collapse: collapse; font-size: 12px; page-break-inside: avoid; }
     th, td { padding: 7px 8px; border: 1px solid #d1d5db; text-align: left; vertical-align: top; }
     th { background: #f3f4f6; font-weight: 700; }
+    .network-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 10px 0 18px; }
+    .network-card { padding: 10px; border: 1px solid #d1d5db; border-radius: 8px; background: #f8fafc; page-break-inside: avoid; }
+    .network-card h3 { margin-top: 0; }
+    .network-svg { display: block; width: 100%; height: auto; }
+    .edge-label { fill: #374151; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; }
+    .node-code { font-size: 12px; font-weight: 700; }
+    .node-label { fill: #6b7280; font-size: 9px; }
+    @media (max-width: 900px) { .network-grid { grid-template-columns: 1fr; } }
     @media print { body { margin: 18mm; } h2 { page-break-after: avoid; } }
   </style>
 </head>
@@ -172,9 +268,12 @@ export function buildEnaReportHtml(
   <table><thead>${descriptiveHeader()}</thead><tbody>${descriptiveRows}</tbody></table>
   <h2>2. 正态性检查（Shapiro-Wilk）</h2>
   <table><thead><tr><th>指标</th><th>条件</th><th>n</th><th>W</th><th>p</th><th>判断</th><th>说明</th></tr></thead><tbody>${normalityRows}</tbody></table>
-  <h2>3. 推断统计</h2>
+  <h2>3. 报告结果与可视化</h2>
+  <p class="note">网络图展示 CoI 阶段之间的共现连接强度；p 值与 effect size 见下方推断统计表。</p>
+  ${enaNetworkChartsHtml(report)}
+  <h2>4. 推断统计</h2>
   <table><thead><tr><th>指标</th><th>检验</th><th>统计量</th><th>p</th><th>Effect size</th><th>状态</th><th>说明</th></tr></thead><tbody>${inferentialRows}</tbody></table>
-  <h2>4. 事后检验（Post-hoc）</h2>
+  <h2>5. 事后检验（Post-hoc）</h2>
   <p class="note">仅三条件且全局检验 p &lt; 0.05 时执行。</p>
   ${postHocSection}
 </body>
