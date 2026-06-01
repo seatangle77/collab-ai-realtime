@@ -2,7 +2,7 @@
 import { useRoute, useRouter } from 'vue-router'
 import { computed, ref, watch } from 'vue'
 import type { Component } from 'vue'
-import { HomeFilled, User, ChatLineRound, Microphone, EditPen } from '@element-plus/icons-vue'
+import { HomeFilled, ChatLineRound, Microphone, EditPen } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -28,7 +28,6 @@ interface TabItem {
 
 const tabs: TabItem[] = [
   { path: '/app', label: '首页', icon: HomeFilled },
-  { path: '/app/groups', label: '群组', icon: User },
   { path: '/app/sessions', label: '会话', icon: ChatLineRound },
   { path: '/app/voice-profile', label: '声纹', icon: Microphone },
   { path: '/app/survey', label: '量表', icon: EditPen },
