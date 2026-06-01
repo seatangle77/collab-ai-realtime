@@ -11,19 +11,31 @@ import matplotlib.patches as mpatches
 import matplotlib.font_manager as fm
 import numpy as np
 
-# Try to find a CJK-capable font on the host system
-_CJK_FONT_CANDIDATES = [
-    "PingFang SC", "Hiragino Sans GB", "STHeiti",          # macOS
-    "WenQuanYi Micro Hei", "Noto Sans CJK SC", "SimHei",   # Linux
-    "Microsoft YaHei", "SimSun",                            # Windows
+# Try to find a CJK-capable font — file path first, then name-based fallback
+import os as _os
+_CJK_FONT_PATHS = [
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",   # Ubuntu/Debian
+    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
 ]
-_found_cjk = next(
-    (f.name for f in fm.fontManager.ttflist if f.name in _CJK_FONT_CANDIDATES),
-    None,
-)
-if _found_cjk:
-    plt.rcParams["font.family"] = _found_cjk
-plt.rcParams["axes.unicode_minus"] = False  # prevent minus sign from breaking
+_CJK_FONT_NAMES = [
+    "PingFang SC", "Hiragino Sans GB", "STHeiti",
+    "Noto Sans CJK SC", "WenQuanYi Micro Hei", "SimHei",
+    "Microsoft YaHei", "SimSun",
+]
+_registered = False
+for _path in _CJK_FONT_PATHS:
+    if _os.path.exists(_path):
+        fm.fontManager.addfont(_path)
+        _prop = fm.FontProperties(fname=_path)
+        plt.rcParams["font.family"] = _prop.get_name()
+        _registered = True
+        break
+if not _registered:
+    _found = next((f.name for f in fm.fontManager.ttflist if f.name in _CJK_FONT_NAMES), None)
+    if _found:
+        plt.rcParams["font.family"] = _found
+plt.rcParams["axes.unicode_minus"] = False
 
 # ---------------------------------------------------------------------------
 # Shared style
