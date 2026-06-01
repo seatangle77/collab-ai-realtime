@@ -25,6 +25,12 @@ const COI_LABELS: Record<string, { label: string; color: string }> = {
   RE: { label: '解决', color: '#f56c6c' },
 }
 
+function formatCST(iso: string): string {
+  const d = new Date(new Date(iso).getTime() + 8 * 60 * 60 * 1000)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`
+}
+
 // ── 会话 summary 列表 ─────────────────────────────────────────────────────────
 const summaries = ref<SessionSummary[]>([])
 const loadingSummaries = ref(false)
@@ -118,6 +124,13 @@ const selected = ref<Set<string>>(new Set())
 
 const totalCount = computed(() => utterances.value.length)
 const codedCount = computed(() => utterances.value.filter((u) => u.coi_category).length)
+
+function jumpToNextUncoded() {
+  const next = utterances.value.find((u) => !u.coi_category)
+  if (!next) { ElMessage.success('所有发言已编码完成！'); return }
+  const el = document.getElementById(`utterance-${next.id}`)
+  el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
 
 async function fetchUtterances() {
   if (!selectedSessionId.value) return
@@ -383,6 +396,9 @@ onMounted(fetchSummaries)
             <el-tag type="success" size="small">已编码 {{ codedCount }} 条</el-tag>
             <el-tag type="warning" size="small">未编码 {{ totalCount - codedCount }} 条</el-tag>
           </div>
+          <el-button size="small" type="primary" plain @click="jumpToNextUncoded">
+            跳到下一条未编码 ↓
+          </el-button>
         </div>
 
         <!-- 批量操作行 -->
@@ -418,6 +434,7 @@ onMounted(fetchSummaries)
           <div
             v-for="(u, index) in utterances"
             :key="u.id"
+            :id="`utterance-${u.id}`"
             class="utterance-item"
             :class="{ 'is-selected': selected.has(u.id), 'is-coded': !!u.coi_category }"
           >
@@ -443,6 +460,7 @@ onMounted(fetchSummaries)
                 <span class="source-count" v-if="u.source_transcript_ids.length > 1">
                   [合并自 {{ u.source_transcript_ids.length }} 条转写]
                 </span>
+                <span class="created-time">{{ formatCST(u.created_at) }}</span>
               </div>
 
               <template v-if="editingId === u.id">
@@ -605,6 +623,7 @@ onMounted(fetchSummaries)
 .item-meta { display: flex; align-items: center; gap: 8px; }
 .speaker-name { font-weight: 600; font-size: 13px; color: #303133; }
 .source-count { font-size: 11px; color: #909399; }
+.created-time { font-size: 11px; color: #c0c4cc; margin-left: auto; }
 .item-content { font-size: 14px; color: #303133; line-height: 1.6; white-space: pre-wrap; word-break: break-all; }
 .edit-actions { display: flex; gap: 8px; }
 
