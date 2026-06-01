@@ -143,7 +143,7 @@ const editSpeaker = ref('')
 function startEdit(u: CoiUtterance) {
   editingId.value = u.id
   editContent.value = u.content
-  editSpeaker.value = u.speaker || ''
+  editSpeaker.value = u.speaker_name || u.speaker || ''
 }
 
 async function saveEdit(u: CoiUtterance) {
