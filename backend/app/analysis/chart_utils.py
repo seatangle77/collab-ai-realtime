@@ -8,7 +8,22 @@ import matplotlib
 matplotlib.use("Agg")  # headless, no display needed
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+import matplotlib.font_manager as fm
 import numpy as np
+
+# Try to find a CJK-capable font on the host system
+_CJK_FONT_CANDIDATES = [
+    "PingFang SC", "Hiragino Sans GB", "STHeiti",          # macOS
+    "WenQuanYi Micro Hei", "Noto Sans CJK SC", "SimHei",   # Linux
+    "Microsoft YaHei", "SimSun",                            # Windows
+]
+_found_cjk = next(
+    (f.name for f in fm.fontManager.ttflist if f.name in _CJK_FONT_CANDIDATES),
+    None,
+)
+if _found_cjk:
+    plt.rcParams["font.family"] = _found_cjk
+plt.rcParams["axes.unicode_minus"] = False  # prevent minus sign from breaking
 
 # ---------------------------------------------------------------------------
 # Shared style
@@ -26,7 +41,6 @@ CONDITION_LABELS: dict[str, str] = {
     "app_notification": "App Notification",
 }
 
-FONT_FAMILY = "DejaVu Sans"
 DPI = 180
 
 
