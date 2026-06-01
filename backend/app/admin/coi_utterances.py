@@ -38,6 +38,7 @@ class CoiUtteranceOut(ApiModel):
     coded_by: str | None
     coded_at: datetime | None
     created_at: datetime
+    start_time: float | None = None
 
 
 class CoiUtterancePatch(ApiModel):
@@ -94,6 +95,7 @@ def _row_to_out(row: Any) -> CoiUtteranceOut:
         coded_by=row["coded_by"],
         coded_at=row["coded_at"],
         created_at=row["created_at"],
+        start_time=float(row["start_time"]) if row.get("start_time") is not None else None,
     )
 
 
@@ -307,6 +309,21 @@ async def update_utterance(
     )
     await db.commit()
     return _row_to_out(result.mappings().first())
+
+
+# ── DELETE session ────────────────────────────────────────────────────────────
+
+@router.delete("/session", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_session_utterances(
+    session_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """删除某个会话的全部发言单元（用于移除无效会话）。"""
+    await db.execute(
+        text("DELETE FROM coi_utterances WHERE session_id = :session_id"),
+        {"session_id": session_id},
+    )
+    await db.commit()
 
 
 # ── DELETE ────────────────────────────────────────────────────────────────────

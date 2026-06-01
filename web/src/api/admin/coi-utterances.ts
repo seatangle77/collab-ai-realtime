@@ -14,6 +14,7 @@ export interface CoiUtterance {
   coded_by: string | null
   coded_at: string | null
   created_at: string
+  start_time: number | null
 }
 
 export interface ImportResponse {
@@ -51,6 +52,10 @@ export async function updateCoiUtterance(
 
 export async function deleteCoiUtterance(id: string): Promise<void> {
   await http.delete(`/api/admin/coi-utterances/${id}`)
+}
+
+export async function deleteCoiSession(sessionId: string): Promise<void> {
+  await http.delete(`/api/admin/coi-utterances/session?session_id=${encodeURIComponent(sessionId)}`)
 }
 
 export async function mergeCoiUtterances(ids: string[]): Promise<CoiUtterance> {

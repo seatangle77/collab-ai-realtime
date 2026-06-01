@@ -242,12 +242,12 @@ export function buildQuestionnaireReportHtml(
   <h2>2. 描述性统计</h2>
   <table><thead>${descriptiveHeader()}</thead><tbody>${descriptiveRows}</tbody></table>
   <h2>3. 内部一致性（Cronbach's α）</h2>
-  <p class="note">α ≥ 0.7 视为可接受的内部一致性。</p>
+  <p class="note">α ≥ 0.7 视为可接受的内部一致性；0.6 ≤ α &lt; 0.7 为边缘可接受；α &lt; 0.6 提示内部一致性不足，解读结果时需谨慎。</p>
   <table><thead><tr><th>维度</th><th>题项数</th><th>n</th><th>α</th><th>说明</th></tr></thead><tbody>${reliabilityRows}</tbody></table>
   <h2>4. 正态性检查（Shapiro-Wilk）</h2>
   <table><thead><tr><th>指标</th><th>条件</th><th>n</th><th>W</th><th>p</th><th>判断</th><th>说明</th></tr></thead><tbody>${normalityRows}</tbody></table>
   <h2>5. 报告结果与可视化</h2>
-  <p class="note">图表展示各量表维度在不同条件下的平均分；p 值与 effect size 见下方推断统计表。</p>
+  <p class="note">柱状图展示各条件下各维度均分（M），误差线为标准差（SD）；p 值与 effect size 见下方推断统计表。</p>
   ${report.charts?.dimension_bars ? `<img src="${report.charts.dimension_bars}" style="max-width:100%;display:block;margin:10px 0 18px;border-radius:6px" alt="维度柱状图">` : questionnaireChartHtml(report, scale, conditionColumns)}
   <h2>6. 推断统计</h2>
   <table><thead><tr><th>指标</th><th>检验</th><th>统计量</th><th>p</th><th>Effect size</th><th>状态</th><th>说明</th></tr></thead><tbody>${inferentialRows}</tbody></table>

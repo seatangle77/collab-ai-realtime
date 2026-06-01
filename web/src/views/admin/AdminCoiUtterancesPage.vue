@@ -9,6 +9,7 @@ import {
   importFromTranscripts,
   updateCoiUtterance,
   deleteCoiUtterance,
+  deleteCoiSession,
   mergeCoiUtterances,
   splitCoiUtterance,
   codeCoiUtterance,
@@ -29,6 +30,15 @@ function formatCST(iso: string): string {
   const d = new Date(new Date(iso).getTime() + 8 * 60 * 60 * 1000)
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`
+}
+
+function getDisplayTime(u: CoiUtterance): string {
+  if (u.start_time != null) {
+    const d = new Date((u.start_time + 8 * 60 * 60) * 1000)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`
+  }
+  return formatCST(u.created_at)
 }
 
 // ── 会话 summary 列表 ─────────────────────────────────────────────────────────
@@ -115,6 +125,22 @@ function backToList() {
   selectedSessionId.value = ''
   utterances.value = []
   selected.value.clear()
+}
+
+async function handleDeleteSession(summary: SessionSummary, event: Event) {
+  event.stopPropagation()
+  await ElMessageBox.confirm(
+    `确认删除会话「${summary.session_title}」的全部 ${summary.total} 条发言编码数据？此操作不可恢复。`,
+    '确认删除',
+    { type: 'warning', confirmButtonText: '删除', confirmButtonClass: 'el-button--danger' },
+  )
+  try {
+    await deleteCoiSession(summary.session_id)
+    ElMessage.success('已删除')
+    await fetchSummaries()
+  } catch (e: any) {
+    ElMessage.error(e?.message || '删除失败')
+  }
 }
 
 // ── 发言单元列表 ───────────────────────────────────────────────────────────────
@@ -383,6 +409,11 @@ onMounted(fetchSummaries)
               <span class="enter-hint">进入 →</span>
             </template>
           </el-table-column>
+          <el-table-column label="" width="60">
+            <template #default="{ row }">
+              <el-button link type="danger" size="small" @click="handleDeleteSession(row, $event)">删除</el-button>
+            </template>
+          </el-table-column>
         </el-table>
       </el-card>
     </template>
@@ -460,7 +491,7 @@ onMounted(fetchSummaries)
                 <span class="source-count" v-if="u.source_transcript_ids.length > 1">
                   [合并自 {{ u.source_transcript_ids.length }} 条转写]
                 </span>
-                <span class="created-time">{{ formatCST(u.created_at) }}</span>
+                <span class="created-time">{{ getDisplayTime(u) }}</span>
               </div>
 
               <template v-if="editingId === u.id">
