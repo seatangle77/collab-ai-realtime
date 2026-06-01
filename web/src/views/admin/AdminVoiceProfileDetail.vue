@@ -372,7 +372,8 @@ onMounted(() => {
 
 <style scoped>
 .admin-voice-profile-detail {
-  max-width: 900px;
+  width: 100%;
+  max-width: 1180px;
 }
 
 .detail-card :deep(.el-card__header) {
@@ -498,15 +499,14 @@ onMounted(() => {
 }
 
 .sample-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 64px minmax(360px, 1fr) minmax(260px, 320px) auto;
   align-items: center;
   gap: 16px;
   margin-bottom: 12px;
 }
 
 .sample-index {
-  flex-shrink: 0;
-  width: 52px;
   font-size: 12px;
   color: #6b7280;
 }
@@ -517,8 +517,19 @@ onMounted(() => {
 }
 
 .sample-audio {
-  flex-shrink: 0;
-  max-width: 160px;
+  width: 100%;
+  min-width: 260px;
+}
+
+@media (max-width: 1100px) {
+  .sample-row {
+    grid-template-columns: 64px minmax(0, 1fr) auto;
+  }
+
+  .sample-audio {
+    grid-column: 2 / 4;
+    min-width: 0;
+  }
 }
 
 .samples-empty {
@@ -592,4 +603,3 @@ onMounted(() => {
   overflow-y: auto;
 }
 </style>
-
