@@ -482,15 +482,33 @@ onMounted(load)
 }
 
 @media (max-width: 480px) {
+  .question-card {
+    padding: 14px 12px;
+  }
+
+  .rating-row {
+    flex-wrap: wrap;
+    justify-content: space-between;
+    row-gap: 6px;
+  }
+
+  .rating-buttons {
+    order: 1;
+    flex: 0 0 100%;
+    justify-content: space-between;
+    gap: 4px;
+  }
+
+  .rating-hint {
+    order: 2;
+    font-size: 11px;
+  }
+
   .rating-btn {
     width: 30px;
     height: 30px;
     font-size: 13px;
     border-radius: 6px;
-  }
-
-  .rating-hint {
-    font-size: 10px;
   }
 }
 </style>
