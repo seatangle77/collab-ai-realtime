@@ -357,6 +357,42 @@ async function applyReorder(arr: CoiUtterance[]) {
   }
 }
 
+// ── 导出 CSV ──────────────────────────────────────────────────────────────────
+function exportCSV() {
+  const headers = ['序号', '说话人', '发言内容', 'CoI分类', '分类名称', '发言时间']
+  const rows = utterances.value.map((u) => {
+    const label = u.coi_category ? (COI_LABELS[u.coi_category]?.label ?? u.coi_category) : ''
+    const time = getDisplayTime(u)
+    return [
+      u.order_index,
+      u.speaker_name || u.speaker || '',
+      u.content,
+      u.coi_category ?? '',
+      label,
+      time,
+    ]
+  })
+
+  const escape = (v: string | number) => {
+    const s = String(v)
+    return s.includes(',') || s.includes('"') || s.includes('\n')
+      ? `"${s.replace(/"/g, '""')}"`
+      : s
+  }
+
+  const csv = '﻿' + [headers, ...rows].map((r) => r.map(escape).join(',')).join('\n')
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  const title = selectedSummary.value
+    ? `${selectedSummary.value.group_name}_${selectedSummary.value.session_title}_CoI编码`
+    : 'CoI编码'
+  a.href = url
+  a.download = `${title}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 onMounted(fetchSummaries)
 </script>
 
@@ -427,9 +463,12 @@ onMounted(fetchSummaries)
             <el-tag type="success" size="small">已编码 {{ codedCount }} 条</el-tag>
             <el-tag type="warning" size="small">未编码 {{ totalCount - codedCount }} 条</el-tag>
           </div>
-          <el-button size="small" type="primary" plain @click="jumpToNextUncoded">
-            跳到下一条未编码 ↓
-          </el-button>
+          <div style="display:flex;gap:8px">
+            <el-button size="small" plain @click="exportCSV">导出 CSV</el-button>
+            <el-button size="small" type="primary" plain @click="jumpToNextUncoded">
+              跳到下一条未编码 ↓
+            </el-button>
+          </div>
         </div>
 
         <!-- 批量操作行 -->
