@@ -241,6 +241,7 @@ onMounted(fetchGroups)
     />
 
     <PostHocTable
+      v-if="filters.mode === 'three_conditions'"
       :loading="loading"
       :post-hoc-tests="postHocTests"
     />
