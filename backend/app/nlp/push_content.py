@@ -38,7 +38,7 @@ _GROUP_SILENCE_SYSTEM = (
     "你是一个温暖积极的讨论伙伴。"
     "输出一句自然友好的破冰话题，帮助全组重新打开讨论。"
     "话题本身要有追问性质，让成员自然地说出理由或举例，而不只是表态。"
-    "不超过20字，直接给出话题，不要任何前缀或解释。"
+    "不超过18字，直接给出话题，不要任何前缀或解释。"
 )
 
 _GROUP_SILENCE_TEMPLATE = (
@@ -102,7 +102,7 @@ _ANALYZE_MEMBERS_SYSTEM = (
     "reasoning_status：有=存在理由、因果、解释、推导、比较或权衡；无=没有明确论证结构；数据不足不参与判断。\n"
     "evidence_status：有=存在例子、事实、数据、引用、案例或观察；无=没有明确支撑依据；数据不足不参与判断。\n\n"
     "【分类规则】\n"
-    "stagnation — 参与不足、思路停滞。\n"
+    "stagnation 表示参与不足、思路停滞。\n"
     "强信号，单独触发：\n"
     "· speaking_ratio < 0.15，表示发言极少，是最直接的参与不足信号。\n"
     "弱信号，单独不触发：\n"
@@ -112,7 +112,7 @@ _ANALYZE_MEMBERS_SYSTEM = (
     "· info_gain < 0.3 且 speaking_ratio < 0.25。\n"
     "注意：info_gain 为“数据不足”时，不参与 stagnation 判断；不要因为 info_gain 单独偏低就判定 stagnation。\n"
     "干预目标：帮助成员重新进入讨论。文案风格：低门槛、鼓励式、重新开口导向。\n\n"
-    "shallow — 发言量尚可但内容深度不足。\n"
+    "shallow 表示发言量尚可但内容深度不足。\n"
     "强信号，单独触发：\n"
     "· reasoning_status=无 且 evidence_status=无 且 speaking_ratio ≥ 0.15，表示成员发言量尚可，但完全没有论证结构或支撑依据。\n"
     "弱信号，需满足 2 条及以上才触发：\n"
@@ -124,7 +124,7 @@ _ANALYZE_MEMBERS_SYSTEM = (
     "注意：shallow 只用于“说了一些，但展开不足”的情况；发言极少时优先考虑 stagnation，不应仅因内容短而判 shallow；"
     "指标为“数据不足”时，不计入弱信号。\n"
     "干预目标：帮助成员补充理由或依据。文案风格：追问式、深化式、展开导向。\n\n"
-    "none — 不需要干预。以下情况应判定为 none：\n"
+    "none 表示不需要干预。以下情况应判定为 none：\n"
     "· 未命中 stagnation 或 shallow 的强信号/组合触发条件\n"
     "· 仅有单一轻微信号偏低，但发言内容仍有实质贡献\n"
     "· reasoning_status=有 且 evidence_status=有，且没有明显低参与或重复问题\n"
@@ -133,19 +133,20 @@ _ANALYZE_MEMBERS_SYSTEM = (
     "默认原则：证据不足时选择 none，不要猜测问题。\n\n"
     "【用户可见文案 content 约束】\n"
     "analysis 是内部分析，可说明触发原因；content 是发给用户看的文案，绝不能暴露内部判断、指标或参与状态。\n"
-    "content 必须从发言记录里找到一个具体的主张、未被展开的方向或隐含的分歧，把它包进问句里——不能只用话题标签出题。\n"
+    "content 必须从发言记录里找到一个具体的主张、未被展开的方向或隐含的分歧，把它包进问句里。不能只用话题标签出题。\n"
     "shallow 的 content 必须针对 anchor 那句话追问更深一层：找出那句话里没说完的预设、隐含立场或未给出的理由，直接问它；不能脱离那句话生成泛化问题。\n"
     "stagnation 的 content 要从当前讨论里提一个有争议的具体点，让成员可以直接表态（同意/反对/补充），而不是泛泛邀请开口。\n"
     "content 语气亲切轻量，像同伴顺着话接一句；问句本身必须带一个立场、主张或两难张力，让对方有东西可以咬。\n"
     "content 禁止出现：发言少、参与度低、没听到你的声音、期待你的声音、大家期待、欢迎多分享、多说说、补充观点、会议进行中、讨论很热烈、内容质量正常、无需引导等泛化/评价性表达。\n"
+    "content 禁止使用破折号，包括“—”“——”“-”。不要用破折号连接上下半句。\n"
     "content 禁止纯邀请式提问（即问句里没有任何具体立场或主张，只是开放邀请说话）。\n"
     "content 不要称呼用户姓名，不要评价用户表现，不要说教，不要像主持人点名。\n"
     "如果发言记录里找不到可追问的具体内容，content 留空且 needs_prompt=false。\n"
     "content 示例（注意：每条都从具体内容出题，而不是从话题标签出题）：\n"
-    "· 有人说\"玩抽象就是缓解压力\"：你觉得它更像是在缓解压力，还是在制造新的社交暗号？\n"
-    "· 有人说\"搭子就是随叫随到\"：如果对方叫了但你不想去，这段关系还成立吗？\n"
-    "· 讨论里提到\"把压力转成玩笑\"：这个时候，玩笑是在消解问题，还是在帮你回避它？\n"
-    "· 有人说\"效率最重要\"：效率高但结果没人认可，还算成功吗？\n\n"
+    "· 玩笑是在消解压力，还是回避压力？\n"
+    "· 不想随叫随到时，搭子关系还成立吗？\n"
+    "· 把压力转成玩笑，会不会模糊真正问题？\n"
+    "· 效率高但没人认可，还算成功吗？\n\n"
     "【重要：anchor 约束】\n"
     "最近发言记录格式为：[transcript_id] user_id=系统用户ID speaker_name=展示名：原文。\n"
     "anchor 必须引用 transcripts 中真实存在的一条，不允许编造 transcript_id、user_id、speaker_name 或 text。\n"
@@ -157,7 +158,7 @@ _ANALYZE_MEMBERS_SYSTEM = (
     "【输出格式】\n"
     "严格返回 JSON，不输出任何解释或 markdown：\n"
     '{"members": [{"user_id": "...", "challenge_type": "stagnation|shallow|none", '
-    '"needs_prompt": true/false, "analysis": "一句中文分析", "content": "推送文案（≤20字）", '
+    '"needs_prompt": true/false, "analysis": "一句中文分析", "content": "推送文案（≤18字）", '
     '"anchor": {"transcript_id": "...", "speaker_id": "...", "speaker_name": "...", "text": "..."} 或 null}]}'
 )
 
