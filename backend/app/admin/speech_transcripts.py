@@ -44,6 +44,10 @@ class AdminSpeechTranscriptOut(ApiModel):
     is_edited: bool
 
 
+class AdminSpeechTranscriptUpdate(ApiModel):
+    text: str
+
+
 @router.get("/", response_model=Page[AdminSpeechTranscriptOut])
 async def list_speech_transcripts(
     page: int = Query(1, ge=1),
@@ -122,6 +126,49 @@ async def list_speech_transcripts(
         items=items,
         meta=PageMeta(total=total, page=page, page_size=page_size),
     )
+
+
+@router.patch("/{transcript_id}", response_model=AdminSpeechTranscriptOut)
+async def update_speech_transcript(
+    transcript_id: str,
+    payload: AdminSpeechTranscriptUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> AdminSpeechTranscriptOut:
+    result = await db.execute(
+        text(
+            """
+            UPDATE speech_transcripts
+            SET
+                original_text = CASE WHEN is_edited = false THEN text ELSE original_text END,
+                text = :text,
+                is_edited = true
+            WHERE transcript_id = :transcript_id
+            RETURNING
+                transcript_id,
+                group_id,
+                session_id,
+                user_id,
+                speaker,
+                text,
+                start,
+                "end" AS "end",
+                duration,
+                created_at,
+                audio_url,
+                confidence,
+                speaker_confidence,
+                speaker_user_id,
+                original_text,
+                is_edited
+            """
+        ),
+        {"transcript_id": transcript_id, "text": payload.text},
+    )
+    await db.commit()
+    row = result.mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="转写记录不存在")
+    return AdminSpeechTranscriptOut.model_validate(dict(row))
 
 
 @router.delete("/{transcript_id}", status_code=204)

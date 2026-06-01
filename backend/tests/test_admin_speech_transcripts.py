@@ -234,11 +234,11 @@ def run() -> None:
 
     _title("D. Update（改）")
     patch = requests.patch(
-        f"{BASE_URL}/api/admin/transcripts/{created['transcript_id']}",
+        f"{BASE_URL}/api/admin/speech-transcripts/{created['transcript_id']}",
         headers=ADMIN_HEADERS,
         json={"text": "修正后的转写文本"},
     )
-    _check("PATCH 已有 transcript -> 200", patch, 200)
+    _check("PATCH speech-transcripts 已有 transcript -> 200", patch, 200)
     patched = patch.json() if patch.ok else {}
     _ok("PATCH 后 is_edited=true", patched.get("is_edited") is True, patched)
     _ok("PATCH 后 original_text 被保存", patched.get("original_text") == extreme_text, patched)
@@ -246,11 +246,20 @@ def run() -> None:
     _check(
         "PATCH 缺少 text -> 422",
         requests.patch(
-            f"{BASE_URL}/api/admin/transcripts/{created['transcript_id']}",
+            f"{BASE_URL}/api/admin/speech-transcripts/{created['transcript_id']}",
             headers=ADMIN_HEADERS,
             json={},
         ),
         422,
+    )
+    _check(
+        "PATCH 不存在 speech transcript -> 404",
+        requests.patch(
+            f"{BASE_URL}/api/admin/speech-transcripts/tr_not_exists_999",
+            headers=ADMIN_HEADERS,
+            json={"text": "updated"},
+        ),
+        404,
     )
 
     _title("E. Delete（删）单条 + 批量")

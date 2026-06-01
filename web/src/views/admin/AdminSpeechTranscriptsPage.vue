@@ -5,6 +5,7 @@ import type { AdminSpeechTranscript } from '../../types/admin'
 import {
   listSpeechTranscripts,
   deleteSpeechTranscript,
+  updateSpeechTranscript,
   batchDeleteSpeechTranscripts,
 } from '../../api/admin/speech-transcripts'
 import { formatDateTimeToCST } from '../../utils/datetime'
@@ -20,6 +21,10 @@ const selectedRows = ref<AdminSpeechTranscript[]>([])
 const textDialogVisible = ref(false)
 const textDialogTitle = ref('')
 const textDialogValue = ref('')
+const editDialogVisible = ref(false)
+const editSaving = ref(false)
+const editingRow = ref<AdminSpeechTranscript | null>(null)
+const editText = ref('')
 
 const filters = reactive({
   session_id: '',
@@ -39,6 +44,12 @@ function openTextDialog(row: AdminSpeechTranscript) {
   textDialogTitle.value = `${row.speaker || row.speaker_user_id || '-'} - 转写文本`
   textDialogValue.value = row.text || ''
   textDialogVisible.value = true
+}
+
+function openEditDialog(row: AdminSpeechTranscript) {
+  editingRow.value = row
+  editText.value = row.text || ''
+  editDialogVisible.value = true
 }
 
 function formatConfidence(value: number | null) {
@@ -133,6 +144,28 @@ async function handleDelete(row: AdminSpeechTranscript) {
   }
 }
 
+async function handleSaveEdit() {
+  if (!editingRow.value) return
+  const nextText = editText.value.trim()
+  if (!nextText) {
+    ElMessage.warning('转写文本不能为空')
+    return
+  }
+  editSaving.value = true
+  try {
+    const updated = await updateSpeechTranscript(editingRow.value.transcript_id, nextText)
+    const index = rows.value.findIndex((row) => row.transcript_id === updated.transcript_id)
+    if (index >= 0) rows.value[index] = updated
+    ElMessage.success('转写文本已更新')
+    editDialogVisible.value = false
+    editingRow.value = null
+  } catch (e: any) {
+    ElMessage.error(e?.message || '保存失败')
+  } finally {
+    editSaving.value = false
+  }
+}
+
 async function handleBatchDelete() {
   if (selectedRows.value.length === 0) return
   try {
@@ -223,8 +256,17 @@ onMounted(() => { fetchData() })
           <template #default="{ row }">
             <div class="text-cell">
               <span class="text-preview">{{ truncateText(row.text) }}</span>
-              <el-button type="primary" link size="small" @click="openTextDialog(row)">查看全文</el-button>
+              <div class="text-actions">
+                <el-button type="primary" link size="small" @click="openTextDialog(row)">查看全文</el-button>
+                <el-button type="primary" link size="small" @click="openEditDialog(row)">编辑</el-button>
+              </div>
             </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="已编辑" width="90" align="center">
+          <template #default="{ row }">
+            <el-tag v-if="row.is_edited" type="warning" size="small">是</el-tag>
+            <span v-else>-</span>
           </template>
         </el-table-column>
         <el-table-column label="时长" min-width="100" align="right">
@@ -250,6 +292,14 @@ onMounted(() => { fetchData() })
     <el-dialog v-model="textDialogVisible" :title="textDialogTitle" width="720px">
       <el-input :model-value="textDialogValue" type="textarea" :rows="12" readonly />
     </el-dialog>
+
+    <el-dialog v-model="editDialogVisible" title="编辑转写文本" width="720px">
+      <el-input v-model="editText" type="textarea" :rows="12" maxlength="12000" show-word-limit />
+      <template #footer>
+        <el-button @click="editDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="editSaving" @click="handleSaveEdit">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -260,6 +310,7 @@ onMounted(() => { fetchData() })
 .toolbar { display: flex; gap: 8px; margin-bottom: 8px; }
 .pagination { display: flex; justify-content: flex-end; margin-top: 12px; }
 .text-cell { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.text-actions { display: flex; flex: none; gap: 4px; }
 .text-preview {
   flex: 1;
   min-width: 0;

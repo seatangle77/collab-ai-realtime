@@ -35,6 +35,13 @@ export async function deleteSpeechTranscript(transcriptId: string): Promise<void
   await http.delete<void>(`/api/admin/speech-transcripts/${transcriptId}`)
 }
 
+export async function updateSpeechTranscript(
+  transcriptId: string,
+  text: string,
+): Promise<AdminSpeechTranscript> {
+  return http.patch<AdminSpeechTranscript>(`/api/admin/speech-transcripts/${transcriptId}`, { text })
+}
+
 export async function batchDeleteSpeechTranscripts(
   transcriptIds: string[],
 ): Promise<BatchDeleteResponse> {
