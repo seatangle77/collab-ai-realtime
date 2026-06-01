@@ -21,6 +21,19 @@ export interface ImportResponse {
   skipped: number
 }
 
+export interface SessionSummary {
+  session_id: string
+  session_title: string
+  group_id: string
+  group_name: string
+  total: number
+  coded: number
+}
+
+export async function listSessionsSummary(): Promise<SessionSummary[]> {
+  return http.get<SessionSummary[]>('/api/admin/coi-utterances/sessions-summary')
+}
+
 export async function listCoiUtterances(sessionId: string): Promise<CoiUtterance[]> {
   return http.get<CoiUtterance[]>(`/api/admin/coi-utterances/?session_id=${encodeURIComponent(sessionId)}`)
 }

@@ -122,6 +122,50 @@ async def _shift_order(session_id: str, from_index: int, db: AsyncSession) -> No
     )
 
 
+# ── GET sessions summary ──────────────────────────────────────────────────────
+
+class SessionSummaryOut(ApiModel):
+    session_id: str
+    session_title: str
+    group_id: str
+    group_name: str
+    total: int
+    coded: int
+
+
+@router.get("/sessions-summary", response_model=list[SessionSummaryOut])
+async def list_sessions_summary(
+    db: AsyncSession = Depends(get_db),
+) -> list[SessionSummaryOut]:
+    result = await db.execute(
+        text(
+            """
+            SELECT cu.session_id, cs.session_title,
+                   cu.group_id, g.name AS group_name,
+                   COUNT(*) AS total,
+                   COUNT(cu.coi_category) AS coded
+            FROM coi_utterances cu
+            JOIN chat_sessions cs ON cs.id = cu.session_id
+            JOIN groups g ON g.id = cu.group_id
+            GROUP BY cu.session_id, cs.session_title, cu.group_id, g.name
+            ORDER BY g.name ASC, cs.session_title ASC
+            """
+        )
+    )
+    rows = result.mappings().all()
+    return [
+        SessionSummaryOut(
+            session_id=r["session_id"],
+            session_title=r["session_title"],
+            group_id=r["group_id"],
+            group_name=r["group_name"],
+            total=r["total"],
+            coded=r["coded"],
+        )
+        for r in rows
+    ]
+
+
 # ── GET list ──────────────────────────────────────────────────────────────────
 
 @router.get("/", response_model=list[CoiUtteranceOut])

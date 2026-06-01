@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { listAdminGroups } from '../../api/admin/groups'
 import { listAdminChatSessions } from '../../api/admin/chat-sessions'
 import {
+  listSessionsSummary,
   listCoiUtterances,
   importFromTranscripts,
   updateCoiUtterance,
@@ -13,6 +14,7 @@ import {
   codeCoiUtterance,
   reorderCoiUtterances,
   type CoiUtterance,
+  type SessionSummary,
 } from '../../api/admin/coi-utterances'
 import type { AdminGroup, AdminChatSession } from '../../types/admin'
 
@@ -23,15 +25,34 @@ const COI_LABELS: Record<string, { label: string; color: string }> = {
   RE: { label: '解决', color: '#f56c6c' },
 }
 
-// ── 选择器 ────────────────────────────────────────────────────────────────────
+// ── 会话 summary 列表 ─────────────────────────────────────────────────────────
+const summaries = ref<SessionSummary[]>([])
+const loadingSummaries = ref(false)
+
+async function fetchSummaries() {
+  loadingSummaries.value = true
+  try {
+    summaries.value = await listSessionsSummary()
+  } catch (e: any) {
+    ElMessage.error(e?.message || '加载会话列表失败')
+  } finally {
+    loadingSummaries.value = false
+  }
+}
+
+// ── 导入对话框 ────────────────────────────────────────────────────────────────
+const importDialogVisible = ref(false)
 const groups = ref<AdminGroup[]>([])
 const sessions = ref<AdminChatSession[]>([])
-const selectedGroupId = ref('')
-const selectedSessionId = ref('')
+const importGroupId = ref('')
+const importSessionId = ref('')
 const loadingGroups = ref(false)
 const loadingSessions = ref(false)
+const importing = ref(false)
 
-async function fetchGroups() {
+async function openImportDialog() {
+  importDialogVisible.value = true
+  if (groups.value.length > 0) return
   loadingGroups.value = true
   try {
     const res = await listAdminGroups({ page_size: 200 })
@@ -41,17 +62,53 @@ async function fetchGroups() {
   }
 }
 
-async function fetchSessions() {
-  if (!selectedGroupId.value) return
+async function onImportGroupChange() {
+  importSessionId.value = ''
+  sessions.value = []
+  if (!importGroupId.value) return
   loadingSessions.value = true
-  selectedSessionId.value = ''
-  utterances.value = []
   try {
-    const res = await listAdminChatSessions({ group_id: selectedGroupId.value, page_size: 200 })
+    const res = await listAdminChatSessions({ group_id: importGroupId.value, page_size: 200 })
     sessions.value = res.items
   } finally {
     loadingSessions.value = false
   }
+}
+
+async function handleImport() {
+  if (!importSessionId.value) return
+  importing.value = true
+  try {
+    const res = await importFromTranscripts(importSessionId.value)
+    ElMessage.success(`导入成功：${res.imported} 条，跳过 ${res.skipped} 条（已存在）`)
+    importDialogVisible.value = false
+    await fetchSummaries()
+    // 如果导入的就是当前打开的会话，刷新发言列表
+    if (importSessionId.value === selectedSessionId.value) {
+      await fetchUtterances()
+    }
+  } catch (e: any) {
+    ElMessage.error(e?.message || '导入失败')
+  } finally {
+    importing.value = false
+  }
+}
+
+// ── 当前打开的会话 ─────────────────────────────────────────────────────────────
+const selectedSessionId = ref('')
+const selectedSummary = computed(() =>
+  summaries.value.find((s) => s.session_id === selectedSessionId.value) ?? null
+)
+
+async function selectSession(summary: SessionSummary) {
+  selectedSessionId.value = summary.session_id
+  await fetchUtterances()
+}
+
+function backToList() {
+  selectedSessionId.value = ''
+  utterances.value = []
+  selected.value.clear()
 }
 
 // ── 发言单元列表 ───────────────────────────────────────────────────────────────
@@ -72,22 +129,6 @@ async function fetchUtterances() {
     ElMessage.error(e?.message || '加载失败')
   } finally {
     loading.value = false
-  }
-}
-
-// ── 导入 ───────────────────────────────────────────────────────────────────────
-const importing = ref(false)
-async function handleImport() {
-  if (!selectedSessionId.value) return
-  importing.value = true
-  try {
-    const res = await importFromTranscripts(selectedSessionId.value)
-    ElMessage.success(`导入成功：${res.imported} 条，跳过 ${res.skipped} 条（已存在）`)
-    await fetchUtterances()
-  } catch (e: any) {
-    ElMessage.error(e?.message || '导入失败')
-  } finally {
-    importing.value = false
   }
 }
 
@@ -236,6 +277,9 @@ async function handleCode(u: CoiUtterance, category: 'TE' | 'EX' | 'IN' | 'RE' |
     const updated = await codeCoiUtterance(u.id, newCat)
     const idx = utterances.value.findIndex((x) => x.id === u.id)
     if (idx !== -1) utterances.value[idx] = updated
+    // 更新 summary 里的 coded 数
+    const s = summaries.value.find((x) => x.session_id === selectedSessionId.value)
+    if (s) s.coded = utterances.value.filter((x) => x.coi_category).length
   } catch (e: any) {
     ElMessage.error(e?.message || '编码失败')
   }
@@ -274,157 +318,204 @@ async function applyReorder(arr: CoiUtterance[]) {
   }
 }
 
-onMounted(fetchGroups)
+onMounted(fetchSummaries)
 </script>
 
 <template>
   <div class="page-container">
+    <!-- ── 标题栏 ── -->
     <div class="page-header">
-      <h2 class="page-title">CoI 发言编码</h2>
+      <div class="header-left">
+        <el-button v-if="selectedSessionId" link @click="backToList">← 返回列表</el-button>
+        <h2 class="page-title">
+          CoI 发言编码
+          <span v-if="selectedSummary" class="page-subtitle">
+            / {{ selectedSummary.group_name }} · {{ selectedSummary.session_title }}
+          </span>
+        </h2>
+      </div>
+      <el-button type="primary" @click="openImportDialog">+ 导入新会话</el-button>
     </div>
 
-    <!-- 筛选栏 -->
-    <el-card shadow="never">
-      <div class="toolbar-row">
-        <div class="toolbar-left">
-          <el-select
-            v-model="selectedGroupId"
-            placeholder="选择群组"
-            style="width: 180px"
-            :loading="loadingGroups"
-            filterable
-            data-testid="coi-group-select"
-            @change="fetchSessions"
-          >
-            <el-option v-for="g in groups" :key="g.id" :label="g.name" :value="g.id" />
-          </el-select>
+    <!-- ── 会话列表视图 ── -->
+    <template v-if="!selectedSessionId">
+      <el-card shadow="never" v-loading="loadingSummaries">
+        <el-empty v-if="!loadingSummaries && summaries.length === 0" description="暂无已导入的会话，点击「导入新会话」开始" />
 
-          <el-select
-            v-model="selectedSessionId"
-            placeholder="选择会话"
-            style="width: 220px"
-            :loading="loadingSessions"
-            :disabled="!selectedGroupId"
-            filterable
-            data-testid="coi-session-select"
-            @change="fetchUtterances"
-          >
-            <el-option v-for="s in sessions" :key="s.id" :label="s.session_title" :value="s.id" />
-          </el-select>
-
-          <el-button type="primary" :loading="importing" :disabled="!selectedSessionId" @click="handleImport">
-            从转写导入
-          </el-button>
-        </div>
-
-        <div class="toolbar-right" v-if="utterances.length > 0">
-          <el-tag type="info" size="small">共 {{ totalCount }} 条</el-tag>
-          <el-tag type="success" size="small">已编码 {{ codedCount }} 条</el-tag>
-          <el-tag type="warning" size="small">未编码 {{ totalCount - codedCount }} 条</el-tag>
-        </div>
-      </div>
-    </el-card>
-
-    <!-- 发言列表 -->
-    <el-card shadow="never">
-      <!-- 批量操作行 -->
-      <div class="batch-row" v-if="utterances.length > 0">
-        <el-checkbox
-          :model-value="selected.size === utterances.length && utterances.length > 0"
-          :indeterminate="selected.size > 0 && selected.size < utterances.length"
-          @change="selectAll"
-        >
-          全选
-        </el-checkbox>
-        <el-button
-          size="small"
-          type="warning"
-          :loading="merging"
-          :disabled="selected.size < 2"
-          @click="handleMerge"
-        >
-          合并选中 ({{ selected.size }})
-        </el-button>
-        <div class="legend">
-          <span v-for="(v, k) in COI_LABELS" :key="k" class="legend-item">
-            <el-tag :color="v.color" effect="dark" size="small">{{ k }}</el-tag>
-            {{ v.label }}
-          </span>
-        </div>
-      </div>
-
-      <!-- 列表主体 -->
-      <div v-loading="loading" class="utterance-list">
-        <el-empty v-if="!selectedSessionId" description="请先选择群组和会话" />
-        <el-empty v-else-if="!loading && utterances.length === 0" description="暂无数据，请点击「从转写导入」" />
-
-        <div
-          v-for="(u, index) in utterances"
-          :key="u.id"
-          class="utterance-item"
-          :class="{ 'is-selected': selected.has(u.id), 'is-coded': !!u.coi_category }"
-        >
-          <!-- 左侧：勾选 + 序号 + 排序 -->
-          <div class="item-left">
-            <el-checkbox :model-value="selected.has(u.id)" @change="toggleSelect(u.id)" />
-            <span class="order-num">{{ u.order_index }}</span>
-            <div class="move-btns">
-              <el-button link size="small" :disabled="index === 0 || reordering" @click="moveUp(index)">↑</el-button>
-              <el-button link size="small" :disabled="index === utterances.length - 1 || reordering" @click="moveDown(index)">↓</el-button>
-            </div>
-          </div>
-
-          <!-- 中间：说话人 + 内容 -->
-          <div class="item-body">
-            <div class="item-meta">
-              <template v-if="editingId === u.id">
-                <el-input v-model="editSpeaker" size="small" placeholder="说话人" style="width: 120px" />
-              </template>
-              <template v-else>
-                <span class="speaker-name">{{ u.speaker_name || u.speaker || '未知说话人' }}</span>
-              </template>
-              <span class="source-count" v-if="u.source_transcript_ids.length > 1">
-                [合并自 {{ u.source_transcript_ids.length }} 条转写]
-              </span>
-            </div>
-
-            <template v-if="editingId === u.id">
-              <el-input v-model="editContent" type="textarea" :rows="3" style="width: 100%" />
-              <div class="edit-actions">
-                <el-button size="small" type="primary" @click="saveEdit(u)">保存</el-button>
-                <el-button size="small" @click="cancelEdit">取消</el-button>
+        <el-table v-else :data="summaries" style="width: 100%" @row-click="selectSession" row-class-name="summary-row">
+          <el-table-column prop="group_name" label="群组" width="150" />
+          <el-table-column prop="session_title" label="会话" min-width="200" />
+          <el-table-column label="进度" width="280">
+            <template #default="{ row }">
+              <div class="progress-cell">
+                <el-progress
+                  :percentage="row.total > 0 ? Math.round((row.coded / row.total) * 100) : 0"
+                  :stroke-width="8"
+                  :color="row.coded === row.total ? '#67c23a' : '#409eff'"
+                  style="flex: 1"
+                />
+                <span class="progress-text">{{ row.coded }} / {{ row.total }}</span>
               </div>
             </template>
-            <template v-else>
-              <div class="item-content">{{ u.content }}</div>
+          </el-table-column>
+          <el-table-column label="状态" width="100">
+            <template #default="{ row }">
+              <el-tag v-if="row.coded === row.total" type="success" size="small">已完成</el-tag>
+              <el-tag v-else-if="row.coded > 0" type="warning" size="small">编码中</el-tag>
+              <el-tag v-else type="info" size="small">未开始</el-tag>
             </template>
-          </div>
+          </el-table-column>
+          <el-table-column label="" width="80">
+            <template #default>
+              <span class="enter-hint">进入 →</span>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-card>
+    </template>
 
-          <!-- 右侧：CoI 编码 + 操作 -->
-          <div class="item-right">
-            <div class="code-btns">
-              <el-button
-                v-for="(v, k) in COI_LABELS"
-                :key="k"
-                size="small"
-                :type="u.coi_category === k ? 'primary' : 'default'"
-                :style="u.coi_category === k ? `background:${v.color};border-color:${v.color}` : ''"
-                @click="handleCode(u, k as any)"
-              >
-                {{ k }}
-              </el-button>
+    <!-- ── 发言编辑视图 ── -->
+    <template v-else>
+      <el-card shadow="never">
+        <div class="editor-header">
+          <div class="editor-stats">
+            <el-tag type="info" size="small">共 {{ totalCount }} 条</el-tag>
+            <el-tag type="success" size="small">已编码 {{ codedCount }} 条</el-tag>
+            <el-tag type="warning" size="small">未编码 {{ totalCount - codedCount }} 条</el-tag>
+          </div>
+        </div>
+
+        <!-- 批量操作行 -->
+        <div class="batch-row" v-if="utterances.length > 0">
+          <el-checkbox
+            :model-value="selected.size === utterances.length && utterances.length > 0"
+            :indeterminate="selected.size > 0 && selected.size < utterances.length"
+            @change="selectAll"
+          >
+            全选
+          </el-checkbox>
+          <el-button
+            size="small"
+            type="warning"
+            :loading="merging"
+            :disabled="selected.size < 2"
+            @click="handleMerge"
+          >
+            合并选中 ({{ selected.size }})
+          </el-button>
+          <div class="legend">
+            <span v-for="(v, k) in COI_LABELS" :key="k" class="legend-item">
+              <el-tag :color="v.color" effect="dark" size="small">{{ k }}</el-tag>
+              {{ v.label }}
+            </span>
+          </div>
+        </div>
+
+        <!-- 列表主体 -->
+        <div v-loading="loading" class="utterance-list">
+          <el-empty v-if="!loading && utterances.length === 0" description="暂无数据，请点击「导入新会话」重新导入" />
+
+          <div
+            v-for="(u, index) in utterances"
+            :key="u.id"
+            class="utterance-item"
+            :class="{ 'is-selected': selected.has(u.id), 'is-coded': !!u.coi_category }"
+          >
+            <!-- 左侧：勾选 + 序号 + 排序 -->
+            <div class="item-left">
+              <el-checkbox :model-value="selected.has(u.id)" @change="toggleSelect(u.id)" />
+              <span class="order-num">{{ u.order_index }}</span>
+              <div class="move-btns">
+                <el-button link size="small" :disabled="index === 0 || reordering" @click="moveUp(index)">↑</el-button>
+                <el-button link size="small" :disabled="index === utterances.length - 1 || reordering" @click="moveDown(index)">↓</el-button>
+              </div>
             </div>
-            <div class="item-ops">
-              <el-button link size="small" @click="startEdit(u)">编辑</el-button>
-              <el-button link size="small" @click="openSplitDialog(u)">拆分</el-button>
-              <el-button link size="small" type="danger" @click="handleDelete(u)">删除</el-button>
+
+            <!-- 中间：说话人 + 内容 -->
+            <div class="item-body">
+              <div class="item-meta">
+                <template v-if="editingId === u.id">
+                  <el-input v-model="editSpeaker" size="small" placeholder="说话人" style="width: 120px" />
+                </template>
+                <template v-else>
+                  <span class="speaker-name">{{ u.speaker_name || u.speaker || '未知说话人' }}</span>
+                </template>
+                <span class="source-count" v-if="u.source_transcript_ids.length > 1">
+                  [合并自 {{ u.source_transcript_ids.length }} 条转写]
+                </span>
+              </div>
+
+              <template v-if="editingId === u.id">
+                <el-input v-model="editContent" type="textarea" :rows="3" style="width: 100%" />
+                <div class="edit-actions">
+                  <el-button size="small" type="primary" @click="saveEdit(u)">保存</el-button>
+                  <el-button size="small" @click="cancelEdit">取消</el-button>
+                </div>
+              </template>
+              <template v-else>
+                <div class="item-content">{{ u.content }}</div>
+              </template>
+            </div>
+
+            <!-- 右侧：CoI 编码 + 操作 -->
+            <div class="item-right">
+              <div class="code-btns">
+                <el-button
+                  v-for="(v, k) in COI_LABELS"
+                  :key="k"
+                  size="small"
+                  :type="u.coi_category === k ? 'primary' : 'default'"
+                  :style="u.coi_category === k ? `background:${v.color};border-color:${v.color}` : ''"
+                  @click="handleCode(u, k as any)"
+                >
+                  {{ k }}
+                </el-button>
+              </div>
+              <div class="item-ops">
+                <el-button link size="small" @click="startEdit(u)">编辑</el-button>
+                <el-button link size="small" @click="openSplitDialog(u)">拆分</el-button>
+                <el-button link size="small" type="danger" @click="handleDelete(u)">删除</el-button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    </el-card>
+      </el-card>
+    </template>
 
-    <!-- 拆分对话框 -->
+    <!-- ── 导入对话框 ── -->
+    <el-dialog v-model="importDialogVisible" title="导入新会话" width="420px">
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <el-select
+          v-model="importGroupId"
+          placeholder="选择群组"
+          style="width: 100%"
+          :loading="loadingGroups"
+          filterable
+          @change="onImportGroupChange"
+        >
+          <el-option v-for="g in groups" :key="g.id" :label="g.name" :value="g.id" />
+        </el-select>
+
+        <el-select
+          v-model="importSessionId"
+          placeholder="选择会话"
+          style="width: 100%"
+          :loading="loadingSessions"
+          :disabled="!importGroupId"
+          filterable
+        >
+          <el-option v-for="s in sessions" :key="s.id" :label="s.session_title" :value="s.id" />
+        </el-select>
+      </div>
+      <template #footer>
+        <el-button @click="importDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="importing" :disabled="!importSessionId" @click="handleImport">
+          从转写导入
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- ── 拆分对话框 ── -->
     <el-dialog v-model="splitDialogVisible" title="拆分发言" width="600px">
       <p class="split-tip">在下方文本中点击选择拆分位置（光标所在处），然后点击「确认拆分」。</p>
       <textarea
@@ -458,17 +549,20 @@ onMounted(fetchGroups)
 <style scoped>
 .page-container { display: flex; flex-direction: column; gap: 16px; }
 .page-header { display: flex; align-items: center; justify-content: space-between; }
+.header-left { display: flex; align-items: center; gap: 8px; }
 .page-title { margin: 0; font-size: 18px; font-weight: 600; }
+.page-subtitle { font-size: 14px; font-weight: 400; color: #909399; }
 
-.toolbar-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-.toolbar-left { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.toolbar-right { display: flex; align-items: center; gap: 8px; }
+/* 会话列表 */
+:deep(.summary-row) { cursor: pointer; }
+:deep(.summary-row:hover td) { background: #f5f7fa !important; }
+.progress-cell { display: flex; align-items: center; gap: 10px; }
+.progress-text { font-size: 12px; color: #606266; white-space: nowrap; }
+.enter-hint { font-size: 13px; color: #409eff; }
+
+/* 编辑器头部 */
+.editor-header { display: flex; align-items: center; justify-content: flex-end; margin-bottom: 12px; }
+.editor-stats { display: flex; gap: 8px; }
 
 .batch-row {
   display: flex;
