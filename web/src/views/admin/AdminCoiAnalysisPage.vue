@@ -100,7 +100,7 @@ function downloadHtmlReport() {
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `coi-analysis-report-${new Date().toISOString().slice(0, 10)}.html`
+  link.download = `coi-analysis-report-${mode.value}-${new Date().toISOString().slice(0, 10)}.html`
   link.click()
   URL.revokeObjectURL(url)
 }

@@ -128,7 +128,7 @@ function downloadHtmlReport() {
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `task-score-report-${new Date().toISOString().slice(0, 10)}.html`
+  link.download = `task-score-report-${filters.mode}-${new Date().toISOString().slice(0, 10)}.html`
   link.click()
   URL.revokeObjectURL(url)
 }

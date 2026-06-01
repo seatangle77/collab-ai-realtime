@@ -102,7 +102,7 @@ function downloadHtmlReport() {
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `questionnaire-${scale.value}-report-${new Date().toISOString().slice(0, 10)}.html`
+  link.download = `questionnaire-${scale.value}-${mode.value}-report-${new Date().toISOString().slice(0, 10)}.html`
   link.click()
   URL.revokeObjectURL(url)
 }
