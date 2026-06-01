@@ -110,6 +110,25 @@ async def _get_or_404(uid: str, db: AsyncSession) -> Any:
     return row
 
 
+async def _fetch_with_name(uid: str, db: AsyncSession) -> CoiUtteranceOut:
+    """带 speaker_name JOIN 的单条查询，避免返回裸 uid。"""
+    result = await db.execute(
+        text(
+            """
+            SELECT cu.*, u.name AS speaker_name
+            FROM coi_utterances cu
+            LEFT JOIN users_info u ON u.id = cu.speaker
+            WHERE cu.id = :id
+            """
+        ),
+        {"id": uid},
+    )
+    row = result.mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="发言单元不存在")
+    return _row_to_out(row)
+
+
 async def _shift_order(session_id: str, from_index: int, db: AsyncSession) -> None:
     """把 from_index 及之后的记录 order_index 各加 1，为插入新记录腾位置。"""
     await db.execute(
@@ -303,12 +322,12 @@ async def update_utterance(
         raise HTTPException(status_code=400, detail="没有需要更新的字段")
 
     set_clause = ", ".join(f"{k} = :{k}" for k in updates)
-    result = await db.execute(
-        text(f"UPDATE coi_utterances SET {set_clause} WHERE id = :uid RETURNING *"),
+    await db.execute(
+        text(f"UPDATE coi_utterances SET {set_clause} WHERE id = :uid"),
         {**updates, "uid": uid},
     )
     await db.commit()
-    return _row_to_out(result.mappings().first())
+    return await _fetch_with_name(uid, db)
 
 
 # ── DELETE session ────────────────────────────────────────────────────────────
@@ -414,11 +433,7 @@ async def merge_utterances(
 
     await db.commit()
 
-    final = await db.execute(
-        text("SELECT * FROM coi_utterances WHERE id = :id"),
-        {"id": keep_id},
-    )
-    return _row_to_out(final.mappings().first())
+    return await _fetch_with_name(keep_id, db)
 
 
 # ── POST split ────────────────────────────────────────────────────────────────
@@ -483,7 +498,13 @@ async def split_utterance(
 
     result = await db.execute(
         text(
-            "SELECT * FROM coi_utterances WHERE id = ANY(:ids) ORDER BY order_index ASC"
+            """
+            SELECT cu.*, u.name AS speaker_name
+            FROM coi_utterances cu
+            LEFT JOIN users_info u ON u.id = cu.speaker
+            WHERE cu.id = ANY(:ids)
+            ORDER BY cu.order_index ASC
+            """
         ),
         {"ids": [uid, new_id]},
     )
@@ -505,7 +526,7 @@ async def code_utterance(
 
     coded_at = datetime.utcnow() if payload.coi_category is not None else None
 
-    result = await db.execute(
+    await db.execute(
         text(
             """
             UPDATE coi_utterances
@@ -513,7 +534,6 @@ async def code_utterance(
                 coded_by     = :coded_by,
                 coded_at     = :coded_at
             WHERE id = :id
-            RETURNING *
             """
         ),
         {
@@ -524,7 +544,7 @@ async def code_utterance(
         },
     )
     await db.commit()
-    return _row_to_out(result.mappings().first())
+    return await _fetch_with_name(uid, db)
 
 
 # ── POST reorder ──────────────────────────────────────────────────────────────
