@@ -5,6 +5,7 @@ export interface CoiUtterance {
   session_id: string
   group_id: string
   speaker: string | null
+  speaker_name: string | null
   speaker_user_id: string | null
   content: string
   source_transcript_ids: string[]

@@ -381,7 +381,7 @@ onMounted(fetchGroups)
                 <el-input v-model="editSpeaker" size="small" placeholder="说话人" style="width: 120px" />
               </template>
               <template v-else>
-                <span class="speaker-name">{{ u.speaker || '未知说话人' }}</span>
+                <span class="speaker-name">{{ u.speaker_name || u.speaker || '未知说话人' }}</span>
               </template>
               <span class="source-count" v-if="u.source_transcript_ids.length > 1">
                 [合并自 {{ u.source_transcript_ids.length }} 条转写]

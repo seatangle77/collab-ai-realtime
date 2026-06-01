@@ -29,6 +29,7 @@ class CoiUtteranceOut(ApiModel):
     session_id: str
     group_id: str
     speaker: str | None
+    speaker_name: str | None
     speaker_user_id: str | None
     content: str
     source_transcript_ids: list[str]
@@ -84,6 +85,7 @@ def _row_to_out(row: Any) -> CoiUtteranceOut:
         session_id=row["session_id"],
         group_id=row["group_id"],
         speaker=row["speaker"],
+        speaker_name=row.get("speaker_name"),
         speaker_user_id=row["speaker_user_id"],
         content=row["content"],
         source_transcript_ids=row["source_transcript_ids"] or [],
@@ -130,9 +132,11 @@ async def list_coi_utterances(
     result = await db.execute(
         text(
             """
-            SELECT * FROM coi_utterances
-            WHERE session_id = :session_id
-            ORDER BY order_index ASC
+            SELECT cu.*, u.name AS speaker_name
+            FROM coi_utterances cu
+            LEFT JOIN users_info u ON u.id = cu.speaker
+            WHERE cu.session_id = :session_id
+            ORDER BY cu.order_index ASC
             """
         ),
         {"session_id": session_id},
