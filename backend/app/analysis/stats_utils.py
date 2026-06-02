@@ -70,3 +70,31 @@ def _epsilon_squared(h: float, k: int, n: int) -> float | None:
     if denom <= 0:
         return None
     return max(0.0, (h - k + 1) / denom)
+
+
+def benjamini_hochberg(p_values: list[float | None]) -> list[float | None]:
+    """Apply Benjamini-Hochberg FDR correction to a list of p-values.
+
+    None entries (skipped / failed tests) are passed through unchanged.
+    Returns a list of the same length with BH-adjusted p-values.
+    """
+    indexed = [(i, p) for i, p in enumerate(p_values) if p is not None]
+    if not indexed:
+        return list(p_values)
+
+    m = len(indexed)
+    sorted_by_p = sorted(indexed, key=lambda x: x[1])
+
+    # p_adj[rank] = p * m / (rank + 1), capped at 1
+    bh = [min(1.0, p * m / (rank + 1)) for rank, (_, p) in enumerate(sorted_by_p)]
+
+    # Enforce monotonicity: cumulative minimum from largest rank
+    for i in range(m - 2, -1, -1):
+        bh[i] = min(bh[i], bh[i + 1])
+
+    # Map back to original positions
+    result: list[float | None] = list(p_values)
+    for rank, (orig_idx, _) in enumerate(sorted_by_p):
+        result[orig_idx] = round(bh[rank], 4)
+
+    return result

@@ -220,7 +220,7 @@ export function buildEnaReportHtml(
   ).join('')
 
   const inferentialRows = report.statistical_tests.map((item) =>
-    `<tr><th>${escapeHtml(item.label)}</th><td>${escapeHtml(testLabel(item.test))}</td><td>${escapeHtml(item.statistic_name ?? '—')}=${escapeHtml(formatNumber(item.statistic))}</td><td>${escapeHtml(pValueText(item.p_value))}</td><td>${escapeHtml(item.effect_size_name ?? '—')}=${escapeHtml(formatNumber(item.effect_size))}</td><td>${escapeHtml(testStatusLabel(item.status))}</td><td>${escapeHtml(item.note)}</td></tr>`,
+    `<tr><th>${escapeHtml(item.label)}</th><td>${escapeHtml(testLabel(item.test))}</td><td>${escapeHtml(item.statistic_name ?? '—')}=${escapeHtml(formatNumber(item.statistic))}</td><td>${escapeHtml(pValueText(item.p_value))}</td><td>${escapeHtml(pValueText(item.p_value_adjusted))}</td><td>${escapeHtml(item.effect_size_name ?? '—')}=${escapeHtml(formatNumber(item.effect_size))}</td><td>${escapeHtml(testStatusLabel(item.status))}</td><td>${escapeHtml(item.note)}</td></tr>`,
   ).join('')
 
   const postHocSection = report.post_hoc_tests.map((item) => {
@@ -263,7 +263,7 @@ export function buildEnaReportHtml(
   <h1>ENA 认知过程网络分析报告</h1>
   <div class="meta">生成时间：${escapeHtml(generatedAt)}</div>
   <div class="meta">分析模式：${escapeHtml(modeDescription(mode))}；纳入会话数：${report.total_sessions}</div>
-  <p class="note">基于 CoI 编码结果，使用 2 分钟滑动时间窗口（步长 30s）计算话语类别共现强度，重点分析 EX-IN、IN-RE 及高阶认知连接。正态性使用 Shapiro-Wilk test；两条件选用 Welch t-test 或 Mann-Whitney U test；三条件使用 one-way ANOVA（附 Levene 方差齐性检验）或 Kruskal-Wallis。本报告为探索性分析，未对各连接强度指标之间做跨指标多重比较校正。</p>
+  <p class="note">基于 CoI 编码结果，使用 2 分钟滑动时间窗口（步长 30s）计算话语类别共现强度，重点分析 EX-IN、IN-RE 及高阶认知连接。正态性使用 Shapiro-Wilk test；两条件选用 Welch t-test 或 Mann-Whitney U test；三条件使用 one-way ANOVA（附 Levene 方差齐性检验）或 Kruskal-Wallis。多重比较校正：对所有连接强度指标的原始 p 值统一应用 Benjamini-Hochberg FDR 校正（见推断统计表 p_adj 列），以控制跨指标的假阳性率。</p>
   <h2>1. 描述性统计</h2>
   <table><thead>${descriptiveHeader()}</thead><tbody>${descriptiveRows}</tbody></table>
   <h2>2. 正态性检查（Shapiro-Wilk）</h2>
@@ -272,7 +272,7 @@ export function buildEnaReportHtml(
   <p class="note">网络图展示 CoI 阶段之间的共现连接强度；p 值与 effect size 见下方推断统计表。</p>
   ${report.charts?.networks ? `<img src="${report.charts.networks}" style="max-width:100%;display:block;margin:10px 0 18px;border-radius:6px" alt="ENA 网络图">` : enaNetworkChartsHtml(report)}
   <h2>4. 推断统计</h2>
-  <table><thead><tr><th>指标</th><th>检验</th><th>统计量</th><th>p</th><th>Effect size</th><th>状态</th><th>说明</th></tr></thead><tbody>${inferentialRows}</tbody></table>
+  <table><thead><tr><th>指标</th><th>检验</th><th>统计量</th><th>p</th><th>p_adj (BH)</th><th>Effect size</th><th>状态</th><th>说明</th></tr></thead><tbody>${inferentialRows}</tbody></table>
   <h2>5. 事后检验（Post-hoc）</h2>
   <p class="note">仅三条件且全局检验 p &lt; 0.05 时执行。</p>
   ${postHocSection}

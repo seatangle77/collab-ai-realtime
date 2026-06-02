@@ -11,7 +11,7 @@ from statistics import mean, median, stdev
 from typing import Any, Literal
 
 from ..api_model import ApiModel
-from .stats_utils import MetricConditionStats, PostHocPairResult, _cohens_d, _eta_squared, _epsilon_squared, _stats_for
+from .stats_utils import MetricConditionStats, PostHocPairResult, _cohens_d, _eta_squared, _epsilon_squared, _stats_for, benjamini_hochberg
 
 try:
     from scipy.stats import f_oneway, kruskal, levene, mannwhitneyu, norm as _scipy_norm, shapiro, ttest_ind, tukey_hsd
@@ -143,6 +143,7 @@ class StatisticalTestResult(ApiModel):
     statistic_name: str | None = None
     statistic: float | None = None
     p_value: float | None = None
+    p_value_adjusted: float | None = None  # Benjamini-Hochberg FDR corrected
     effect_size_name: str | None = None
     effect_size: float | None = None
     status: StatisticalTestStatus
@@ -636,6 +637,14 @@ def build_coi_analysis(
         )
         for m in COI_METRICS
     ]
+
+    # Benjamini-Hochberg FDR correction across all metrics
+    raw_p = [t.p_value if t.status == "ok" else None for t in statistical_tests]
+    adjusted_p = benjamini_hochberg(raw_p)
+    for t, p_adj in zip(statistical_tests, adjusted_p):
+        if t.status == "ok":
+            t.p_value_adjusted = p_adj
+
     omnibus_by_metric = {r.metric: r for r in statistical_tests}
 
     post_hoc_tests = [

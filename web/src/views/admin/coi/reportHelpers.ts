@@ -197,7 +197,7 @@ export function buildCoiReportHtml(
   `).join('')
 
   const inferentialRows = report.statistical_tests.map((item) => `
-    <tr><th>${escapeHtml(item.label)}</th><td>${escapeHtml(testLabel(item.test))}</td><td>${escapeHtml(item.statistic_name || '—')}</td><td>${escapeHtml(formatNumber(item.statistic))}</td><td>${escapeHtml(pValueText(item.p_value))}</td><td>${escapeHtml(item.effect_size_name || '—')}</td><td>${escapeHtml(formatNumber(item.effect_size))}</td><td>${escapeHtml(testStatusLabel(item.status))}</td><td>${escapeHtml(item.note)}</td></tr>
+    <tr><th>${escapeHtml(item.label)}</th><td>${escapeHtml(testLabel(item.test))}</td><td>${escapeHtml(item.statistic_name || '—')}</td><td>${escapeHtml(formatNumber(item.statistic))}</td><td>${escapeHtml(pValueText(item.p_value))}</td><td>${escapeHtml(pValueText(item.p_value_adjusted))}</td><td>${escapeHtml(item.effect_size_name || '—')}</td><td>${escapeHtml(formatNumber(item.effect_size))}</td><td>${escapeHtml(testStatusLabel(item.status))}</td><td>${escapeHtml(item.note)}</td></tr>
   `).join('')
 
   const postHocMethodLabel = (method: PostHocResult['method']) =>
@@ -259,7 +259,7 @@ export function buildCoiReportHtml(
   <div class="meta">分析模式：${escapeHtml(modeDescription(mode))}；纳入会话数：${report.total_sessions}</div>
   <h2>1. 分析方法</h2>
   <p class="note">基于 CoI 框架 Cognitive Presence 维度对已编码发言进行量化分析。权重：TE=1, EX=2, IN=3, RE=4。高阶认知参与比例 = (IN+RE) / 总有效认知话语数。加权得分 = Σ(类别数×权重) / 总有效认知话语数。只纳入全部发言已编码的会话。</p>
-  <p class="note">正态性使用 Shapiro-Wilk test；两条件选用 Welch t-test 或 Mann-Whitney U test；三条件使用 one-way ANOVA（附 Levene 方差齐性检验）或 Kruskal-Wallis。Effect size 使用 Hedges' g、rank-biserial r、eta squared 或 epsilon squared。本报告为探索性分析，未对各指标之间做跨指标多重比较校正。</p>
+  <p class="note">正态性使用 Shapiro-Wilk test；两条件选用 Welch t-test 或 Mann-Whitney U test；三条件使用 one-way ANOVA（附 Levene 方差齐性检验）或 Kruskal-Wallis。Effect size 使用 Hedges' g、rank-biserial r、eta squared 或 epsilon squared。多重比较校正：对所有指标的原始 p 值统一应用 Benjamini-Hochberg FDR 校正（见推断统计表 p_adj 列），以控制跨指标的假阳性率。</p>
   <h2>2. 样本选择</h2>
   <table><thead><tr><th>条件</th><th>小组数</th><th>小组</th></tr></thead><tbody>${sampleRows}</tbody></table>
   <h2>3. 排除会话</h2>
@@ -272,7 +272,7 @@ export function buildCoiReportHtml(
   <p class="note">图表展示各条件的 CoI 话语结构，以及 Integration + Resolution 所占的高阶认知参与比例；p 值与 effect size 见下方推断统计表。</p>
   ${report.charts?.composition ? `<img src="${report.charts.composition}" style="max-width:100%;display:block;margin:10px 0 18px;border-radius:6px" alt="CoI 话语结构图">` : coiCompositionChartsHtml(report, conditionColumns)}
   <h2>7. 推断统计</h2>
-  <table><thead><tr><th>指标</th><th>检验</th><th>统计量</th><th>值</th><th>p</th><th>Effect size</th><th>值</th><th>状态</th><th>说明</th></tr></thead><tbody>${inferentialRows}</tbody></table>
+  <table><thead><tr><th>指标</th><th>检验</th><th>统计量</th><th>值</th><th>p</th><th>p_adj (BH)</th><th>Effect size</th><th>值</th><th>状态</th><th>说明</th></tr></thead><tbody>${inferentialRows}</tbody></table>
   <h2>8. 事后检验（Post-hoc）</h2>
   <p class="note">仅三条件且全局检验 p &lt; 0.05 时执行；Tukey HSD 用于 ANOVA，Dunn + Bonferroni 用于 Kruskal-Wallis。</p>
   ${postHocSection}

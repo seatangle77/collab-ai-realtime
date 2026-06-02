@@ -49,6 +49,7 @@ export interface EnaStatTestResult {
   statistic_name: string | null
   statistic: number | null
   p_value: number | null
+  p_value_adjusted: number | null
   effect_size_name: string | null
   effect_size: number | null
   status: StatTestStatus

@@ -14,7 +14,7 @@ from statistics import mean, median, stdev
 from typing import Any, Literal
 
 from ..api_model import ApiModel
-from .stats_utils import MetricConditionStats, PostHocPairResult, _cohens_d, _epsilon_squared, _eta_squared, _stats_for
+from .stats_utils import MetricConditionStats, PostHocPairResult, _cohens_d, _epsilon_squared, _eta_squared, _stats_for, benjamini_hochberg
 
 try:
     from scipy.stats import f_oneway, kruskal, levene, mannwhitneyu, norm as _scipy_norm, shapiro, ttest_ind, tukey_hsd
@@ -129,6 +129,7 @@ class EnaStatTestResult(ApiModel):
     statistic_name: str | None = None
     statistic: float | None = None
     p_value: float | None = None
+    p_value_adjusted: float | None = None  # Benjamini-Hochberg FDR corrected
     effect_size_name: str | None = None
     effect_size: float | None = None
     status: StatisticalTestStatus
@@ -692,6 +693,14 @@ def build_ena_analysis(
         _stat_test(metric=m, rec=rec_by_metric[m], values_by_condition=values_by_metric_condition[m])
         for m in ENA_METRICS
     ]
+
+    # Benjamini-Hochberg FDR correction across all metrics
+    raw_p = [t.p_value if t.status == "ok" else None for t in stat_tests]
+    adjusted_p = benjamini_hochberg(raw_p)
+    for t, p_adj in zip(stat_tests, adjusted_p):
+        if t.status == "ok":
+            t.p_value_adjusted = p_adj
+
     omnibus_by_metric = {t.metric: t for t in stat_tests}
     post_hoc = [
         _post_hoc(
