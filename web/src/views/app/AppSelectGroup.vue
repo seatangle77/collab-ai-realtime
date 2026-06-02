@@ -10,6 +10,7 @@ import { extractErrorMessage } from '../../utils/error'
 interface AppCurrentGroup {
   id: string
   name: string
+  condition?: string
 }
 
 const router = useRouter()
@@ -95,11 +96,12 @@ async function confirmGroup() {
   try {
     if (selectedDiscoverGroup.value && !selectedGroup.value) {
       const detail = await joinGroup(selectedDiscoverGroup.value.id)
-      saveCurrentGroupToStorage({ id: detail.group.id, name: detail.group.name })
+      saveCurrentGroupToStorage({ id: detail.group.id, name: detail.group.name, condition: detail.group.condition })
     } else {
       saveCurrentGroupToStorage({
         id: selected.id,
         name: selected.name,
+        condition: selected.condition,
       })
     }
     await router.replace(resolveRedirect())

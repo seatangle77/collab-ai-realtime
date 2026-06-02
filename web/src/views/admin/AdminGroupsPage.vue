@@ -236,7 +236,7 @@ async function handleConditionChange(row: AdminGroup, newCondition: string) {
 }
 
 function openIcebreakerPage(row: AdminGroup) {
-  const url = `/app/icebreaker?group_id=${encodeURIComponent(row.id)}`
+  const url = `/app/experiment-briefing?group_id=${encodeURIComponent(row.id)}`
   window.open(url, '_blank', 'noopener,noreferrer')
 }
 

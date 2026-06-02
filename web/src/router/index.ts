@@ -33,6 +33,11 @@ const routes: RouteRecordRaw[] = [
     component: () => import('../views/app/AppSelectGroup.vue'),
   },
   {
+    path: '/app/experiment-briefing',
+    name: 'AppExperimentBriefing',
+    component: () => import('../views/app/AppExperimentBriefing.vue'),
+  },
+  {
     path: '/app/icebreaker',
     name: 'AppIcebreaker',
     component: () => import('../views/app/AppIcebreaker.vue'),
@@ -267,7 +272,7 @@ router.beforeEach((to, _from, next) => {
     }
   }
 
-  if (to.path === '/app/icebreaker') {
+  if (to.path === '/app/experiment-briefing' || to.path === '/app/icebreaker') {
     if (!window.localStorage.getItem('admin_api_key')) {
       next({
         path: '/admin/login',
