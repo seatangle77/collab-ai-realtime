@@ -91,7 +91,7 @@ function downloadHtmlReport() {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `ena-analysis-report-${new Date().toISOString().slice(0, 10)}.html`
+  a.download = `ena-analysis-report-${mode.value}-${new Date().toISOString().slice(0, 10)}.html`
   a.click()
   URL.revokeObjectURL(url)
 }
