@@ -267,8 +267,10 @@ def _generate_ena_charts(
                 mpatches.Patch(color="#d62728", label="A 更强 (<-0.01)"),
                 mpatches.Patch(color="#cccccc", label="差异 < 0.01"),
             ]
-            axes[-1].legend(handles=legend_items, loc="lower center",
-                            fontsize=8, framealpha=0.6, ncol=1)
+            axes[-1].legend(handles=legend_items,
+                            loc="upper center",
+                            bbox_to_anchor=(0.5, -0.04),
+                            fontsize=8, framealpha=0.0, ncol=3)
 
         p_by_metric = {t.metric: t.p_value for t in statistical_tests}
         p_lines = [
@@ -278,7 +280,7 @@ def _generate_ena_charts(
         fig.text(0.5, 0.01, "  |  ".join(p_lines), ha="center", va="bottom",
                  fontsize=8.5, color="#555555")
 
-        fig.tight_layout(pad=1.5, rect=(0, 0.06, 1, 1))
+        fig.tight_layout(pad=1.5, rect=(0, 0.10, 1, 1))
         return {"networks": fig_to_base64(fig)}
     except Exception:
         return {}
