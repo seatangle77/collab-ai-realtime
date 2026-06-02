@@ -221,7 +221,14 @@ def _generate_coi_charts(
         ax1.set_xlim(0, 1)
         ax1.set_xlabel("Proportion", fontsize=10)
         ax1.set_title("CoI 话语结构比例", fontsize=12, fontweight="bold")
-        ax1.legend(loc="lower right", fontsize=9, framealpha=0.6)
+        ax1.legend(
+            loc="upper center",
+            bbox_to_anchor=(0.5, -0.18),
+            ncol=4,
+            fontsize=9,
+            framealpha=0.0,
+            borderpad=0.5,
+        )
         ax1.grid(axis="x", linestyle="--", linewidth=0.6, color="#cccccc")
         ax1.spines["top"].set_visible(False)
         ax1.spines["right"].set_visible(False)
@@ -237,7 +244,7 @@ def _generate_coi_charts(
         for bar, val in zip(bars, ho_vals):
             ax2.text(val + 0.01, bar.get_y() + bar.get_height() / 2,
                      f"{val:.3f}", va="center", fontsize=9, fontweight="bold")
-        ax2.set_xlim(0, 1)
+        ax2.set_xlim(0, 1.15)
         ax2.set_xlabel("Proportion", fontsize=10)
         ax2.set_title("高阶认知参与比例 (IN+RE)", fontsize=12, fontweight="bold")
         p_ho = p_by_metric.get("higher_order_ratio")
@@ -245,7 +252,7 @@ def _generate_coi_charts(
         ax2.spines["top"].set_visible(False)
         ax2.spines["right"].set_visible(False)
 
-        fig.tight_layout(pad=2.0)
+        fig.tight_layout(pad=2.0, rect=(0, 0.06, 1, 1))
         return {"composition": fig_to_base64(fig)}
     except Exception:
         return {}

@@ -179,51 +179,64 @@ class EnaAnalysisResult(ApiModel):
 # ─────────────────────────────────────────────────────────────────
 
 _NODE_POS = {"TE": (0.5, 0.88), "EX": (0.08, 0.44), "IN": (0.92, 0.44), "RE": (0.5, 0.0)}
-_NODE_COLORS = {"TE": "#e69f00", "EX": "#1f77b4", "IN": "#9467bd", "RE": "#2ca02c"}
-_NODE_LABELS_ZH = {"TE": "TE\n触发", "EX": "EX\n探索", "IN": "IN\n整合", "RE": "RE\n解决"}
+_NODE_COLORS = {"TE": "#f59e0b", "EX": "#3b82f6", "IN": "#8b5cf6", "RE": "#10b981"}
+_NODE_LABELS_ZH = {"TE": "触发", "EX": "探索", "IN": "整合", "RE": "解决"}
+_EDGE_COLORS = {
+    ("EX", "IN"): "#6366f1", ("IN", "RE"): "#8b5cf6",
+    ("TE", "EX"): "#f59e0b", ("TE", "IN"): "#3b82f6",
+    ("TE", "RE"): "#ef4444", ("EX", "RE"): "#06b6d4",
+}
 
 
 def _draw_ena_network(ax: "plt.Axes", network: "EnaNetworkCondition", title: str, is_diff: bool = False) -> None:
-    ax.set_xlim(-0.15, 1.15)
-    ax.set_ylim(-0.2, 1.1)
+    ax.set_xlim(-0.18, 1.18)
+    ax.set_ylim(-0.18, 1.08)
     ax.set_aspect("equal")
     ax.axis("off")
-    ax.set_title(title, fontsize=10, fontweight="bold", pad=6)
+    ax.set_facecolor("#f8fafc")
+    ax.set_title(title, fontsize=11, fontweight="bold", pad=8)
 
     weights = [abs(e.weight_diff if is_diff else e.weight) for e in network.edges]
     max_w = max(weights) if any(w > 0 for w in weights) else 1.0
 
     for edge in network.edges:
         w = abs(edge.weight_diff if is_diff else edge.weight)
-        if w < 0.001:
-            continue
         x0, y0 = _NODE_POS.get(edge.source, (0.5, 0.5))
         x1, y1 = _NODE_POS.get(edge.target, (0.5, 0.5))
-        lw = max(0.5, (w / max_w) * 8)
+        lw = max(0.8, (w / max_w) * 9)
+        alpha = max(0.12, w / max_w * 0.85 + 0.1) if w >= 0.001 else 0.08
         if is_diff:
             diff_val = edge.weight_diff or 0.0
-            color = "#1f77b4" if diff_val > 0.01 else ("#d62728" if diff_val < -0.01 else "#cccccc")
+            color = "#2563eb" if diff_val > 0.01 else ("#dc2626" if diff_val < -0.01 else "#cbd5e1")
         else:
-            color = "#888888"
-        ax.plot([x0, x1], [y0, y1], color=color, linewidth=lw, alpha=0.75, zorder=1)
+            pair = (edge.source, edge.target)
+            color = _EDGE_COLORS.get(pair, _EDGE_COLORS.get((edge.target, edge.source), "#94a3b8"))
+        # Slight curve via control point offset
         mx, my = (x0 + x1) / 2, (y0 + y1) / 2
+        dx, dy = x1 - x0, y1 - y0
+        length = max((dx**2 + dy**2) ** 0.5, 1e-6)
+        cx, cy = mx - (dy / length) * 0.08, my + (dx / length) * 0.08
+        from matplotlib.patches import FancyArrowPatch
+        style = f"arc3,rad=0.15"
+        ax.annotate("", xy=(x1, y1), xytext=(x0, y0),
+                    arrowprops=dict(arrowstyle="-", color=color, lw=lw,
+                                   connectionstyle=style, alpha=alpha), zorder=1)
         val = edge.weight_diff if is_diff else edge.weight
         if val is not None and abs(val) >= 0.03:
             txt = f"{val:+.2f}" if is_diff else f"{val:.2f}"
-            ax.text(mx, my + 0.04, txt, ha="center", va="bottom", fontsize=7.5,
-                    color="#333333", zorder=4)
+            ax.text(cx, cy + 0.04, txt, ha="center", va="bottom", fontsize=8,
+                    fontweight="600", color=color, alpha=0.95, zorder=4)
 
     for node in network.nodes:
         x, y = _NODE_POS.get(node, (0.5, 0.5))
-        circle = mpatches.FancyBboxPatch(
-            (x - 0.09, y - 0.09), 0.18, 0.18,
-            boxstyle="round,pad=0.01",
-            facecolor=_NODE_COLORS.get(node, "#888888"),
-            edgecolor="white", linewidth=1.5, zorder=3,
-        )
+        color = _NODE_COLORS.get(node, "#888888")
+        circle = mpatches.Circle((x, y), 0.1, facecolor=color, edgecolor="white",
+                                  linewidth=2.0, zorder=3)
         ax.add_patch(circle)
-        ax.text(x, y, _NODE_LABELS_ZH.get(node, node), ha="center", va="center",
-                fontsize=8.5, fontweight="bold", color="white", zorder=5)
+        ax.text(x, y + 0.025, node, ha="center", va="center",
+                fontsize=10, fontweight="bold", color="white", zorder=5)
+        ax.text(x, y - 0.038, _NODE_LABELS_ZH.get(node, ""), ha="center", va="center",
+                fontsize=7.5, color="white", alpha=0.9, zorder=5)
 
 
 def _generate_ena_charts(

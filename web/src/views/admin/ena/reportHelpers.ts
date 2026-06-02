@@ -108,10 +108,10 @@ function escapeHtml(value: unknown): string {
 }
 
 const NODE_POSITIONS: Record<string, { x: number; y: number }> = {
-  TE: { x: 150, y: 42 },
-  EX: { x: 42, y: 160 },
-  IN: { x: 258, y: 160 },
-  RE: { x: 150, y: 278 },
+  TE: { x: 160, y: 52 },
+  EX: { x: 52, y: 188 },
+  IN: { x: 268, y: 188 },
+  RE: { x: 160, y: 316 },
 }
 
 const NODE_COLORS: Record<string, string> = {
@@ -122,56 +122,93 @@ const NODE_COLORS: Record<string, string> = {
 }
 
 const NODE_LABELS: Record<string, string> = {
-  TE: '触发事件',
+  TE: '触发',
   EX: '探索',
   IN: '整合',
   RE: '解决',
 }
 
-function edgeStroke(weight: number, maxWeight: number): number {
-  if (maxWeight <= 0) return 0.5
-  return Math.max(0.5, (weight / maxWeight) * 16)
+// Per-edge-pair colors for visual distinction
+const EDGE_COLORS: Record<string, string> = {
+  'EX_IN': '#6366f1',
+  'IN_RE': '#8b5cf6',
+  'TE_EX': '#f59e0b',
+  'TE_IN': '#3b82f6',
+  'TE_RE': '#ef4444',
+  'EX_RE': '#06b6d4',
 }
 
-function diffColor(diff: number): string {
-  if (diff > 0.01) return '#2563eb'
-  if (diff < -0.01) return '#dc2626'
-  return '#d1d5db'
+function edgeColor(source: string, target: string, isDiff: boolean, diff: number): string {
+  if (isDiff) {
+    if (diff > 0.01) return '#2563eb'
+    if (diff < -0.01) return '#dc2626'
+    return '#d1d5db'
+  }
+  const key = `${source}_${target}`
+  return EDGE_COLORS[key] ?? '#94a3b8'
+}
+
+function edgeStroke(weight: number, maxWeight: number): number {
+  if (maxWeight <= 0) return 1
+  return Math.max(1, (weight / maxWeight) * 10)
 }
 
 function networkSvg(net: EnaNetworkCondition, isDiff = false): string {
   const weights = net.edges.map((edge) => Math.abs(isDiff ? (edge.weight_diff ?? 0) : edge.weight))
   const maxWeight = Math.max(...weights, 0.001)
+
   const edges = net.edges.map((edge) => {
-    const source = NODE_POSITIONS[edge.source] ?? { x: 150, y: 160 }
-    const target = NODE_POSITIONS[edge.target] ?? { x: 150, y: 160 }
+    const src = NODE_POSITIONS[edge.source] ?? { x: 160, y: 188 }
+    const tgt = NODE_POSITIONS[edge.target] ?? { x: 160, y: 188 }
     const weight = isDiff ? Math.abs(edge.weight_diff ?? 0) : edge.weight
-    const color = isDiff ? diffColor(edge.weight_diff ?? 0) : weight < 0.01 ? '#e5e7eb' : '#6b7280'
+    const diff = edge.weight_diff ?? 0
+    const color = edgeColor(edge.source, edge.target, isDiff, diff)
+    const strokeW = edgeStroke(weight, maxWeight)
+    const opacity = weight < 0.01 ? 0.12 : Math.max(0.25, weight / maxWeight * 0.9 + 0.1)
     const label = isDiff
-      ? `${(edge.weight_diff ?? 0) > 0 ? '+' : ''}${formatNumber(edge.weight_diff ?? 0)}`
-      : formatNumber(edge.weight)
-    const showLabel = isDiff ? Math.abs(edge.weight_diff ?? 0) >= 0.05 : edge.weight >= 0.05
+      ? `${diff > 0 ? '+' : ''}${formatNumber(diff)}`
+      : formatNumber(weight)
+    const showLabel = weight >= 0.03
+    const mx = (src.x + tgt.x) / 2
+    const my = (src.y + tgt.y) / 2
+
+    // Slight curve via quadratic bezier for non-adjacent nodes
+    const dx = tgt.x - src.x
+    const dy = tgt.y - src.y
+    const len = Math.sqrt(dx * dx + dy * dy)
+    const cx = mx - (dy / len) * 18
+    const cy = my + (dx / len) * 18
+
     return `
-      <line x1="${source.x}" y1="${source.y}" x2="${target.x}" y2="${target.y}" stroke="${color}" stroke-width="${edgeStroke(weight, maxWeight)}" stroke-linecap="round" opacity="0.85" />
-      ${showLabel ? `<text x="${(source.x + target.x) / 2}" y="${(source.y + target.y) / 2 - 4}" text-anchor="middle" class="edge-label">${escapeHtml(label)}</text>` : ''}
+      <path d="M${src.x},${src.y} Q${cx},${cy} ${tgt.x},${tgt.y}"
+            fill="none" stroke="${color}" stroke-width="${strokeW}"
+            stroke-linecap="round" opacity="${opacity}" />
+      ${showLabel ? `<text x="${cx}" y="${cy - 5}" text-anchor="middle"
+            font-family="ui-monospace,monospace" font-size="10" font-weight="600"
+            fill="${color}" opacity="0.9">${escapeHtml(label)}</text>` : ''}
     `
   }).join('')
+
   const nodes = net.nodes.map((node) => {
-    const pos = NODE_POSITIONS[node] ?? { x: 150, y: 160 }
+    const pos = NODE_POSITIONS[node] ?? { x: 160, y: 188 }
     const color = NODE_COLORS[node] ?? '#64748b'
     return `
       <g>
-        <circle cx="${pos.x}" cy="${pos.y}" r="28" fill="${color}" fill-opacity="0.15" stroke="${color}" stroke-width="2" />
-        <text x="${pos.x}" y="${pos.y - 5}" text-anchor="middle" class="node-code" fill="${color}">${escapeHtml(node)}</text>
-        <text x="${pos.x}" y="${pos.y + 10}" text-anchor="middle" class="node-label">${escapeHtml(NODE_LABELS[node] ?? node)}</text>
+        <circle cx="${pos.x}" cy="${pos.y}" r="30" fill="${color}" stroke="white" stroke-width="2.5" />
+        <text x="${pos.x}" y="${pos.y - 5}" text-anchor="middle"
+              font-family="-apple-system,sans-serif" font-size="13" font-weight="700" fill="white">${escapeHtml(node)}</text>
+        <text x="${pos.x}" y="${pos.y + 12}" text-anchor="middle"
+              font-family="-apple-system,sans-serif" font-size="10" fill="rgba(255,255,255,0.9)">${escapeHtml(NODE_LABELS[node] ?? node)}</text>
       </g>
     `
   }).join('')
-  const title = isDiff ? '差异图（条件B − 条件A）' : conditionLabel(net.condition)
+
+  const title = isDiff ? '差异图（B − A）' : conditionLabel(net.condition)
   return `
     <div class="network-card">
       <h3>${escapeHtml(title)}</h3>
-      <svg class="network-svg" viewBox="0 0 300 320" role="img" aria-label="${escapeHtml(title)}">
+      <svg class="network-svg" viewBox="0 0 320 368" role="img" aria-label="${escapeHtml(title)}">
+        <rect width="320" height="368" fill="#f8fafc" rx="8"/>
         ${edges}
         ${nodes}
       </svg>
