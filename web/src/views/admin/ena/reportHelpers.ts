@@ -297,10 +297,10 @@ export function buildEnaReportHtml(
   </style>
 </head>
 <body>
-  <h1>ENA 认知过程网络分析报告</h1>
+  <h1>CoI 认知过程共现网络分析报告</h1>
   <div class="meta">生成时间：${escapeHtml(generatedAt)}</div>
   <div class="meta">分析模式：${escapeHtml(modeDescription(mode))}；纳入会话数：${report.total_sessions}</div>
-  <p class="note">基于 CoI 编码结果，使用 2 分钟滑动时间窗口（步长 30s）计算话语类别共现强度，重点分析 EX-IN、IN-RE 及高阶认知连接。正态性使用 Shapiro-Wilk test；两条件选用 Welch t-test 或 Mann-Whitney U test；三条件使用 one-way ANOVA（附 Levene 方差齐性检验）或 Kruskal-Wallis。多重比较校正：对所有连接强度指标的原始 p 值统一应用 Benjamini-Hochberg FDR 校正（见推断统计表 p_adj 列），以控制跨指标的假阳性率。</p>
+  <p class="note"><strong>分析说明：</strong>本报告基于 CoI 编码结果，采用 ENA 启发（ENA-inspired）的 CoI 类别共现网络分析方法（CoI co-occurrence network analysis）。使用 2 分钟滑动时间窗口（步长 30s）计算各 CoI 阶段（TE/EX/IN/RE）在同一时间窗口内的共现强度，以此刻画认知过程阶段之间的联结模式。本方法聚焦于 EX-IN、IN-RE 等高阶认知连接强度的条件间比较，与 ENA Web Tool 的完整 SVD 投影模型不同，属于基于窗口共现的简化网络分析。正态性使用 Shapiro-Wilk test；两条件选用 Welch t-test 或 Mann-Whitney U test；三条件使用 one-way ANOVA（附 Levene 方差齐性检验）或 Kruskal-Wallis。多重比较校正：对所有连接强度指标的原始 p 值统一应用 Benjamini-Hochberg FDR 校正（见推断统计表 p_adj 列），以控制跨指标的假阳性率。</p>
   <h2>1. 描述性统计</h2>
   <table><thead>${descriptiveHeader()}</thead><tbody>${descriptiveRows}</tbody></table>
   <h2>2. 正态性检查（Shapiro-Wilk）</h2>

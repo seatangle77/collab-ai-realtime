@@ -258,7 +258,8 @@ export function buildCoiReportHtml(
   <div class="meta">生成时间：${escapeHtml(generatedAt)}</div>
   <div class="meta">分析模式：${escapeHtml(modeDescription(mode))}；纳入会话数：${report.total_sessions}</div>
   <h2>1. 分析方法</h2>
-  <p class="note">基于 CoI 框架 Cognitive Presence 维度对已编码发言进行量化分析。权重：TE=1, EX=2, IN=3, RE=4。高阶认知参与比例 = (IN+RE) / 总有效认知话语数。加权得分 = Σ(类别数×权重) / 总有效认知话语数。只纳入全部发言已编码的会话。</p>
+  <p class="note">基于 CoI 框架（Community of Inquiry）Cognitive Presence 维度对已编码发言进行量化分析。权重：TE=1, EX=2, IN=3, RE=4。高阶认知参与比例 = (IN+RE) / 总有效认知话语数。加权得分 = Σ(类别数×权重) / 总有效认知话语数。只纳入全部发言已编码的会话。</p>
+  <p class="note"><strong>指标说明：</strong>TE（Triggering Event，触发事件）与 EX（Exploration，探索）更多反映问题的提出与观点的发散性探索；IN（Integration，整合）与 RE（Resolution，解决）更多反映观点的综合归纳与问题的实质性解决，属于高阶认知参与。高阶认知参与比例（IN+RE）及加权得分越高，表明小组讨论在认知层面越深入。</p>
   <p class="note">正态性使用 Shapiro-Wilk test；两条件选用 Welch t-test 或 Mann-Whitney U test；三条件使用 one-way ANOVA（附 Levene 方差齐性检验）或 Kruskal-Wallis。Effect size 使用 Hedges' g、rank-biserial r、eta squared 或 epsilon squared。多重比较校正：对所有指标的原始 p 值统一应用 Benjamini-Hochberg FDR 校正（见推断统计表 p_adj 列），以控制跨指标的假阳性率。</p>
   <h2>2. 样本选择</h2>
   <table><thead><tr><th>条件</th><th>小组数</th><th>小组</th></tr></thead><tbody>${sampleRows}</tbody></table>
