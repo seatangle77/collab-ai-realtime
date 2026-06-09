@@ -190,6 +190,19 @@ function selectAll() {
 
 // ── 合并 ───────────────────────────────────────────────────────────────────────
 const merging = ref(false)
+async function performMerge(ids: string[]) {
+  merging.value = true
+  try {
+    await mergeCoiUtterances(ids)
+    ElMessage.success('合并成功')
+    await fetchUtterances()
+  } catch (e: any) {
+    ElMessage.error(e?.message || '合并失败')
+  } finally {
+    merging.value = false
+  }
+}
+
 async function handleMerge() {
   if (selected.value.size < 2) {
     ElMessage.warning('请至少选择 2 条发言')
@@ -198,21 +211,14 @@ async function handleMerge() {
   const selectedIds = utterances.value
     .filter((u) => selected.value.has(u.id))
     .map((u) => u.id)
+  await performMerge(selectedIds)
+}
 
-  await ElMessageBox.confirm(`合并选中的 ${selectedIds.length} 条发言？合并后无法自动撤销。`, '确认合并', {
-    type: 'warning',
-  })
-
-  merging.value = true
-  try {
-    await mergeCoiUtterances(selectedIds)
-    ElMessage.success('合并成功')
-    await fetchUtterances()
-  } catch (e: any) {
-    ElMessage.error(e?.message || '合并失败')
-  } finally {
-    merging.value = false
-  }
+async function mergeDown(index: number) {
+  const current = utterances.value[index]
+  const next = utterances.value[index + 1]
+  if (!current || !next) return
+  await performMerge([current.id, next.id])
 }
 
 // ── 编辑 ───────────────────────────────────────────────────────────────────────
@@ -560,6 +566,14 @@ onMounted(fetchSummaries)
                 </el-button>
               </div>
               <div class="item-ops">
+                <el-button
+                  link
+                  size="small"
+                  :disabled="index === utterances.length - 1 || merging"
+                  @click="mergeDown(index)"
+                >
+                  向下合并
+                </el-button>
                 <el-button link size="small" @click="startEdit(u)">编辑</el-button>
                 <el-button link size="small" @click="openSplitDialog(u)">拆分</el-button>
                 <el-button link size="small" type="danger" @click="handleDelete(u)">删除</el-button>

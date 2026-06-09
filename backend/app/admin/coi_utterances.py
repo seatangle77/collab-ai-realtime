@@ -389,7 +389,7 @@ async def merge_utterances(
     if len(session_ids) > 1:
         raise HTTPException(status_code=400, detail="只能合并同一会话内的发言单元")
 
-    merged_content = "\n".join(r["content"] for r in rows)
+    merged_content = "；".join(r["content"] for r in rows)
     merged_source_ids: list[str] = []
     for r in rows:
         merged_source_ids.extend(r["source_transcript_ids"] or [])
