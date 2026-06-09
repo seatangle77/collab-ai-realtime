@@ -416,21 +416,6 @@ async def merge_utterances(
         {"ids": delete_ids},
     )
 
-    # 重排 order_index 保证连续
-    session_id = rows[0]["session_id"]
-    all_result = await db.execute(
-        text(
-            "SELECT id FROM coi_utterances WHERE session_id = :session_id ORDER BY order_index ASC"
-        ),
-        {"session_id": session_id},
-    )
-    all_ids = [r["id"] for r in all_result.mappings().all()]
-    for idx, rid in enumerate(all_ids, start=1):
-        await db.execute(
-            text("UPDATE coi_utterances SET order_index = :idx WHERE id = :id"),
-            {"idx": idx, "id": rid},
-        )
-
     await db.commit()
 
     return await _fetch_with_name(keep_id, db)

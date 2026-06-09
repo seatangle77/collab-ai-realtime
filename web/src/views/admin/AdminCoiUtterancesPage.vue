@@ -366,11 +366,11 @@ async function applyReorder(arr: CoiUtterance[]) {
 // ── 导出 CSV ──────────────────────────────────────────────────────────────────
 function exportCSV() {
   const headers = ['序号', '说话人', '发言内容', 'CoI分类', '分类名称', '发言时间']
-  const rows = utterances.value.map((u) => {
+  const rows = utterances.value.map((u, index) => {
     const label = u.coi_category ? (COI_LABELS[u.coi_category]?.label ?? u.coi_category) : ''
     const time = getDisplayTime(u)
     return [
-      u.order_index,
+      index + 1,
       u.speaker_name || u.speaker || '',
       u.content,
       u.coi_category ?? '',
@@ -517,7 +517,7 @@ onMounted(fetchSummaries)
             <!-- 左侧：勾选 + 序号 + 排序 -->
             <div class="item-left">
               <el-checkbox :model-value="selected.has(u.id)" @change="toggleSelect(u.id)" />
-              <span class="order-num">{{ u.order_index }}</span>
+              <span class="order-num">{{ index + 1 }}</span>
               <div class="move-btns">
                 <el-button link size="small" :disabled="index === 0 || reordering" @click="moveUp(index)">↑</el-button>
                 <el-button link size="small" :disabled="index === utterances.length - 1 || reordering" @click="moveDown(index)">↓</el-button>
