@@ -149,14 +149,12 @@ async def save_transcript_utterances(
     if to_save:
         rows: list[dict[str, Any]] = [
             {
-                "id": str(uuid.uuid4()),
+                "id": "cu" + uuid.uuid4().hex[:12],
                 "session_id": session_id,
                 "group_id": group_id,
                 "speaker": None,
-                "speaker_name": None,
                 "speaker_user_id": None,
                 "content": u.content,
-                "source_transcript_ids": "{}",
                 "order_index": u.order_index,
                 "coi_category": u.coi_category,
                 "start_time": u.start_time,
@@ -166,11 +164,11 @@ async def save_transcript_utterances(
         await db.execute(
             text("""
                 INSERT INTO coi_utterances
-                    (id, session_id, group_id, speaker, speaker_name, speaker_user_id,
+                    (id, session_id, group_id, speaker, speaker_user_id,
                      content, source_transcript_ids, order_index, coi_category, start_time)
                 VALUES
-                    (:id, :session_id, :group_id, :speaker, :speaker_name, :speaker_user_id,
-                     :content, :source_transcript_ids::text[], :order_index, :coi_category, :start_time)
+                    (:id, :session_id, :group_id, :speaker, :speaker_user_id,
+                     :content, '{}'::text[], :order_index, :coi_category, :start_time)
             """),
             rows,
         )

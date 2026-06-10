@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { UploadFilled } from '@element-plus/icons-vue'
 import type { UploadFile } from 'element-plus'
@@ -15,6 +15,12 @@ interface DraftLine {
   content: string
   startTime: number | null
   endTime: number | null
+}
+
+interface LocalDraft {
+  fileName: string
+  lines: DraftLine[]
+  savedAt: string
 }
 
 const FILLER_RE = /^[\s嗯啊哦哈哎呀哟喂呵嘻吧呢是好对、，。！？…—·]+$/
@@ -53,8 +59,8 @@ async function onGroupChange() {
     const res = await listAdminChatSessions({ group_id: selectedGroupId.value, page_size: 200 })
     sessions.value = res.items
     if (res.items.length > 0) {
-      selectedSessionId.value = res.items[0].id
-      await checkExisting()
+      selectedSessionId.value = res.items[0]!.id
+      await checkExistingAndDraft()
     }
   } finally {
     loadingSessions.value = false
@@ -64,15 +70,76 @@ async function onGroupChange() {
 async function onSessionChange() {
   existingCount.value = 0
   resetContent()
-  await checkExisting()
+  await checkExistingAndDraft()
 }
 
-async function checkExisting() {
+async function checkExistingAndDraft() {
   if (!selectedSessionId.value) return
   try {
     const res = await getUtteranceCount(selectedSessionId.value)
     existingCount.value = res.count
   } catch {}
+  checkDraft()
+}
+
+// ── 草稿（localStorage）────────────────────────────────────────────────────────
+
+const hasDraft = ref(false)
+const draftInfo = ref<{ fileName: string; savedAt: string; count: number } | null>(null)
+
+function draftKey(sid: string) {
+  return `coi_preprocess_draft_${sid}`
+}
+
+function checkDraft() {
+  if (!selectedSessionId.value) return
+  const raw = localStorage.getItem(draftKey(selectedSessionId.value))
+  if (!raw) { hasDraft.value = false; draftInfo.value = null; return }
+  try {
+    const d = JSON.parse(raw) as LocalDraft
+    hasDraft.value = true
+    draftInfo.value = { fileName: d.fileName, savedAt: d.savedAt, count: d.lines.length }
+  } catch {
+    hasDraft.value = false
+    draftInfo.value = null
+  }
+}
+
+function saveDraft() {
+  if (!selectedSessionId.value || lines.value.length === 0) return
+  const draft: LocalDraft = {
+    fileName: uploadedFileName.value,
+    lines: lines.value,
+    savedAt: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+  }
+  localStorage.setItem(draftKey(selectedSessionId.value), JSON.stringify(draft))
+  hasDraft.value = true
+  draftInfo.value = { fileName: draft.fileName, savedAt: draft.savedAt, count: draft.lines.length }
+  ElMessage.success('草稿已保存到本地')
+}
+
+function restoreDraft() {
+  if (!selectedSessionId.value) return
+  const raw = localStorage.getItem(draftKey(selectedSessionId.value))
+  if (!raw) return
+  try {
+    const d = JSON.parse(raw) as LocalDraft
+    lines.value = d.lines
+    uploadedFileName.value = d.fileName
+    let max = 0
+    for (const l of d.lines) { if (l.key > max) max = l.key }
+    keyCounter = max
+    ElMessage.success(`已恢复草稿：${d.lines.length} 条`)
+  } catch {
+    ElMessage.error('草稿数据损坏，无法恢复')
+  }
+}
+
+function clearDraft() {
+  if (!selectedSessionId.value) return
+  localStorage.removeItem(draftKey(selectedSessionId.value))
+  hasDraft.value = false
+  draftInfo.value = null
 }
 
 // ── 文件解析 ───────────────────────────────────────────────────────────────────
@@ -87,7 +154,7 @@ function parseTime(min: string, sec: string) {
 }
 
 function fmt(s: number | null): string {
-  if (s == null) return '--'
+  if (s == null || isNaN(s)) return '--'
   const m = Math.floor(s / 60)
   const sec = (s % 60).toFixed(1).padStart(4, '0')
   return `${m}:${sec}`
@@ -97,6 +164,8 @@ function resetContent() {
   rawLines.value = []
   lines.value = []
   uploadedFileName.value = ''
+  editingIndex.value = null
+  splittingIndex.value = null
 }
 
 function handleFileChange(file: UploadFile) {
@@ -116,9 +185,9 @@ function handleFileChange(file: UploadFile) {
       .filter((m): m is RegExpMatchArray => !!m)
       .map(m => ({
         key: ++keyCounter,
-        content: m[5].trim(),
-        startTime: parseTime(m[1], m[2]),
-        endTime: parseTime(m[3], m[4]),
+        content: m[5]!.trim(),
+        startTime: parseTime(m[1]!, m[2]!),
+        endTime: parseTime(m[3]!, m[4]!),
       }))
     applyFilter()
   }
@@ -138,7 +207,85 @@ function applyFilter() {
 
 watch(filterEnabled, applyFilter)
 
-// ── 编辑操作 ───────────────────────────────────────────────────────────────────
+// ── 行内编辑 ───────────────────────────────────────────────────────────────────
+
+const editingIndex = ref<number | null>(null)
+const editingContent = ref('')
+const editInputRef = ref<HTMLTextAreaElement[]>([])
+
+function startEdit(index: number) {
+  splittingIndex.value = null
+  editingIndex.value = index
+  editingContent.value = lines.value[index]!.content
+  nextTick(() => {
+    const el = editInputRef.value[0]
+    el?.focus()
+    el?.select()
+  })
+}
+
+function confirmEdit() {
+  if (editingIndex.value === null) return
+  const trimmed = editingContent.value.trim()
+  if (trimmed) {
+    lines.value[editingIndex.value]!.content = trimmed
+  }
+  editingIndex.value = null
+}
+
+function cancelEdit() {
+  editingIndex.value = null
+}
+
+function onEditKeydown(e: KeyboardEvent) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault()
+    confirmEdit()
+  } else if (e.key === 'Escape') {
+    cancelEdit()
+  }
+}
+
+// ── 拆分 ───────────────────────────────────────────────────────────────────────
+
+const splittingIndex = ref<number | null>(null)
+const splitTextareaRef = ref<HTMLTextAreaElement[]>([])
+
+function startSplit(index: number) {
+  editingIndex.value = null
+  splittingIndex.value = index
+  nextTick(() => splitTextareaRef.value[0]?.focus())
+}
+
+function cancelSplit() {
+  splittingIndex.value = null
+}
+
+function splitAtCursor() {
+  if (splittingIndex.value === null) return
+  const textarea = splitTextareaRef.value[0]
+  if (!textarea) return
+  const pos = textarea.selectionStart
+  const line = lines.value[splittingIndex.value]!
+  const fullText = textarea.value  // 用 textarea 当前值（可能已编辑）
+  const part1 = fullText.slice(0, pos).trim()
+  const part2 = fullText.slice(pos).trim()
+  if (!part1 || !part2) {
+    ElMessage.warning('光标位置无法拆分，请将光标放在文字中间')
+    return
+  }
+  const newLine: DraftLine = {
+    key: ++keyCounter,
+    content: part2,
+    startTime: line.startTime,
+    endTime: line.endTime,
+  }
+  line.content = part1
+  lines.value.splice(splittingIndex.value + 1, 0, newLine)
+  splittingIndex.value = null
+}
+
+// ── 其他编辑操作 ───────────────────────────────────────────────────────────────
 
 function deleteLine(index: number) {
   lines.value.splice(index, 1)
@@ -146,14 +293,14 @@ function deleteLine(index: number) {
 
 function mergeDown(index: number) {
   if (index >= lines.value.length - 1) return
-  const a = lines.value[index]
-  const b = lines.value[index + 1]
+  const a = lines.value[index]!
+  const b = lines.value[index + 1]!
   a.content = a.content + ' ' + b.content
   a.endTime = b.endTime
   lines.value.splice(index + 1, 1)
 }
 
-// ── 保存 ───────────────────────────────────────────────────────────────────────
+// ── 保存到后端 ─────────────────────────────────────────────────────────────────
 
 const saving = ref(false)
 
@@ -180,6 +327,7 @@ async function handleSave() {
     const res = await saveTranscriptUtterances(selectedSessionId.value, payload)
     ElMessage.success(`预处理保存成功：${res.saved} 条${res.deleted_previous > 0 ? `，覆盖旧数据 ${res.deleted_previous} 条` : ''}`)
     existingCount.value = res.saved
+    clearDraft()
     resetContent()
   } catch (e: any) {
     ElMessage.error(e?.message || '保存失败')
@@ -256,36 +404,87 @@ async function handleSave() {
             </el-button>
           </el-upload>
 
-          <el-button
-            v-if="lines.length > 0"
-            type="primary"
-            :loading="saving"
-            @click="handleSave"
-          >
-            保存预处理结果
-          </el-button>
+          <template v-if="lines.length > 0">
+            <el-button @click="saveDraft">保存草稿</el-button>
+            <el-button type="primary" :loading="saving" @click="handleSave">
+              保存预处理结果
+            </el-button>
+          </template>
         </div>
       </div>
     </el-card>
+
+    <!-- 草稿提示 -->
+    <el-alert
+      v-if="hasDraft && lines.length === 0 && draftInfo"
+      type="warning"
+      :closable="false"
+      show-icon
+    >
+      <template #default>
+        <span>发现本地草稿：{{ draftInfo.fileName }}，共 {{ draftInfo.count }} 条，保存于 {{ draftInfo.savedAt }}</span>
+        <el-button size="small" type="primary" style="margin-left:12px" @click="restoreDraft">恢复草稿</el-button>
+        <el-button size="small" style="margin-left:6px" @click="clearDraft">丢弃</el-button>
+      </template>
+    </el-alert>
 
     <!-- 话语列表 -->
     <el-card v-if="lines.length > 0" shadow="never">
       <template #header>
         <div class="list-header">
           <span class="list-title">预处理话语列表</span>
-          <span class="list-desc">保存后，在「CoI 编码（录音转写）」页逐条打标签</span>
+          <span class="list-desc">点击文字可编辑；保存后，在「CoI 编码（录音转写）」页逐条打标签</span>
         </div>
       </template>
 
       <div class="line-list">
-        <div v-for="(line, i) in lines" :key="line.key" class="line-row">
+        <div
+          v-for="(line, i) in lines"
+          :key="line.key"
+          class="line-row"
+          :class="{ 'is-editing': editingIndex === i, 'is-splitting': splittingIndex === i }"
+        >
           <span class="line-num">{{ i + 1 }}</span>
           <span class="line-time">{{ fmt(line.startTime) }}</span>
-          <span class="line-content">{{ line.content }}</span>
-          <div class="line-actions">
-            <el-button link size="small" :disabled="i === lines.length - 1" @click="mergeDown(i)">
-              合并↓
-            </el-button>
+
+          <!-- 编辑态 -->
+          <textarea
+            v-if="editingIndex === i"
+            ref="editInputRef"
+            v-model="editingContent"
+            class="line-edit-input"
+            rows="2"
+            @keydown="onEditKeydown"
+            @blur="confirmEdit"
+          />
+
+          <!-- 拆分态 -->
+          <div v-else-if="splittingIndex === i" class="split-area">
+            <textarea
+              ref="splitTextareaRef"
+              class="line-edit-input"
+              :value="line.content"
+              rows="2"
+            />
+            <div class="split-hint">将光标点击到要拆分的位置，然后点「在光标处拆分」</div>
+            <div class="split-actions">
+              <el-button size="small" type="primary" @click="splitAtCursor">在光标处拆分</el-button>
+              <el-button size="small" @click="cancelSplit">取消</el-button>
+            </div>
+          </div>
+
+          <!-- 展示态 -->
+          <span
+            v-else
+            class="line-content editable"
+            @click="startEdit(i)"
+            title="点击编辑"
+          >{{ line.content }}</span>
+
+          <div v-if="splittingIndex !== i" class="line-actions">
+            <el-button v-if="editingIndex !== i" link size="small" @click="startEdit(i)">编辑</el-button>
+            <el-button link size="small" @click="startSplit(i)">拆分</el-button>
+            <el-button link size="small" :disabled="i === lines.length - 1" @click="mergeDown(i)">合并↓</el-button>
             <el-button link type="danger" size="small" @click="deleteLine(i)">删除</el-button>
           </div>
         </div>
@@ -331,19 +530,47 @@ async function handleSave() {
 }
 .line-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
-  padding: 8px 10px;
+  padding: 7px 10px;
   border-radius: 6px;
   font-size: 13px;
   transition: background 0.12s;
+  border: 1px solid transparent;
 }
 .line-row:hover { background: #f5f7fa; }
-.line-num { width: 28px; flex-shrink: 0; text-align: right; font-size: 11px; color: #c0c4cc; font-weight: 600; }
-.line-time { width: 46px; flex-shrink: 0; font-size: 11px; color: #909399; }
+.line-row.is-editing { background: #f0f7ff; border-color: #c6e2ff; }
+.line-row.is-splitting { background: #fff7e6; border-color: #ffd591; align-items: flex-start; }
+
+.line-num { width: 28px; flex-shrink: 0; text-align: right; font-size: 11px; color: #c0c4cc; font-weight: 600; padding-top: 2px; }
+.line-time { width: 46px; flex-shrink: 0; font-size: 11px; color: #909399; padding-top: 2px; }
+
 .line-content { flex: 1; color: #303133; line-height: 1.5; word-break: break-all; }
-.line-actions { display: flex; gap: 4px; flex-shrink: 0; opacity: 0; }
+.line-content.editable { cursor: text; }
+.line-content.editable:hover { color: #409eff; }
+
+.line-edit-input {
+  flex: 1;
+  font-size: 13px;
+  font-family: inherit;
+  line-height: 1.5;
+  color: #303133;
+  border: 1px solid #409eff;
+  border-radius: 4px;
+  padding: 4px 8px;
+  resize: vertical;
+  outline: none;
+  background: #fff;
+  word-break: break-all;
+}
+
+.split-area { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+.split-hint { font-size: 11px; color: #b45309; }
+.split-actions { display: flex; gap: 6px; }
+
+.line-actions { display: flex; gap: 2px; flex-shrink: 0; opacity: 0; padding-top: 1px; }
 .line-row:hover .line-actions { opacity: 1; }
+.line-row.is-editing .line-actions { opacity: 1; }
 
 .empty-card :deep(.el-card__body) { display: flex; align-items: center; justify-content: center; min-height: 300px; }
 </style>
