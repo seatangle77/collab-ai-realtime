@@ -5,7 +5,7 @@ import { UploadFilled } from '@element-plus/icons-vue'
 import type { UploadFile } from 'element-plus'
 import { listAdminGroups } from '../../api/admin/groups'
 import { listAdminChatSessions } from '../../api/admin/chat-sessions'
-import { getUtteranceCount, saveTranscriptUtterances } from '../../api/admin/coi-transcript-coding'
+import { getUtteranceCount, getSessionUtterances, saveTranscriptUtterances } from '../../api/admin/coi-transcript-coding'
 import type { AdminGroup, AdminChatSession } from '../../types/admin'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -140,6 +140,35 @@ function clearDraft() {
   localStorage.removeItem(draftKey(selectedSessionId.value))
   hasDraft.value = false
   draftInfo.value = null
+}
+
+// ── 从数据库加载 ───────────────────────────────────────────────────────────────
+
+const loadingFromDB = ref(false)
+
+async function loadFromDB() {
+  if (!selectedSessionId.value) return
+  loadingFromDB.value = true
+  try {
+    const res = await getSessionUtterances(selectedSessionId.value)
+    if (res.utterances.length === 0) {
+      ElMessage.warning('该会话暂无已保存的预处理数据')
+      return
+    }
+    keyCounter = 0
+    lines.value = res.utterances.map(u => ({
+      key: ++keyCounter,
+      content: u.content,
+      startTime: u.start_time,
+      endTime: null,
+    }))
+    uploadedFileName.value = '[从数据库加载]'
+    ElMessage.success(`已加载 ${lines.value.length} 条，可继续编辑后保存`)
+  } catch (e: any) {
+    ElMessage.error(e?.message || '加载失败')
+  } finally {
+    loadingFromDB.value = false
+  }
 }
 
 // ── 文件解析 ───────────────────────────────────────────────────────────────────
@@ -391,6 +420,14 @@ async function handleSave() {
             </div>
             <span class="count-text">共 {{ lines.length }} 条</span>
           </template>
+
+          <el-button
+            v-if="existingCount > 0 && lines.length === 0"
+            :loading="loadingFromDB"
+            @click="loadFromDB"
+          >
+            加载已有数据
+          </el-button>
 
           <el-upload
             :auto-upload="false"
