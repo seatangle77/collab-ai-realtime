@@ -333,6 +333,22 @@ function mergeDown(index: number) {
 
 const saving = ref(false)
 
+function exportCSV() {
+  if (lines.value.length === 0) return
+  const header = '序号,时间戳,内容,CoI分类'
+  const rows = lines.value.map((l, i) =>
+    `${i + 1},${fmt(l.startTime)},"${l.content.replace(/"/g, '""')}",`
+  )
+  const csv = '﻿' + [header, ...rows].join('\n')
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `coi_utterances_${selectedSessionId.value.slice(0, 8)}_${new Date().toISOString().slice(0, 10)}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 async function handleSave() {
   if (!selectedSessionId.value) { ElMessage.warning('请先选择会话'); return }
   if (lines.value.length === 0) { ElMessage.warning('没有可保存的内容'); return }
@@ -442,6 +458,7 @@ async function handleSave() {
           </el-upload>
 
           <template v-if="lines.length > 0">
+            <el-button @click="exportCSV">导出 CSV</el-button>
             <el-button @click="saveDraft">保存草稿</el-button>
             <el-button type="primary" :loading="saving" @click="handleSave">
               保存预处理结果
