@@ -344,7 +344,9 @@ function exportCSV() {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `coi_utterances_${selectedSessionId.value.slice(0, 8)}_${new Date().toISOString().slice(0, 10)}.csv`
+  const sessionTitle = sessions.value.find(s => s.id === selectedSessionId.value)?.session_title ?? selectedSessionId.value.slice(0, 8)
+  const safeName = sessionTitle.replace(/[/\\:*?"<>|]/g, '_')
+  a.download = `coi_utterances_${safeName}_${new Date().toISOString().slice(0, 10)}.csv`
   a.click()
   URL.revokeObjectURL(url)
 }
