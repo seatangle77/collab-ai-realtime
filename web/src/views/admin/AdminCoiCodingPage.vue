@@ -192,7 +192,7 @@ function fmt(s: number | null): string {
 }
 
 function scrollToFocused() {
-  document.getElementById(`utt-${focusedIndex.value}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  document.getElementById(`utt-${focusedIndex.value}`)?.scrollIntoView({ behavior: 'auto', block: 'nearest' })
 }
 
 function setCategory(index: number, cat: CoiCategory) {
