@@ -183,22 +183,22 @@ onMounted(fetchGroups)
       </el-col>
     </el-row>
 
-    <!-- 排除会话警告 -->
+    <!-- 未编码发言提示 -->
     <el-alert
       v-if="report && report.excluded_sessions.length > 0"
-      type="warning"
+      type="info"
       show-icon
       :closable="false"
       class="excluded-alert"
     >
       <template #title>
-        有 {{ report.excluded_sessions.length }} 个会话因存在未编码发言被排除出分析
+        有 {{ report.excluded_sessions.length }} 个会话包含未编码发言；这些发言已在分析中忽略
       </template>
       <div class="excluded-list">
         <div v-for="s in report.excluded_sessions" :key="s.session_id" class="excluded-item">
           <span>{{ s.group_name ?? s.group_id }}</span>
           <el-tag size="small" type="info">{{ conditionLabel(s.condition) }}</el-tag>
-          <span class="excluded-count">{{ s.uncoded_count }} 条未编码 / 共 {{ s.total_count }} 条</span>
+          <span class="excluded-count">已忽略 {{ s.uncoded_count }} 条未编码 / 共 {{ s.total_count }} 条</span>
         </div>
       </div>
     </el-alert>

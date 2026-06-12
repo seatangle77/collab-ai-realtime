@@ -586,10 +586,10 @@ def build_coi_analysis(
                 uncoded_count=len(uncoded),
                 total_count=len(utterances),
             ))
+        coded_utterances = [u for u in utterances if u.get("coi_category") in CATEGORY_WEIGHTS]
+        if not coded_utterances:
             continue
-        if not utterances:
-            continue
-        obs = _compute_session_observation(sid, meta["group_id"], meta["condition"], utterances)
+        obs = _compute_session_observation(sid, meta["group_id"], meta["condition"], coded_utterances)
         observations.append(obs)
 
     sessions_by_condition = {c: 0 for c in conditions}
