@@ -13,7 +13,7 @@ defineProps<{
     <template #header>
       <div class="card-title">
         <strong>推断统计结果</strong>
-        <span>根据正态性自动选择检验，报告 p 值与 effect size</span>
+        <span>根据正态性自动选择检验；p_adj 为 Benjamini-Hochberg FDR 校正值（跨指标多重比较）</span>
       </div>
     </template>
     <el-table v-loading="loading" :data="tests" border class="compact-table">
@@ -31,6 +31,23 @@ defineProps<{
         <template #default="{ row }">
           <span :class="{ significant: row.p_value !== null && row.p_value < 0.05 }">
             {{ pValueText(row.p_value) }}
+          </span>
+        </template>
+      </el-table-column>
+      <el-table-column label="p_adj (BH)" width="110" align="center">
+        <template #default="{ row }">
+          <el-tooltip
+            v-if="row.p_value !== null && row.p_value < 0.05 && row.p_value_adjusted !== null && row.p_value_adjusted >= 0.05"
+            content="原始 p 显著但 FDR 校正后不显著，解释为趋势性结果"
+            placement="top"
+          >
+            <span class="trend">{{ pValueText(row.p_value_adjusted) }} ↑趋势</span>
+          </el-tooltip>
+          <span
+            v-else
+            :class="{ significant: row.p_value_adjusted !== null && row.p_value_adjusted < 0.05 }"
+          >
+            {{ pValueText(row.p_value_adjusted) }}
           </span>
         </template>
       </el-table-column>
@@ -56,4 +73,5 @@ defineProps<{
 .compact-table :deep(.el-table__cell) { padding: 8px 10px; }
 .compact-table :deep(.el-table__header th) { background: #f8fafc; color: #324055; font-size: 13px; font-weight: 600; }
 .significant { color: #c0392b; font-weight: 700; }
+.trend { color: #d97706; font-weight: 600; }
 </style>
