@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import { Download, ZoomIn } from '@element-plus/icons-vue'
 import type { TaskScoreObservation } from '../../../api/admin/task-score-analysis'
 import { conditionLabel, formatNumber } from './reportHelpers'
 
@@ -10,6 +11,28 @@ const props = defineProps<{
   conditionColumns: string[]
   charts?: Record<string, string>
 }>()
+
+const chartLanguage = ref<'zh' | 'en'>('zh')
+const previewVisible = ref(false)
+const chartLabels = {
+  zh: {
+    cardTitle: '主要结果箱线图',
+    cardDesc: 'GS、弱协同值、强协同值按条件展示分布',
+    alt: '主要结果箱线图',
+  },
+  en: {
+    cardTitle: 'Primary Outcome Box Plots',
+    cardDesc: 'GS, weak synergy, and strong synergy distributions by condition',
+    alt: 'primary outcome box plots',
+  },
+}
+const hasEnglishChart = computed(() => Boolean(props.charts?.['box_plots_en']))
+const activeLabels = computed(() => chartLabels[chartLanguage.value])
+const activeChartKey = computed(() => chartLanguage.value === 'en' && hasEnglishChart.value ? 'box_plots_en' : 'box_plots')
+const activeChartSrc = computed(() => props.charts?.[activeChartKey.value] ?? '')
+const activeChartFileName = computed(() =>
+  `task-score-box-plots-${chartLanguage.value}-${new Date().toISOString().slice(0, 10)}.png`
+)
 
 const PLOT_METRICS: Array<{ key: PlotMetricKey; label: string; note: string }> = [
   { key: 'gs', label: 'GS 小组最终分数', note: '任务分数越低表示小组最终表现越好' },
@@ -114,24 +137,60 @@ function conditionColor(condition: string): string {
   if (condition === 'app_notification') return '#16a34a'
   return '#64748b'
 }
+
+function downloadActiveChart() {
+  if (!activeChartSrc.value) return
+  const link = document.createElement('a')
+  link.href = activeChartSrc.value
+  link.download = activeChartFileName.value
+  link.click()
+}
 </script>
 
 <template>
   <el-card class="analysis-card boxplot-card" shadow="never">
     <template #header>
       <div class="card-title">
-        <strong>主要结果箱线图</strong>
-        <span>GS、弱协同值、强协同值按条件展示分布</span>
+        <div class="card-heading">
+          <strong>{{ activeLabels.cardTitle }}</strong>
+          <span>{{ activeLabels.cardDesc }}</span>
+        </div>
+        <el-segmented
+          v-if="charts?.['box_plots_en']"
+          v-model="chartLanguage"
+          size="small"
+          :options="[
+            { label: '中文', value: 'zh' },
+            { label: 'English', value: 'en' },
+          ]"
+        />
       </div>
     </template>
 
     <!-- matplotlib 图（优先） -->
-    <img
-      v-if="charts?.['box_plots']"
-      :src="charts['box_plots']"
-      alt="主要结果箱线图"
-      style="width: 100%; display: block; border-radius: 4px;"
-    />
+    <div v-if="activeChartSrc" class="chart-image-shell">
+      <div class="chart-image-actions">
+        <el-tooltip content="放大预览" placement="top">
+          <el-button :icon="ZoomIn" class="chart-tool-button" circle @click="previewVisible = true" />
+        </el-tooltip>
+        <el-tooltip content="下载 PNG" placement="top">
+          <el-button :icon="Download" class="chart-tool-button" circle @click="downloadActiveChart" />
+        </el-tooltip>
+      </div>
+      <img
+        :src="activeChartSrc"
+        :alt="activeLabels.alt"
+        class="chart-image"
+        @click="previewVisible = true"
+      />
+      <el-image-viewer
+        v-if="previewVisible"
+        :url-list="[activeChartSrc]"
+        :initial-index="0"
+        :hide-on-click-modal="true"
+        @close="previewVisible = false"
+      />
+    </div>
 
     <!-- 旧 SVG 兜底 -->
     <div v-else class="boxplot-grid">
@@ -212,20 +271,62 @@ function conditionColor(condition: string): string {
 
 .card-title {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
 
-.card-title strong {
+.card-heading {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.card-heading strong {
   color: #1e2d40;
   font-size: 14px;
   font-weight: 600;
 }
 
-.card-title span {
+.card-heading span {
   color: #64748b;
   font-size: 12px;
+}
+
+.chart-image-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.chart-image-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 2px 4px 0;
+}
+
+.chart-tool-button {
+  width: 32px;
+  height: 32px;
+  border-color: #d6e0ec;
+  color: #475569;
+  background: #fff;
+}
+
+.chart-tool-button:hover,
+.chart-tool-button:focus {
+  border-color: #9db4d1;
+  color: #1d4ed8;
+  background: #f8fbff;
+}
+
+.chart-image {
+  width: 100%;
+  display: block;
+  cursor: zoom-in;
+  border-radius: 4px;
 }
 
 .boxplot-grid {

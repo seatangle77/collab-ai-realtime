@@ -9,6 +9,7 @@ matplotlib.use("Agg")  # headless, no display needed
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import matplotlib.font_manager as fm
+import matplotlib.patheffects as path_effects
 import numpy as np
 
 # Try to find a CJK-capable font — file path first, then name-based fallback
@@ -54,6 +55,12 @@ CONDITION_LABELS: dict[str, str] = {
 }
 
 DPI = 180
+
+
+def _strengthen_text(text_obj, width: float, color: str):
+    if width > 0:
+        text_obj.set_path_effects([path_effects.withStroke(linewidth=width, foreground=color)])
+    return text_obj
 
 
 def _apply_base_style(ax: plt.Axes) -> None:
@@ -106,16 +113,26 @@ def pvalue_label(p: float | None) -> str:
     return "n.s."
 
 
-def annotate_pvalue(ax: plt.Axes, p: float | None, x: float, y: float) -> None:
+def annotate_pvalue(
+    ax: plt.Axes,
+    p: float | None,
+    x: float,
+    y: float,
+    *,
+    fontsize: float = 9,
+    nonsig_fontweight: str = "normal",
+    stroke_width: float = 0,
+) -> None:
     label = pvalue_label(p)
     color = "#cc0000" if (p is not None and p < 0.05) else "#888888"
-    weight = "bold" if (p is not None and p < 0.05) else "normal"
-    ax.text(
+    weight = "bold" if (p is not None and p < 0.05) else nonsig_fontweight
+    text_obj = ax.text(
         x, y, label,
         ha="center", va="bottom",
-        fontsize=9, color=color, fontweight=weight,
+        fontsize=fontsize, color=color, fontweight=weight,
         transform=ax.transAxes,
     )
+    _strengthen_text(text_obj, stroke_width, color)
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +146,7 @@ def draw_boxplot(
     title: str,
     ylabel: str,
     p_value: float | None = None,
+    condition_labels: dict[str, str] | None = None,
 ) -> None:
     _apply_base_style(ax)
 
@@ -160,22 +178,35 @@ def draw_boxplot(
     for i, (pos, vals) in enumerate(zip(positions, plot_data)):
         if vals:
             med = float(np.median(vals))
-            ax.text(
+            med_obj = ax.text(
                 pos, med, f"{med:.2f}",
                 ha="center", va="center",
-                fontsize=8, fontweight="bold", color="white", zorder=5,
+                fontsize=11, fontweight="black", color="white", zorder=5,
             )
+            _strengthen_text(med_obj, 0.45, "white")
 
     n_labels = [f"n={len(data_by_condition.get(c, []))}" for c in conditions]
     ax.set_xticks(positions)
     ax.set_xticklabels(
-        [f"{condition_label(c)}\n{n}" for c, n in zip(conditions, n_labels)],
-        fontsize=9,
+        [f"{(condition_labels or {}).get(c, condition_label(c))}\n{n}" for c, n in zip(conditions, n_labels)],
+        fontsize=10,
+        fontweight="black",
     )
-    ax.set_ylabel(ylabel, fontsize=10)
-    ax.set_title(title, fontsize=12, fontweight="bold", pad=8)
+    for label in ax.get_xticklabels():
+        label.set_color("#111111")
+        _strengthen_text(label, 0.35, "#111111")
+    for label in ax.get_yticklabels():
+        label.set_fontweight("black")
+        label.set_fontsize(10)
+        label.set_color("#111111")
+        _strengthen_text(label, 0.35, "#111111")
 
-    annotate_pvalue(ax, p_value, x=0.5, y=0.97)
+    ylabel_obj = ax.set_ylabel(ylabel, fontsize=11, fontweight="black", color="#111111")
+    _strengthen_text(ylabel_obj, 0.35, "#111111")
+    title_obj = ax.set_title(title, fontsize=13, fontweight="black", pad=8, color="#111111")
+    _strengthen_text(title_obj, 0.35, "#111111")
+
+    annotate_pvalue(ax, p_value, x=0.5, y=0.97, fontsize=12, nonsig_fontweight="black", stroke_width=0.4)
 
 
 # ---------------------------------------------------------------------------

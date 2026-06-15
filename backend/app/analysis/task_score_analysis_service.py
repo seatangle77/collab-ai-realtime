@@ -54,6 +54,35 @@ METRIC_LABELS: dict[str, str] = {
     "strong_synergy": "强协同值",
 }
 
+CONDITION_LABELS_EN: dict[str, str] = {
+    "no_assistance": "No Assistance",
+    "glasses": "Smart Glasses",
+    "app_notification": "App Notification",
+}
+
+TASK_SCORE_CHART_TEXT = {
+    "zh": {
+        "chart_key": "box_plots",
+        "condition_labels": None,
+        "figsize": (13, 5),
+        "plot_metrics": [
+            ("gs", "GS 小组最终分", "Score (lower = better)"),
+            ("weak_synergy", "弱协同值 (AIS − GS)", "Synergy Score"),
+            ("strong_synergy", "强协同值 (Best IS − GS)", "Synergy Score"),
+        ],
+    },
+    "en": {
+        "chart_key": "box_plots_en",
+        "condition_labels": CONDITION_LABELS_EN,
+        "figsize": (14, 5.2),
+        "plot_metrics": [
+            ("gs", "GS Group Final Score", "Score (lower = better)"),
+            ("weak_synergy", "Weak Synergy (AIS - GS)", "Synergy Score"),
+            ("strong_synergy", "Strong Synergy (Best IS - GS)", "Synergy Score"),
+        ],
+    },
+}
+
 PRIMARY_METRICS = ["gs", "weak_synergy", "strong_synergy"]
 BASELINE_METRICS = ["ais", "best_is"]
 ALL_METRICS = [*PRIMARY_METRICS, *BASELINE_METRICS]
@@ -507,28 +536,31 @@ def _generate_task_score_charts(
         return {}
     try:
         p_by_metric = {t.metric: t.p_value for t in statistical_tests}
-        plot_metrics = [
-            ("gs",            "GS 小组最终分",             "Score (lower = better)"),
-            ("weak_synergy",  "弱协同值 (AIS − GS)",       "Synergy Score"),
-            ("strong_synergy","强协同值 (Best IS − GS)",    "Synergy Score"),
-        ]
-        fig, axes = plt.subplots(1, 3, figsize=(13, 5))
-        fig.patch.set_facecolor("white")
-        for ax, (metric, title, ylabel) in zip(axes, plot_metrics):
-            data_by_condition = {
-                c: [getattr(obs, metric) for obs in observations if obs.condition == c]
-                for c in conditions
-            }
-            draw_boxplot(
-                ax=ax,
-                data_by_condition=data_by_condition,
-                conditions=conditions,
-                title=title,
-                ylabel=ylabel,
-                p_value=p_by_metric.get(metric),
-            )
-        fig.tight_layout(pad=2.0)
-        return {"box_plots": fig_to_base64(fig)}
+
+        def _draw_chart(text: dict[str, Any]) -> str:
+            fig, axes = plt.subplots(1, 3, figsize=text["figsize"])
+            fig.patch.set_facecolor("white")
+            for ax, (metric, title, ylabel) in zip(axes, text["plot_metrics"]):
+                data_by_condition = {
+                    c: [getattr(obs, metric) for obs in observations if obs.condition == c]
+                    for c in conditions
+                }
+                draw_boxplot(
+                    ax=ax,
+                    data_by_condition=data_by_condition,
+                    conditions=conditions,
+                    title=title,
+                    ylabel=ylabel,
+                    p_value=p_by_metric.get(metric),
+                    condition_labels=text["condition_labels"],
+                )
+            fig.tight_layout(pad=2.0)
+            return fig_to_base64(fig)
+
+        return {
+            text["chart_key"]: _draw_chart(text)
+            for text in TASK_SCORE_CHART_TEXT.values()
+        }
     except Exception:
         return {}
 
