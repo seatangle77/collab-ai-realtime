@@ -31,6 +31,7 @@ except ImportError:  # pragma: no cover
 try:
     import matplotlib.pyplot as plt
     import matplotlib.patches as mpatches
+    import matplotlib.patheffects as path_effects
     import numpy as np
     from .chart_utils import condition_label as _cond_label, fig_to_base64, annotate_pvalue, pvalue_label, _apply_base_style
     _CHARTS_AVAILABLE = True
@@ -181,20 +182,135 @@ class EnaAnalysisResult(ApiModel):
 _NODE_POS = {"TE": (0.5, 0.88), "EX": (0.08, 0.44), "IN": (0.92, 0.44), "RE": (0.5, 0.0)}
 _NODE_COLORS = {"TE": "#f59e0b", "EX": "#3b82f6", "IN": "#8b5cf6", "RE": "#10b981"}
 _NODE_LABELS_ZH = {"TE": "触发", "EX": "探索", "IN": "整合", "RE": "解决"}
+_NODE_LABELS_EN = {"TE": "", "EX": "", "IN": "", "RE": ""}
 _EDGE_COLORS = {
     ("EX", "IN"): "#6366f1", ("IN", "RE"): "#8b5cf6",
     ("TE", "EX"): "#f59e0b", ("TE", "IN"): "#3b82f6",
     ("TE", "RE"): "#ef4444", ("EX", "RE"): "#06b6d4",
 }
+_EDGE_LABEL_COLORS = {
+    ("EX", "IN"): "#4338ca", ("IN", "RE"): "#6d28d9",
+    ("TE", "EX"): "#b45309", ("TE", "IN"): "#1d4ed8",
+    ("TE", "RE"): "#b91c1c", ("EX", "RE"): "#0891b2",
+}
+_EDGE_LABEL_POSITIONS = {
+    ("TE", "EX"): (0.14, 0.73),
+    ("TE", "IN"): (0.78, 0.67),
+    ("TE", "RE"): (0.36, 0.54),
+    ("EX", "IN"): (0.54, 0.32),
+    ("EX", "RE"): (0.10, 0.22),
+    ("IN", "RE"): (0.87, 0.25),
+}
+_DIFF_EDGE_LABEL_POSITIONS = {
+    ("TE", "EX"): (0.20, 0.75),
+    ("TE", "IN"): (0.76, 0.69),
+    ("TE", "RE"): (0.34, 0.54),
+    ("EX", "IN"): (0.62, 0.33),
+    ("EX", "RE"): (0.12, 0.17),
+    ("IN", "RE"): (0.82, 0.22),
+}
+_ENA_METRIC_LABELS_EN: dict[str, str] = {
+    "ex_in_strength": "EX-IN connection strength\n(Exploration -> Integration)",
+    "in_re_strength": "IN-RE connection strength\n(Integration -> Resolution)",
+    "higher_order_strength": "Higher-order connection strength\n(EX+IN+RE co-occurrence)",
+}
+_ENA_CHART_TEXT = {
+    "zh": {
+        "chart_key": "networks",
+        "node_labels": _NODE_LABELS_ZH,
+        "metric_labels": ENA_METRIC_LABELS,
+        "diff_title": "差异图 (B − A)",
+        "legend_b": "B 更强 (>0.01)",
+        "legend_a": "A 更强 (<-0.01)",
+        "legend_same": "差异 < 0.01",
+        "node_label_size": 10.5,
+        "footer_size": 12,
+        "fig_width_per_col": 5.2,
+        "fig_height": 5.8,
+        "title_size": 16,
+        "edge_label_size": 12,
+        "node_radius": 0.115,
+        "node_code_size": 15,
+        "node_code_y_offset": 0.030,
+        "node_label_y_offset": -0.045,
+        "font_weight": "bold",
+        "text_stroke": 0,
+        "legend_size": 11,
+        "footer_x": [0.24, 0.50, 0.77],
+        "footer_y": 0.01,
+        "acronym_note": None,
+        "acronym_notes": None,
+        "acronym_note_size": 0,
+        "acronym_note_y": 0,
+        "layout_bottom": 0.10,
+    },
+    "en": {
+        "chart_key": "networks_en",
+        "node_labels": _NODE_LABELS_EN,
+        "metric_labels": _ENA_METRIC_LABELS_EN,
+        "diff_title": "Difference (B - A)",
+        "legend_b": "B stronger (>0.01)",
+        "legend_a": "A stronger (<-0.01)",
+        "legend_same": "Difference < 0.01",
+        "node_label_size": 0,
+        "footer_size": 13.5,
+        "fig_width_per_col": 6.6,
+        "fig_height": 7.2,
+        "title_size": 19,
+        "edge_label_size": 14.5,
+        "node_radius": 0.14,
+        "node_code_size": 22,
+        "node_code_y_offset": 0.0,
+        "node_label_y_offset": 0.0,
+        "font_weight": "black",
+        "text_stroke": 0.42,
+        "legend_size": 13.5,
+        "footer_x": [0.21, 0.50, 0.80],
+        "footer_y": 0.015,
+        "acronym_note": None,
+        "acronym_notes": [
+            (0.17, "TE = Triggering"),
+            (0.39, "EX = Exploration"),
+            (0.61, "IN = Integration"),
+            (0.83, "RE = Resolution"),
+        ],
+        "acronym_note_size": 16,
+        "acronym_note_y": 0.105,
+        "layout_bottom": 0.24,
+    },
+}
 
 
-def _draw_ena_network(ax: "plt.Axes", network: "EnaNetworkCondition", title: str, is_diff: bool = False) -> None:
+def _strengthen_text(text_obj: Any, width: float, color: str) -> Any:
+    if width:
+        text_obj.set_path_effects([path_effects.withStroke(linewidth=width, foreground=color)])
+    return text_obj
+
+
+def _draw_ena_network(
+    ax: "plt.Axes",
+    network: "EnaNetworkCondition",
+    title: str,
+    *,
+    node_labels: dict[str, str],
+    node_label_size: float,
+    title_size: float,
+    edge_label_size: float,
+    node_radius: float,
+    node_code_size: float,
+    node_code_y_offset: float,
+    node_label_y_offset: float,
+    font_weight: str,
+    text_stroke: float,
+    is_diff: bool = False,
+) -> None:
     ax.set_xlim(-0.18, 1.18)
     ax.set_ylim(-0.18, 1.08)
     ax.set_aspect("equal")
     ax.axis("off")
     ax.set_facecolor("#f8fafc")
-    ax.set_title(title, fontsize=11, fontweight="bold", pad=8)
+    title_obj = ax.set_title(title, fontsize=title_size, fontweight=font_weight, pad=10, color="#111111")
+    _strengthen_text(title_obj, text_stroke, "#111111")
 
     weights = [abs(e.weight_diff if is_diff else e.weight) for e in network.edges]
     max_w = max(weights) if any(w > 0 for w in weights) else 1.0
@@ -208,14 +324,21 @@ def _draw_ena_network(ax: "plt.Axes", network: "EnaNetworkCondition", title: str
         if is_diff:
             diff_val = edge.weight_diff or 0.0
             color = "#2563eb" if diff_val > 0.01 else ("#dc2626" if diff_val < -0.01 else "#cbd5e1")
+            label_color = "#1d4ed8" if diff_val > 0.01 else ("#b91c1c" if diff_val < -0.01 else "#4b5563")
         else:
             pair = (edge.source, edge.target)
             color = _EDGE_COLORS.get(pair, _EDGE_COLORS.get((edge.target, edge.source), "#94a3b8"))
+            label_color = _EDGE_LABEL_COLORS.get(pair, _EDGE_LABEL_COLORS.get((edge.target, edge.source), "#334155"))
         # Slight curve via control point offset
         mx, my = (x0 + x1) / 2, (y0 + y1) / 2
         dx, dy = x1 - x0, y1 - y0
         length = max((dx**2 + dy**2) ** 0.5, 1e-6)
-        cx, cy = mx - (dy / length) * 0.08, my + (dx / length) * 0.08
+        default_label_x, default_label_y = mx - (dy / length) * 0.08, my + (dx / length) * 0.08
+        label_positions = _DIFF_EDGE_LABEL_POSITIONS if is_diff else _EDGE_LABEL_POSITIONS
+        label_x, label_y = label_positions.get(
+            (edge.source, edge.target),
+            label_positions.get((edge.target, edge.source), (default_label_x, default_label_y)),
+        )
         from matplotlib.patches import FancyArrowPatch
         style = f"arc3,rad=0.15"
         ax.annotate("", xy=(x1, y1), xytext=(x0, y0),
@@ -224,19 +347,28 @@ def _draw_ena_network(ax: "plt.Axes", network: "EnaNetworkCondition", title: str
         val = edge.weight_diff if is_diff else edge.weight
         if val is not None and abs(val) >= 0.03:
             txt = f"{val:+.2f}" if is_diff else f"{val:.2f}"
-            ax.text(cx, cy + 0.04, txt, ha="center", va="bottom", fontsize=8,
-                    fontweight="600", color=color, alpha=0.95, zorder=4)
+            label_obj = ax.text(
+                label_x, label_y, txt,
+                ha="center", va="center",
+                fontsize=edge_label_size, fontweight=font_weight, color=label_color, alpha=1.0, zorder=4,
+                bbox=dict(boxstyle="round,pad=0.15", facecolor="white", edgecolor="none", alpha=0.82),
+            )
+            _strengthen_text(label_obj, text_stroke, label_color)
 
     for node in network.nodes:
         x, y = _NODE_POS.get(node, (0.5, 0.5))
         color = _NODE_COLORS.get(node, "#888888")
-        circle = mpatches.Circle((x, y), 0.1, facecolor=color, edgecolor="white",
-                                  linewidth=2.0, zorder=3)
+        circle = mpatches.Circle((x, y), node_radius, facecolor=color, edgecolor="white",
+                                  linewidth=2.4, zorder=3)
         ax.add_patch(circle)
-        ax.text(x, y + 0.025, node, ha="center", va="center",
-                fontsize=10, fontweight="bold", color="white", zorder=5)
-        ax.text(x, y - 0.038, _NODE_LABELS_ZH.get(node, ""), ha="center", va="center",
-                fontsize=7.5, color="white", alpha=0.9, zorder=5)
+        code_obj = ax.text(x, y + node_code_y_offset, node, ha="center", va="center",
+                           fontsize=node_code_size, fontweight=font_weight, color="white", zorder=5)
+        _strengthen_text(code_obj, text_stroke, "white")
+        label = node_labels.get(node, "")
+        if label:
+            label_obj = ax.text(x, y + node_label_y_offset, label, ha="center", va="center",
+                                fontsize=node_label_size, fontweight=font_weight, color="white", alpha=1.0, zorder=5)
+            _strengthen_text(label_obj, text_stroke, "white")
 
 
 def _generate_ena_charts(
@@ -252,36 +384,103 @@ def _generate_ena_charts(
         if n_cols == 0:
             return {}
 
-        fig, axes = plt.subplots(1, n_cols, figsize=(n_cols * 4.2, 4.5))
-        fig.patch.set_facecolor("white")
-        if n_cols == 1:
-            axes = [axes]
+        def _draw_networks_chart(text: dict[str, Any]) -> str:
+            fig, axes = plt.subplots(1, n_cols, figsize=(n_cols * text["fig_width_per_col"], text["fig_height"]))
+            fig.patch.set_facecolor("white")
+            if n_cols == 1:
+                axes = [axes]
 
-        for ax, net in zip(axes, networks):
-            _draw_ena_network(ax, net, _cond_label(net.condition), is_diff=False)
+            for ax, net in zip(axes, networks):
+                _draw_ena_network(
+                    ax,
+                    net,
+                    _cond_label(net.condition),
+                    node_labels=text["node_labels"],
+                    node_label_size=text["node_label_size"],
+                    title_size=text["title_size"],
+                    edge_label_size=text["edge_label_size"],
+                    node_radius=text["node_radius"],
+                    node_code_size=text["node_code_size"],
+                    node_code_y_offset=text["node_code_y_offset"],
+                    node_label_y_offset=text["node_label_y_offset"],
+                    font_weight=text["font_weight"],
+                    text_stroke=text["text_stroke"],
+                    is_diff=False,
+                )
 
-        if diff_network is not None:
-            _draw_ena_network(axes[-1], diff_network, "差异图 (B − A)", is_diff=True)
-            legend_items = [
-                mpatches.Patch(color="#1f77b4", label="B 更强 (>0.01)"),
-                mpatches.Patch(color="#d62728", label="A 更强 (<-0.01)"),
-                mpatches.Patch(color="#cccccc", label="差异 < 0.01"),
-            ]
-            axes[-1].legend(handles=legend_items,
-                            loc="upper center",
-                            bbox_to_anchor=(0.5, -0.04),
-                            fontsize=8, framealpha=0.0, ncol=3)
+            if diff_network is not None:
+                _draw_ena_network(
+                    axes[-1],
+                    diff_network,
+                    text["diff_title"],
+                    node_labels=text["node_labels"],
+                    node_label_size=text["node_label_size"],
+                    title_size=text["title_size"],
+                    edge_label_size=text["edge_label_size"],
+                    node_radius=text["node_radius"],
+                    node_code_size=text["node_code_size"],
+                    node_code_y_offset=text["node_code_y_offset"],
+                    node_label_y_offset=text["node_label_y_offset"],
+                    font_weight=text["font_weight"],
+                    text_stroke=text["text_stroke"],
+                    is_diff=True,
+                )
+                legend_items = [
+                    mpatches.Patch(color="#1f77b4", label=text["legend_b"]),
+                    mpatches.Patch(color="#d62728", label=text["legend_a"]),
+                    mpatches.Patch(color="#cccccc", label=text["legend_same"]),
+                ]
+                legend = axes[-1].legend(
+                    handles=legend_items,
+                    loc="upper center",
+                    bbox_to_anchor=(0.5, -0.06),
+                    prop={"size": text["legend_size"], "weight": text["font_weight"]},
+                    framealpha=0.0,
+                    ncol=3,
+                )
+                for legend_text in legend.get_texts():
+                    legend_text.set_color("#111111")
+                    _strengthen_text(legend_text, text["text_stroke"], "#111111")
 
-        p_by_metric = {t.metric: t.p_value for t in statistical_tests}
-        p_lines = [
-            f"{ENA_METRIC_LABELS[m]}: {pvalue_label(p_by_metric.get(m))}"
-            for m in ENA_METRICS
-        ]
-        fig.text(0.5, 0.01, "  |  ".join(p_lines), ha="center", va="bottom",
-                 fontsize=8.5, color="#555555")
+            p_by_metric = {t.metric: t.p_value for t in statistical_tests}
+            if text["acronym_note"]:
+                note_obj = fig.text(
+                    0.5, text["acronym_note_y"],
+                    text["acronym_note"],
+                    ha="center", va="bottom",
+                    fontsize=text["acronym_note_size"], fontweight=text["font_weight"],
+                    color="#111111",
+                )
+                _strengthen_text(note_obj, text["text_stroke"], "#111111")
+            if text["acronym_notes"]:
+                for x, note in text["acronym_notes"]:
+                    note_obj = fig.text(
+                        x, text["acronym_note_y"],
+                        note,
+                        ha="center", va="bottom",
+                        fontsize=text["acronym_note_size"], fontweight=text["font_weight"],
+                        color="#111111",
+                    )
+                    _strengthen_text(note_obj, text["text_stroke"], "#111111")
+            for x, metric in zip(text["footer_x"], ENA_METRICS):
+                p_value = p_by_metric.get(metric)
+                footer_color = "#cc0000" if (p_value is not None and p_value < 0.05) else "#222222"
+                footer_obj = fig.text(
+                    x, text["footer_y"],
+                    f"{text['metric_labels'][metric]}: {pvalue_label(p_value)}",
+                    ha="center", va="bottom",
+                    fontsize=text["footer_size"], fontweight=text["font_weight"],
+                    color=footer_color,
+                )
+                _strengthen_text(footer_obj, text["text_stroke"], footer_color)
 
-        fig.tight_layout(pad=1.5, rect=(0, 0.10, 1, 1))
-        return {"networks": fig_to_base64(fig)}
+            fig.tight_layout(pad=1.5, rect=(0, text["layout_bottom"], 1, 1))
+            return fig_to_base64(fig)
+
+        return {
+            text["chart_key"]: _draw_networks_chart(text)
+            for text in _ENA_CHART_TEXT.values()
+        }
     except Exception:
         return {}
 

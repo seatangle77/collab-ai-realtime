@@ -217,9 +217,12 @@ export function buildCoiReportHtml(
     <tr><th>${escapeHtml(conditionLabel(c))}</th><td>${selectedGroupIdsByCondition[c]?.length ?? 0}</td><td>${escapeHtml(selectedGroupNames(c, selectedGroupIdsByCondition, groupOptionsByCondition))}</td></tr>
   `).join('')
 
-  const excludedRows = report.excluded_sessions.length > 0
-    ? report.excluded_sessions.map((s) => `<tr><td>${escapeHtml(s.session_id)}</td><td>${escapeHtml(s.group_name ?? s.group_id)}</td><td>${escapeHtml(conditionLabel(s.condition))}</td><td>${s.uncoded_count} / ${s.total_count}</td></tr>`).join('')
-    : '<tr><td colspan="4">无未编码发言</td></tr>'
+  const compositionChartHtml = report.charts?.composition
+    ? `<img src="${report.charts.composition}" style="max-width:100%;display:block;margin:10px 0 18px;border-radius:6px" alt="CoI 话语结构图">`
+    : coiCompositionChartsHtml(report, conditionColumns)
+  const compositionChartEnglishHtml = report.charts?.composition_en
+    ? `<h3>English Version</h3><img src="${report.charts.composition_en}" style="max-width:100%;display:block;margin:10px 0 18px;border-radius:6px" alt="CoI discourse structure chart, English version">`
+    : ''
 
   return `<!doctype html>
 <html lang="zh-CN">
@@ -263,18 +266,17 @@ export function buildCoiReportHtml(
   <p class="note">正态性使用 Shapiro-Wilk test；两条件选用 Welch t-test 或 Mann-Whitney U test；三条件使用 one-way ANOVA（附 Levene 方差齐性检验）或 Kruskal-Wallis。Effect size 使用 Hedges' g、rank-biserial r、eta squared 或 epsilon squared。多重比较校正：对所有指标的原始 p 值统一应用 Benjamini-Hochberg FDR 校正（见推断统计表 p_adj 列），以控制跨指标的假阳性率。</p>
   <h2>2. 样本选择</h2>
   <table><thead><tr><th>条件</th><th>小组数</th><th>小组</th></tr></thead><tbody>${sampleRows}</tbody></table>
-  <h2>3. 未编码发言处理</h2>
-  <table><thead><tr><th>会话 ID</th><th>小组</th><th>条件</th><th>忽略未编码 / 总计</th></tr></thead><tbody>${excludedRows}</tbody></table>
-  <h2>4. 描述性统计</h2>
+  <h2>3. 描述性统计</h2>
   <table><thead>${descriptiveHeader()}</thead><tbody>${descriptiveRows}</tbody></table>
-  <h2>5. 正态性检查（Shapiro-Wilk）</h2>
+  <h2>4. 正态性检查（Shapiro-Wilk）</h2>
   <table><thead><tr><th>指标</th><th>条件</th><th>n</th><th>W</th><th>p</th><th>判断</th><th>说明</th></tr></thead><tbody>${normalityRows}</tbody></table>
-  <h2>6. 报告结果与可视化</h2>
+  <h2>5. 报告结果与可视化</h2>
   <p class="note">图表展示各条件的 CoI 话语结构，以及 Integration + Resolution 所占的高阶认知参与比例；p 值与 effect size 见下方推断统计表。</p>
-  ${report.charts?.composition ? `<img src="${report.charts.composition}" style="max-width:100%;display:block;margin:10px 0 18px;border-radius:6px" alt="CoI 话语结构图">` : coiCompositionChartsHtml(report, conditionColumns)}
-  <h2>7. 推断统计</h2>
+  ${compositionChartHtml}
+  ${compositionChartEnglishHtml}
+  <h2>6. 推断统计</h2>
   <table><thead><tr><th>指标</th><th>检验</th><th>统计量</th><th>值</th><th>p</th><th>p_adj (BH)</th><th>Effect size</th><th>值</th><th>状态</th><th>说明</th></tr></thead><tbody>${inferentialRows}</tbody></table>
-  <h2>8. 事后检验（Post-hoc）</h2>
+  <h2>7. 事后检验（Post-hoc）</h2>
   <p class="note">仅三条件且全局检验 p &lt; 0.05 时执行；Tukey HSD 用于 ANOVA，Dunn + Bonferroni 用于 Kruskal-Wallis。</p>
   ${postHocSection}
 </body>

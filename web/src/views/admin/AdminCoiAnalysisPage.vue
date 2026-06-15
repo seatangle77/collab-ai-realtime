@@ -19,7 +19,7 @@ const loadingGroups = ref(false)
 const groups = ref<AdminGroup[]>([])
 const report = ref<CoiAnalysisResult | null>(null)
 
-const selectedGroupIdsByCondition = reactive<Record<string, string[]>>({
+let selectedGroupIdsByCondition = reactive<Record<string, string[]>>({
   no_assistance: [],
   glasses: [],
   app_notification: [],
@@ -183,26 +183,6 @@ onMounted(fetchGroups)
       </el-col>
     </el-row>
 
-    <!-- 未编码发言提示 -->
-    <el-alert
-      v-if="report && report.excluded_sessions.length > 0"
-      type="info"
-      show-icon
-      :closable="false"
-      class="excluded-alert"
-    >
-      <template #title>
-        有 {{ report.excluded_sessions.length }} 个会话包含未编码发言；这些发言已在分析中忽略
-      </template>
-      <div class="excluded-list">
-        <div v-for="s in report.excluded_sessions" :key="s.session_id" class="excluded-item">
-          <span>{{ s.group_name ?? s.group_id }}</span>
-          <el-tag size="small" type="info">{{ conditionLabel(s.condition) }}</el-tag>
-          <span class="excluded-count">已忽略 {{ s.uncoded_count }} 条未编码 / 共 {{ s.total_count }} 条</span>
-        </div>
-      </div>
-    </el-alert>
-
     <CoiDescriptiveStatsTable
       :loading="loading"
       :metrics="report?.metrics ?? []"
@@ -244,26 +224,4 @@ onMounted(fetchGroups)
   grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr);
 }
 
-.excluded-alert :deep(.el-alert__content) {
-  width: 100%;
-}
-
-.excluded-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.excluded-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-}
-
-.excluded-count {
-  color: #8a7a5a;
-  font-size: 12px;
-}
 </style>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import { Download, ZoomIn } from '@element-plus/icons-vue'
 import type { EnaNetworkCondition } from '../../../api/admin/ena-analysis'
 import { conditionLabel } from './reportHelpers'
 
@@ -8,6 +9,28 @@ const props = defineProps<{
   diffNetwork: EnaNetworkCondition | null
   charts?: Record<string, string>
 }>()
+
+const chartLanguage = ref<'zh' | 'en'>('zh')
+const previewVisible = ref(false)
+const chartLabels = {
+  zh: {
+    title: 'ENA 认知过程网络图',
+    desc: '线条粗细 = 共现强度；差异图中蓝色表示条件B更强，红色表示条件A更强',
+    alt: 'ENA 认知过程网络图',
+  },
+  en: {
+    title: 'ENA Cognitive Process Network',
+    desc: 'Line thickness = co-occurrence strength; blue indicates condition B is stronger, red indicates condition A is stronger',
+    alt: 'ENA cognitive process network',
+  },
+}
+const hasEnglishChart = computed(() => Boolean(props.charts?.['networks_en']))
+const activeLabels = computed(() => chartLabels[chartLanguage.value])
+const activeChartKey = computed(() => chartLanguage.value === 'en' && hasEnglishChart.value ? 'networks_en' : 'networks')
+const activeChartSrc = computed(() => props.charts?.[activeChartKey.value] ?? '')
+const activeChartFileName = computed(() =>
+  `ena-network-${chartLanguage.value}-${new Date().toISOString().slice(0, 10)}.png`
+)
 
 // Fixed node positions in a diamond layout (cx, cy) within a 300×300 viewport
 const NODE_POSITIONS: Record<string, { x: number; y: number }> = {
@@ -76,24 +99,62 @@ const COI_LABELS: Record<string, string> = {
   IN: 'IN\n整合',
   RE: 'RE\n解决',
 }
+
+function downloadActiveChart() {
+  if (!activeChartSrc.value) return
+  const link = document.createElement('a')
+  link.href = activeChartSrc.value
+  link.download = activeChartFileName.value
+  link.click()
+}
 </script>
 
 <template>
   <el-card class="analysis-card" shadow="never">
     <template #header>
       <div class="card-title">
-        <strong>ENA 认知过程网络图</strong>
-        <span>线条粗细 = 共现强度；差异图中蓝色表示条件B更强，红色表示条件A更强</span>
+        <div class="card-heading">
+          <strong>{{ activeLabels.title }}</strong>
+          <span>{{ activeLabels.desc }}</span>
+        </div>
+        <div class="card-controls">
+          <el-segmented
+            v-if="charts?.['networks_en']"
+            v-model="chartLanguage"
+            size="small"
+            :options="[
+              { label: '中文', value: 'zh' },
+              { label: 'English', value: 'en' },
+            ]"
+          />
+        </div>
       </div>
     </template>
 
     <!-- matplotlib 图（优先） -->
-    <img
-      v-if="charts?.['networks']"
-      :src="charts['networks']"
-      alt="ENA 认知过程网络图"
-      style="width: 100%; display: block; border-radius: 4px;"
-    />
+    <div v-if="activeChartSrc" class="chart-image-shell">
+      <div class="chart-image-actions">
+        <el-tooltip content="放大预览" placement="top">
+          <el-button :icon="ZoomIn" class="chart-tool-button" circle @click="previewVisible = true" />
+        </el-tooltip>
+        <el-tooltip content="下载 PNG" placement="top">
+          <el-button :icon="Download" class="chart-tool-button" circle @click="downloadActiveChart" />
+        </el-tooltip>
+      </div>
+      <img
+        :src="activeChartSrc"
+        :alt="activeLabels.alt"
+        class="chart-image"
+        @click="previewVisible = true"
+      />
+      <el-image-viewer
+        v-if="previewVisible"
+        :url-list="[activeChartSrc]"
+        :initial-index="0"
+        :hide-on-click-modal="true"
+        @close="previewVisible = false"
+      />
+    </div>
 
     <!-- 旧 SVG 兜底 -->
     <div v-else class="networks-row">
@@ -230,8 +291,68 @@ const COI_LABELS: Record<string, string> = {
 
 <style scoped>
 .analysis-card { border: 1px solid #e3e9f2; border-radius: 8px; }
-.card-title { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.card-title span { color: #748197; font-size: 13px; }
+.card-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.card-heading {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.card-heading strong {
+  color: #1e2d40;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.card-heading span { color: #748197; font-size: 13px; }
+
+.card-controls {
+  display: flex;
+  align-items: center;
+}
+
+.chart-image-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.chart-image-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 2px 4px 0;
+}
+
+.chart-tool-button {
+  width: 32px;
+  height: 32px;
+  border-color: #d6e0ec;
+  color: #475569;
+  background: #fff;
+}
+
+.chart-tool-button:hover,
+.chart-tool-button:focus {
+  border-color: #9db4d1;
+  color: #1d4ed8;
+  background: #f8fbff;
+}
+
+.chart-image {
+  width: 100%;
+  display: block;
+  cursor: zoom-in;
+  border-radius: 4px;
+}
 
 .networks-row {
   display: flex;

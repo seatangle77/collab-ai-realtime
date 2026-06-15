@@ -189,6 +189,25 @@ _COI_CATEGORY_LABELS = {
     "in_ratio": "Integration",
     "re_ratio": "Resolution",
 }
+_COI_CHART_TEXT = {
+    "zh": {
+        "composition_key": "composition",
+        "left_title": "CoI 话语结构比例",
+        "right_title": "高阶认知参与比例 (IN+RE)",
+    },
+    "en": {
+        "composition_key": "composition_en",
+        "left_title": "CoI Discourse Structure Proportions",
+        "right_title": "Higher-Order Cognitive Engagement (IN+RE)",
+    },
+}
+
+
+def _emphasize_coi_axis_text(ax: Any) -> None:
+    ax.tick_params(colors="#111111", labelsize=11)
+    for label in ax.get_xticklabels() + ax.get_yticklabels():
+        label.set_fontweight("semibold")
+        label.set_color("#111111")
 
 
 def _generate_coi_charts(
@@ -204,56 +223,66 @@ def _generate_coi_charts(
         category_metrics = ["te_ratio", "ex_ratio", "in_ratio", "re_ratio"]
         cond_labels = [_cond_label(c) for c in conditions]
 
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, max(3, len(conditions) * 1.2 + 2)))
-        fig.patch.set_facecolor("white")
+        def _draw_composition_chart(text: dict[str, str]) -> str:
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, max(3, len(conditions) * 1.2 + 2)))
+            fig.patch.set_facecolor("white")
 
-        # --- Left: stacked horizontal bar (composition) ---
-        _apply_base_style(ax1)
-        lefts = np.zeros(len(conditions))
-        for m in category_metrics:
-            vals = np.array([
-                _mean(values_by_metric_condition[m].get(c, [0.0])) if values_by_metric_condition[m].get(c) else 0.0
+            # --- Left: stacked horizontal bar (composition) ---
+            _apply_base_style(ax1)
+            lefts = np.zeros(len(conditions))
+            for m in category_metrics:
+                vals = np.array([
+                    _mean(values_by_metric_condition[m].get(c, [0.0])) if values_by_metric_condition[m].get(c) else 0.0
+                    for c in conditions
+                ])
+                ax1.barh(cond_labels, vals, left=lefts, color=_COI_CATEGORY_COLORS[m],
+                         label=_COI_CATEGORY_LABELS[m], height=0.5)
+                lefts += vals
+            ax1.set_xlim(0, 1)
+            ax1.set_xlabel("Proportion", fontsize=11, fontweight="semibold", color="#111111")
+            ax1.set_title(text["left_title"], fontsize=13, fontweight="bold", pad=8, color="#111111")
+            legend = ax1.legend(
+                loc="upper center",
+                bbox_to_anchor=(0.5, -0.18),
+                ncol=4,
+                prop={"size": 10.5, "weight": "semibold"},
+                framealpha=0.0,
+                borderpad=0.5,
+            )
+            for legend_text in legend.get_texts():
+                legend_text.set_color("#111111")
+            ax1.grid(axis="x", linestyle="--", linewidth=0.6, color="#cccccc")
+            ax1.spines["top"].set_visible(False)
+            ax1.spines["right"].set_visible(False)
+            _emphasize_coi_axis_text(ax1)
+
+            # --- Right: higher-order ratio bar ---
+            _apply_base_style(ax2)
+            ho_vals = [
+                _mean(values_by_metric_condition["higher_order_ratio"].get(c, [0.0]))
+                if values_by_metric_condition["higher_order_ratio"].get(c) else 0.0
                 for c in conditions
-            ])
-            ax1.barh(cond_labels, vals, left=lefts, color=_COI_CATEGORY_COLORS[m],
-                     label=_COI_CATEGORY_LABELS[m], height=0.5)
-            lefts += vals
-        ax1.set_xlim(0, 1)
-        ax1.set_xlabel("Proportion", fontsize=10)
-        ax1.set_title("CoI 话语结构比例", fontsize=12, fontweight="bold")
-        ax1.legend(
-            loc="upper center",
-            bbox_to_anchor=(0.5, -0.18),
-            ncol=4,
-            fontsize=9,
-            framealpha=0.0,
-            borderpad=0.5,
-        )
-        ax1.grid(axis="x", linestyle="--", linewidth=0.6, color="#cccccc")
-        ax1.spines["top"].set_visible(False)
-        ax1.spines["right"].set_visible(False)
+            ]
+            bars = ax2.barh(cond_labels, ho_vals, color=[condition_color(c) for c in conditions], height=0.5)
+            for bar, val in zip(bars, ho_vals):
+                ax2.text(val + 0.01, bar.get_y() + bar.get_height() / 2,
+                         f"{val:.3f}", va="center", fontsize=10, fontweight="bold", color="#111111")
+            ax2.set_xlim(0, 1.15)
+            ax2.set_xlabel("Proportion", fontsize=11, fontweight="semibold", color="#111111")
+            ax2.set_title(text["right_title"], fontsize=13, fontweight="bold", pad=20, color="#111111")
+            p_ho = p_by_metric.get("higher_order_ratio")
+            annotate_pvalue(ax2, p_ho, x=0.5, y=1.02)
+            ax2.spines["top"].set_visible(False)
+            ax2.spines["right"].set_visible(False)
+            _emphasize_coi_axis_text(ax2)
 
-        # --- Right: higher-order ratio bar ---
-        _apply_base_style(ax2)
-        ho_vals = [
-            _mean(values_by_metric_condition["higher_order_ratio"].get(c, [0.0]))
-            if values_by_metric_condition["higher_order_ratio"].get(c) else 0.0
-            for c in conditions
-        ]
-        bars = ax2.barh(cond_labels, ho_vals, color=[condition_color(c) for c in conditions], height=0.5)
-        for bar, val in zip(bars, ho_vals):
-            ax2.text(val + 0.01, bar.get_y() + bar.get_height() / 2,
-                     f"{val:.3f}", va="center", fontsize=9, fontweight="bold")
-        ax2.set_xlim(0, 1.15)
-        ax2.set_xlabel("Proportion", fontsize=10)
-        ax2.set_title("高阶认知参与比例 (IN+RE)", fontsize=12, fontweight="bold")
-        p_ho = p_by_metric.get("higher_order_ratio")
-        annotate_pvalue(ax2, p_ho, x=0.5, y=0.97)
-        ax2.spines["top"].set_visible(False)
-        ax2.spines["right"].set_visible(False)
+            fig.tight_layout(pad=2.0, rect=(0, 0.06, 1, 0.96))
+            return fig_to_base64(fig)
 
-        fig.tight_layout(pad=2.0, rect=(0, 0.06, 1, 1))
-        return {"composition": fig_to_base64(fig)}
+        return {
+            text["composition_key"]: _draw_composition_chart(text)
+            for text in _COI_CHART_TEXT.values()
+        }
     except Exception:
         return {}
 

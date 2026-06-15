@@ -32,7 +32,7 @@ const loading = ref(false)
 const loadingGroups = ref(false)
 const groups = ref<AdminGroup[]>([])
 const report = ref<TaskScoreAnalysisResult | null>(null)
-const selectedGroupIdsByCondition = reactive<Record<string, string[]>>({
+let selectedGroupIdsByCondition = reactive<Record<string, string[]>>({
   no_assistance: [],
   glasses: [],
   app_notification: [],
