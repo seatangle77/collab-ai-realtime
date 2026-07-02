@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>月球生存讨论 · 智能眼镜端演示</title>
+<style>
+  :root {
+    --app-font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+
+    --app-bg-page: #f8fafc;
+    --app-bg-elevated: #ffffff;
+    --app-bg-subtle: #f9fafb;
+    --app-border: #e2e8f0;
+    --app-border-strong: #cbd5e1;
+
+    --app-text-primary: #0f172a;
+    --app-text-secondary: #64748b;
+    --app-text-muted: #94a3b8;
+
+    --app-primary: #2563eb;
+    --app-primary-hover: #1d4ed8;
+    --app-primary-soft: #eff6ff;
+
+    --app-danger: #dc2626;
+    --app-danger-soft: #fef2f2;
+
+    --app-radius-lg: 14px;
+    --app-radius-md: 10px;
+    --app-radius-sm: 8px;
+
+    --app-font-size-title: 26px;
+    --app-font-size-heading: 19px;
+    --app-font-size-body: 16px;
+    --app-font-size-caption: 14px;
+
+    --app-content-width-default: 480px;
+
+    --app-color-ai: #f59e0b;
+    --app-color-ai-soft: #fffbeb;
+    --app-color-ai-border: #fcd34d;
+
+    --app-radius-pill: 999px;
+    --app-radius-bubble: 14px;
+    --app-radius-card: 10px;
+
+    --app-shadow-card: 0 1px 3px rgba(15, 23, 42, 0.10), 0 1px 2px -1px rgba(15, 23, 42, 0.08);
+    --app-shadow-soft: 0 10px 30px rgba(15, 23, 42, 0.08);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    font-family: var(--app-font-sans);
+    background-color: var(--app-bg-page);
+    color: var(--app-text-primary);
+    font-size: var(--app-font-size-body);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .app-shell {
+    max-width: var(--app-content-width-default);
+    margin: 0 auto;
+    min-height: 100vh;
+    background: var(--app-bg-page);
+    position: relative;
+    padding-bottom: 90px;
+  }
+
+  /* 顶部头部 */
+  .page-header {
+    padding: 14px 16px 10px;
+    background: var(--app-bg-page);
+    position: sticky;
+    top: 0;
+    z-index: 50;
+  }
+
+  .title-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .back-btn {
+    background: none;
+    border: none;
+    font-size: 22px;
+    line-height: 1;
+    color: var(--app-text-secondary);
+    cursor: pointer;
+    padding: 0 4px 0 0;
+    flex-shrink: 0;
+  }
+
+  .title-main {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .page-title {
+    margin: 0;
+    font-size: var(--app-font-size-heading);
+    font-weight: 700;
+    color: var(--app-text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .status-tag {
+    flex-shrink: 0;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: var(--app-radius-pill);
+    background: #ecfdf5;
+    color: #059669;
+    border: 1px solid #a7f3d0;
+  }
+
+  .device-tag {
+    margin-left: auto;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 3px 9px;
+    border-radius: var(--app-radius-pill);
+    background: var(--app-primary-soft);
+    color: var(--app-primary);
+    border: 1px solid #bfdbfe;
+  }
+
+  .transcripts-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 16px 8px;
+  }
+
+  .transcripts-title {
+    margin: 0;
+    font-size: var(--app-font-size-caption);
+    font-weight: 700;
+    color: var(--app-text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .readonly-badge {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--app-text-muted);
+    border: 1px solid var(--app-border);
+    border-radius: var(--app-radius-pill);
+    padding: 1px 6px;
+  }
+
+  .ws-status {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    color: #059669;
+  }
+
+  .ws-status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #22c55e;
+  }
+
+  /* 转录列表 */
+  .transcripts-list {
+    list-style: none;
+    margin: 0;
+    padding: 4px 16px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .transcript-row {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+
+  .transcript-avatar {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+  }
+
+  .avatar--blue { background: #3b82f6; }
+  .avatar--teal { background: #14b8a6; }
+  .avatar--violet { background: #8b5cf6; }
+  .avatar--amber { background: #f59e0b; }
+  .avatar--rose { background: #f43f5e; }
+
+  .transcript-bubbles {
+    min-width: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .speaker-name {
+    margin: 0 0 4px 2px;
+    font-size: var(--app-font-size-caption);
+    line-height: 1.2;
+    color: var(--app-text-secondary);
+  }
+
+  .bubble-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .bubble {
+    display: inline-block;
+    align-self: flex-start;
+    max-width: 100%;
+    padding: 10px 16px;
+    border-radius: var(--app-radius-bubble);
+    border-top-left-radius: 4px;
+    background: var(--app-bg-elevated);
+    box-shadow: var(--app-shadow-card);
+  }
+
+  .bubble-time {
+    margin: 2px 0 0 4px;
+    font-size: 11px;
+    line-height: 1.3;
+    color: var(--app-text-muted);
+  }
+
+  .transcript-text {
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.6;
+    color: var(--app-text-primary);
+  }
+
+  .transcript-text mark {
+    background: rgba(245, 158, 11, 0.16);
+    color: #b45309;
+    border-radius: 4px;
+    padding: 0 2px;
+    font-weight: 600;
+  }
+
+  .ai-card {
+    margin: 0 auto;
+    width: min(100%, 540px);
+    padding: 10px 14px;
+    border-radius: var(--app-radius-sm);
+    background: var(--app-color-ai-soft);
+    border: 1px solid var(--app-color-ai-border);
+    border-left: 3px solid var(--app-color-ai);
+  }
+
+  .ai-card__head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-size: var(--app-font-size-caption);
+    color: #9a3412;
+  }
+
+  .ai-card__icon { font-size: 13px; }
+  .ai-card__label { font-weight: 600; color: var(--app-color-ai); }
+  .ai-card__time { margin-left: auto; color: var(--app-color-ai); font-variant-numeric: tabular-nums; }
+
+  .ai-card__content {
+    margin: 0;
+    font-size: var(--app-font-size-body);
+    line-height: 1.7;
+    color: var(--app-text-primary);
+  }
+
+  /* 底部 AI 洞察抽屉 */
+  .ai-sheet {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 150;
+    background: var(--app-bg-elevated);
+    border-top: 1px solid var(--app-border);
+    border-radius: 12px 12px 0 0;
+    box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.08);
+    max-width: var(--app-content-width-default);
+    margin: 0 auto;
+  }
+
+  .ai-sheet__handle-bar {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 8px 0 4px;
+    cursor: pointer;
+  }
+
+  .ai-sheet__handle-knob {
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--app-border-strong);
+  }
+
+  .ai-sheet__preview {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 14px 10px;
+    cursor: pointer;
+    min-height: 36px;
+  }
+
+  .ai-sheet__preview-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--app-text-primary);
+    flex-shrink: 0;
+  }
+
+  .ai-sheet__preview-keywords {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+
+  .ai-sheet__preview-pill {
+    font-size: 12px;
+    color: #b45309;
+    background: rgba(245, 158, 11, 0.08);
+    border: 1px solid rgba(245, 158, 11, 0.18);
+    border-radius: 999px;
+    padding: 3px 8px;
+    white-space: nowrap;
+  }
+
+  .ai-sheet__preview-more {
+    font-size: 12px;
+    color: var(--app-text-muted);
+    white-space: nowrap;
+  }
+
+  .ai-sheet__preview-chevron {
+    font-size: 12px;
+    color: var(--app-text-muted);
+    flex-shrink: 0;
+  }
+
+  .ai-sheet__body {
+    max-height: 60vh;
+    overflow-y: auto;
+    padding: 4px 0 16px;
+    border-top: 1px solid var(--app-border);
+    display: none;
+  }
+
+  .ai-sheet.is-expanded .ai-sheet__body { display: block; }
+  .ai-sheet.is-expanded .ai-sheet__preview-chevron { transform: rotate(180deg); }
+
+  .ai-sheet__summary-section {
+    padding: 14px;
+    background: var(--app-bg-subtle);
+  }
+
+  .ai-sheet__gap-section { padding: 14px; }
+
+  .ai-sheet__divider {
+    height: 1px;
+    background: var(--app-border);
+  }
+
+  .ai-sheet__section-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+
+  .ai-sheet__section-label {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--app-text-primary);
+  }
+
+  .ai-sheet__section-hint {
+    font-size: 12px;
+    color: var(--app-text-muted);
+  }
+
+  .ai-sheet__summary-content {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--app-text-primary);
+  }
+
+  /* 关键词查询按钮（InfoGapButtons 风格） */
+  .info-gap-container {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .info-gap-item {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .info-gap-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid rgba(217, 119, 6, 0.2);
+    background: #fff7ed;
+    color: #d97706;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, opacity 0.2s ease;
+  }
+
+  .info-gap-btn:hover:not(:disabled) {
+    background: #ffedd5;
+    border-color: rgba(217, 119, 6, 0.35);
+  }
+
+  .info-gap-btn--viewed {
+    border-color: rgba(59, 130, 246, 0.22);
+    background: #f0f7ff;
+    color: #1d4ed8;
+    cursor: default;
+  }
+
+  .info-gap-btn--loading { opacity: 0.6; cursor: wait; }
+
+  .info-gap-btn__spinner {
+    width: 10px;
+    height: 10px;
+    border: 1.5px solid currentColor;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    flex-shrink: 0;
+    display: none;
+  }
+
+  .info-gap-btn--loading .info-gap-btn__spinner { display: inline-block; }
+
+  .info-gap-btn__label { min-width: 0; line-height: 1.4; }
+
+  .info-gap-btn__chevron {
+    font-size: 15px;
+    line-height: 1;
+    flex-shrink: 0;
+    opacity: 0.7;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .info-gap-result {
+    padding: 0 2px 0;
+    animation: fadeIn 0.25s ease;
+    display: none;
+  }
+
+  .info-gap-result.is-visible { display: block; }
+
+  .info-gap-result__content {
+    margin: 0;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: #f8fafc;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--app-text-primary);
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* 演示标记 */
+  .demo-banner {
+    margin: 0 16px 6px;
+    padding: 6px 10px;
+    border-radius: var(--app-radius-sm);
+    background: #f1f5f9;
+    border: 1px dashed var(--app-border-strong);
+    color: var(--app-text-muted);
+    font-size: 12px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+  <div class="app-shell">
+
+    <div class="demo-banner">静态演示页面 · 数据均为虚构 · 仅用于展示智能眼镜端关键词查询交互</div>
+
+    <div class="page-header">
+      <div class="title-row">
+        <button type="button" class="back-btn" aria-label="返回">‹</button>
+        <div class="title-main">
+          <h2 class="page-title">冬季生存挑战 · 12件物品排序 · 第三组</h2>
+          <span class="status-tag">进行中</span>
+        </div>
+        <span class="device-tag">◔ 智能眼镜</span>
+      </div>
+    </div>
+
+    <div class="transcripts-header">
+      <h3 class="transcripts-title">
+        讨论实录
+        <span class="readonly-badge">只读</span>
+      </h3>
+      <div class="ws-status">
+        <span class="ws-status-dot"></span>
+        <span>已连接</span>
+      </div>
+    </div>
+
+    <ul class="transcripts-list">
+
+      <li>
+        <div class="transcript-row">
+          <div class="transcript-avatar avatar--blue" title="林晓">林</div>
+          <div class="transcript-bubbles">
+            <p class="speaker-name">林晓</p>
+            <div class="bubble-stack">
+              <div class="bubble">
+                <p class="transcript-text">我们先把这12件物品按生存优先级排个序吧，<mark>火柴</mark>和<mark>不锈钢丝绒</mark>大家觉得谁该排第一？</p>
+              </div>
+              <p class="bubble-time">14:02</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li>
+        <div class="transcript-row">
+          <div class="transcript-avatar avatar--teal" title="陈昊">陈</div>
+          <div class="transcript-bubbles">
+            <p class="speaker-name">陈昊</p>
+            <div class="bubble-stack">
+              <div class="bubble">
+                <p class="transcript-text">我觉得火柴肯定要排前面，没有可靠的点火和取暖手段，低温环境很快就会出问题。</p>
+              </div>
+              <p class="bubble-time">14:03</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li>
+        <div class="transcript-row">
+          <div class="transcript-avatar avatar--violet" title="苏雨">苏</div>
+          <div class="transcript-bubbles">
+            <p class="speaker-name">苏雨</p>
+            <div class="bubble-stack">
+              <div class="bubble">
+                <p class="transcript-text">那<mark>威士忌</mark>呢？很多人第一反应觉得喝酒能驱寒，但其实酒精会让血管扩张散热更快，排名我觉得应该靠后。</p>
+              </div>
+              <p class="bubble-time">14:04</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li>
+        <div class="transcript-row">
+          <div class="transcript-avatar avatar--amber" title="赵明">赵</div>
+          <div class="transcript-bubbles">
+            <p class="speaker-name">赵明</p>
+            <div class="bubble-stack">
+              <div class="bubble">
+                <p class="transcript-text">对，威士忌更多是消毒和应急燃料的作用，直接靠喝酒取暖其实是个常见误区。</p>
+              </div>
+              <p class="bubble-time">14:06</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li>
+        <div class="ai-card">
+          <div class="ai-card__head">
+            <span class="ai-card__icon">◈</span>
+            <span class="ai-card__label">AI 建议</span>
+            <span class="ai-card__time">14:06</span>
+          </div>
+          <p class="ai-card__content">威士忌驱寒效果比火柴取暖更可靠吗？</p>
+        </div>
+      </li>
+
+      <li>
+        <div class="transcript-row">
+          <div class="transcript-avatar avatar--rose" title="林晓">林</div>
+          <div class="transcript-bubbles">
+            <p class="speaker-name">林晓</p>
+            <div class="bubble-stack">
+              <div class="bubble">
+                <p class="transcript-text">那<mark>信号弹</mark>和<mark>地图</mark>谁更靠前？</p>
+              </div>
+              <p class="bubble-time">14:08</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li>
+        <div class="transcript-row">
+          <div class="transcript-avatar avatar--teal" title="陈昊">陈</div>
+          <div class="transcript-bubbles">
+            <p class="speaker-name">陈昊</p>
+            <div class="bubble-stack">
+              <div class="bubble">
+                <p class="transcript-text">如果方位明确，地图配<mark>指南针</mark>定位优先；但失联超过48小时，信号弹的获救价值会反超。</p>
+              </div>
+              <p class="bubble-time">14:10</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li>
+        <div class="transcript-row">
+          <div class="transcript-avatar avatar--violet" title="苏雨">苏</div>
+          <div class="transcript-bubbles">
+            <p class="speaker-name">苏雨</p>
+            <div class="bubble-stack">
+              <div class="bubble">
+                <p class="transcript-text"><mark>睡袋</mark>和<mark>保温毯</mark>怎么排？长时间暴露低温下，睡袋的保暖效率应该是最高的。</p>
+              </div>
+              <p class="bubble-time">14:12</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li>
+        <div class="transcript-row">
+          <div class="transcript-avatar avatar--amber" title="赵明">赵</div>
+          <div class="transcript-bubbles">
+            <p class="speaker-name">赵明</p>
+            <div class="bubble-stack">
+              <div class="bubble">
+                <p class="transcript-text">同意，<mark>急救包</mark>也得往前提，冻伤和外伤处理不及时会直接致命。</p>
+              </div>
+              <p class="bubble-time">14:13</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li>
+        <div class="transcript-row">
+          <div class="transcript-avatar avatar--blue" title="林晓">林</div>
+          <div class="transcript-bubbles">
+            <p class="speaker-name">林晓</p>
+            <div class="bubble-stack">
+              <div class="bubble">
+                <p class="transcript-text">那<mark>手斧</mark>、<mark>雪鞋</mark>和<mark>巧克力</mark>这几样呢？感觉优先级没那么高。</p>
+              </div>
+              <p class="bubble-time">14:15</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li>
+        <div class="transcript-row">
+          <div class="transcript-avatar avatar--teal" title="陈昊">陈</div>
+          <div class="transcript-bubbles">
+            <p class="speaker-name">陈昊</p>
+            <div class="bubble-stack">
+              <div class="bubble">
+                <p class="transcript-text">手斧能砍柴搭庇护所，雪鞋决定能不能移动求援，巧克力是高热量应急口粮，三个都靠中段，不算最优先但也不能扔。</p>
+              </div>
+              <p class="bubble-time">14:17</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+    </ul>
+  </div>
+
+  <!-- 底部 AI 洞察抽屉：关键词查询交互 -->
+  <div class="ai-sheet" id="aiSheet">
+    <div class="ai-sheet__handle-bar" id="sheetToggle" role="button" aria-label="展开或收起 AI 洞察">
+      <div class="ai-sheet__handle-knob"></div>
+    </div>
+
+    <div class="ai-sheet__preview" id="sheetPreviewRow">
+      <span class="ai-sheet__preview-title">摘要</span>
+      <span class="ai-sheet__preview-keywords">
+        <span class="ai-sheet__preview-pill">信号弹</span>
+        <span class="ai-sheet__preview-pill">不锈钢丝绒</span>
+        <span class="ai-sheet__preview-pill">雪鞋</span>
+        <span class="ai-sheet__preview-more">+1</span>
+      </span>
+      <span class="ai-sheet__preview-chevron">▴</span>
+    </div>
+
+    <div class="ai-sheet__body" id="sheetBody">
+      <div class="ai-sheet__summary-section">
+        <div class="ai-sheet__section-head">
+          <span class="ai-sheet__section-label">讨论摘要</span>
+          <span class="ai-sheet__section-hint">v2</span>
+        </div>
+        <p class="ai-sheet__summary-content">小组围绕冬季生存12件物品排序展开讨论：火柴与不锈钢丝绒被列为最高优先级的点火取暖工具；威士忌虽常被误认为能驱寒，实际酒精会加速散热，排名应靠后，更适合消毒或应急燃料；信号弹与地图、指南针的优先级取决于失联时长；睡袋和保温毯关系到长期保暖效率；急救包用于处理冻伤与外伤；手斧、雪鞋、巧克力则属于中等优先级的辅助物资。</p>
+      </div>
+
+      <div class="ai-sheet__divider"></div>
+
+      <div class="ai-sheet__gap-section">
+        <div class="ai-sheet__section-head">
+          <span class="ai-sheet__section-label">相关概念</span>
+          <span class="ai-sheet__section-hint">点击查看解释</span>
+        </div>
+        <div class="info-gap-container" id="infoGapContainer"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const keywordData = [
+      {
+        keyword: '信号弹',
+        explanation: '远距离求救信号工具，在失联时间较长、自行突围概率低的情况下，获救价值会显著超过导航类物品。'
+      },
+      {
+        keyword: '不锈钢丝绒',
+        explanation: '可与电池摩擦快速产生火星引燃干燥材料，是火柴受潮失效后的关键备用点火手段，优先级通常紧随火柴之后。'
+      },
+      {
+        keyword: '保温毯',
+        explanation: '轻便易携带，可反射体表热量、减少风寒流失，适合短时间应急保暖，但持续保暖效果不及睡袋。'
+      },
+      {
+        keyword: '雪鞋',
+        explanation: '在深雪地形中决定能否有效移动求援或转移至更安全位置，对体力消耗和移动效率影响较大。'
+      }
+    ]
+
+    const container = document.getElementById('infoGapContainer')
+
+    keywordData.forEach((item, idx) => {
+      const wrap = document.createElement('div')
+      wrap.className = 'info-gap-item'
+
+      const btn = document.createElement('button')
+      btn.className = 'info-gap-btn'
+      btn.innerHTML = `
+        <span class="info-gap-btn__spinner" aria-hidden="true"></span>
+        <span class="info-gap-btn__label">${item.keyword}</span>
+        <span class="info-gap-btn__chevron" aria-hidden="true">›</span>
+      `
+
+      const result = document.createElement('div')
+      result.className = 'info-gap-result'
+      result.innerHTML = `<p class="info-gap-result__content">${item.keyword}：${item.explanation}</p>`
+
+      btn.addEventListener('click', () => {
+        if (btn.disabled) return
+        btn.classList.add('info-gap-btn--loading')
+        btn.disabled = true
+        setTimeout(() => {
+          btn.classList.remove('info-gap-btn--loading')
+          btn.classList.add('info-gap-btn--viewed')
+          btn.querySelector('.info-gap-btn__chevron').textContent = '•'
+          result.classList.add('is-visible')
+        }, 420 + idx * 60)
+      })
+
+      wrap.appendChild(btn)
+      wrap.appendChild(result)
+      container.appendChild(wrap)
+    })
+
+    const sheet = document.getElementById('aiSheet')
+    const toggleSheet = () => sheet.classList.toggle('is-expanded')
+    document.getElementById('sheetToggle').addEventListener('click', toggleSheet)
+    document.getElementById('sheetPreviewRow').addEventListener('click', toggleSheet)
+  </script>
+</body>
+</html>

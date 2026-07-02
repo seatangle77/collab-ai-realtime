@@ -7,6 +7,7 @@ import { listAdminGroups } from '../../api/admin/groups'
 import { listAdminChatSessions } from '../../api/admin/chat-sessions'
 import { getUtteranceCount, getSessionUtterances, saveTranscriptUtterances } from '../../api/admin/coi-transcript-coding'
 import type { AdminGroup, AdminChatSession } from '../../types/admin'
+import { clearCoiDownstreamDrafts, coiPreprocessDraftKey } from '../../utils/coiDraftKeys'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -88,7 +89,7 @@ const hasDraft = ref(false)
 const draftInfo = ref<{ fileName: string; savedAt: string; count: number } | null>(null)
 
 function draftKey(sid: string) {
-  return `coi_preprocess_draft_${sid}`
+  return coiPreprocessDraftKey(sid)
 }
 
 function checkDraft() {
@@ -140,6 +141,11 @@ function clearDraft() {
   localStorage.removeItem(draftKey(selectedSessionId.value))
   hasDraft.value = false
   draftInfo.value = null
+}
+
+function clearDownstreamDrafts() {
+  if (!selectedSessionId.value) return
+  clearCoiDownstreamDrafts(selectedSessionId.value)
 }
 
 // ── 从数据库加载 ───────────────────────────────────────────────────────────────
@@ -375,6 +381,7 @@ async function handleSave() {
     ElMessage.success(`预处理保存成功：${res.saved} 条${res.deleted_previous > 0 ? `，覆盖旧数据 ${res.deleted_previous} 条` : ''}`)
     existingCount.value = res.saved
     clearDraft()
+    clearDownstreamDrafts()
     resetContent()
   } catch (e: any) {
     ElMessage.error(e?.message || '保存失败')
@@ -588,9 +595,9 @@ async function handleSave() {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  padding: 7px 10px;
+  padding: 9px 10px;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 16px;
   transition: background 0.12s;
   border: 1px solid transparent;
 }
@@ -598,18 +605,18 @@ async function handleSave() {
 .line-row.is-editing { background: #f0f7ff; border-color: #c6e2ff; }
 .line-row.is-splitting { background: #fff7e6; border-color: #ffd591; align-items: flex-start; }
 
-.line-num { width: 28px; flex-shrink: 0; text-align: right; font-size: 11px; color: #c0c4cc; font-weight: 600; padding-top: 2px; }
-.line-time { width: 46px; flex-shrink: 0; font-size: 11px; color: #909399; padding-top: 2px; }
+.line-num { width: 34px; flex-shrink: 0; text-align: right; font-size: 13px; color: #c0c4cc; font-weight: 600; padding-top: 3px; }
+.line-time { width: 58px; flex-shrink: 0; font-size: 13px; color: #909399; padding-top: 3px; }
 
-.line-content { flex: 1; color: #303133; line-height: 1.5; word-break: break-all; }
+.line-content { flex: 1; color: #303133; line-height: 1.65; word-break: break-all; }
 .line-content.editable { cursor: text; }
 .line-content.editable:hover { color: #409eff; }
 
 .line-edit-input {
   flex: 1;
-  font-size: 13px;
+  font-size: 16px;
   font-family: inherit;
-  line-height: 1.5;
+  line-height: 1.65;
   color: #303133;
   border: 1px solid #409eff;
   border-radius: 4px;

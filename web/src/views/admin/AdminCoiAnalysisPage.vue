@@ -134,7 +134,7 @@ onMounted(fetchGroups)
     <div class="page-header">
       <div>
         <h1>CoI 认知参与度分析</h1>
-        <p>基于已编码的 CoI 发言单元，计算各组认知参与度指标并进行组间统计检验。</p>
+        <p>基于最终协商后的 CoI 观点单元，计算各组认知参与度指标并进行组间统计检验。</p>
       </div>
       <div class="page-actions">
         <el-button :icon="Download" :disabled="!report" @click="downloadHtmlReport">下载 HTML 报告</el-button>

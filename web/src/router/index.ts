@@ -226,7 +226,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'coi-utterances',
         name: 'AdminCoiUtterances',
-        component: () => import('../views/admin/AdminCoiUtterancesPage.vue'),
+        redirect: '/admin/coi-transcript-coding',
       },
       {
         path: 'coi-transcript-coding',
@@ -234,9 +234,24 @@ const routes: RouteRecordRaw[] = [
         component: () => import('../views/admin/AdminCoiTranscriptCodingPage.vue'),
       },
       {
+        path: 'coi-units',
+        name: 'AdminCoiUnits',
+        component: () => import('../views/admin/AdminCoiUnitsPage.vue'),
+      },
+      {
+        path: 'coi-independent-coding',
+        name: 'AdminCoiIndependentCoding',
+        component: () => import('../views/admin/AdminCoiIndependentCodingPage.vue'),
+      },
+      {
+        path: 'coi-agreement',
+        name: 'AdminCoiAgreement',
+        component: () => import('../views/admin/AdminCoiAgreementPage.vue'),
+      },
+      {
         path: 'coi-coding',
         name: 'AdminCoiCoding',
-        component: () => import('../views/admin/AdminCoiCodingPage.vue'),
+        redirect: '/admin/coi-transcript-coding',
       },
       {
         path: 'coi-analysis',

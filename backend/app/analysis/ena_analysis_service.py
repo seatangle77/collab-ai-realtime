@@ -832,7 +832,7 @@ def build_ena_analysis(
     mode: AnalysisMode,
     rows: list[dict[str, Any]],
 ) -> EnaAnalysisResult:
-    """Build full ENA analysis from coi_utterances rows.
+    """Build full ENA analysis from finalized CoI unit rows.
 
     rows: list of dicts with keys: session_id, group_id, condition,
           order_index, coi_category, start_time (float | None)

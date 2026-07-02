@@ -26,20 +26,33 @@ async def _load_rows(
     db: AsyncSession,
     group_ids: set[str],
 ) -> list[dict]:
+    """Load CoI unit rows with final agreed codes.
+
+    The analysis now uses the new workflow tables:
+    - coi_units provides the finalized analysis units.
+    - coi_unit_codes with coder_role='final' provides agreed codes.
+
+    Units without a final code are included with coi_category=NULL so the
+    analysis service can report them as uncoded/excluded instead of silently
+    hiding incomplete sessions.
+    """
     if not group_ids:
         return []
     result = await db.execute(
         text("""
             SELECT
-                cu.session_id,
-                cu.group_id,
-                cu.coi_category,
+                u.session_id,
+                u.group_id,
+                final_code.coi_category,
                 g.condition,
                 g.name AS group_name
-            FROM coi_utterances cu
-            JOIN groups g ON g.id = cu.group_id
-            WHERE cu.group_id = ANY(:group_ids)
-            ORDER BY cu.session_id, cu.order_index
+            FROM coi_units u
+            JOIN groups g ON g.id = u.group_id
+            LEFT JOIN coi_unit_codes final_code
+              ON final_code.unit_id = u.id
+             AND final_code.coder_role = 'final'
+            WHERE u.group_id = ANY(:group_ids)
+            ORDER BY u.session_id, u.order_index
         """),
         {"group_ids": list(group_ids)},
     )

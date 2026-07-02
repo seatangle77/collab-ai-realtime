@@ -116,7 +116,7 @@ onMounted(fetchGroups)
     <div class="page-header">
       <div>
         <h1>ENA 认知过程网络分析</h1>
-        <p>基于已编码的 CoI 发言，用 2 分钟滑动时间窗口计算话语共现强度，分析不同条件下的认知过程连接模式。</p>
+        <p>基于最终协商后的 CoI 观点单元，用 2 分钟滑动时间窗口计算话语共现强度，分析不同条件下的认知过程连接模式。</p>
       </div>
       <div class="page-actions">
         <el-button :icon="Download" :disabled="!report" @click="downloadHtmlReport">下载 HTML 报告</el-button>

@@ -1,4 +1,4 @@
-"""Admin API: ENA (Epistemic Network Analysis) based on CoI coding results."""
+"""Admin API: ENA (Epistemic Network Analysis) based on final CoI codes."""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
@@ -30,22 +30,26 @@ async def _load_rows(
     db: AsyncSession,
     group_ids: set[str],
 ) -> list[dict]:
+    """Load finalized CoI unit codes for ENA window co-occurrence analysis."""
     if not group_ids:
         return []
     result = await db.execute(
         text("""
             SELECT
-                cu.session_id,
-                cu.group_id,
-                cu.order_index,
-                cu.coi_category,
-                cu.start_time,
+                u.session_id,
+                u.group_id,
+                u.order_index,
+                final_code.coi_category,
+                u.start_time,
                 g.condition
-            FROM coi_utterances cu
-            JOIN groups g ON g.id = cu.group_id
-            WHERE cu.group_id = ANY(:group_ids)
-              AND cu.coi_category IS NOT NULL
-            ORDER BY cu.session_id, cu.order_index
+            FROM coi_units u
+            JOIN groups g ON g.id = u.group_id
+            JOIN coi_unit_codes final_code
+              ON final_code.unit_id = u.id
+             AND final_code.coder_role = 'final'
+            WHERE u.group_id = ANY(:group_ids)
+              AND final_code.coi_category IS NOT NULL
+            ORDER BY u.session_id, u.order_index
         """),
         {"group_ids": list(group_ids)},
     )
