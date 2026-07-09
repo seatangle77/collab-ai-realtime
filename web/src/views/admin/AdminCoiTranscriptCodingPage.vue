@@ -16,6 +16,9 @@ interface DraftLine {
   content: string
   startTime: number | null
   endTime: number | null
+  speaker?: string
+  coiCategory?: '' | 'TE' | 'EX' | 'IN' | 'RE'
+  note?: string
 }
 
 interface LocalDraft {
@@ -26,6 +29,8 @@ interface LocalDraft {
 
 const FILLER_RE = /^[\s嗯啊哦哈哎呀哟喂呵嘻吧呢是好对、，。！？…—·]+$/
 const LINE_RE = /^\[(\d+):(\d+(?:\.\d+)?),(\d+):(\d+(?:\.\d+)?),\d+\]\s+(.+)$/
+const COI_CATEGORIES = new Set(['TE', 'EX', 'IN', 'RE'])
+const PREPROCESS_CSV_REQUIRED_HEADERS = ['时间戳', '整理后内容']
 
 // ── 群组 / 会话 ────────────────────────────────────────────────────────────────
 
@@ -195,6 +200,121 @@ function fmt(s: number | null): string {
   return `${m}:${sec}`
 }
 
+function fmtCsvTimestamp(s: number | null): string {
+  return s == null || isNaN(s) ? '' : fmt(s)
+}
+
+function csvEscape(value: string | number | null | undefined): string {
+  const text = String(value ?? '')
+  return `"${text.replace(/"/g, '""')}"`
+}
+
+function stripBom(text: string): string {
+  return text.replace(/^\uFEFF/, '')
+}
+
+function parseCsvRows(text: string): string[][] {
+  const rows: string[][] = []
+  let row: string[] = []
+  let field = ''
+  let inQuotes = false
+  const source = stripBom(text)
+
+  for (let i = 0; i < source.length; i += 1) {
+    const ch = source[i]
+    const next = source[i + 1]
+
+    if (ch === '"') {
+      if (inQuotes && next === '"') {
+        field += '"'
+        i += 1
+      } else {
+        inQuotes = !inQuotes
+      }
+    } else if (ch === ',' && !inQuotes) {
+      row.push(field)
+      field = ''
+    } else if ((ch === '\n' || ch === '\r') && !inQuotes) {
+      row.push(field)
+      field = ''
+      if (row.some(cell => cell.trim() !== '')) rows.push(row)
+      row = []
+      if (ch === '\r' && next === '\n') i += 1
+    } else {
+      field += ch
+    }
+  }
+
+  row.push(field)
+  if (row.some(cell => cell.trim() !== '')) rows.push(row)
+  return rows
+}
+
+function rowsToObjects(rows: string[][]): Record<string, string>[] {
+  if (rows.length === 0) return []
+  const headers = rows[0]!.map(h => h.trim())
+  return rows.slice(1).map(row => {
+    const obj: Record<string, string> = {}
+    headers.forEach((header, index) => {
+      obj[header] = row[index]?.trim() ?? ''
+    })
+    return obj
+  })
+}
+
+function parseCsvTimestamp(value: string): number | null {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  const match = trimmed.match(/^(\d+):(\d+(?:\.\d+)?)$/)
+  if (!match) return null
+  return parseTime(match[1]!, match[2]!)
+}
+
+function isCoiCategory(value: string): value is 'TE' | 'EX' | 'IN' | 'RE' {
+  return COI_CATEGORIES.has(value)
+}
+
+function parseTxtTranscript(text: string): DraftLine[] {
+  keyCounter = 0
+  return text
+    .split('\n')
+    .map(l => l.trim().match(LINE_RE))
+    .filter((m): m is RegExpMatchArray => !!m)
+    .map(m => ({
+      key: ++keyCounter,
+      content: m[5]!.trim(),
+      startTime: parseTime(m[1]!, m[2]!),
+      endTime: parseTime(m[3]!, m[4]!),
+    }))
+}
+
+function parsePreprocessCsv(text: string): DraftLine[] {
+  const rows = parseCsvRows(text)
+  const headers = rows[0]?.map(h => h.trim()) ?? []
+  const missingHeaders = PREPROCESS_CSV_REQUIRED_HEADERS.filter(header => !headers.includes(header))
+  if (missingHeaders.length > 0) {
+    throw new Error(`CSV 缺少必要列：${missingHeaders.join('、')}`)
+  }
+
+  keyCounter = 0
+  return rowsToObjects(rows)
+    .map(row => {
+      const content = row['整理后内容']?.trim() ?? ''
+      const category = row['CoI分类']?.trim() ?? ''
+      const coiCategory: DraftLine['coiCategory'] = isCoiCategory(category) ? category : ''
+      return {
+        key: ++keyCounter,
+        content,
+        startTime: parseCsvTimestamp(row['时间戳'] ?? ''),
+        endTime: null,
+        speaker: row['说话人']?.trim() ?? '',
+        coiCategory,
+        note: row['备注']?.trim() ?? '',
+      }
+    })
+    .filter(line => line.content)
+}
+
 function resetContent() {
   rawLines.value = []
   lines.value = []
@@ -213,18 +333,19 @@ function handleFileChange(file: UploadFile) {
   uploadedFileName.value = file.name
   const reader = new FileReader()
   reader.onload = evt => {
-    keyCounter = 0
-    rawLines.value = (evt.target?.result as string)
-      .split('\n')
-      .map(l => l.trim().match(LINE_RE))
-      .filter((m): m is RegExpMatchArray => !!m)
-      .map(m => ({
-        key: ++keyCounter,
-        content: m[5]!.trim(),
-        startTime: parseTime(m[1]!, m[2]!),
-        endTime: parseTime(m[3]!, m[4]!),
-      }))
-    applyFilter()
+    try {
+      const text = evt.target?.result as string
+      rawLines.value = file.name.toLowerCase().endsWith('.csv')
+        ? parsePreprocessCsv(text)
+        : parseTxtTranscript(text)
+      applyFilter()
+      if (rawLines.value.length === 0) {
+        ElMessage.warning('未解析到可用的话语内容')
+      }
+    } catch (e: any) {
+      resetContent()
+      ElMessage.error(e?.message || '文件解析失败')
+    }
   }
   reader.readAsText(raw, 'utf-8')
 }
@@ -314,6 +435,9 @@ function splitAtCursor() {
     content: part2,
     startTime: line.startTime,
     endTime: line.endTime,
+    speaker: line.speaker,
+    coiCategory: line.coiCategory,
+    note: '',
   }
   line.content = part1
   lines.value.splice(splittingIndex.value + 1, 0, newLine)
@@ -341,11 +465,19 @@ const saving = ref(false)
 
 function exportCSV() {
   if (lines.value.length === 0) return
-  const header = '序号,时间戳,内容,CoI分类'
-  const rows = lines.value.map((l, i) =>
-    `${i + 1},${fmt(l.startTime)},"${l.content.replace(/"/g, '""')}",`
-  )
-  const csv = '﻿' + [header, ...rows].join('\n')
+  const header = ['序号', '时间戳', '说话人', '整理后内容', 'CoI分类', '备注']
+  const rows = lines.value.map((l, i) => [
+    i + 1,
+    fmtCsvTimestamp(l.startTime),
+    l.speaker ?? '',
+    l.content,
+    l.coiCategory ?? '',
+    l.note ?? '',
+  ])
+  const csv = '\uFEFF' + [
+    header.map(csvEscape).join(','),
+    ...rows.map(row => row.map(csvEscape).join(',')),
+  ].join('\n')
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -395,7 +527,7 @@ async function handleSave() {
   <div class="page-container">
     <div class="page-header">
       <h2 class="page-title">CoI 预处理（录音转写）</h2>
-      <span class="header-desc">上传腾讯 ASR 的 TXT → 清洗 → 保存，之后到「CoI 编码（录音转写）」完成编码</span>
+      <span class="header-desc">上传腾讯 ASR TXT 或预处理 CSV → 清洗 → 保存，之后到「CoI 编码（录音转写）」完成编码</span>
     </div>
 
     <!-- 控制栏 -->
@@ -457,12 +589,12 @@ async function handleSave() {
           <el-upload
             :auto-upload="false"
             :show-file-list="false"
-            accept=".txt"
+            accept=".txt,.csv"
             :on-change="handleFileChange"
           >
             <el-button :type="lines.length ? 'default' : 'primary'" plain>
               <el-icon style="margin-right:4px"><UploadFilled /></el-icon>
-              {{ uploadedFileName || '上传 TXT 文件' }}
+              {{ uploadedFileName || '上传 TXT/CSV 文件' }}
             </el-button>
           </el-upload>
 
@@ -558,7 +690,7 @@ async function handleSave() {
     <el-card v-else shadow="never" class="empty-card">
       <el-empty
         :image-size="120"
-        :description="selectedSessionId ? '请上传腾讯 ASR 导出的 TXT 文件' : '请先选择群组'"
+        :description="selectedSessionId ? '请上传腾讯 ASR 导出的 TXT 文件或预处理 CSV 文件' : '请先选择群组'"
       />
     </el-card>
   </div>
