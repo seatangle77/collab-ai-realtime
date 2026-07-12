@@ -489,14 +489,14 @@ def _generate_ena_charts(
 # Step 3: Sliding window core logic
 # ─────────────────────────────────────────────────────────────────
 
-def _assign_times(utterances: list[dict[str, Any]]) -> list[tuple[float, str | None]]:
-    """Return (timestamp_seconds, coi_category) for each utterance.
+def _assign_times(utterances: list[dict[str, Any]]) -> list[tuple[float, list[str]]]:
+    """Return (timestamp_seconds, coi_categories) for each utterance.
 
     If start_time is present, normalize so the first utterance starts at 0.
     If start_time is NULL for all utterances, fall back to order_index * synthetic seconds.
     Mixed case: use start_time where available, interpolate/fallback for NULLs.
     """
-    times: list[tuple[float, str | None]] = []
+    times: list[tuple[float, list[str]]] = []
     real_times = [u.get("start_time") for u in utterances]
     has_real = any(t is not None for t in real_times)
 
@@ -507,13 +507,13 @@ def _assign_times(utterances: list[dict[str, Any]]) -> list[tuple[float, str | N
         for i, u in enumerate(utterances):
             t = u.get("start_time")
             if t is not None:
-                times.append((float(t) - min_t, u.get("coi_category")))
+                times.append((float(t) - min_t, list(u.get("coi_categories") or [])))
             else:
                 # Use neighbour interpolation: position * synthetic step
-                times.append((i * _SYNTHETIC_SECONDS_PER_UTTERANCE, u.get("coi_category")))
+                times.append((i * _SYNTHETIC_SECONDS_PER_UTTERANCE, list(u.get("coi_categories") or [])))
     else:
         for i, u in enumerate(utterances):
-            times.append((i * _SYNTHETIC_SECONDS_PER_UTTERANCE, u.get("coi_category")))
+            times.append((i * _SYNTHETIC_SECONDS_PER_UTTERANCE, list(u.get("coi_categories") or [])))
 
     return times
 
@@ -559,8 +559,10 @@ def compute_session_ena_metrics(
         # Collect categories present in this window (only coded utterances)
         cats_in_window = {
             cat
-            for t_val, cat in timed
-            if w_start <= t_val <= w_end and cat in ("TE", "EX", "IN", "RE")
+            for t_val, categories in timed
+            if w_start <= t_val <= w_end
+            for cat in categories
+            if cat in ("TE", "EX", "IN", "RE")
         }
         if not cats_in_window:
             continue
@@ -835,7 +837,7 @@ def build_ena_analysis(
     """Build full ENA analysis from finalized CoI unit rows.
 
     rows: list of dicts with keys: session_id, group_id, condition,
-          order_index, coi_category, start_time (float | None)
+          order_index, coi_categories, start_time (float | None)
     """
     conditions = CONDITIONS_BY_MODE[mode]
 

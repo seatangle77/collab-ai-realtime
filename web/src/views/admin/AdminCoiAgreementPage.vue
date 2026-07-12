@@ -17,13 +17,13 @@ interface AgreementItem {
   orderIndex: number
   content: string
   startTime: number | null
-  coderA: CoiCategory | null
-  coderB: CoiCategory | null
-  finalCategory: CoiCategory | null
+  coderA: CoiCategory[]
+  coderB: CoiCategory[]
+  finalCategories: CoiCategory[]
 }
 
 interface LocalDraft {
-  codes: { unitId: string; category: CoiCategory }[]
+  codes: { unitId: string; categories: CoiCategory[] }[]
   savedAt: string
 }
 
@@ -48,9 +48,9 @@ const hasDraft = ref(false)
 const draftInfo = ref<{ savedAt: string; count: number } | null>(null)
 
 const totalCount = computed(() => items.value.length)
-const finalCount = computed(() => items.value.filter(item => item.finalCategory).length)
+const finalCount = computed(() => items.value.filter(item => item.finalCategories.length > 0).length)
 const agreedCount = computed(() => items.value.filter(item => isAgreed(item)).length)
-const disagreementCount = computed(() => items.value.filter(item => item.coderA && item.coderB && item.coderA !== item.coderB).length)
+const disagreementCount = computed(() => items.value.filter(item => item.coderA.length && item.coderB.length && !isAgreed(item)).length)
 const progressPct = computed(() =>
   totalCount.value > 0 ? Math.round((finalCount.value / totalCount.value) * 100) : 0,
 )
@@ -121,8 +121,8 @@ function saveDraft() {
   const key = draftKey()
   if (!key || items.value.length === 0) return
   const codes = items.value
-    .filter((item): item is AgreementItem & { finalCategory: CoiCategory } => !!item.finalCategory)
-    .map(item => ({ unitId: item.unitId, category: item.finalCategory }))
+    .filter(item => item.finalCategories.length > 0)
+    .map(item => ({ unitId: item.unitId, categories: [...item.finalCategories] }))
   const draft: LocalDraft = {
     codes,
     savedAt: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
@@ -140,10 +140,10 @@ function restoreDraft() {
   if (!raw) return
   try {
     const draft = JSON.parse(raw) as LocalDraft
-    const categoryByUnit = new Map(draft.codes.map(code => [code.unitId, code.category]))
+    const categoriesByUnit = new Map(draft.codes.map(code => [code.unitId, code.categories]))
     items.value = items.value.map(item => ({
       ...item,
-      finalCategory: categoryByUnit.get(item.unitId) ?? null,
+      finalCategories: categoriesByUnit.get(item.unitId) ?? [],
     }))
     ElMessage.success(`已恢复最终协商草稿：${draft.codes.length} 条`)
   } catch {
@@ -165,9 +165,9 @@ function toAgreementItem(row: AgreementUnit): AgreementItem {
     orderIndex: row.unit.order_index,
     content: row.unit.content,
     startTime: row.unit.start_time,
-    coderA: row.coder_a?.coi_category ?? null,
-    coderB: row.coder_b?.coi_category ?? null,
-    finalCategory: row.final?.coi_category ?? null,
+    coderA: [...(row.coder_a?.coi_categories ?? [])],
+    coderB: [...(row.coder_b?.coi_categories ?? [])],
+    finalCategories: [...(row.final?.coi_categories ?? [])],
   }
 }
 
@@ -196,26 +196,34 @@ function fmt(s: number | null): string {
 }
 
 function isAgreed(item: AgreementItem): boolean {
-  return !!item.coderA && !!item.coderB && item.coderA === item.coderB
+  return item.coderA.length > 0
+    && item.coderB.length > 0
+    && item.coderA.length === item.coderB.length
+    && item.coderA.every(category => item.coderB.includes(category))
+}
+
+function isPartiallyAgreed(item: AgreementItem): boolean {
+  return !isAgreed(item) && item.coderA.some(category => item.coderB.includes(category))
 }
 
 function statusType(item: AgreementItem): 'success' | 'warning' | 'info' {
   if (isAgreed(item)) return 'success'
-  if (item.coderA && item.coderB) return 'warning'
+  if (item.coderA.length && item.coderB.length) return 'warning'
   return 'info'
 }
 
 function statusText(item: AgreementItem): string {
   if (isAgreed(item)) return '一致'
-  if (item.coderA && item.coderB) return '不一致'
+  if (isPartiallyAgreed(item)) return '部分一致'
+  if (item.coderA.length && item.coderB.length) return '不一致'
   return '未完成 A/B'
 }
 
 function fillAgreedFinals() {
   let filled = 0
   for (const item of items.value) {
-    if (!item.finalCategory && isAgreed(item)) {
-      item.finalCategory = item.coderA
+    if (!item.finalCategories.length && isAgreed(item)) {
+      item.finalCategories = [...item.coderA]
       filled += 1
     }
   }
@@ -225,11 +233,13 @@ function fillAgreedFinals() {
 function setFinalCategory(index: number, cat: CoiCategory) {
   const item = items.value[index]
   if (!item) return
-  item.finalCategory = item.finalCategory === cat ? null : cat
+  item.finalCategories = item.finalCategories.includes(cat)
+    ? item.finalCategories.filter(category => category !== cat)
+    : COI_KEYS.filter(category => [...item.finalCategories, cat].includes(category))
 }
 
-function tagLabel(cat: CoiCategory | null): string {
-  return cat ? `${cat} ${COI_LABELS[cat].label}` : '未编码'
+function tagLabel(cat: CoiCategory): string {
+  return `${cat} ${COI_LABELS[cat].label}`
 }
 
 async function handleSave() {
@@ -247,10 +257,10 @@ async function handleSave() {
   saving.value = true
   try {
     const codes = items.value
-      .filter((item): item is AgreementItem & { finalCategory: CoiCategory } => !!item.finalCategory)
+      .filter(item => item.finalCategories.length > 0)
       .map(item => ({
         unit_id: item.unitId,
-        coi_category: item.finalCategory,
+        coi_categories: item.finalCategories,
         coded_by: '最终协商',
       }))
     const res = await saveFinalCoiCodes(selectedSessionId.value, codes)
@@ -358,7 +368,7 @@ async function handleSave() {
           v-for="(item, i) in items"
           :key="item.unitId"
           class="agreement-row"
-          :class="{ 'is-final': !!item.finalCategory, 'is-disagreement': item.coderA && item.coderB && item.coderA !== item.coderB }"
+          :class="{ 'is-final': item.finalCategories.length > 0, 'is-disagreement': item.coderA.length && item.coderB.length && !isAgreed(item) }"
         >
           <div class="unit-top">
             <span class="unit-num">{{ item.orderIndex }}</span>
@@ -369,16 +379,20 @@ async function handleSave() {
           <div class="code-grid">
             <div class="code-cell">
               <span class="code-label">研究员 A</span>
-              <el-tag v-if="item.coderA" size="small" :color="COI_LABELS[item.coderA].bg" effect="plain">
-                {{ tagLabel(item.coderA) }}
-              </el-tag>
+              <template v-if="item.coderA.length">
+                <el-tag v-for="cat in item.coderA" :key="cat" size="small" :color="COI_LABELS[cat].bg" effect="plain">
+                  {{ tagLabel(cat) }}
+                </el-tag>
+              </template>
               <el-tag v-else size="small" type="info">未编码</el-tag>
             </div>
             <div class="code-cell">
               <span class="code-label">研究员 B</span>
-              <el-tag v-if="item.coderB" size="small" :color="COI_LABELS[item.coderB].bg" effect="plain">
-                {{ tagLabel(item.coderB) }}
-              </el-tag>
+              <template v-if="item.coderB.length">
+                <el-tag v-for="cat in item.coderB" :key="cat" size="small" :color="COI_LABELS[cat].bg" effect="plain">
+                  {{ tagLabel(cat) }}
+                </el-tag>
+              </template>
               <el-tag v-else size="small" type="info">未编码</el-tag>
             </div>
             <div class="code-cell">
@@ -394,16 +408,16 @@ async function handleSave() {
                 v-for="cat in COI_KEYS"
                 :key="cat"
                 class="cat-btn"
-                :class="{ 'is-active': item.finalCategory === cat }"
-                :style="item.finalCategory === cat
+                :class="{ 'is-active': item.finalCategories.includes(cat) }"
+                :style="item.finalCategories.includes(cat)
                   ? { background: COI_LABELS[cat].color, borderColor: COI_LABELS[cat].color, color: '#fff' }
                   : { borderColor: COI_LABELS[cat].color, color: COI_LABELS[cat].color, background: COI_LABELS[cat].bg }"
                 @click="setFinalCategory(i, cat)"
               >{{ cat }} {{ COI_LABELS[cat].label }}</button>
               <button
-                v-if="item.finalCategory"
+                v-if="item.finalCategories.length"
                 class="clear-btn"
-                @click="item.finalCategory = null"
+                @click="item.finalCategories = []"
               >清除</button>
             </div>
           </div>
@@ -424,16 +438,16 @@ async function handleSave() {
 .page-container { display: flex; flex-direction: column; gap: 16px; }
 .page-header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 .page-title { margin: 0; font-size: 18px; font-weight: 600; }
-.header-desc { font-size: 12px; color: #909399; }
+.header-desc { font-size: 13px; color: #909399; }
 .control-card :deep(.el-card__body) { padding: 14px 20px; }
 .control-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .control-left { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
 .control-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .control-item { display: flex; align-items: center; gap: 8px; }
-.control-label { font-size: 13px; color: #606266; white-space: nowrap; }
-.progress-text { font-size: 13px; font-weight: 500; color: #303133; white-space: nowrap; }
+.control-label { font-size: 14px; color: #606266; white-space: nowrap; }
+.progress-text { font-size: 14px; font-weight: 500; color: #303133; white-space: nowrap; }
 .list-header { display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; }
-.list-title { font-size: 14px; font-weight: 600; color: #303133; }
+.list-title { font-size: 15px; font-weight: 600; color: #303133; }
 .list-tags { display: flex; gap: 6px; flex-wrap: wrap; }
 .agreement-list { display: flex; flex-direction: column; gap: 8px; max-height: calc(100vh - 310px); overflow-y: auto; }
 .agreement-row {
@@ -446,18 +460,18 @@ async function handleSave() {
 .agreement-row.is-disagreement { background: #fffaf0; border-color: #f3d19e; }
 .unit-top { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
 .unit-num { font-size: 11px; color: #c0c4cc; font-weight: 600; width: 24px; text-align: right; flex-shrink: 0; }
-.unit-time { font-size: 11px; color: #909399; width: 40px; flex-shrink: 0; }
-.unit-content { font-size: 13px; color: #303133; line-height: 1.6; word-break: break-word; }
+.unit-time { font-size: 12px; color: #909399; width: 40px; flex-shrink: 0; }
+.unit-content { font-size: 15px; color: #303133; line-height: 1.7; word-break: break-word; }
 .code-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-left: 72px; margin-bottom: 10px; }
 .code-cell { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.code-label, .final-label { font-size: 12px; color: #606266; white-space: nowrap; }
+.code-label, .final-label { font-size: 14px; color: #606266; white-space: nowrap; }
 .final-row { display: flex; align-items: center; gap: 12px; margin-left: 72px; flex-wrap: wrap; }
 .category-buttons { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .cat-btn {
   padding: 3px 12px;
   border: 1.5px solid;
   border-radius: 5px;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   font-family: inherit;
@@ -470,7 +484,7 @@ async function handleSave() {
   padding: 3px 8px;
   border: 1px solid #dcdfe6;
   border-radius: 5px;
-  font-size: 12px;
+  font-size: 13px;
   color: #909399;
   background: #fff;
   cursor: pointer;

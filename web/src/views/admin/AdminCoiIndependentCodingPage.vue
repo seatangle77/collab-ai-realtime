@@ -20,11 +20,11 @@ interface CodingItem {
   orderIndex: number
   content: string
   startTime: number | null
-  category: CoiCategory | null
+  categories: CoiCategory[]
 }
 
 interface LocalDraft {
-  codes: { unitId: string; category: CoiCategory }[]
+  codes: { unitId: string; categories: CoiCategory[] }[]
   savedAt: string
 }
 
@@ -55,7 +55,7 @@ const hasDraft = ref(false)
 const draftInfo = ref<{ savedAt: string; count: number } | null>(null)
 
 const totalCount = computed(() => items.value.length)
-const codedCount = computed(() => items.value.filter(item => item.category).length)
+const codedCount = computed(() => items.value.filter(item => item.categories.length > 0).length)
 const progressPct = computed(() =>
   totalCount.value > 0 ? Math.round((codedCount.value / totalCount.value) * 100) : 0,
 )
@@ -138,8 +138,8 @@ function saveDraft() {
   const key = draftKey()
   if (!key || items.value.length === 0) return
   const codes = items.value
-    .filter((item): item is CodingItem & { category: CoiCategory } => !!item.category)
-    .map(item => ({ unitId: item.unitId, category: item.category }))
+    .filter(item => item.categories.length > 0)
+    .map(item => ({ unitId: item.unitId, categories: [...item.categories] }))
   const draft: LocalDraft = {
     codes,
     savedAt: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
@@ -157,10 +157,10 @@ function restoreDraft() {
   if (!raw) return
   try {
     const draft = JSON.parse(raw) as LocalDraft
-    const categoryByUnit = new Map(draft.codes.map(code => [code.unitId, code.category]))
+    const categoriesByUnit = new Map(draft.codes.map(code => [code.unitId, code.categories]))
     items.value = items.value.map(item => ({
       ...item,
-      category: categoryByUnit.get(item.unitId) ?? null,
+      categories: categoriesByUnit.get(item.unitId) ?? [],
     }))
     focusedIndex.value = 0
     ElMessage.success(`已恢复 ${coderLabel.value} 草稿：${draft.codes.length} 条编码`)
@@ -183,7 +183,7 @@ function toCodingItem(row: UnitWithCode): CodingItem {
     orderIndex: row.unit.order_index,
     content: row.unit.content,
     startTime: row.unit.start_time,
-    category: row.code?.coi_category ?? null,
+    categories: [...(row.code?.coi_categories ?? [])],
   }
 }
 
@@ -221,14 +221,9 @@ function scrollToFocused() {
 function setCategory(index: number, cat: CoiCategory) {
   const item = items.value[index]
   if (!item) return
-  item.category = item.category === cat ? null : cat
-  if (item.category && index === focusedIndex.value) {
-    const next = items.value.findIndex((candidate, i) => i > index && !candidate.category)
-    if (next !== -1) {
-      focusedIndex.value = next
-      nextTick(scrollToFocused)
-    }
-  }
+  item.categories = item.categories.includes(cat)
+    ? item.categories.filter(category => category !== cat)
+    : COI_KEYS.filter(category => [...item.categories, cat].includes(category))
 }
 
 function advance() {
@@ -241,8 +236,7 @@ function advance() {
 function codeAndAdvance(cat: CoiCategory) {
   const item = items.value[focusedIndex.value]
   if (!item) return
-  item.category = cat
-  advance()
+  setCategory(focusedIndex.value, cat)
 }
 
 function handleKeydown(e: KeyboardEvent) {
@@ -281,10 +275,10 @@ async function handleSave() {
   saving.value = true
   try {
     const codes = items.value
-      .filter((item): item is CodingItem & { category: CoiCategory } => !!item.category)
+      .filter(item => item.categories.length > 0)
       .map(item => ({
         unit_id: item.unitId,
-        coi_category: item.category,
+        coi_categories: item.categories,
         coded_by: coderLabel.value,
       }))
     const res = await saveCoiCodes(selectedSessionId.value, coderRole.value as CoiCoderRole, codes)
@@ -404,7 +398,7 @@ async function handleSave() {
           :id="`coi-code-${i}`"
           :key="item.unitId"
           class="coding-row"
-          :class="{ 'is-focused': i === focusedIndex, 'is-coded': !!item.category }"
+          :class="{ 'is-focused': i === focusedIndex, 'is-coded': item.categories.length > 0 }"
           @click="focusedIndex = i"
         >
           <div class="unit-top">
@@ -418,16 +412,16 @@ async function handleSave() {
                 v-for="cat in COI_KEYS"
                 :key="cat"
                 class="cat-btn"
-                :class="{ 'is-active': item.category === cat }"
-                :style="item.category === cat
+                :class="{ 'is-active': item.categories.includes(cat) }"
+                :style="item.categories.includes(cat)
                   ? { background: COI_LABELS[cat].color, borderColor: COI_LABELS[cat].color, color: '#fff' }
                   : { borderColor: COI_LABELS[cat].color, color: COI_LABELS[cat].color, background: COI_LABELS[cat].bg }"
                 @click.stop="setCategory(i, cat)"
               >{{ cat }} {{ COI_LABELS[cat].label }}</button>
               <button
-                v-if="item.category"
+                v-if="item.categories.length"
                 class="clear-btn"
-                @click.stop="item.category = null"
+                @click.stop="item.categories = []"
               >清除</button>
             </div>
           </div>
@@ -448,7 +442,7 @@ async function handleSave() {
 .page-container { display: flex; flex-direction: column; gap: 16px; }
 .page-header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 .page-title { margin: 0; font-size: 18px; font-weight: 600; }
-.header-desc { font-size: 12px; color: #909399; }
+.header-desc { font-size: 13px; color: #909399; }
 .header-desc kbd {
   display: inline-block;
   padding: 1px 5px;
@@ -464,11 +458,11 @@ async function handleSave() {
 .control-left { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
 .control-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .control-item { display: flex; align-items: center; gap: 8px; }
-.control-label { font-size: 13px; color: #606266; white-space: nowrap; }
-.progress-text { font-size: 13px; font-weight: 500; color: #303133; white-space: nowrap; }
+.control-label { font-size: 14px; color: #606266; white-space: nowrap; }
+.progress-text { font-size: 14px; font-weight: 500; color: #303133; white-space: nowrap; }
 
 .list-header { display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; }
-.list-title { font-size: 14px; font-weight: 600; color: #303133; }
+.list-title { font-size: 15px; font-weight: 600; color: #303133; }
 .list-tags { display: flex; gap: 6px; }
 
 .coding-list { display: flex; flex-direction: column; gap: 6px; max-height: calc(100vh - 300px); overflow-y: auto; }
@@ -494,14 +488,14 @@ async function handleSave() {
   width: 24px;
   text-align: right;
 }
-.unit-time { font-size: 11px; color: #909399; flex-shrink: 0; width: 40px; }
-.unit-content { font-size: 13px; color: #303133; line-height: 1.6; word-break: break-word; }
+.unit-time { font-size: 12px; color: #909399; flex-shrink: 0; width: 40px; }
+.unit-content { font-size: 15px; color: #303133; line-height: 1.7; word-break: break-word; }
 .category-buttons { display: flex; align-items: center; gap: 6px; padding-left: 72px; flex-wrap: wrap; }
 .cat-btn {
   padding: 3px 12px;
   border: 1.5px solid;
   border-radius: 5px;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   font-family: inherit;
@@ -514,7 +508,7 @@ async function handleSave() {
   padding: 3px 8px;
   border: 1px solid #dcdfe6;
   border-radius: 5px;
-  font-size: 12px;
+  font-size: 13px;
   color: #909399;
   background: #fff;
   cursor: pointer;

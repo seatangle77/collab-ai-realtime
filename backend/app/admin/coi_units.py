@@ -70,7 +70,7 @@ class ImportUnitsResponse(ApiModel):
 
 class CoiCodeIn(ApiModel):
     unit_id: str
-    coi_category: CoiCategory
+    coi_categories: list[CoiCategory]
     coded_by: str | None = None
 
 
@@ -86,7 +86,7 @@ class SaveCodesResponse(ApiModel):
 class CoiCodeOut(ApiModel):
     unit_id: str
     coder_role: CoderRole
-    coi_category: CoiCategory
+    coi_categories: list[CoiCategory]
     coded_by: str | None
     coded_at: datetime
     updated_at: datetime
@@ -138,6 +138,15 @@ def _validate_coi_category(coi_category: str) -> CoiCategory:
     return coi_category  # type: ignore[return-value]
 
 
+def _normalize_coi_categories(coi_categories: list[str]) -> list[CoiCategory]:
+    if not coi_categories:
+        raise HTTPException(status_code=400, detail="每条观点至少需要一个 CoI 分类")
+    if len(coi_categories) > len(COI_CATEGORIES):
+        raise HTTPException(status_code=400, detail="CoI 分类数量不能超过 4 个")
+    selected = {_validate_coi_category(category) for category in coi_categories}
+    return [category for category in ("TE", "EX", "IN", "RE") if category in selected]  # type: ignore[misc]
+
+
 async def _get_session_group_id(db: AsyncSession, session_id: str) -> str:
     result = await db.execute(
         text("SELECT group_id FROM chat_sessions WHERE id = :sid"),
@@ -169,7 +178,7 @@ def _code_row_to_out(row: Any) -> CoiCodeOut:
     return CoiCodeOut(
         unit_id=row["unit_id"],
         coder_role=_validate_coder_role(row["coder_role"]),
-        coi_category=_validate_coi_category(row["coi_category"]),
+        coi_categories=_normalize_coi_categories(list(row["coi_categories"] or [])),
         coded_by=row["coded_by"],
         coded_at=row["coded_at"],
         updated_at=row["updated_at"],
@@ -183,7 +192,7 @@ def _joined_code_to_out(row: Any, prefix: str = "code") -> CoiCodeOut | None:
     return CoiCodeOut(
         unit_id=unit_id,
         coder_role=_validate_coder_role(row[f"{prefix}_coder_role"]),
-        coi_category=_validate_coi_category(row[f"{prefix}_coi_category"]),
+        coi_categories=_normalize_coi_categories(list(row[f"{prefix}_coi_categories"] or [])),
         coded_by=row[f"{prefix}_coded_by"],
         coded_at=row[f"{prefix}_coded_at"],
         updated_at=row[f"{prefix}_updated_at"],
@@ -208,7 +217,7 @@ def _validate_codes_payload(codes: list[CoiCodeIn]) -> None:
         if code.unit_id in seen:
             raise HTTPException(status_code=400, detail="同一观点单元不能重复提交编码")
         seen.add(code.unit_id)
-        _validate_coi_category(code.coi_category)
+        code.coi_categories = _normalize_coi_categories(code.coi_categories)
 
 
 async def _count_codes(db: AsyncSession, session_id: str) -> int:
@@ -451,7 +460,7 @@ async def get_session_codes(
             SELECT u.*,
                    c.unit_id AS code_unit_id,
                    c.coder_role AS code_coder_role,
-                   c.coi_category AS code_coi_category,
+                   c.coi_categories AS code_coi_categories,
                    c.coded_by AS code_coded_by,
                    c.coded_at AS code_coded_at,
                    c.updated_at AS code_updated_at
@@ -514,7 +523,7 @@ async def save_session_codes(
                 "session_id": session_id,
                 "group_id": unit_group_by_id[code.unit_id],
                 "coder_role": role,
-                "coi_category": code.coi_category,
+                "coi_categories": code.coi_categories,
                 "coded_by": code.coded_by,
             }
             for code in payload.codes
@@ -523,10 +532,10 @@ async def save_session_codes(
             text("""
                 INSERT INTO coi_unit_codes
                     (id, unit_id, session_id, group_id, coder_role,
-                     coi_category, coded_by, coded_at, updated_at)
+                     coi_categories, coded_by, coded_at, updated_at)
                 VALUES
                     (:id, :unit_id, :session_id, :group_id, :coder_role,
-                     :coi_category, :coded_by, NOW(), NOW())
+                     :coi_categories, :coded_by, NOW(), NOW())
             """),
             rows,
         )
@@ -548,19 +557,19 @@ async def get_session_agreement(
             SELECT u.*,
                    ca.unit_id AS coder_a_unit_id,
                    ca.coder_role AS coder_a_coder_role,
-                   ca.coi_category AS coder_a_coi_category,
+                   ca.coi_categories AS coder_a_coi_categories,
                    ca.coded_by AS coder_a_coded_by,
                    ca.coded_at AS coder_a_coded_at,
                    ca.updated_at AS coder_a_updated_at,
                    cb.unit_id AS coder_b_unit_id,
                    cb.coder_role AS coder_b_coder_role,
-                   cb.coi_category AS coder_b_coi_category,
+                   cb.coi_categories AS coder_b_coi_categories,
                    cb.coded_by AS coder_b_coded_by,
                    cb.coded_at AS coder_b_coded_at,
                    cb.updated_at AS coder_b_updated_at,
                    cf.unit_id AS final_unit_id,
                    cf.coder_role AS final_coder_role,
-                   cf.coi_category AS final_coi_category,
+                   cf.coi_categories AS final_coi_categories,
                    cf.coded_by AS final_coded_by,
                    cf.coded_at AS final_coded_at,
                    cf.updated_at AS final_updated_at
@@ -590,7 +599,7 @@ async def get_session_agreement(
                 agreed=(
                     coder_a is not None
                     and coder_b is not None
-                    and coder_a.coi_category == coder_b.coi_category
+                    and set(coder_a.coi_categories) == set(coder_b.coi_categories)
                 ),
             )
         )

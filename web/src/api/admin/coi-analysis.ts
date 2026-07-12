@@ -1,6 +1,7 @@
 import { http } from '../http'
 
 export type CoiAnalysisMode = 'two_conditions' | 'three_conditions'
+export type CoiAnalysisCoderRole = 'final' | 'coder_a' | 'coder_b'
 export type CoiNormalityStatus = 'ok' | 'insufficient_n' | 'constant_values' | 'dependency_missing'
 export type CoiRecommendedTest =
   | 'independent_samples_t_test'
@@ -99,6 +100,7 @@ export interface CoiAnalysisResult {
 export interface CreateCoiAnalysisPayload {
   mode: CoiAnalysisMode
   group_ids_by_condition: Record<string, string[]>
+  coder_role?: CoiAnalysisCoderRole
 }
 
 export async function createCoiAnalysis(payload: CreateCoiAnalysisPayload): Promise<CoiAnalysisResult> {

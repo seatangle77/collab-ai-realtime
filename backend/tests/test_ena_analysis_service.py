@@ -25,8 +25,9 @@ from app.analysis.ena_analysis_service import (
 # Helpers
 # ─────────────────────────────────────────────────────────────────
 
-def _utt(order: int, category: str | None, start_time: float | None = None) -> dict:
-    return {"order_index": order, "coi_category": category, "start_time": start_time}
+def _utt(order: int, category: str | list[str] | None, start_time: float | None = None) -> dict:
+    categories = [category] if isinstance(category, str) else (category or [])
+    return {"order_index": order, "coi_categories": categories, "start_time": start_time}
 
 
 def _session_rows(session_id: str, group_id: str, condition: str, utterances: list[dict]) -> list[dict]:
@@ -54,6 +55,11 @@ def test_ex_in_cooccur_same_window() -> None:
     utts = [_utt(1, "EX", 0.0), _utt(2, "IN", 60.0)]
     r = compute_session_ena_metrics(utts)
     assert r["ex_in_strength"] > 0.0, "EX and IN should co-occur in the same window"
+
+
+def test_multicode_unit_creates_internal_cooccurrence() -> None:
+    r = compute_session_ena_metrics([_utt(1, ["TE", "IN"], 0.0)])
+    assert r["edge_weights"]["TE_IN"] == 1.0
 
 
 def test_in_re_not_cooccur_across_window_boundary() -> None:

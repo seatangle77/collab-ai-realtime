@@ -2,7 +2,12 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Download, Printer, Refresh } from '@element-plus/icons-vue'
-import { createEnaAnalysis, type EnaAnalysisMode, type EnaAnalysisResult } from '../../api/admin/ena-analysis'
+import {
+  createEnaAnalysis,
+  type EnaAnalysisCoderRole,
+  type EnaAnalysisMode,
+  type EnaAnalysisResult,
+} from '../../api/admin/ena-analysis'
 import { listAdminGroups } from '../../api/admin/groups'
 import type { AdminGroup } from '../../types/admin'
 import SampleSelector from './task-score/SampleSelector.vue'
@@ -11,13 +16,15 @@ import EnaNormalityTable from './ena/EnaNormalityTable.vue'
 import EnaInferentialStatsTable from './ena/EnaInferentialStatsTable.vue'
 import EnaPostHocTable from './ena/EnaPostHocTable.vue'
 import EnaNetworkChart from './ena/EnaNetworkChart.vue'
-import { buildEnaReportHtml, conditionLabel, modeDescription } from './ena/reportHelpers'
+import { buildEnaReportHtml, coderRoleLabel, conditionLabel, modeDescription } from './ena/reportHelpers'
 
 const mode = ref<EnaAnalysisMode>('two_conditions')
+const coderRole = ref<EnaAnalysisCoderRole>('final')
 const loading = ref(false)
 const loadingGroups = ref(false)
 const groups = ref<AdminGroup[]>([])
 const report = ref<EnaAnalysisResult | null>(null)
+const currentCoderRoleLabel = computed(() => coderRoleLabel(coderRole.value))
 
 let selectedGroupIdsByCondition = reactive<Record<string, string[]>>({
   no_assistance: [],
@@ -68,6 +75,7 @@ async function fetchReport() {
   try {
     report.value = await createEnaAnalysis({
       mode: mode.value,
+      coder_role: coderRole.value,
       group_ids_by_condition: Object.fromEntries(
         conditionColumns.value.map((c) => [c, selectedGroupIdsByCondition[c] ?? []]),
       ),
@@ -86,7 +94,7 @@ function ensureReportReady(): boolean {
 
 function downloadHtmlReport() {
   if (!ensureReportReady()) return
-  const html = buildEnaReportHtml(report.value!, mode.value, conditionColumns.value)
+  const html = buildEnaReportHtml(report.value!, mode.value, coderRole.value, conditionColumns.value)
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -100,7 +108,7 @@ function printReportAsPdf() {
   if (!ensureReportReady()) return
   const w = window.open('', '_blank')
   if (!w) { ElMessage.error('浏览器阻止了打印窗口，请允许弹窗后重试'); return }
-  const html = buildEnaReportHtml(report.value!, mode.value, conditionColumns.value)
+  const html = buildEnaReportHtml(report.value!, mode.value, coderRole.value, conditionColumns.value)
   w.document.open()
   w.document.write(html)
   w.document.close()
@@ -116,7 +124,7 @@ onMounted(fetchGroups)
     <div class="page-header">
       <div>
         <h1>ENA 认知过程网络分析</h1>
-        <p>基于最终协商后的 CoI 观点单元，用 2 分钟滑动时间窗口计算话语共现强度，分析不同条件下的认知过程连接模式。</p>
+        <p>基于所选 CoI 编码来源，用 2 分钟滑动时间窗口计算话语共现强度，分析不同条件下的认知过程连接模式。</p>
       </div>
       <div class="page-actions">
         <el-button :icon="Download" :disabled="!report" @click="downloadHtmlReport">下载 HTML 报告</el-button>
@@ -138,6 +146,14 @@ onMounted(fetchGroups)
         </el-form-item>
         <el-form-item label="当前口径">
           <el-tag size="large">{{ modeDescription(mode) }}</el-tag>
+        </el-form-item>
+        <el-form-item label="编码来源">
+          <el-select v-model="coderRole" style="width: 180px" @change="report = null">
+            <el-option label="最终协商编码" value="final" />
+            <el-option label="研究员 A 独立编码" value="coder_a" />
+            <el-option label="研究员 B 独立编码" value="coder_b" />
+          </el-select>
+          <el-tag size="large" type="info" style="margin-left: 8px">{{ currentCoderRoleLabel }}</el-tag>
         </el-form-item>
         <el-form-item label="窗口设置">
           <el-tag size="large" type="info">2 分钟窗口 · 30 秒步长</el-tag>

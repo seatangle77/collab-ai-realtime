@@ -40,14 +40,14 @@ export interface ImportUnitsResponse {
 
 export interface CoiCodeIn {
   unit_id: string
-  coi_category: CoiCategory
+  coi_categories: CoiCategory[]
   coded_by?: string | null
 }
 
 export interface CoiCode {
   unit_id: string
   coder_role: CoiCoderRole
-  coi_category: CoiCategory
+  coi_categories: CoiCategory[]
   coded_by: string | null
   coded_at: string
   updated_at: string

@@ -62,6 +62,10 @@ COI_METRICS = [
     "in_ratio",
     "re_ratio",
     "higher_order_ratio",
+    "low_order_unit_ratio",
+    "higher_order_unit_ratio",
+    "mixed_order_unit_ratio",
+    "multi_coded_unit_ratio",
     "weighted_score",
 ]
 
@@ -71,6 +75,10 @@ COI_METRIC_LABELS: dict[str, str] = {
     "in_ratio": "Integration 比例",
     "re_ratio": "Resolution 比例",
     "higher_order_ratio": "高阶认知参与比例 (IN+RE)",
+    "low_order_unit_ratio": "包含低阶编码的观点比例 (TE/EX)",
+    "higher_order_unit_ratio": "包含高阶编码的观点比例 (IN/RE)",
+    "mixed_order_unit_ratio": "低阶与高阶共现观点比例",
+    "multi_coded_unit_ratio": "多编码观点比例",
     "weighted_score": "认知参与加权得分",
 }
 
@@ -98,12 +106,18 @@ class CoiSessionObservation(ApiModel):
     ex_count: int
     in_count: int
     re_count: int
+    unit_count: int
     total_count: int
+    multi_coded_count: int
     te_ratio: float
     ex_ratio: float
     in_ratio: float
     re_ratio: float
     higher_order_ratio: float
+    low_order_unit_ratio: float
+    higher_order_unit_ratio: float
+    mixed_order_unit_ratio: float
+    multi_coded_unit_ratio: float
     weighted_score: float
 
 
@@ -536,12 +550,24 @@ def _compute_session_observation(
     utterances: list[dict[str, Any]],
 ) -> CoiSessionObservation:
     counts = {"TE": 0, "EX": 0, "IN": 0, "RE": 0}
+    normalized_units: list[list[str]] = []
     for u in utterances:
-        cat = u.get("coi_category")
-        if cat in counts:
+        categories = [cat for cat in (u.get("coi_categories") or []) if cat in counts]
+        categories = list(dict.fromkeys(categories))
+        if categories:
+            normalized_units.append(categories)
+        for cat in categories:
             counts[cat] += 1
 
     total = sum(counts.values())
+    unit_count = len(normalized_units)
+    multi_coded_count = sum(len(categories) > 1 for categories in normalized_units)
+    low_order_units = sum(bool({"TE", "EX"}.intersection(categories)) for categories in normalized_units)
+    higher_order_units = sum(bool({"IN", "RE"}.intersection(categories)) for categories in normalized_units)
+    mixed_order_units = sum(
+        bool({"TE", "EX"}.intersection(categories)) and bool({"IN", "RE"}.intersection(categories))
+        for categories in normalized_units
+    )
     te, ex, in_, re = counts["TE"], counts["EX"], counts["IN"], counts["RE"]
 
     te_ratio = te / total if total else 0.0
@@ -549,7 +575,10 @@ def _compute_session_observation(
     in_ratio = in_ / total if total else 0.0
     re_ratio = re / total if total else 0.0
     higher_order_ratio = (in_ + re) / total if total else 0.0
-    weighted_score = (te * 1 + ex * 2 + in_ * 3 + re * 4) / total if total else 0.0
+    weighted_score = (
+        sum(mean(CATEGORY_WEIGHTS[cat] for cat in categories) for categories in normalized_units) / unit_count
+        if unit_count else 0.0
+    )
 
     return CoiSessionObservation(
         session_id=session_id,
@@ -559,12 +588,18 @@ def _compute_session_observation(
         ex_count=ex,
         in_count=in_,
         re_count=re,
+        unit_count=unit_count,
         total_count=total,
+        multi_coded_count=multi_coded_count,
         te_ratio=_round(te_ratio),
         ex_ratio=_round(ex_ratio),
         in_ratio=_round(in_ratio),
         re_ratio=_round(re_ratio),
         higher_order_ratio=_round(higher_order_ratio),
+        low_order_unit_ratio=_round(low_order_units / unit_count if unit_count else 0.0),
+        higher_order_unit_ratio=_round(higher_order_units / unit_count if unit_count else 0.0),
+        mixed_order_unit_ratio=_round(mixed_order_units / unit_count if unit_count else 0.0),
+        multi_coded_unit_ratio=_round(multi_coded_count / unit_count if unit_count else 0.0),
         weighted_score=_round(weighted_score),
     )
 
@@ -580,7 +615,7 @@ def build_coi_analysis(
 ) -> CoiAnalysisResult:
     """Build CoI analysis from raw DB rows.
 
-    Each row must contain: session_id, group_id, condition, coi_category (nullable),
+    Each row must contain: session_id, group_id, condition, coi_categories (nullable),
     group_name (optional).
     """
     conditions = CONDITIONS_BY_MODE[mode]
@@ -605,7 +640,7 @@ def build_coi_analysis(
 
     for sid, utterances in sessions.items():
         meta = session_meta[sid]
-        uncoded = [u for u in utterances if u.get("coi_category") is None]
+        uncoded = [u for u in utterances if not u.get("coi_categories")]
         if uncoded:
             excluded_sessions.append(ExcludedSession(
                 session_id=sid,
@@ -615,7 +650,10 @@ def build_coi_analysis(
                 uncoded_count=len(uncoded),
                 total_count=len(utterances),
             ))
-        coded_utterances = [u for u in utterances if u.get("coi_category") in CATEGORY_WEIGHTS]
+        coded_utterances = [
+            u for u in utterances
+            if any(cat in CATEGORY_WEIGHTS for cat in (u.get("coi_categories") or []))
+        ]
         if not coded_utterances:
             continue
         obs = _compute_session_observation(sid, meta["group_id"], meta["condition"], coded_utterances)

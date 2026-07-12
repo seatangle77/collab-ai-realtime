@@ -2,7 +2,12 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Download, Printer, Refresh } from '@element-plus/icons-vue'
-import { createCoiAnalysis, type CoiAnalysisMode, type CoiAnalysisResult } from '../../api/admin/coi-analysis'
+import {
+  createCoiAnalysis,
+  type CoiAnalysisCoderRole,
+  type CoiAnalysisMode,
+  type CoiAnalysisResult,
+} from '../../api/admin/coi-analysis'
 import { listAdminGroups } from '../../api/admin/groups'
 import type { AdminGroup } from '../../types/admin'
 import SampleSelector from './task-score/SampleSelector.vue'
@@ -11,13 +16,15 @@ import CoiNormalityTable from './coi/CoiNormalityTable.vue'
 import CoiInferentialStatsTable from './coi/CoiInferentialStatsTable.vue'
 import CoiPostHocTable from './coi/CoiPostHocTable.vue'
 import CoiCompositionCharts from './coi/CoiCompositionCharts.vue'
-import { buildCoiReportHtml, conditionLabel, modeDescription } from './coi/reportHelpers'
+import { buildCoiReportHtml, coderRoleLabel, conditionLabel, modeDescription } from './coi/reportHelpers'
 
 const mode = ref<CoiAnalysisMode>('two_conditions')
+const coderRole = ref<CoiAnalysisCoderRole>('final')
 const loading = ref(false)
 const loadingGroups = ref(false)
 const groups = ref<AdminGroup[]>([])
 const report = ref<CoiAnalysisResult | null>(null)
+const currentCoderRoleLabel = computed(() => coderRoleLabel(coderRole.value))
 
 let selectedGroupIdsByCondition = reactive<Record<string, string[]>>({
   no_assistance: [],
@@ -68,6 +75,7 @@ async function fetchReport() {
   try {
     report.value = await createCoiAnalysis({
       mode: mode.value,
+      coder_role: coderRole.value,
       group_ids_by_condition: Object.fromEntries(
         conditionColumns.value.map((c) => [c, selectedGroupIdsByCondition[c] ?? []]),
       ),
@@ -92,6 +100,7 @@ function downloadHtmlReport() {
   const html = buildCoiReportHtml(
     report.value!,
     mode.value,
+    coderRole.value,
     conditionColumns.value,
     selectedGroupIdsByCondition,
     groupOptionsByCondition.value,
@@ -115,6 +124,7 @@ function printReportAsPdf() {
   const html = buildCoiReportHtml(
     report.value!,
     mode.value,
+    coderRole.value,
     conditionColumns.value,
     selectedGroupIdsByCondition,
     groupOptionsByCondition.value,
@@ -134,7 +144,7 @@ onMounted(fetchGroups)
     <div class="page-header">
       <div>
         <h1>CoI 认知参与度分析</h1>
-        <p>基于最终协商后的 CoI 观点单元，计算各组认知参与度指标并进行组间统计检验。</p>
+        <p>基于所选 CoI 编码来源，计算各组认知参与度指标并进行组间统计检验。</p>
       </div>
       <div class="page-actions">
         <el-button :icon="Download" :disabled="!report" @click="downloadHtmlReport">下载 HTML 报告</el-button>
@@ -156,6 +166,14 @@ onMounted(fetchGroups)
         </el-form-item>
         <el-form-item label="当前口径">
           <el-tag size="large">{{ modeDescription(mode) }}</el-tag>
+        </el-form-item>
+        <el-form-item label="编码来源">
+          <el-select v-model="coderRole" style="width: 180px" @change="report = null">
+            <el-option label="最终协商编码" value="final" />
+            <el-option label="研究员 A 独立编码" value="coder_a" />
+            <el-option label="研究员 B 独立编码" value="coder_b" />
+          </el-select>
+          <el-tag size="large" type="info" style="margin-left: 8px">{{ currentCoderRoleLabel }}</el-tag>
         </el-form-item>
       </el-form>
     </el-card>

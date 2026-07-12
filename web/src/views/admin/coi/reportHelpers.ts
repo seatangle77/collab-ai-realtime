@@ -1,4 +1,5 @@
 import type {
+  CoiAnalysisCoderRole,
   CoiAnalysisMode,
   CoiAnalysisResult,
   MetricSummary,
@@ -22,6 +23,15 @@ export function modeDescription(mode: CoiAnalysisMode): string {
   return mode === 'two_conditions'
     ? 'no_assistance vs glasses'
     : 'no_assistance / glasses / app_notification'
+}
+
+export function coderRoleLabel(role: CoiAnalysisCoderRole): string {
+  const labels: Record<CoiAnalysisCoderRole, string> = {
+    final: '最终协商编码',
+    coder_a: '研究员 A 独立编码',
+    coder_b: '研究员 B 独立编码',
+  }
+  return labels[role]
 }
 
 export function formatNumber(value: number | null | undefined): string {
@@ -172,6 +182,7 @@ function coiCompositionChartsHtml(report: CoiAnalysisResult, conditionColumns: s
 export function buildCoiReportHtml(
   report: CoiAnalysisResult,
   mode: CoiAnalysisMode,
+  coderRole: CoiAnalysisCoderRole,
   conditionColumns: string[],
   selectedGroupIdsByCondition: Record<string, string[]>,
   groupOptionsByCondition: Record<string, AdminGroup[]>,
@@ -259,9 +270,9 @@ export function buildCoiReportHtml(
 <body>
   <h1>CoI 认知参与度分析报告</h1>
   <div class="meta">生成时间：${escapeHtml(generatedAt)}</div>
-  <div class="meta">分析模式：${escapeHtml(modeDescription(mode))}；纳入会话数：${report.total_sessions}</div>
+  <div class="meta">分析模式：${escapeHtml(modeDescription(mode))}；编码来源：${escapeHtml(coderRoleLabel(coderRole))}；纳入会话数：${report.total_sessions}</div>
   <h2>1. 分析方法</h2>
-  <p class="note">基于 CoI 框架（Community of Inquiry）Cognitive Presence 维度对最终协商后的观点单元进行量化分析。权重：TE=1, EX=2, IN=3, RE=4。高阶认知参与比例 = (IN+RE) / 总有效认知话语数。加权得分 = Σ(类别数×权重) / 总有效认知话语数。未完成 final 编码的观点单元视为非分析单元，不进入各项 CoI 指标分母。</p>
+  <p class="note">基于 CoI 框架（Community of Inquiry）Cognitive Presence 维度对所选编码来源（${escapeHtml(coderRoleLabel(coderRole))}）下的观点单元进行量化分析。权重：TE=1, EX=2, IN=3, RE=4。高阶认知参与比例 = (IN+RE) / 总有效认知话语数。加权得分 = Σ(类别数×权重) / 总有效认知话语数。未完成当前编码来源编码的观点单元视为非分析单元，不进入各项 CoI 指标分母。</p>
   <p class="note"><strong>指标说明：</strong>TE（Triggering Event，触发事件）与 EX（Exploration，探索）更多反映问题的提出与观点的发散性探索；IN（Integration，整合）与 RE（Resolution，解决）更多反映观点的综合归纳与问题的实质性解决，属于高阶认知参与。高阶认知参与比例（IN+RE）及加权得分越高，表明小组讨论在认知层面越深入。</p>
   <p class="note">正态性使用 Shapiro-Wilk test；两条件选用 Welch t-test 或 Mann-Whitney U test；三条件使用 one-way ANOVA（附 Levene 方差齐性检验）或 Kruskal-Wallis。Effect size 使用 Hedges' g、rank-biserial r、eta squared 或 epsilon squared。多重比较校正：对所有指标的原始 p 值统一应用 Benjamini-Hochberg FDR 校正（见推断统计表 p_adj 列），以控制跨指标的假阳性率。</p>
   <h2>2. 样本选择</h2>

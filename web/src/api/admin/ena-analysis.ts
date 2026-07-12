@@ -1,6 +1,7 @@
 import { http } from '../http'
 
 export type EnaAnalysisMode = 'two_conditions' | 'three_conditions'
+export type EnaAnalysisCoderRole = 'final' | 'coder_a' | 'coder_b'
 export type NormalityStatus = 'ok' | 'insufficient_n' | 'constant_values' | 'dependency_missing'
 export type RecommendedTest =
   | 'independent_samples_t_test'
@@ -116,6 +117,7 @@ export interface EnaAnalysisResult {
 export interface CreateEnaAnalysisPayload {
   mode: EnaAnalysisMode
   group_ids_by_condition: Record<string, string[]>
+  coder_role?: EnaAnalysisCoderRole
 }
 
 export async function createEnaAnalysis(payload: CreateEnaAnalysisPayload): Promise<EnaAnalysisResult> {

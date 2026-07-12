@@ -1,4 +1,5 @@
 import type {
+  EnaAnalysisCoderRole,
   EnaAnalysisMode,
   EnaMetricSummary,
   EnaNormalityResult,
@@ -22,6 +23,15 @@ export function modeDescription(mode: EnaAnalysisMode): string {
   return mode === 'two_conditions'
     ? 'no_assistance vs glasses'
     : 'no_assistance / glasses / app_notification'
+}
+
+export function coderRoleLabel(role: EnaAnalysisCoderRole): string {
+  const labels: Record<EnaAnalysisCoderRole, string> = {
+    final: '最终协商编码',
+    coder_a: '研究员 A 独立编码',
+    coder_b: '研究员 B 独立编码',
+  }
+  return labels[role]
 }
 
 export function formatNumber(value: number | null | undefined): string {
@@ -234,6 +244,7 @@ function enaNetworkChartsHtml(report: EnaAnalysisResult): string {
 export function buildEnaReportHtml(
   report: EnaAnalysisResult,
   mode: EnaAnalysisMode,
+  coderRole: EnaAnalysisCoderRole,
   conditionColumns: string[],
 ): string {
   const generatedAt = new Date().toLocaleString()
@@ -305,8 +316,8 @@ export function buildEnaReportHtml(
 <body>
   <h1>CoI 认知过程共现网络分析报告</h1>
   <div class="meta">生成时间：${escapeHtml(generatedAt)}</div>
-  <div class="meta">分析模式：${escapeHtml(modeDescription(mode))}；纳入会话数：${report.total_sessions}</div>
-  <p class="note"><strong>分析说明：</strong>本报告基于最终协商后的 CoI 观点单元编码结果，采用 ENA 启发（ENA-inspired）的 CoI 类别共现网络分析方法（CoI co-occurrence network analysis）。使用 2 分钟滑动时间窗口（步长 30s）计算各 CoI 阶段（TE/EX/IN/RE）在同一时间窗口内的共现强度，以此刻画认知过程阶段之间的联结模式。本方法聚焦于 EX-IN、IN-RE 等高阶认知连接强度的条件间比较，与 ENA Web Tool 的完整 SVD 投影模型不同，属于基于窗口共现的简化网络分析。正态性使用 Shapiro-Wilk test；两条件选用 Welch t-test 或 Mann-Whitney U test；三条件使用 one-way ANOVA（附 Levene 方差齐性检验）或 Kruskal-Wallis。多重比较校正：对所有连接强度指标的原始 p 值统一应用 Benjamini-Hochberg FDR 校正（见推断统计表 p_adj 列），以控制跨指标的假阳性率。</p>
+  <div class="meta">分析模式：${escapeHtml(modeDescription(mode))}；编码来源：${escapeHtml(coderRoleLabel(coderRole))}；纳入会话数：${report.total_sessions}</div>
+  <p class="note"><strong>分析说明：</strong>本报告基于所选编码来源（${escapeHtml(coderRoleLabel(coderRole))}）下的 CoI 观点单元编码结果，采用 ENA 启发（ENA-inspired）的 CoI 类别共现网络分析方法（CoI co-occurrence network analysis）。使用 2 分钟滑动时间窗口（步长 30s）计算各 CoI 阶段（TE/EX/IN/RE）在同一时间窗口内的共现强度，以此刻画认知过程阶段之间的联结模式。本方法聚焦于 EX-IN、IN-RE 等高阶认知连接强度的条件间比较，与 ENA Web Tool 的完整 SVD 投影模型不同，属于基于窗口共现的简化网络分析。正态性使用 Shapiro-Wilk test；两条件选用 Welch t-test 或 Mann-Whitney U test；三条件使用 one-way ANOVA（附 Levene 方差齐性检验）或 Kruskal-Wallis。多重比较校正：对所有连接强度指标的原始 p 值统一应用 Benjamini-Hochberg FDR 校正（见推断统计表 p_adj 列），以控制跨指标的假阳性率。</p>
   <h2>1. 描述性统计</h2>
   <table><thead>${descriptiveHeader()}</thead><tbody>${descriptiveRows}</tbody></table>
   <h2>2. 正态性检查（Shapiro-Wilk）</h2>
