@@ -68,6 +68,16 @@ class ImportUnitsResponse(ApiModel):
     deleted_codes: int
 
 
+class SplitUnitRequest(ApiModel):
+    first_content: str
+    second_content: str
+
+
+class UnitMutationResponse(ApiModel):
+    units: list[CoiUnitOut]
+    invalidated_codes: int
+
+
 class CoiCodeIn(ApiModel):
     unit_id: str
     coi_categories: list[CoiCategory]
@@ -130,6 +140,11 @@ def _validate_coder_role(coder_role: str) -> CoderRole:
     if coder_role not in CODER_ROLES:
         raise HTTPException(status_code=400, detail="无效的编码角色")
     return coder_role  # type: ignore[return-value]
+
+
+def _require_structure_editor(coder_role: str) -> None:
+    if coder_role != "coder_a":
+        raise HTTPException(status_code=403, detail="只有研究员 A 可以拆分或合并观点单元")
 
 
 def _validate_coi_category(coi_category: str) -> CoiCategory:
@@ -255,6 +270,88 @@ async def _ensure_units_belong_to_session(
         raise HTTPException(status_code=400, detail="编码中包含不属于该会话的观点单元")
 
 
+async def _lock_session_units(db: AsyncSession, session_id: str) -> list[Any]:
+    result = await db.execute(
+        text("""
+            SELECT *
+            FROM coi_units
+            WHERE session_id = :sid
+            ORDER BY order_index ASC
+            FOR UPDATE
+        """),
+        {"sid": session_id},
+    )
+    return list(result.mappings().all())
+
+
+async def _delete_unit_codes(db: AsyncSession, unit_ids: list[str]) -> int:
+    result = await db.execute(
+        text("""
+            DELETE FROM coi_unit_codes
+            WHERE unit_id = ANY(:unit_ids)
+            RETURNING id
+        """),
+        {"unit_ids": unit_ids},
+    )
+    return len(result.all())
+
+
+async def _shift_orders_up_after(
+    db: AsyncSession,
+    session_id: str,
+    order_index: int,
+    max_order: int,
+) -> None:
+    """Make one empty order slot after order_index without transient collisions."""
+    if order_index >= max_order:
+        return
+    offset = max_order + 1
+    await db.execute(
+        text("""
+            UPDATE coi_units
+            SET order_index = order_index + :offset
+            WHERE session_id = :sid AND order_index > :order_index
+        """),
+        {"sid": session_id, "order_index": order_index, "offset": offset},
+    )
+    await db.execute(
+        text("""
+            UPDATE coi_units
+            SET order_index = order_index - :offset + 1
+            WHERE session_id = :sid AND order_index > :offset
+        """),
+        {"sid": session_id, "offset": offset},
+    )
+
+
+async def _shift_orders_down_after(
+    db: AsyncSession,
+    session_id: str,
+    order_index: int,
+    max_order: int,
+) -> None:
+    """Close one order slot after deleting adjacent units without collisions."""
+    if order_index >= max_order:
+        return
+    offset = max_order + 1
+    await db.execute(
+        text("""
+            UPDATE coi_units
+            SET order_index = order_index + :offset
+            WHERE session_id = :sid AND order_index > :order_index
+        """),
+        {"sid": session_id, "order_index": order_index, "offset": offset},
+    )
+    await db.execute(
+        text("""
+            UPDATE coi_units
+            SET order_index = order_index - :offset - 1
+            WHERE session_id = :sid AND order_index > :offset
+        """),
+        {"sid": session_id, "offset": offset},
+    )
+
+
 # ── Step 4: unit preparation endpoints ────────────────────────────────────────
 
 @router.get("/sessions-summary", response_model=list[SessionSummaryOut])
@@ -320,6 +417,144 @@ async def list_session_units(
         {"sid": session_id},
     )
     return [_unit_row_to_out(row) for row in result.mappings().all()]
+
+
+@router.post(
+    "/sessions/{session_id}/units/{unit_id}/split",
+    response_model=UnitMutationResponse,
+)
+async def split_session_unit(
+    session_id: str,
+    unit_id: str,
+    payload: SplitUnitRequest,
+    coder_role: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+) -> UnitMutationResponse:
+    """Split one shared unit; invalidate only codes attached to that unit."""
+    _require_structure_editor(coder_role)
+    await _get_session_group_id(db, session_id)
+    first_content = payload.first_content.strip()
+    second_content = payload.second_content.strip()
+    if not first_content or not second_content:
+        raise HTTPException(status_code=400, detail="拆分后的两段内容都不能为空")
+
+    rows = await _lock_session_units(db, session_id)
+    target = next((row for row in rows if row["id"] == unit_id), None)
+    if target is None:
+        raise HTTPException(status_code=404, detail="观点单元不存在或已被调整，请重新加载")
+
+    max_order = max((int(row["order_index"]) for row in rows), default=0)
+    order_index = int(target["order_index"])
+    new_ids = [_new_unit_id(), _new_unit_id()]
+    invalidated_codes = await _delete_unit_codes(db, [unit_id])
+    await db.execute(
+        text("DELETE FROM coi_units WHERE id = :unit_id"),
+        {"unit_id": unit_id},
+    )
+    await _shift_orders_up_after(db, session_id, order_index, max_order)
+
+    shared = {
+        "session_id": session_id,
+        "group_id": target["group_id"],
+        "speaker": target["speaker"],
+        "speaker_user_id": target["speaker_user_id"],
+        "source_transcript_ids": target["source_transcript_ids"] or [],
+        "start_time": target["start_time"],
+    }
+    await db.execute(
+        text("""
+            INSERT INTO coi_units
+                (id, session_id, group_id, speaker, speaker_user_id,
+                 content, source_transcript_ids, order_index, start_time)
+            VALUES
+                (:id, :session_id, :group_id, :speaker, :speaker_user_id,
+                 :content, :source_transcript_ids, :order_index, :start_time)
+        """),
+        [
+            {**shared, "id": new_ids[0], "content": first_content, "order_index": order_index},
+            {**shared, "id": new_ids[1], "content": second_content, "order_index": order_index + 1},
+        ],
+    )
+    result = await db.execute(
+        text("SELECT * FROM coi_units WHERE id = ANY(:unit_ids) ORDER BY order_index ASC"),
+        {"unit_ids": new_ids},
+    )
+    units = [_unit_row_to_out(row) for row in result.mappings().all()]
+    await db.commit()
+    return UnitMutationResponse(units=units, invalidated_codes=invalidated_codes)
+
+
+@router.post(
+    "/sessions/{session_id}/units/{unit_id}/merge-next",
+    response_model=UnitMutationResponse,
+)
+async def merge_session_unit_with_next(
+    session_id: str,
+    unit_id: str,
+    coder_role: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+) -> UnitMutationResponse:
+    """Merge one shared unit with its next neighbor; invalidate only their codes."""
+    _require_structure_editor(coder_role)
+    await _get_session_group_id(db, session_id)
+    rows = await _lock_session_units(db, session_id)
+    target_index = next((i for i, row in enumerate(rows) if row["id"] == unit_id), -1)
+    if target_index < 0:
+        raise HTTPException(status_code=404, detail="观点单元不存在或已被调整，请重新加载")
+    if target_index >= len(rows) - 1:
+        raise HTTPException(status_code=400, detail="最后一条观点无法与下一条合并")
+
+    current = rows[target_index]
+    following = rows[target_index + 1]
+    current_order = int(current["order_index"])
+    following_order = int(following["order_index"])
+    if following_order != current_order + 1:
+        raise HTTPException(status_code=409, detail="观点序号已变化，请重新加载后再试")
+
+    merged_id = _new_unit_id()
+    invalidated_codes = await _delete_unit_codes(db, [current["id"], following["id"]])
+    await db.execute(
+        text("DELETE FROM coi_units WHERE id = ANY(:unit_ids)"),
+        {"unit_ids": [current["id"], following["id"]]},
+    )
+    max_order = max((int(row["order_index"]) for row in rows), default=0)
+    await _shift_orders_down_after(db, session_id, following_order, max_order)
+
+    source_ids = list(dict.fromkeys([
+        *(current["source_transcript_ids"] or []),
+        *(following["source_transcript_ids"] or []),
+    ]))
+    await db.execute(
+        text("""
+            INSERT INTO coi_units
+                (id, session_id, group_id, speaker, speaker_user_id,
+                 content, source_transcript_ids, order_index, start_time)
+            VALUES
+                (:id, :session_id, :group_id, :speaker, :speaker_user_id,
+                 :content, :source_transcript_ids, :order_index, :start_time)
+        """),
+        {
+            "id": merged_id,
+            "session_id": session_id,
+            "group_id": current["group_id"],
+            "speaker": current["speaker"],
+            "speaker_user_id": current["speaker_user_id"],
+            "content": f'{str(current["content"]).strip()} {str(following["content"]).strip()}',
+            "source_transcript_ids": source_ids,
+            "order_index": current_order,
+            "start_time": current["start_time"],
+        },
+    )
+    result = await db.execute(
+        text("SELECT * FROM coi_units WHERE id = :unit_id"),
+        {"unit_id": merged_id},
+    )
+    row = result.mappings().first()
+    if row is None:
+        raise HTTPException(status_code=500, detail="合并观点保存失败")
+    unit = _unit_row_to_out(row)
+    await db.commit()
+    return UnitMutationResponse(units=[unit], invalidated_codes=invalidated_codes)
 
 
 @router.post("/sessions/{session_id}/import-from-preprocess", response_model=ImportUnitsResponse)

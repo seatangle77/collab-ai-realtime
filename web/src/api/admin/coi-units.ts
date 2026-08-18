@@ -38,6 +38,11 @@ export interface ImportUnitsResponse {
   deleted_codes: number
 }
 
+export interface UnitMutationResponse {
+  units: CoiUnit[]
+  invalidated_codes: number
+}
+
 export interface CoiCodeIn {
   unit_id: string
   coi_categories: CoiCategory[]
@@ -105,6 +110,29 @@ export async function saveCoiUnits(
   return http.put<SaveUnitsResponse>(
     `/api/admin/coi-units/sessions/${encodeURIComponent(sessionId)}`,
     { units },
+  )
+}
+
+export async function splitCoiUnit(
+  sessionId: string,
+  unitId: string,
+  firstContent: string,
+  secondContent: string,
+): Promise<UnitMutationResponse> {
+  const query = new URLSearchParams({ coder_role: 'coder_a' })
+  return http.post<UnitMutationResponse>(
+    `/api/admin/coi-units/sessions/${encodeURIComponent(sessionId)}/units/${encodeURIComponent(unitId)}/split?${query.toString()}`,
+    { first_content: firstContent, second_content: secondContent },
+  )
+}
+
+export async function mergeCoiUnitWithNext(
+  sessionId: string,
+  unitId: string,
+): Promise<UnitMutationResponse> {
+  const query = new URLSearchParams({ coder_role: 'coder_a' })
+  return http.post<UnitMutationResponse>(
+    `/api/admin/coi-units/sessions/${encodeURIComponent(sessionId)}/units/${encodeURIComponent(unitId)}/merge-next?${query.toString()}`,
   )
 }
 

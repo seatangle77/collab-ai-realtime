@@ -5,7 +5,9 @@ import { listAdminGroups } from '../../api/admin/groups'
 import { listAdminChatSessions } from '../../api/admin/chat-sessions'
 import {
   getCoiCodes,
+  mergeCoiUnitWithNext,
   saveCoiCodes,
+  splitCoiUnit,
   type CoiCategory,
   type CoiCoderRole,
   type UnitWithCode,
@@ -50,11 +52,16 @@ const loadingGroups = ref(false)
 const loadingSessions = ref(false)
 const loadingItems = ref(false)
 const saving = ref(false)
+const mutatingStructure = ref(false)
 const items = ref<CodingItem[]>([])
 const focusedIndex = ref(0)
 const hasDraft = ref(false)
 const draftInfo = ref<{ savedAt: string; count: number } | null>(null)
 const showStarredOnly = ref(false)
+const splitDialogVisible = ref(false)
+const splitTargetIndex = ref<number | null>(null)
+const splitContent = ref('')
+const splitTextareaRef = ref<HTMLTextAreaElement | null>(null)
 
 const totalCount = computed(() => items.value.length)
 const codedCount = computed(() => items.value.filter(item => item.categories.length > 0).length)
@@ -301,6 +308,117 @@ function codeAndAdvance(cat: CoiCategory) {
   setCategory(focusedIndex.value, cat)
 }
 
+function buildCodePayload() {
+  return items.value
+    .filter(item => item.categories.length > 0)
+    .map(item => ({
+      unit_id: item.unitId,
+      coi_categories: item.categories,
+      coded_by: coderLabel.value,
+    }))
+}
+
+async function saveCurrentCodesBeforeMutation() {
+  if (!selectedSessionId.value) throw new Error('请先选择会话')
+  await saveCoiCodes(
+    selectedSessionId.value,
+    coderRole.value as CoiCoderRole,
+    buildCodePayload(),
+  )
+  clearDraft()
+}
+
+function openSplitDialog(index: number) {
+  if (coderRole.value !== 'coder_a') return
+  const item = items.value[index]
+  if (!item) return
+  splitTargetIndex.value = index
+  splitContent.value = item.content
+  splitDialogVisible.value = true
+  nextTick(() => {
+    const textarea = splitTextareaRef.value
+    if (!textarea) return
+    const midpoint = Math.floor(item.content.length / 2)
+    textarea.focus()
+    textarea.setSelectionRange(midpoint, midpoint)
+  })
+}
+
+function closeSplitDialog() {
+  if (mutatingStructure.value) return
+  splitDialogVisible.value = false
+  splitTargetIndex.value = null
+  splitContent.value = ''
+}
+
+async function focusMutatedUnits(unitIds: string[]) {
+  showStarredOnly.value = false
+  await loadCodes()
+  const idSet = new Set(unitIds)
+  for (const item of items.value) {
+    if (idSet.has(item.unitId)) item.starred = true
+  }
+  persistReviewStars()
+  const firstIndex = items.value.findIndex(item => idSet.has(item.unitId))
+  focusedIndex.value = firstIndex >= 0 ? firstIndex : 0
+  nextTick(scrollToFocused)
+}
+
+async function confirmSplitAtCursor() {
+  if (coderRole.value !== 'coder_a' || splitTargetIndex.value === null || !selectedSessionId.value) return
+  const textarea = splitTextareaRef.value
+  const item = items.value[splitTargetIndex.value]
+  if (!textarea || !item) return
+  const position = textarea.selectionStart
+  const firstContent = splitContent.value.slice(0, position).trim()
+  const secondContent = splitContent.value.slice(position).trim()
+  if (!firstContent || !secondContent) {
+    ElMessage.warning('请把光标放在观点文字中间，再点击确认拆分')
+    return
+  }
+
+  mutatingStructure.value = true
+  try {
+    await saveCurrentCodesBeforeMutation()
+    const res = await splitCoiUnit(selectedSessionId.value, item.unitId, firstContent, secondContent)
+    splitDialogVisible.value = false
+    splitTargetIndex.value = null
+    splitContent.value = ''
+    await focusMutatedUnits(res.units.map(unit => unit.id))
+    ElMessage.success(`已拆分为 2 条；${res.invalidated_codes} 条相关编码需重新确认`)
+  } catch (e: any) {
+    ElMessage.error(e?.message || '拆分失败，请重新加载后再试')
+  } finally {
+    mutatingStructure.value = false
+  }
+}
+
+async function mergeWithNext(index: number) {
+  if (coderRole.value !== 'coder_a' || !selectedSessionId.value) return
+  const current = items.value[index]
+  const following = items.value[index + 1]
+  if (!current || !following) return
+  try {
+    await ElMessageBox.confirm(
+      `将观点 ${current.orderIndex} 与 ${following.orderIndex} 合并。两条观点现有的 A/B/final 编码会失效，其他编码不受影响。确认合并？`,
+      '确认合并观点',
+      { type: 'warning', confirmButtonText: '合并', cancelButtonText: '取消' },
+    )
+  } catch { return }
+
+  mutatingStructure.value = true
+  try {
+    await saveCurrentCodesBeforeMutation()
+    const res = await mergeCoiUnitWithNext(selectedSessionId.value, current.unitId)
+    await focusMutatedUnits(res.units.map(unit => unit.id))
+    ElMessage.success(`已合并观点；${res.invalidated_codes} 条相关编码需重新确认`)
+  } catch (e: any) {
+    ElMessage.error(e?.message || '合并失败，请重新加载后再试')
+  } finally {
+    mutatingStructure.value = false
+  }
+}
+
 function handleKeydown(e: KeyboardEvent) {
   if (!items.value.length) return
   const tag = (e.target as HTMLElement).tagName
@@ -338,14 +456,11 @@ async function handleSave() {
 
   saving.value = true
   try {
-    const codes = items.value
-      .filter(item => item.categories.length > 0)
-      .map(item => ({
-        unit_id: item.unitId,
-        coi_categories: item.categories,
-        coded_by: coderLabel.value,
-      }))
-    const res = await saveCoiCodes(selectedSessionId.value, coderRole.value as CoiCoderRole, codes)
+    const res = await saveCoiCodes(
+      selectedSessionId.value,
+      coderRole.value as CoiCoderRole,
+      buildCodePayload(),
+    )
     clearDraft()
     ElMessage.success(`${coderLabel.value} 编码已保存：${res.saved} 条`)
   } catch (e: any) {
@@ -452,6 +567,14 @@ async function handleSave() {
       </template>
     </el-alert>
 
+    <el-alert
+      v-if="coderRole === 'coder_a' && items.length > 0"
+      type="info"
+      :closable="false"
+      show-icon
+      title="研究员 A 可直接拆分或合并观点；仅受影响观点的 A/B/final 编码需要重新确认，其他编码会保留。"
+    />
+
     <el-card v-if="items.length > 0" shadow="never" v-loading="loadingItems">
       <template #header>
         <div class="list-header">
@@ -503,6 +626,19 @@ async function handleSave() {
                 @click.stop="entry.item.categories = []"
               >清除</button>
             </div>
+            <div v-if="coderRole === 'coder_a'" class="structure-actions">
+              <button
+                class="structure-btn"
+                :disabled="mutatingStructure"
+                @click.stop="openSplitDialog(entry.index)"
+              >拆分</button>
+              <button
+                v-if="entry.index < items.length - 1"
+                class="structure-btn"
+                :disabled="mutatingStructure"
+                @click.stop="mergeWithNext(entry.index)"
+              >与下一条合并</button>
+            </div>
           </div>
         </div>
         <el-empty
@@ -519,6 +655,30 @@ async function handleSave() {
         :description="selectedSessionId ? '该会话暂无观点单元，请先完成 CoI 观点整理' : '请先选择群组'"
       />
     </el-card>
+
+    <el-dialog
+      v-model="splitDialogVisible"
+      title="拆分观点单元"
+      width="min(680px, 92vw)"
+      :close-on-click-modal="!mutatingStructure"
+      :close-on-press-escape="!mutatingStructure"
+      :show-close="!mutatingStructure"
+      @closed="closeSplitDialog"
+    >
+      <p class="split-hint">把光标放在需要拆开的文字位置，然后点击“按光标拆分”。</p>
+      <textarea
+        ref="splitTextareaRef"
+        v-model="splitContent"
+        class="split-textarea"
+        rows="8"
+      />
+      <template #footer>
+        <el-button :disabled="mutatingStructure" @click="closeSplitDialog">取消</el-button>
+        <el-button type="primary" :loading="mutatingStructure" @click="confirmSplitAtCursor">
+          按光标拆分
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -593,6 +753,20 @@ async function handleSave() {
 .star-btn:hover { color: #e6a23c; border-color: #e6a23c; }
 .star-btn.is-active { color: #e6a23c; border-color: #e6a23c; background: #fdf6ec; }
 .category-buttons { display: flex; align-items: center; gap: 6px; padding-left: 72px; flex-wrap: wrap; }
+.structure-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.structure-btn {
+  padding: 3px 9px;
+  border: 1px solid #dcdfe6;
+  border-radius: 5px;
+  color: #606266;
+  background: #fff;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1.6;
+}
+.structure-btn:hover:not(:disabled) { color: #409eff; border-color: #409eff; }
+.structure-btn:disabled { cursor: not-allowed; opacity: 0.55; }
 .cat-btn {
   padding: 3px 12px;
   border: 1.5px solid;
@@ -618,9 +792,24 @@ async function handleSave() {
   transition: all 0.12s;
 }
 .clear-btn:hover { color: #f56c6c; border-color: #f56c6c; }
+.split-hint { margin: 0 0 10px; color: #606266; font-size: 14px; }
+.split-textarea {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  color: #303133;
+  background: #fff;
+  font: inherit;
+  line-height: 1.7;
+  resize: vertical;
+}
+.split-textarea:focus { outline: none; border-color: #409eff; box-shadow: 0 0 0 2px rgba(64,158,255,0.12); }
 .empty-card { min-height: 320px; display: flex; align-items: center; justify-content: center; }
 @media (max-width: 760px) {
   .category-buttons { padding-left: 0; }
+  .unit-bottom { align-items: flex-start; flex-direction: column; }
   .unit-top { display: grid; grid-template-columns: 28px 44px minmax(0, 1fr); }
 }
 </style>
