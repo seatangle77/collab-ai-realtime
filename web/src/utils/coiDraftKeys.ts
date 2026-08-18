@@ -12,6 +12,10 @@ export function coiCodesDraftKey(sessionId: string, coderRole: CoiCoderRole): st
   return `coi_codes_draft_${sessionId}_${coderRole}`
 }
 
+export function coiReviewStarsKey(sessionId: string, coderRole: CoiCoderRole): string {
+  return `coi_review_stars_${sessionId}_${coderRole}`
+}
+
 export function legacyCoiCodingDraftKey(sessionId: string): string {
   return `coi_coding_draft_${sessionId}`
 }
@@ -21,5 +25,8 @@ export function clearCoiDownstreamDrafts(sessionId: string): void {
   localStorage.removeItem(coiCodesDraftKey(sessionId, 'coder_a'))
   localStorage.removeItem(coiCodesDraftKey(sessionId, 'coder_b'))
   localStorage.removeItem(coiCodesDraftKey(sessionId, 'final'))
+  localStorage.removeItem(coiReviewStarsKey(sessionId, 'coder_a'))
+  localStorage.removeItem(coiReviewStarsKey(sessionId, 'coder_b'))
+  localStorage.removeItem(coiReviewStarsKey(sessionId, 'final'))
   localStorage.removeItem(legacyCoiCodingDraftKey(sessionId))
 }

@@ -15,21 +15,20 @@ const previewVisible = ref(false)
 const chartLabels = {
   zh: {
     title: 'ENA 认知过程网络图',
-    desc: '线条粗细 = 共现强度；差异图中蓝色表示条件B更强，红色表示条件A更强',
+    desc: '线宽表示共现强度；差异网络颜色仅表示描述性差异，不代表统计显著',
     alt: 'ENA 认知过程网络图',
   },
   en: {
     title: 'ENA Cognitive Process Network',
-    desc: 'Line thickness = co-occurrence strength; blue indicates condition B is stronger, red indicates condition A is stronger',
+    desc: 'Edge width indicates co-occurrence strength; difference colors are descriptive only, not statistical significance',
     alt: 'ENA cognitive process network',
   },
 }
 const hasEnglishChart = computed(() => Boolean(props.charts?.['networks_en']))
 const activeLabels = computed(() => chartLabels[chartLanguage.value])
 const activeChartKey = computed(() => chartLanguage.value === 'en' && hasEnglishChart.value ? 'networks_en' : 'networks')
-const activeChartSrc = computed(() => props.charts?.[activeChartKey.value] ?? '')
-const activeChartFileName = computed(() =>
-  `ena-network-${chartLanguage.value}-${new Date().toISOString().slice(0, 10)}.png`
+const activeChartSrc = computed(() =>
+  props.charts?.[`${activeChartKey.value}_svg`] ?? props.charts?.[activeChartKey.value] ?? '',
 )
 
 // Fixed node positions in a diamond layout (cx, cy) within a 300×300 viewport
@@ -46,9 +45,8 @@ const MIN_STROKE = 0.5  // minimum visible line
 
 // Blue-to-red scale for diff network
 function diffColor(diff: number): string {
-  if (diff > 0.01) return '#2563eb'   // blue: B stronger
-  if (diff < -0.01) return '#dc2626'  // red: A stronger
-  return '#d1d5db'                     // grey: no difference
+  if (Math.abs(diff) < 0.01) return '#d1d5db'
+  return diff > 0 ? '#2563eb' : '#dc2626'
 }
 
 function edgeStroke(weight: number, maxWeight: number): number {
@@ -56,9 +54,9 @@ function edgeStroke(weight: number, maxWeight: number): number {
   return Math.max(MIN_STROKE, (weight / maxWeight) * MAX_STROKE)
 }
 
-function networkEdges(net: EnaNetworkCondition, isDiff = false) {
+function networkEdges(net: EnaNetworkCondition, isDiff = false, sharedMax?: number) {
   const weights = net.edges.map((e) => Math.abs(isDiff ? (e.weight_diff ?? 0) : e.weight))
-  const maxW = Math.max(...weights, 0.001)
+  const maxW = sharedMax ?? Math.max(...weights, 0.001)
   return net.edges.map((e) => {
     const src = NODE_POSITIONS[e.source]!
     const tgt = NODE_POSITIONS[e.target]!
@@ -74,13 +72,6 @@ function networkEdges(net: EnaNetworkCondition, isDiff = false) {
 function nodePos(node: string): { x: number; y: number } {
   return NODE_POSITIONS[node] ?? { x: 150, y: 150 }
 }
-
-const conditionNetworks = computed(() =>
-  props.networks.map((net) => ({
-    net,
-    edges: networkEdges(net),
-  })),
-)
 
 const diffEdges = computed(() =>
   props.diffNetwork ? networkEdges(props.diffNetwork, true) : [],
@@ -100,11 +91,25 @@ const COI_LABELS: Record<string, string> = {
   RE: 'RE\n解决',
 }
 
-function downloadActiveChart() {
-  if (!activeChartSrc.value) return
+const sharedConditionMax = computed(() =>
+  Math.max(...props.networks.flatMap((net) => net.edges.map((edge) => edge.weight)), 0.001),
+)
+
+const conditionNetworks = computed(() =>
+  props.networks.map((net) => ({
+    net,
+    edges: networkEdges(net, false, sharedConditionMax.value),
+  })),
+)
+
+function downloadActiveChart(format: 'svg' | 'png') {
+  const source = format === 'svg'
+    ? props.charts?.[`${activeChartKey.value}_svg`]
+    : props.charts?.[activeChartKey.value]
+  if (!source) return
   const link = document.createElement('a')
-  link.href = activeChartSrc.value
-  link.download = activeChartFileName.value
+  link.href = source
+  link.download = `ena-network-${chartLanguage.value}-${new Date().toISOString().slice(0, 10)}.${format}`
   link.click()
 }
 </script>
@@ -137,8 +142,17 @@ function downloadActiveChart() {
         <el-tooltip content="放大预览" placement="top">
           <el-button :icon="ZoomIn" class="chart-tool-button" circle @click="previewVisible = true" />
         </el-tooltip>
-        <el-tooltip content="下载 PNG" placement="top">
-          <el-button :icon="Download" class="chart-tool-button" circle @click="downloadActiveChart" />
+        <el-tooltip content="下载 SVG（论文优先）" placement="top">
+          <el-button class="chart-format-button" @click="downloadActiveChart('svg')">
+            <el-icon><Download /></el-icon>
+            SVG
+          </el-button>
+        </el-tooltip>
+        <el-tooltip content="下载 300 dpi PNG" placement="top">
+          <el-button class="chart-format-button" @click="downloadActiveChart('png')">
+            <el-icon><Download /></el-icon>
+            PNG
+          </el-button>
         </el-tooltip>
       </div>
       <img
@@ -177,9 +191,9 @@ function downloadActiveChart() {
             stroke-linecap="round"
             opacity="0.85"
           />
-          <!-- Edge weight labels for key connections -->
+          <!-- Edge weight labels -->
           <text
-            v-for="(e, i) in edges.filter(e => e.weight >= 0.05)"
+            v-for="(e, i) in edges"
             :key="`lbl-${i}`"
             :x="(e.x1 + e.x2) / 2"
             :y="(e.y1 + e.y2) / 2 - 4"
@@ -230,7 +244,7 @@ function downloadActiveChart() {
 
       <!-- Difference network -->
       <div v-if="diffNetwork" class="network-wrap" data-testid="network-diff">
-        <div class="network-title">差异图（条件B − 条件A）</div>
+        <div class="network-title">Smart Glasses − No Assistance</div>
         <svg viewBox="0 0 300 320" class="network-svg" role="img" aria-label="差异网络图">
           <line
             v-for="(e, i) in diffEdges"
@@ -242,7 +256,7 @@ function downloadActiveChart() {
             opacity="0.85"
           />
           <text
-            v-for="(e, i) in diffEdges.filter(e => Math.abs(e.weight_diff ?? 0) >= 0.05)"
+            v-for="(e, i) in diffEdges"
             :key="`dlbl-${i}`"
             :x="(e.x1 + e.x2) / 2"
             :y="(e.y1 + e.y2) / 2 - 4"
@@ -280,10 +294,17 @@ function downloadActiveChart() {
         </svg>
         <!-- Diff legend -->
         <div class="diff-legend">
-          <span class="diff-legend-item blue">■ 蓝色：条件B 连接更强</span>
-          <span class="diff-legend-item red">■ 红色：条件A 连接更强</span>
-          <span class="diff-legend-item grey">■ 灰色：差异 &lt; 0.01</span>
+          <span class="diff-legend-item blue">■ 蓝色：Smart Glasses 连接更强</span>
+          <span class="diff-legend-item red">■ 红色：No Assistance 连接更强</span>
+          <span class="diff-legend-item grey">■ 灰色：绝对差异 &lt; 0.01</span>
+          <span class="diff-caveat">以上颜色仅表示描述性差异，不代表统计显著。</span>
         </div>
+      </div>
+      <div class="node-legend">
+        <span><i class="te" />TE — Triggering Event</span>
+        <span><i class="ex" />EX — Exploration</span>
+        <span><i class="in" />IN — Integration</span>
+        <span><i class="re" />RE — Resolution</span>
       </div>
     </div>
   </el-card>
@@ -347,6 +368,20 @@ function downloadActiveChart() {
   background: #f8fbff;
 }
 
+.chart-format-button {
+  border-color: #d6e0ec;
+  color: #475569;
+  background: #fff;
+  font-weight: 600;
+}
+
+.chart-format-button:hover,
+.chart-format-button:focus {
+  border-color: #9db4d1;
+  color: #1d4ed8;
+  background: #f8fbff;
+}
+
 .chart-image {
   width: 100%;
   display: block;
@@ -355,10 +390,11 @@ function downloadActiveChart() {
 }
 
 .networks-row {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
   gap: 24px;
   padding: 16px;
+  background: #fff;
 }
 
 .network-wrap {
@@ -366,8 +402,12 @@ function downloadActiveChart() {
   flex-direction: column;
   align-items: center;
   gap: 12px;
-  min-width: 220px;
-  flex: 1 1 220px;
+  min-width: 0;
+  grid-column: span 5;
+}
+
+.network-wrap[data-testid="network-diff"] {
+  grid-column: 3 / 9;
 }
 
 .network-title {
@@ -444,4 +484,45 @@ function downloadActiveChart() {
 .diff-legend-item.blue { color: #2563eb; }
 .diff-legend-item.red  { color: #dc2626; }
 .diff-legend-item.grey { color: #9ca3af; }
+
+.diff-caveat {
+  margin-top: 3px;
+  color: #4b5563;
+  text-align: center;
+}
+
+.node-legend {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  color: #1f2937;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.node-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.node-legend i {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+}
+
+.node-legend .te { background: #f59e0b; }
+.node-legend .ex { background: #3b82f6; }
+.node-legend .in { background: #8b5cf6; }
+.node-legend .re { background: #10b981; }
+
+@media (max-width: 760px) {
+  .network-wrap,
+  .network-wrap[data-testid="network-diff"] {
+    grid-column: 1 / -1;
+  }
+}
 </style>

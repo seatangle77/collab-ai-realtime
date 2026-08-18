@@ -213,7 +213,7 @@ function networkSvg(net: EnaNetworkCondition, isDiff = false): string {
     `
   }).join('')
 
-  const title = isDiff ? '差异图（B − A）' : conditionLabel(net.condition)
+  const title = isDiff ? 'Smart Glasses − No Assistance' : conditionLabel(net.condition)
   return `
     <div class="network-card">
       <h3>${escapeHtml(title)}</h3>
@@ -230,7 +230,7 @@ function enaNetworkChartsHtml(report: EnaAnalysisResult): string {
   const conditionNetworks = report.networks.map((net) => networkSvg(net)).join('')
   const diffNetwork = report.diff_network ? networkSvg(report.diff_network, true) : ''
   const diffLegend = report.diff_network
-    ? '<p class="note">差异图中蓝色表示条件 B 连接更强，红色表示条件 A 连接更强，灰色表示差异小于 0.01。</p>'
+    ? '<p class="note">差异网络中蓝色表示 Smart Glasses 连接更强，红色表示 No Assistance 连接更强，灰色表示绝对差异小于 0.01。颜色仅表示描述性差异，不代表统计显著。TE = Triggering Event；EX = Exploration；IN = Integration；RE = Resolution。</p>'
     : '<p class="note">三条件主报告展示各条件网络图；不生成两两差异网络图。</p>'
   return `
     <div class="network-grid">
@@ -280,11 +280,11 @@ export function buildEnaReportHtml(
     ).join('')
     return `<h3>${escapeHtml(item.label)}（${escapeHtml(postHocMethodLabel(item.method))}）</h3><table><thead><tr><th>条件 A</th><th>条件 B</th><th>均值差 (B−A)</th><th>p (校正后)</th><th>显著</th></tr></thead><tbody>${pairRows}</tbody></table>`
   }).join('')
-  const networkChartHtml = report.charts?.networks
-    ? `<img src="${report.charts.networks}" style="max-width:100%;display:block;margin:10px 0 18px;border-radius:6px" alt="ENA 网络图">`
+  const networkChartHtml = report.charts?.networks_svg || report.charts?.networks
+    ? `<img src="${report.charts.networks_svg ?? report.charts.networks}" style="max-width:100%;display:block;margin:10px 0 18px" alt="ENA 网络图">`
     : enaNetworkChartsHtml(report)
-  const networkChartEnglishHtml = report.charts?.networks_en
-    ? `<h3>English Version</h3><img src="${report.charts.networks_en}" style="max-width:100%;display:block;margin:10px 0 18px;border-radius:6px" alt="ENA network chart, English version">`
+  const networkChartEnglishHtml = report.charts?.networks_en_svg || report.charts?.networks_en
+    ? `<h3>English Version</h3><img src="${report.charts.networks_en_svg ?? report.charts.networks_en}" style="max-width:100%;display:block;margin:10px 0 18px" alt="ENA network chart, English version">`
     : ''
 
   return `<!doctype html>

@@ -11,7 +11,7 @@ import {
   type UnitWithCode,
 } from '../../api/admin/coi-units'
 import type { AdminChatSession, AdminGroup } from '../../types/admin'
-import { coiCodesDraftKey } from '../../utils/coiDraftKeys'
+import { coiCodesDraftKey, coiReviewStarsKey } from '../../utils/coiDraftKeys'
 
 type IndependentCoderRole = 'coder_a' | 'coder_b'
 
@@ -21,6 +21,7 @@ interface CodingItem {
   content: string
   startTime: number | null
   categories: CoiCategory[]
+  starred: boolean
 }
 
 interface LocalDraft {
@@ -53,9 +54,14 @@ const items = ref<CodingItem[]>([])
 const focusedIndex = ref(0)
 const hasDraft = ref(false)
 const draftInfo = ref<{ savedAt: string; count: number } | null>(null)
+const showStarredOnly = ref(false)
 
 const totalCount = computed(() => items.value.length)
 const codedCount = computed(() => items.value.filter(item => item.categories.length > 0).length)
+const starredCount = computed(() => items.value.filter(item => item.starred).length)
+const visibleItems = computed(() => items.value
+  .map((item, index) => ({ item, index }))
+  .filter(({ item }) => !showStarredOnly.value || item.starred))
 const progressPct = computed(() =>
   totalCount.value > 0 ? Math.round((codedCount.value / totalCount.value) * 100) : 0,
 )
@@ -83,6 +89,7 @@ function resetItems() {
   focusedIndex.value = 0
   hasDraft.value = false
   draftInfo.value = null
+  showStarredOnly.value = false
 }
 
 async function onGroupChange() {
@@ -117,6 +124,46 @@ async function onCoderRoleChange() {
 
 function draftKey() {
   return selectedSessionId.value ? coiCodesDraftKey(selectedSessionId.value, coderRole.value) : ''
+}
+
+function reviewStarsKey() {
+  return selectedSessionId.value ? coiReviewStarsKey(selectedSessionId.value, coderRole.value) : ''
+}
+
+function readReviewStars(): Set<string> {
+  const key = reviewStarsKey()
+  if (!key) return new Set()
+  try {
+    const value = JSON.parse(localStorage.getItem(key) ?? '[]')
+    return new Set(Array.isArray(value) ? value.filter(id => typeof id === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function persistReviewStars() {
+  const key = reviewStarsKey()
+  if (!key) return
+  localStorage.setItem(key, JSON.stringify(items.value.filter(item => item.starred).map(item => item.unitId)))
+}
+
+function toggleStar(index: number) {
+  const item = items.value[index]
+  if (!item) return
+  item.starred = !item.starred
+  persistReviewStars()
+  if (showStarredOnly.value && !item.starred) {
+    nextTick(() => {
+      focusedIndex.value = visibleItems.value[0]?.index ?? 0
+      scrollToFocused()
+    })
+  }
+}
+
+function toggleStarredFilter() {
+  showStarredOnly.value = !showStarredOnly.value
+  focusedIndex.value = visibleItems.value[0]?.index ?? 0
+  nextTick(scrollToFocused)
 }
 
 function checkDraft() {
@@ -177,13 +224,14 @@ function clearDraft() {
   draftInfo.value = null
 }
 
-function toCodingItem(row: UnitWithCode): CodingItem {
+function toCodingItem(row: UnitWithCode, starredUnitIds: Set<string>): CodingItem {
   return {
     unitId: row.unit.id,
     orderIndex: row.unit.order_index,
     content: row.unit.content,
     startTime: row.unit.start_time,
     categories: [...(row.code?.coi_categories ?? [])],
+    starred: starredUnitIds.has(row.unit.id),
   }
 }
 
@@ -192,7 +240,10 @@ async function loadCodes() {
   loadingItems.value = true
   try {
     const res = await getCoiCodes(selectedSessionId.value, coderRole.value)
-    items.value = res.map(toCodingItem)
+    const starredUnitIds = readReviewStars()
+    items.value = res.map(row => toCodingItem(row, starredUnitIds))
+    // Drop stars that referenced units replaced during upstream preparation.
+    persistReviewStars()
     focusedIndex.value = 0
     checkDraft()
     if (res.length === 0) {
@@ -227,10 +278,21 @@ function setCategory(index: number, cat: CoiCategory) {
 }
 
 function advance() {
-  if (focusedIndex.value < items.value.length - 1) {
-    focusedIndex.value += 1
+  const position = visibleItems.value.findIndex(({ index }) => index === focusedIndex.value)
+  const next = visibleItems.value[position + 1]
+  if (next) {
+    focusedIndex.value = next.index
     nextTick(scrollToFocused)
   }
+}
+
+function moveFocus(offset: -1 | 1) {
+  const position = visibleItems.value.findIndex(({ index }) => index === focusedIndex.value)
+  const fallbackPosition = offset > 0 ? 0 : visibleItems.value.length - 1
+  const target = visibleItems.value[position >= 0 ? position + offset : fallbackPosition]
+  if (!target) return
+  focusedIndex.value = target.index
+  nextTick(scrollToFocused)
 }
 
 function codeAndAdvance(cat: CoiCategory) {
@@ -249,13 +311,15 @@ function handleKeydown(e: KeyboardEvent) {
     case '3': e.preventDefault(); codeAndAdvance('IN'); break
     case '4': e.preventDefault(); codeAndAdvance('RE'); break
     case '0': e.preventDefault(); advance(); break
+    case 's':
+    case 'S': e.preventDefault(); toggleStar(focusedIndex.value); break
     case 'ArrowDown':
       e.preventDefault()
-      if (focusedIndex.value < items.value.length - 1) { focusedIndex.value += 1; nextTick(scrollToFocused) }
+      moveFocus(1)
       break
     case 'ArrowUp':
       e.preventDefault()
-      if (focusedIndex.value > 0) { focusedIndex.value -= 1; nextTick(scrollToFocused) }
+      moveFocus(-1)
       break
   }
 }
@@ -297,7 +361,7 @@ async function handleSave() {
     <div class="page-header">
       <h2 class="page-title">CoI 独立编码</h2>
       <span class="header-desc">
-        键盘：<kbd>1</kbd>TE <kbd>2</kbd>EX <kbd>3</kbd>IN <kbd>4</kbd>RE <kbd>0</kbd>跳过 <kbd>↑↓</kbd>切换焦点行
+        键盘：<kbd>1</kbd>TE <kbd>2</kbd>EX <kbd>3</kbd>IN <kbd>4</kbd>RE <kbd>S</kbd>星标 <kbd>0</kbd>跳过 <kbd>↑↓</kbd>切换焦点行
       </span>
     </div>
 
@@ -352,6 +416,13 @@ async function handleSave() {
               :color="progressPct === 100 ? '#67c23a' : '#409eff'"
             />
             <span class="progress-text">{{ codedCount }} / {{ totalCount }}</span>
+            <el-button
+              :type="showStarredOnly ? 'warning' : 'default'"
+              :disabled="starredCount === 0 && !showStarredOnly"
+              @click="toggleStarredFilter"
+            >
+              {{ showStarredOnly ? '显示全部' : `只看星标（${starredCount}）` }}
+            </el-button>
           </template>
           <el-button
             :disabled="!selectedSessionId"
@@ -388,23 +459,31 @@ async function handleSave() {
           <div class="list-tags">
             <el-tag size="small" type="success">已编 {{ codedCount }}</el-tag>
             <el-tag size="small" type="info">未编 {{ totalCount - codedCount }}</el-tag>
+            <el-tag size="small" type="warning">星标 {{ starredCount }}</el-tag>
           </div>
         </div>
       </template>
 
       <div class="coding-list">
         <div
-          v-for="(item, i) in items"
-          :id="`coi-code-${i}`"
-          :key="item.unitId"
+          v-for="entry in visibleItems"
+          :id="`coi-code-${entry.index}`"
+          :key="entry.item.unitId"
           class="coding-row"
-          :class="{ 'is-focused': i === focusedIndex, 'is-coded': item.categories.length > 0 }"
-          @click="focusedIndex = i"
+          :class="{ 'is-focused': entry.index === focusedIndex, 'is-coded': entry.item.categories.length > 0, 'is-starred': entry.item.starred }"
+          @click="focusedIndex = entry.index"
         >
           <div class="unit-top">
-            <span class="unit-num">{{ item.orderIndex }}</span>
-            <span class="unit-time">{{ fmt(item.startTime) }}</span>
-            <span class="unit-content">{{ item.content }}</span>
+            <span class="unit-num">{{ entry.item.orderIndex }}</span>
+            <span class="unit-time">{{ fmt(entry.item.startTime) }}</span>
+            <span class="unit-content">{{ entry.item.content }}</span>
+            <button
+              class="star-btn"
+              :class="{ 'is-active': entry.item.starred }"
+              :title="entry.item.starred ? '取消待复核星标' : '标记为待复核'"
+              :aria-label="entry.item.starred ? '取消待复核星标' : '标记为待复核'"
+              @click.stop="toggleStar(entry.index)"
+            >{{ entry.item.starred ? '★' : '☆' }}</button>
           </div>
           <div class="unit-bottom">
             <div class="category-buttons">
@@ -412,20 +491,25 @@ async function handleSave() {
                 v-for="cat in COI_KEYS"
                 :key="cat"
                 class="cat-btn"
-                :class="{ 'is-active': item.categories.includes(cat) }"
-                :style="item.categories.includes(cat)
+                :class="{ 'is-active': entry.item.categories.includes(cat) }"
+                :style="entry.item.categories.includes(cat)
                   ? { background: COI_LABELS[cat].color, borderColor: COI_LABELS[cat].color, color: '#fff' }
                   : { borderColor: COI_LABELS[cat].color, color: COI_LABELS[cat].color, background: COI_LABELS[cat].bg }"
-                @click.stop="setCategory(i, cat)"
+                @click.stop="setCategory(entry.index, cat)"
               >{{ cat }} {{ COI_LABELS[cat].label }}</button>
               <button
-                v-if="item.categories.length"
+                v-if="entry.item.categories.length"
                 class="clear-btn"
-                @click.stop="item.categories = []"
+                @click.stop="entry.item.categories = []"
               >清除</button>
             </div>
           </div>
         </div>
+        <el-empty
+          v-if="showStarredOnly && visibleItems.length === 0"
+          :image-size="80"
+          description="当前没有待复核的星标项"
+        />
       </div>
     </el-card>
 
@@ -478,6 +562,8 @@ async function handleSave() {
 .coding-row.is-focused { border-color: #409eff; background: #f0f7ff; }
 .coding-row.is-coded { border-left: 3px solid #67c23a; }
 .coding-row.is-focused.is-coded { border-left-color: #409eff; }
+.coding-row.is-starred { box-shadow: inset 0 0 0 1px #f3d19e; background: #fffaf0; }
+.coding-row.is-focused.is-starred { background: #fff7e6; }
 .unit-top { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
 .unit-bottom { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .unit-num {
@@ -489,7 +575,23 @@ async function handleSave() {
   text-align: right;
 }
 .unit-time { font-size: 12px; color: #909399; flex-shrink: 0; width: 40px; }
-.unit-content { font-size: 15px; color: #303133; line-height: 1.7; word-break: break-word; }
+.unit-content { flex: 1; min-width: 0; font-size: 15px; color: #303133; line-height: 1.7; word-break: break-word; }
+.star-btn {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid #dcdfe6;
+  border-radius: 50%;
+  color: #a8abb2;
+  background: #fff;
+  font-size: 20px;
+  line-height: 28px;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.star-btn:hover { color: #e6a23c; border-color: #e6a23c; }
+.star-btn.is-active { color: #e6a23c; border-color: #e6a23c; background: #fdf6ec; }
 .category-buttons { display: flex; align-items: center; gap: 6px; padding-left: 72px; flex-wrap: wrap; }
 .cat-btn {
   padding: 3px 12px;
