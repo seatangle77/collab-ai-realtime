@@ -16,7 +16,7 @@ from ..api_model import ApiModel
 from ..db import get_db
 from .deps import require_admin
 
-CoderRole = Literal["final", "coder_a", "coder_b"]
+CoderRole = Literal["final", "coder_a", "coder_b", "coder_c"]
 
 router = APIRouter(
     prefix="/api/admin/coi-analysis",
@@ -34,7 +34,7 @@ async def _load_rows(
 
     The analysis now uses the new workflow tables:
     - coi_units provides the finalized analysis units.
-    - coi_unit_codes provides codes for final/coder_a/coder_b.
+    - coi_unit_codes provides codes for final/coder_a/coder_b/coder_c.
 
     Units without a selected-role code are included with coi_categories=NULL so the
     analysis service can report them as uncoded/excluded instead of silently

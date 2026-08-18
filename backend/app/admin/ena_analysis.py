@@ -16,7 +16,7 @@ from ..api_model import ApiModel
 from ..db import get_db
 from .deps import require_admin
 
-CoderRole = Literal["final", "coder_a", "coder_b"]
+CoderRole = Literal["final", "coder_a", "coder_b", "coder_c"]
 
 router = APIRouter(
     prefix="/api/admin/ena-analysis",

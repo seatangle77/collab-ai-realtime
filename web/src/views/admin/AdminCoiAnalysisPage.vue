@@ -172,6 +172,7 @@ onMounted(fetchGroups)
             <el-option label="最终协商编码" value="final" />
             <el-option label="研究员 A 独立编码" value="coder_a" />
             <el-option label="研究员 B 独立编码" value="coder_b" />
+            <el-option label="AI 编码员 C" value="coder_c" />
           </el-select>
           <el-tag size="large" type="info" style="margin-left: 8px">{{ currentCoderRoleLabel }}</el-tag>
         </el-form-item>

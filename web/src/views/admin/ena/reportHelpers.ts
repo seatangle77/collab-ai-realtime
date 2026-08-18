@@ -30,6 +30,7 @@ export function coderRoleLabel(role: EnaAnalysisCoderRole): string {
     final: '最终协商编码',
     coder_a: '研究员 A 独立编码',
     coder_b: '研究员 B 独立编码',
+    coder_c: 'AI 编码员 C',
   }
   return labels[role]
 }

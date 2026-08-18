@@ -1,7 +1,7 @@
 import { http } from '../http'
 
 export type EnaAnalysisMode = 'two_conditions' | 'three_conditions'
-export type EnaAnalysisCoderRole = 'final' | 'coder_a' | 'coder_b'
+export type EnaAnalysisCoderRole = 'final' | 'coder_a' | 'coder_b' | 'coder_c'
 export type NormalityStatus = 'ok' | 'insufficient_n' | 'constant_values' | 'dependency_missing'
 export type RecommendedTest =
   | 'independent_samples_t_test'

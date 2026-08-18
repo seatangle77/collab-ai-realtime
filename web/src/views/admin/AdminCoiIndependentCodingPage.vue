@@ -400,7 +400,7 @@ async function mergeWithNext(index: number) {
   if (!current || !following) return
   try {
     await ElMessageBox.confirm(
-      `将观点 ${current.orderIndex} 与 ${following.orderIndex} 合并。两条观点现有的 A/B/final 编码会失效，其他编码不受影响。确认合并？`,
+      `将观点 ${current.orderIndex} 与 ${following.orderIndex} 合并。两条观点现有的 A/B/C/final 编码会失效，其他编码不受影响。确认合并？`,
       '确认合并观点',
       { type: 'warning', confirmButtonText: '合并', cancelButtonText: '取消' },
     )
@@ -572,7 +572,7 @@ async function handleSave() {
       type="info"
       :closable="false"
       show-icon
-      title="研究员 A 可直接拆分或合并观点；仅受影响观点的 A/B/final 编码需要重新确认，其他编码会保留。"
+      title="研究员 A 可直接拆分或合并观点；仅受影响观点的 A/B/C/final 编码需要重新确认，其他编码会保留。"
     />
 
     <el-card v-if="items.length > 0" shadow="never" v-loading="loadingItems">

@@ -1,7 +1,7 @@
 import { http } from '../http'
 
 export type CoiAnalysisMode = 'two_conditions' | 'three_conditions'
-export type CoiAnalysisCoderRole = 'final' | 'coder_a' | 'coder_b'
+export type CoiAnalysisCoderRole = 'final' | 'coder_a' | 'coder_b' | 'coder_c'
 export type CoiNormalityStatus = 'ok' | 'insufficient_n' | 'constant_values' | 'dependency_missing'
 export type CoiRecommendedTest =
   | 'independent_samples_t_test'
