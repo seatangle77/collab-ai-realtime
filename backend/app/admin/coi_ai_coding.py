@@ -15,7 +15,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..api_model import ApiModel
-from ..db import get_db, get_sessionmaker
+from ..db import get_db
 from ..settings import QWEN_CHAT_EXTRA_BODY, nlp_settings
 from .deps import require_admin
 
@@ -64,37 +64,6 @@ class SaveAiCodesRequest(ApiModel):
 class AiCodingResponse(ApiModel):
     saved: int
     items: list[AiCodingItemOut]
-
-
-async def ensure_coi_ai_coding_schema() -> None:
-    """Idempotently add the minimal columns and coder C constraint."""
-    session_factory = get_sessionmaker()
-    async with session_factory() as db:
-        await db.execute(text("""
-            ALTER TABLE coi_unit_codes
-                ADD COLUMN IF NOT EXISTS coding_reason TEXT,
-                ADD COLUMN IF NOT EXISTS ai_original_categories VARCHAR(2)[]
-        """))
-        await db.execute(text("""
-            DO $$
-            DECLARE current_definition TEXT;
-            BEGIN
-                SELECT pg_get_constraintdef(oid)
-                  INTO current_definition
-                  FROM pg_constraint
-                 WHERE conrelid = 'coi_unit_codes'::regclass
-                   AND conname = 'coi_unit_codes_role_check';
-
-                IF current_definition IS NULL OR position('coder_c' in current_definition) = 0 THEN
-                    ALTER TABLE coi_unit_codes
-                        DROP CONSTRAINT IF EXISTS coi_unit_codes_role_check;
-                    ALTER TABLE coi_unit_codes
-                        ADD CONSTRAINT coi_unit_codes_role_check
-                        CHECK (coder_role IN ('coder_a', 'coder_b', 'coder_c', 'final'));
-                END IF;
-            END $$
-        """))
-        await db.commit()
 
 
 def _new_code_id() -> str:

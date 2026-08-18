@@ -64,10 +64,7 @@ from .admin.coi_analysis import router as admin_coi_analysis_router
 from .admin.ena_analysis import router as admin_ena_analysis_router
 from .admin.coi_transcript_coding import router as admin_coi_transcript_coding_router
 from .admin.coi_units import router as admin_coi_units_router
-from .admin.coi_ai_coding import (
-    ensure_coi_ai_coding_schema,
-    router as admin_coi_ai_coding_router,
-)
+from .admin.coi_ai_coding import router as admin_coi_ai_coding_router
 
 app = FastAPI()
 
@@ -178,8 +175,6 @@ async def _startup():
         await db.commit()
 
     await ensure_offline_audio_segments_table()
-    await ensure_coi_ai_coding_schema()
-
     # 预加载 NLP sentence-transformers 模型，避免第一个请求冷启动延迟
     nlp_embedder.load_model(nlp_settings.embed_model)
     # 预加载 HanLP MTL 模型，避免第一个 NLP 请求冷启动
