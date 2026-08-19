@@ -97,17 +97,23 @@ function toEditable(item: AiCodingItem): EditableAiCodingItem {
 async function loadItems() {
   if (!selectedSessionId.value) {
     items.value = []
-    return
+    return false
   }
   loadingItems.value = true
   try {
     items.value = (await getAiCodingItems(selectedSessionId.value)).map(toEditable)
     if (items.value.length === 0) ElMessage.info('该会话暂无观点单元')
+    return true
   } catch (e: any) {
     ElMessage.error(e?.message || '加载 AI 编码失败')
+    return false
   } finally {
     loadingItems.value = false
   }
+}
+
+async function refreshItems() {
+  if (await loadItems()) ElMessage.success('观点单元已刷新')
 }
 
 function selectUncoded() {
@@ -291,7 +297,7 @@ function readableSuggestion(value: string): string {
           </el-select>
         </div>
         <div class="control-group">
-          <el-button :disabled="!selectedSessionId" :loading="loadingItems" @click="loadItems">重新加载</el-button>
+          <el-button :disabled="!selectedSessionId" :loading="loadingItems" @click="refreshItems">刷新观点</el-button>
           <el-button :disabled="items.length === 0" @click="selectUncoded">选择未编码</el-button>
           <el-button :disabled="selectedItems.length === 0" @click="clearSelection">清除选择</el-button>
           <el-button type="warning" plain :disabled="selectedItems.length === 0" :loading="reviewing" @click="handleReviewUnits">
