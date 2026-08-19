@@ -6,6 +6,8 @@ export interface AiCodingItem {
   order_index: number
   content: string
   start_time: number | null
+  ai_segmentation_suggestion: string | null
+  ai_segmentation_reviewed_at: string | null
   coi_categories: CoiCategory[]
   ai_original_categories: CoiCategory[]
   coding_reason: string
@@ -37,6 +39,16 @@ export async function generateAiCodes(
 ): Promise<AiCodingResponse> {
   return http.post<AiCodingResponse>(
     `/api/admin/coi-ai-coding/sessions/${encodeURIComponent(sessionId)}/generate`,
+    { unit_ids: unitIds },
+  )
+}
+
+export async function reviewAiCodingUnits(
+  sessionId: string,
+  unitIds: string[],
+): Promise<AiCodingResponse> {
+  return http.post<AiCodingResponse>(
+    `/api/admin/coi-ai-coding/sessions/${encodeURIComponent(sessionId)}/review-units`,
     { unit_ids: unitIds },
   )
 }

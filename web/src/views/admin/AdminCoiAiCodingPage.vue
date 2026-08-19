@@ -6,6 +6,7 @@ import { listAdminChatSessions } from '../../api/admin/chat-sessions'
 import {
   generateAiCodes,
   getAiCodingItems,
+  reviewAiCodingUnits,
   saveAiCodeAdjustments,
   type AiCodingItem,
 } from '../../api/admin/coi-ai-coding'
@@ -34,6 +35,7 @@ const items = ref<EditableAiCodingItem[]>([])
 const loadingGroups = ref(false)
 const loadingSessions = ref(false)
 const loadingItems = ref(false)
+const reviewing = ref(false)
 const generating = ref(false)
 const saving = ref(false)
 const filter = ref<'all' | 'uncoded' | 'coded' | 'adjusted'>('all')
@@ -130,6 +132,27 @@ function onSelectChange(item: EditableAiCodingItem, value: boolean) {
   }
 }
 
+async function handleReviewUnits() {
+  if (!selectedSessionId.value || selectedItems.value.length === 0) {
+    ElMessage.warning('请先勾选需要检查的观点')
+    return
+  }
+  const selectedIds = new Set(selectedItems.value.map(item => item.unit_id))
+  reviewing.value = true
+  try {
+    const res = await reviewAiCodingUnits(selectedSessionId.value, [...selectedIds])
+    items.value = res.items.map((item) => ({
+      ...toEditable(item),
+      selected: selectedIds.has(item.unit_id),
+    }))
+    ElMessage.success(`AI 观点检查完成：${res.saved} 条`)
+  } catch (e: any) {
+    ElMessage.error(e?.message || 'AI 观点检查失败')
+  } finally {
+    reviewing.value = false
+  }
+}
+
 async function handleGenerate() {
   if (!selectedSessionId.value || selectedItems.value.length === 0) {
     ElMessage.warning('请先勾选需要 AI 编码的观点')
@@ -138,6 +161,16 @@ async function handleGenerate() {
   if (dirtyItems.value.length > 0) {
     ElMessage.warning('请先保存当前人工调整，再进行新的 AI 编码')
     return
+  }
+  const unreviewed = selectedItems.value.filter(item => !item.ai_segmentation_reviewed_at).length
+  if (unreviewed > 0) {
+    try {
+      await ElMessageBox.confirm(
+        `所选内容中有 ${unreviewed} 条尚未进行观点单元检查，是否仍然继续编码？`,
+        '尚未检查观点单元',
+        { type: 'warning', confirmButtonText: '继续编码', cancelButtonText: '先检查' },
+      )
+    } catch { return }
   }
   const recoded = selectedItems.value.filter(item => item.coi_categories.length > 0).length
   if (recoded > 0) {
@@ -221,6 +254,10 @@ function fmt(seconds: number | null): string {
   const rest = (seconds % 60).toFixed(1).padStart(4, '0')
   return `${minutes}:${rest}`
 }
+
+function fmtReviewedAt(value: string | null): string {
+  return value ? value.replace('T', ' ').slice(0, 19) : ''
+}
 </script>
 
 <template>
@@ -228,7 +265,7 @@ function fmt(seconds: number | null): string {
     <div class="page-header">
       <div>
         <h2 class="page-title">CoI AI 编码员 C</h2>
-        <p class="page-desc">选择少量观点交给 AI 编码；AI 返回分类和理由，研究员可直接调整后保存。</p>
+        <p class="page-desc">可先让 AI 检查观点单元，再进行编码；建议和编码结果均可由研究员判断与调整。</p>
       </div>
     </div>
 
@@ -248,6 +285,9 @@ function fmt(seconds: number | null): string {
           <el-button :disabled="!selectedSessionId" :loading="loadingItems" @click="loadItems">重新加载</el-button>
           <el-button :disabled="items.length === 0" @click="selectUncoded">选择未编码</el-button>
           <el-button :disabled="selectedItems.length === 0" @click="clearSelection">清除选择</el-button>
+          <el-button type="warning" plain :disabled="selectedItems.length === 0" :loading="reviewing" @click="handleReviewUnits">
+            AI 检查观点（{{ selectedItems.length }}）
+          </el-button>
           <el-button type="primary" :disabled="selectedItems.length === 0" :loading="generating" @click="handleGenerate">
             AI 编码所选（{{ selectedItems.length }}）
           </el-button>
@@ -258,7 +298,7 @@ function fmt(seconds: number | null): string {
       </div>
     </el-card>
 
-    <el-card v-if="items.length > 0" shadow="never" v-loading="loadingItems || generating">
+    <el-card v-if="items.length > 0" shadow="never" v-loading="loadingItems || reviewing || generating">
       <template #header>
         <div class="list-header">
           <span>观点单元：已编码 {{ codedCount }} / {{ items.length }}</span>
@@ -278,6 +318,14 @@ function fmt(seconds: number | null): string {
             <span class="unit-index">{{ item.order_index }}</span>
             <span class="unit-time">{{ fmt(item.start_time) }}</span>
             <span class="unit-content">{{ item.content }}</span>
+          </div>
+
+          <div v-if="item.ai_segmentation_suggestion" class="segmentation-suggestion">
+            <el-tag :type="item.ai_segmentation_suggestion === '无需调整' ? 'success' : 'warning'" size="small">
+              观点检查
+            </el-tag>
+            <span>{{ item.ai_segmentation_suggestion }}</span>
+            <span class="suggestion-time">{{ fmtReviewedAt(item.ai_segmentation_reviewed_at) }}</span>
           </div>
 
           <div v-if="item.coi_categories.length > 0" class="result-area">
@@ -328,6 +376,8 @@ function fmt(seconds: number | null): string {
 .unit-index { width: 28px; color: #909399; font-size: 12px; text-align: right; flex-shrink: 0; }
 .unit-time { width: 42px; color: #909399; font-size: 12px; flex-shrink: 0; }
 .unit-content { color: #303133; line-height: 1.7; word-break: break-word; }
+.segmentation-suggestion { margin: 9px 0 0 72px; display: flex; align-items: flex-start; gap: 8px; color: #606266; font-size: 13px; line-height: 24px; }
+.suggestion-time { margin-left: auto; color: #a8abb2; font-size: 12px; white-space: nowrap; }
 .result-area { margin: 10px 0 0 72px; display: flex; flex-direction: column; gap: 10px; }
 .category-row, .reason-row { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; }
 .reason-row :deep(.el-textarea) { flex: 1; min-width: 280px; }
@@ -335,7 +385,7 @@ function fmt(seconds: number | null): string {
 .result-meta { color: #a8abb2; font-size: 12px; padding-left: 46px; }
 .uncoded-hint { margin: 8px 0 0 72px; color: #a8abb2; font-size: 13px; }
 @media (max-width: 720px) {
-  .result-area, .uncoded-hint { margin-left: 0; }
+  .segmentation-suggestion, .result-area, .uncoded-hint { margin-left: 0; }
   .reason-row :deep(.el-textarea) { min-width: 100%; }
 }
 </style>
