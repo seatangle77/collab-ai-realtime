@@ -258,6 +258,15 @@ function fmt(seconds: number | null): string {
 function fmtReviewedAt(value: string | null): string {
   return value ? value.replace('T', ' ').slice(0, 19) : ''
 }
+
+function readableSuggestion(value: string): string {
+  let readable = value
+  for (const item of items.value) {
+    readable = readable.split(`[${item.unit_id}]`).join(`第${item.order_index}条`)
+    readable = readable.split(item.unit_id).join(`第${item.order_index}条`)
+  }
+  return readable
+}
 </script>
 
 <template>
@@ -324,7 +333,7 @@ function fmtReviewedAt(value: string | null): string {
             <el-tag :type="item.ai_segmentation_suggestion === '无需调整' ? 'success' : 'warning'" size="small">
               观点检查
             </el-tag>
-            <span>{{ item.ai_segmentation_suggestion }}</span>
+            <span>{{ readableSuggestion(item.ai_segmentation_suggestion) }}</span>
             <span class="suggestion-time">{{ fmtReviewedAt(item.ai_segmentation_reviewed_at) }}</span>
           </div>
 

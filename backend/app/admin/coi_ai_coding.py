@@ -161,6 +161,7 @@ async def _review_segmentation(units: list[dict[str, Any]]) -> list[dict[str, st
         "逐条判断是否需要拆分，或是否应与本次输入中的相邻观点合并。\n"
         "AI不得修改原文，只能给研究员建议。若无需调整，suggestion 必须写‘无需调整’。\n"
         "若需调整，必须以‘拆分建议：’或‘合并建议：’开头，并说明具体边界或相邻条目。\n"
+        "建议正文只能使用‘第N条’指代观点，不得出现 unit_id；unit_id 仅用于 JSON 字段。\n"
         "严格返回 JSON，不要输出 Markdown 或其他文字。\n"
         "输出格式：{\"results\":[{\"unit_id\":\"...\",\"suggestion\":\"无需调整\"}]}\n"
         "必须返回每个输入 unit_id，且不得增加不存在的 unit_id。\n\n"
@@ -189,6 +190,7 @@ async def _review_segmentation(units: list[dict[str, Any]]) -> list[dict[str, st
 
         by_id: dict[str, dict[str, str]] = {}
         expected_ids = {unit["id"] for unit in units}
+        order_by_id = {unit["id"]: unit["order_index"] for unit in units}
         for item in raw_results:
             if not isinstance(item, dict) or item.get("unit_id") not in expected_ids:
                 raise ValueError("模型返回了无效的 unit_id")
@@ -196,6 +198,9 @@ async def _review_segmentation(units: list[dict[str, Any]]) -> list[dict[str, st
             suggestion = str(item.get("suggestion") or "").strip()
             if not suggestion:
                 raise ValueError("模型未返回观点单元建议")
+            for referenced_id, order_index in order_by_id.items():
+                suggestion = suggestion.replace(f"[{referenced_id}]", f"第{order_index}条")
+                suggestion = suggestion.replace(referenced_id, f"第{order_index}条")
             by_id[unit_id] = {
                 "unit_id": unit_id,
                 "suggestion": suggestion[:2000],
