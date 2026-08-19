@@ -55,7 +55,7 @@ class GenerateAiCodesRequest(ApiModel):
 
 class SaveAiCodeIn(ApiModel):
     unit_id: str
-    coi_categories: list[CoiCategory] = Field(min_length=1, max_length=4)
+    coi_categories: list[CoiCategory] = Field(max_length=4)
     coding_reason: str = Field(min_length=1, max_length=2000)
 
 
@@ -76,8 +76,8 @@ def _normalize_categories(value: Any) -> list[CoiCategory]:
     if not isinstance(value, list):
         raise ValueError("coi_categories 必须是数组")
     selected = {str(item).upper() for item in value}
-    if not selected or not selected.issubset(COI_CATEGORIES):
-        raise ValueError("CoI 分类必须是 TE、EX、IN、RE 的非空组合")
+    if not selected.issubset(COI_CATEGORIES):
+        raise ValueError("CoI 分类只能包含 TE、EX、IN、RE")
     return [category for category in ("TE", "EX", "IN", "RE") if category in selected]  # type: ignore[misc]
 
 
@@ -231,6 +231,8 @@ async def _generate_codes(units: list[dict[str, Any]]) -> list[dict[str, Any]]:
         "请逐条编码以下观点单元。严格返回 JSON，不要输出 Markdown 或其他文字。\n"
         "输出格式：{\"results\":[{\"unit_id\":\"...\","
         "\"coi_categories\":[\"TE\"],\"reason\":\"简短中文理由\"}]}\n"
+        "若某条仅为重复、附和、程序性话语或无实质认知贡献，"
+        "coi_categories 必须返回空数组 []，reason 说明为何不编码；不得强行选择最接近的类别。\n"
         "必须返回每个输入 unit_id，且不得增加不存在的 unit_id。\n\n"
         f"观点单元：\n{unit_text}"
     )

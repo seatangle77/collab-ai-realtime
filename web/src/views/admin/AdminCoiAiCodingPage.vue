@@ -41,14 +41,18 @@ const saving = ref(false)
 const filter = ref<'all' | 'uncoded' | 'coded' | 'adjusted'>('all')
 
 const selectedItems = computed(() => items.value.filter(item => item.selected))
-const codedCount = computed(() => items.value.filter(item => item.coi_categories.length > 0).length)
+const codedCount = computed(() => items.value.filter(hasAiResult).length)
 const dirtyItems = computed(() => items.value.filter(item => item.dirty))
 const visibleItems = computed(() => items.value.filter((item) => {
-  if (filter.value === 'uncoded') return item.coi_categories.length === 0
-  if (filter.value === 'coded') return item.coi_categories.length > 0
+  if (filter.value === 'uncoded') return !hasAiResult(item)
+  if (filter.value === 'coded') return hasAiResult(item)
   if (filter.value === 'adjusted') return isAdjusted(item)
   return true
 }))
+
+function hasAiResult(item: AiCodingItem): boolean {
+  return item.coded_at !== null
+}
 
 onMounted(loadGroups)
 
@@ -119,10 +123,10 @@ async function refreshItems() {
 function selectUncoded() {
   let count = 0
   for (const item of items.value) {
-    item.selected = item.coi_categories.length === 0 && count < MAX_SELECTION
+    item.selected = !hasAiResult(item) && count < MAX_SELECTION
     if (item.selected) count += 1
   }
-  if (items.value.filter(item => item.coi_categories.length === 0).length > MAX_SELECTION) {
+  if (items.value.filter(item => !hasAiResult(item)).length > MAX_SELECTION) {
     ElMessage.info(`一次最多选择 ${MAX_SELECTION} 条，已选择前 ${MAX_SELECTION} 条未编码观点`)
   }
 }
@@ -178,7 +182,7 @@ async function handleGenerate() {
       )
     } catch { return }
   }
-  const recoded = selectedItems.value.filter(item => item.coi_categories.length > 0).length
+  const recoded = selectedItems.value.filter(hasAiResult).length
   if (recoded > 0) {
     try {
       await ElMessageBox.confirm(
@@ -207,10 +211,6 @@ function toggleCategory(item: EditableAiCodingItem, category: CoiCategory) {
   const selected = new Set(item.coi_categories)
   if (selected.has(category)) selected.delete(category)
   else selected.add(category)
-  if (selected.size === 0) {
-    ElMessage.warning('每条编码至少保留一个类别')
-    return
-  }
   item.coi_categories = COI_KEYS.filter(key => selected.has(key))
   item.dirty = true
 }
@@ -224,7 +224,7 @@ function sameCategories(left: CoiCategory[], right: CoiCategory[]): boolean {
 }
 
 function isAdjusted(item: EditableAiCodingItem): boolean {
-  return item.ai_original_categories.length > 0
+  return hasAiResult(item)
     && !sameCategories(item.coi_categories, item.ai_original_categories)
 }
 
@@ -327,7 +327,7 @@ function readableSuggestion(value: string): string {
       </template>
 
       <div class="coding-list">
-        <div v-for="item in visibleItems" :key="item.unit_id" class="coding-row" :class="{ 'is-coded': item.coi_categories.length > 0, 'is-dirty': item.dirty }">
+        <div v-for="item in visibleItems" :key="item.unit_id" class="coding-row" :class="{ 'is-coded': hasAiResult(item), 'is-dirty': item.dirty }">
           <div class="unit-line">
             <el-checkbox v-model="item.selected" @change="onSelectChange(item, Boolean($event))" />
             <span class="unit-index">{{ item.order_index }}</span>
@@ -343,7 +343,7 @@ function readableSuggestion(value: string): string {
             <span class="suggestion-time">{{ fmtReviewedAt(item.ai_segmentation_reviewed_at) }}</span>
           </div>
 
-          <div v-if="item.coi_categories.length > 0" class="result-area">
+          <div v-if="hasAiResult(item)" class="result-area">
             <div class="category-row">
               <span class="field-label">编码</span>
               <el-button
@@ -353,8 +353,9 @@ function readableSuggestion(value: string): string {
                 :type="item.coi_categories.includes(category) ? 'primary' : 'default'"
                 @click="toggleCategory(item, category)"
               >{{ category }} {{ COI_LABELS[category] }}</el-button>
+              <el-tag v-if="item.coi_categories.length === 0" type="info" size="small">不编码</el-tag>
               <el-tag v-if="isAdjusted(item)" type="warning" size="small">
-                AI 原始：{{ item.ai_original_categories.join(' / ') }}
+                AI 原始：{{ item.ai_original_categories.join(' / ') || '不编码' }}
               </el-tag>
             </div>
             <div class="reason-row">
