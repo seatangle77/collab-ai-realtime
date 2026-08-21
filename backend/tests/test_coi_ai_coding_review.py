@@ -75,6 +75,27 @@ def test_generate_codes_accepts_empty_categories_for_non_codeable_unit(monkeypat
     assert "coi_categories 必须返回空数组 []" in prompt
     assert "表达排序方向、相对位置或有序答案" in prompt
     assert "程序性片段不得抵消该排序贡献" in prompt
+    assert '"coi_categories":["TE","EX"]' in prompt
+    assert "选出 TE 后仍须继续检查" in prompt
+    assert "不得以‘主要功能’或‘TE 为主导’为由省略其他类别" in prompt
+
+
+def test_generate_codes_preserves_multiple_categories(monkeypatch) -> None:
+    _FakeClient.response_content = """{"results":[
+        {"unit_id":"u1","coi_categories":["IN","TE"],"reason":"提出疑问并进行比较权衡"}
+    ]}"""
+    monkeypatch.setattr(coi_ai_coding.nlp_settings, "qwen_api_key", "test-key")
+    monkeypatch.setattr(coi_ai_coding, "AsyncOpenAI", _FakeClient)
+
+    result = asyncio.run(coi_ai_coding._generate_codes([
+        {"id": "u1", "order_index": 1, "content": "提出疑问并比较多个条件。"},
+    ]))
+
+    assert result == [{
+        "unit_id": "u1",
+        "coi_categories": ["TE", "IN"],
+        "coding_reason": "提出疑问并进行比较权衡",
+    }]
 
 
 def test_generate_codes_audits_request_response_and_parsed_result(monkeypatch) -> None:
