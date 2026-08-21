@@ -111,3 +111,25 @@ def test_save_ai_code_input_accepts_empty_categories() -> None:
     )
 
     assert payload.coi_categories == []
+
+
+def test_empty_categories_are_returned_as_completed_ai_result() -> None:
+    item = coi_ai_coding._row_to_out({
+        "unit_id": "u9",
+        "order_index": 9,
+        "content": "程序性话语",
+        "start_time": 1.0,
+        "ai_segmentation_suggestion": "无需调整",
+        "ai_segmentation_reviewed_at": None,
+        "coi_categories": [],
+        "ai_original_categories": [],
+        "coding_reason": "仅为程序性话语，不编码。",
+        "has_ai_result": True,
+        "coded_by": "AI 编码员 C",
+        "coded_at": None,
+        "updated_at": None,
+    })
+
+    assert item.has_ai_result is True
+    assert item.coi_categories == []
+    assert item.coding_reason == "仅为程序性话语，不编码。"

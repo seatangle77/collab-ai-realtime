@@ -11,6 +11,7 @@ export interface AiCodingItem {
   coi_categories: CoiCategory[]
   ai_original_categories: CoiCategory[]
   coding_reason: string
+  has_ai_result: boolean
   coded_by: string | null
   coded_at: string | null
   updated_at: string | null

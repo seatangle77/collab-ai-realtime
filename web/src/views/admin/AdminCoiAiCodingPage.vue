@@ -51,7 +51,7 @@ const visibleItems = computed(() => items.value.filter((item) => {
 }))
 
 function hasAiResult(item: AiCodingItem): boolean {
-  return item.coded_at !== null || item.coding_reason.trim().length > 0
+  return item.has_ai_result || item.coded_at !== null || item.coding_reason.trim().length > 0
 }
 
 onMounted(loadGroups)

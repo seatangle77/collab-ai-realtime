@@ -46,6 +46,7 @@ class AiCodingItemOut(ApiModel):
     coi_categories: list[CoiCategory]
     ai_original_categories: list[CoiCategory]
     coding_reason: str
+    has_ai_result: bool
     coded_by: str | None
     coded_at: datetime | None
     updated_at: datetime | None
@@ -129,6 +130,7 @@ def _row_to_out(row: Any) -> AiCodingItemOut:
         coi_categories=list(row["coi_categories"] or []),
         ai_original_categories=list(row["ai_original_categories"] or []),
         coding_reason=row["coding_reason"] or "",
+        has_ai_result=bool(row["has_ai_result"]),
         coded_by=row["coded_by"],
         coded_at=row["coded_at"],
         updated_at=row["updated_at"],
@@ -140,6 +142,7 @@ async def _load_session_items(db: AsyncSession, session_id: str) -> list[AiCodin
         SELECT u.id AS unit_id, u.order_index, u.content, u.start_time,
                u.ai_segmentation_suggestion, u.ai_segmentation_reviewed_at,
                c.coi_categories, c.ai_original_categories, c.coding_reason,
+               (c.unit_id IS NOT NULL) AS has_ai_result,
                c.coded_by, c.coded_at, c.updated_at
           FROM coi_units u
           LEFT JOIN coi_unit_codes c
@@ -525,11 +528,24 @@ async def generate_ai_codes(
             error=str(exc), results=generated,
         )
         raise
+    items = await _load_session_items(db, session_id)
+    selected_ids = set(payload.unit_ids)
+    readback = [
+        {
+            "unit_id": item.unit_id,
+            "has_ai_result": item.has_ai_result,
+            "coi_categories": item.coi_categories,
+            "coding_reason": item.coding_reason,
+            "coded_at": item.coded_at,
+        }
+        for item in items
+        if item.unit_id in selected_ids
+    ]
     _audit(
         request_id=request_id, session_id=session_id, operation="coding",
-        stage="saved", saved=len(rows), results=generated,
+        stage="saved", saved=len(rows), results=generated, readback=readback,
     )
-    return AiCodingResponse(saved=len(rows), items=await _load_session_items(db, session_id))
+    return AiCodingResponse(saved=len(rows), items=items)
 
 
 @router.put("/sessions/{session_id}/codes", response_model=AiCodingResponse)
