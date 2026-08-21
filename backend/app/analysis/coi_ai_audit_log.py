@@ -17,6 +17,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_LOG_DIR = REPO_ROOT / "logs" / "data-analysis" / "coi-ai-coding"
 DEFAULT_RETENTION_DAYS = 14
 DEFAULT_MAX_FIELD_CHARS = 200_000
+DEFAULT_ROTATION_HOURS = 4
 
 _write_lock = threading.Lock()
 _last_cleanup_key: tuple[str, datetime.date] | None = None
@@ -53,6 +54,15 @@ def _limit_value(value: Any, max_chars: int) -> Any:
     if value is None or isinstance(value, (bool, int, float)):
         return value
     return str(value)
+
+
+def _log_file_path(log_dir: Path, now: datetime.datetime) -> Path:
+    rotation_hours = min(
+        _positive_int_env("COI_AI_AUDIT_ROTATION_HOURS", DEFAULT_ROTATION_HOURS),
+        24,
+    )
+    bucket_hour = now.hour - now.hour % rotation_hours
+    return log_dir / f"coi-ai-coding-{now:%Y%m%d}-{bucket_hour:02d}.jsonl"
 
 
 def _cleanup_expired_files(log_dir: Path, now: datetime.datetime) -> None:
@@ -99,7 +109,7 @@ def write_coi_ai_audit(record: dict[str, Any]) -> bool:
             except OSError:
                 pass
             _cleanup_expired_files(log_dir, now)
-            log_file = log_dir / f"coi-ai-coding-{now:%Y%m%d}.jsonl"
+            log_file = _log_file_path(log_dir, now)
             file_descriptor = os.open(
                 log_file,
                 os.O_APPEND | os.O_CREAT | os.O_WRONLY,
