@@ -1,6 +1,7 @@
 """Admin API for AI coder C in the CoI workflow."""
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import uuid
@@ -15,6 +16,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..api_model import ApiModel
+from ..analysis.coi_ai_audit_log import write_coi_ai_audit
 from ..db import get_db
 from ..settings import QWEN_CHAT_EXTRA_BODY, nlp_settings
 from .deps import require_admin
@@ -70,6 +72,29 @@ class AiCodingResponse(ApiModel):
 
 def _new_code_id() -> str:
     return "cuc" + uuid.uuid4().hex[:12]
+
+
+def _new_audit_request_id() -> str:
+    return "coia" + uuid.uuid4().hex[:16]
+
+
+def _audit(
+    *,
+    request_id: str | None,
+    session_id: str | None,
+    operation: str,
+    stage: str,
+    **details: Any,
+) -> None:
+    if not request_id or not session_id:
+        return
+    write_coi_ai_audit({
+        "request_id": request_id,
+        "session_id": session_id,
+        "operation": operation,
+        "stage": stage,
+        **details,
+    })
 
 
 def _normalize_categories(value: Any) -> list[CoiCategory]:
@@ -144,13 +169,28 @@ async def _load_selected_units(
     return rows
 
 
-async def _review_segmentation(units: list[dict[str, Any]]) -> list[dict[str, str]]:
+async def _review_segmentation(
+    units: list[dict[str, Any]],
+    *,
+    session_id: str | None = None,
+    request_id: str | None = None,
+) -> list[dict[str, str]]:
+    operation = "segmentation_review"
     if not nlp_settings.qwen_api_key:
+        _audit(
+            request_id=request_id, session_id=session_id, operation=operation,
+            stage="failed", phase="configuration", error="AI 模型尚未配置",
+        )
         raise HTTPException(status_code=503, detail="AI 模型尚未配置")
     try:
         manual = MANUAL_PATH.read_text(encoding="utf-8")
     except OSError as exc:
         logger.exception("读取 CoI AI 编码手册失败")
+        _audit(
+            request_id=request_id, session_id=session_id, operation=operation,
+            stage="failed", phase="manual_read", error_type=type(exc).__name__,
+            error=str(exc),
+        )
         raise HTTPException(status_code=500, detail="无法读取 CoI 编码手册") from exc
 
     unit_text = "\n".join(
@@ -172,17 +212,30 @@ async def _review_segmentation(units: list[dict[str, Any]]) -> list[dict[str, st
         base_url=nlp_settings.qwen_base_url,
         timeout=60.0,
     )
+    messages = [
+        {"role": "system", "content": manual},
+        {"role": "user", "content": user_prompt},
+    ]
+    _audit(
+        request_id=request_id, session_id=session_id, operation=operation,
+        stage="request", model=nlp_settings.reasoning_model,
+        manual_sha256=hashlib.sha256(manual.encode("utf-8")).hexdigest(),
+        units=units, messages=messages, max_tokens=2500,
+        extra_body=QWEN_CHAT_EXTRA_BODY,
+    )
+    raw = ""
     try:
         response = await client.chat.completions.create(
             model=nlp_settings.reasoning_model,
             max_tokens=2500,
             extra_body=QWEN_CHAT_EXTRA_BODY,
-            messages=[
-                {"role": "system", "content": manual},
-                {"role": "user", "content": user_prompt},
-            ],
+            messages=messages,
         )
         raw = response.choices[0].message.content or ""
+        _audit(
+            request_id=request_id, session_id=session_id, operation=operation,
+            stage="model_response", raw_response=raw,
+        )
         payload = json.loads(_strip_json_fence(raw))
         raw_results = payload.get("results") if isinstance(payload, dict) else None
         if not isinstance(raw_results, list):
@@ -207,21 +260,49 @@ async def _review_segmentation(units: list[dict[str, Any]]) -> list[dict[str, st
             }
         if set(by_id) != expected_ids:
             raise ValueError("模型没有返回全部观点单元")
-        return [by_id[unit["id"]] for unit in units]
+        parsed = [by_id[unit["id"]] for unit in units]
+        _audit(
+            request_id=request_id, session_id=session_id, operation=operation,
+            stage="parsed", results=parsed,
+        )
+        return parsed
     except HTTPException:
         raise
     except Exception as exc:
-        logger.warning("[CoI/AI-C] 观点单元检查或解析失败: %s", exc)
+        logger.warning(
+            "[CoI/AI-C] 观点单元检查或解析失败 session_id=%s request_id=%s: %s",
+            session_id, request_id, exc,
+        )
+        _audit(
+            request_id=request_id, session_id=session_id, operation=operation,
+            stage="failed", phase="model_or_parse", error_type=type(exc).__name__,
+            error=str(exc), raw_response=raw,
+        )
         raise HTTPException(status_code=502, detail="AI 观点检查失败，请稍后重试") from exc
 
 
-async def _generate_codes(units: list[dict[str, Any]]) -> list[dict[str, Any]]:
+async def _generate_codes(
+    units: list[dict[str, Any]],
+    *,
+    session_id: str | None = None,
+    request_id: str | None = None,
+) -> list[dict[str, Any]]:
+    operation = "coding"
     if not nlp_settings.qwen_api_key:
+        _audit(
+            request_id=request_id, session_id=session_id, operation=operation,
+            stage="failed", phase="configuration", error="AI 模型尚未配置",
+        )
         raise HTTPException(status_code=503, detail="AI 模型尚未配置")
     try:
         manual = MANUAL_PATH.read_text(encoding="utf-8")
     except OSError as exc:
         logger.exception("读取 CoI AI 编码手册失败")
+        _audit(
+            request_id=request_id, session_id=session_id, operation=operation,
+            stage="failed", phase="manual_read", error_type=type(exc).__name__,
+            error=str(exc),
+        )
         raise HTTPException(status_code=500, detail="无法读取 CoI 编码手册") from exc
 
     unit_text = "\n".join(
@@ -241,17 +322,30 @@ async def _generate_codes(units: list[dict[str, Any]]) -> list[dict[str, Any]]:
         base_url=nlp_settings.qwen_base_url,
         timeout=60.0,
     )
+    messages = [
+        {"role": "system", "content": manual},
+        {"role": "user", "content": user_prompt},
+    ]
+    _audit(
+        request_id=request_id, session_id=session_id, operation=operation,
+        stage="request", model=nlp_settings.reasoning_model,
+        manual_sha256=hashlib.sha256(manual.encode("utf-8")).hexdigest(),
+        units=units, messages=messages, max_tokens=2500,
+        extra_body=QWEN_CHAT_EXTRA_BODY,
+    )
+    raw = ""
     try:
         response = await client.chat.completions.create(
             model=nlp_settings.reasoning_model,
             max_tokens=2500,
             extra_body=QWEN_CHAT_EXTRA_BODY,
-            messages=[
-                {"role": "system", "content": manual},
-                {"role": "user", "content": user_prompt},
-            ],
+            messages=messages,
         )
         raw = response.choices[0].message.content or ""
+        _audit(
+            request_id=request_id, session_id=session_id, operation=operation,
+            stage="model_response", raw_response=raw,
+        )
         payload = json.loads(_strip_json_fence(raw))
         raw_results = payload.get("results") if isinstance(payload, dict) else None
         if not isinstance(raw_results, list):
@@ -273,11 +367,24 @@ async def _generate_codes(units: list[dict[str, Any]]) -> list[dict[str, Any]]:
             }
         if set(by_id) != expected_ids:
             raise ValueError("模型没有返回全部观点单元")
-        return [by_id[unit["id"]] for unit in units]
+        parsed = [by_id[unit["id"]] for unit in units]
+        _audit(
+            request_id=request_id, session_id=session_id, operation=operation,
+            stage="parsed", results=parsed,
+        )
+        return parsed
     except HTTPException:
         raise
     except Exception as exc:
-        logger.warning("[CoI/AI-C] 编码或解析失败: %s", exc)
+        logger.warning(
+            "[CoI/AI-C] 编码或解析失败 session_id=%s request_id=%s: %s",
+            session_id, request_id, exc,
+        )
+        _audit(
+            request_id=request_id, session_id=session_id, operation=operation,
+            stage="failed", phase="model_or_parse", error_type=type(exc).__name__,
+            error=str(exc), raw_response=raw,
+        )
         raise HTTPException(status_code=502, detail="AI 编码失败，请稍后重试") from exc
 
 
@@ -295,26 +402,56 @@ async def review_ai_coding_units(
     payload: GenerateAiCodesRequest,
     db: AsyncSession = Depends(get_db),
 ) -> AiCodingResponse:
-    units = await _load_selected_units(db, session_id, payload.unit_ids)
+    request_id = _new_audit_request_id()
+    _audit(
+        request_id=request_id, session_id=session_id,
+        operation="segmentation_review", stage="received",
+        requested_unit_ids=payload.unit_ids,
+    )
+    try:
+        units = await _load_selected_units(db, session_id, payload.unit_ids)
+    except Exception as exc:
+        _audit(
+            request_id=request_id, session_id=session_id,
+            operation="segmentation_review", stage="failed", phase="load_units",
+            error_type=type(exc).__name__, error=str(exc),
+        )
+        raise
     await db.rollback()
-    suggestions = await _review_segmentation(units)
-    await _load_selected_units(db, session_id, payload.unit_ids)
-    rows = [
-        {
-            "unit_id": item["unit_id"],
-            "session_id": session_id,
-            "suggestion": item["suggestion"],
-        }
-        for item in suggestions
-    ]
-    await db.execute(text("""
-        UPDATE coi_units
-           SET ai_segmentation_suggestion = :suggestion,
-               ai_segmentation_reviewed_at = NOW()
-         WHERE id = :unit_id
-           AND session_id = :session_id
-    """), rows)
-    await db.commit()
+    suggestions = await _review_segmentation(
+        units, session_id=session_id, request_id=request_id,
+    )
+    try:
+        await _load_selected_units(db, session_id, payload.unit_ids)
+        rows = [
+            {
+                "unit_id": item["unit_id"],
+                "session_id": session_id,
+                "suggestion": item["suggestion"],
+            }
+            for item in suggestions
+        ]
+        await db.execute(text("""
+            UPDATE coi_units
+               SET ai_segmentation_suggestion = :suggestion,
+                   ai_segmentation_reviewed_at = NOW()
+             WHERE id = :unit_id
+               AND session_id = :session_id
+        """), rows)
+        await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        _audit(
+            request_id=request_id, session_id=session_id,
+            operation="segmentation_review", stage="failed", phase="save",
+            error_type=type(exc).__name__, error=str(exc), results=suggestions,
+        )
+        raise
+    _audit(
+        request_id=request_id, session_id=session_id,
+        operation="segmentation_review", stage="saved", saved=len(rows),
+        results=suggestions,
+    )
     return AiCodingResponse(saved=len(rows), items=await _load_session_items(db, session_id))
 
 
@@ -324,39 +461,71 @@ async def generate_ai_codes(
     payload: GenerateAiCodesRequest,
     db: AsyncSession = Depends(get_db),
 ) -> AiCodingResponse:
-    units = await _load_selected_units(db, session_id, payload.unit_ids)
+    request_id = _new_audit_request_id()
+    _audit(
+        request_id=request_id, session_id=session_id, operation="coding",
+        stage="received", requested_unit_ids=payload.unit_ids,
+    )
+    try:
+        units = await _load_selected_units(db, session_id, payload.unit_ids)
+    except Exception as exc:
+        _audit(
+            request_id=request_id, session_id=session_id, operation="coding",
+            stage="failed", phase="load_units", error_type=type(exc).__name__,
+            error=str(exc),
+        )
+        raise
     await db.rollback()
-    generated = await _generate_codes(units)
-    units = await _load_selected_units(db, session_id, payload.unit_ids)
-    rows = [
-        {
-            "id": _new_code_id(),
-            "unit_id": item["unit_id"],
-            "session_id": session_id,
-            "group_id": next(unit["group_id"] for unit in units if unit["id"] == item["unit_id"]),
-            "coi_categories": item["coi_categories"],
-            "coding_reason": item["coding_reason"],
-        }
-        for item in generated
-    ]
-    await db.execute(text("""
-        INSERT INTO coi_unit_codes
-            (id, unit_id, session_id, group_id, coder_role, coded_by,
-             coi_categories, ai_original_categories, coding_reason,
-             coded_at, created_at, updated_at)
-        VALUES
-            (:id, :unit_id, :session_id, :group_id, 'coder_c', 'AI 编码员 C',
-             :coi_categories, :coi_categories, :coding_reason,
-             NOW(), NOW(), NOW())
-        ON CONFLICT (unit_id, coder_role) DO UPDATE SET
-            coi_categories = EXCLUDED.coi_categories,
-            ai_original_categories = EXCLUDED.ai_original_categories,
-            coding_reason = EXCLUDED.coding_reason,
-            coded_by = 'AI 编码员 C',
-            coded_at = NOW(),
-            updated_at = NOW()
-    """), rows)
-    await db.commit()
+    generated = await _generate_codes(
+        units, session_id=session_id, request_id=request_id,
+    )
+    try:
+        units = await _load_selected_units(db, session_id, payload.unit_ids)
+        rows = [
+            {
+                "id": _new_code_id(),
+                "unit_id": item["unit_id"],
+                "session_id": session_id,
+                "group_id": next(
+                    unit["group_id"]
+                    for unit in units
+                    if unit["id"] == item["unit_id"]
+                ),
+                "coi_categories": item["coi_categories"],
+                "coding_reason": item["coding_reason"],
+            }
+            for item in generated
+        ]
+        await db.execute(text("""
+            INSERT INTO coi_unit_codes
+                (id, unit_id, session_id, group_id, coder_role, coded_by,
+                 coi_categories, ai_original_categories, coding_reason,
+                 coded_at, created_at, updated_at)
+            VALUES
+                (:id, :unit_id, :session_id, :group_id, 'coder_c', 'AI 编码员 C',
+                 :coi_categories, :coi_categories, :coding_reason,
+                 NOW(), NOW(), NOW())
+            ON CONFLICT (unit_id, coder_role) DO UPDATE SET
+                coi_categories = EXCLUDED.coi_categories,
+                ai_original_categories = EXCLUDED.ai_original_categories,
+                coding_reason = EXCLUDED.coding_reason,
+                coded_by = 'AI 编码员 C',
+                coded_at = NOW(),
+                updated_at = NOW()
+        """), rows)
+        await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        _audit(
+            request_id=request_id, session_id=session_id, operation="coding",
+            stage="failed", phase="save", error_type=type(exc).__name__,
+            error=str(exc), results=generated,
+        )
+        raise
+    _audit(
+        request_id=request_id, session_id=session_id, operation="coding",
+        stage="saved", saved=len(rows), results=generated,
+    )
     return AiCodingResponse(saved=len(rows), items=await _load_session_items(db, session_id))
 
 

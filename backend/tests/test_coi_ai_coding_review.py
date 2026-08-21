@@ -75,6 +75,32 @@ def test_generate_codes_accepts_empty_categories_for_non_codeable_unit(monkeypat
     assert "coi_categories 必须返回空数组 []" in prompt
 
 
+def test_generate_codes_audits_request_response_and_parsed_result(monkeypatch) -> None:
+    _FakeClient.response_content = """{"results":[
+        {"unit_id":"u9","coi_categories":["TE"],"reason":"提出待确认问题"}
+    ]}"""
+    audit_records: list[dict] = []
+    monkeypatch.setattr(coi_ai_coding.nlp_settings, "qwen_api_key", "test-key")
+    monkeypatch.setattr(coi_ai_coding, "AsyncOpenAI", _FakeClient)
+    monkeypatch.setattr(
+        coi_ai_coding, "write_coi_ai_audit", lambda record: audit_records.append(record),
+    )
+
+    result = asyncio.run(coi_ai_coding._generate_codes(
+        [{"id": "u9", "order_index": 9, "content": "要不大家都说一下对应的字母。"}],
+        session_id="session-test",
+        request_id="coia-test",
+    ))
+
+    assert result[0]["coi_categories"] == ["TE"]
+    assert [record["stage"] for record in audit_records] == [
+        "request", "model_response", "parsed",
+    ]
+    assert audit_records[0]["units"][0]["id"] == "u9"
+    assert audit_records[1]["raw_response"] == _FakeClient.response_content
+    assert audit_records[2]["results"] == result
+
+
 def test_save_ai_code_input_accepts_empty_categories() -> None:
     payload = coi_ai_coding.SaveAiCodeIn(
         unit_id="u1",
