@@ -73,6 +73,8 @@ def test_generate_codes_accepts_empty_categories_for_non_codeable_unit(monkeypat
     assert request is not None
     prompt = request["messages"][1]["content"]
     assert "coi_categories 必须返回空数组 []" in prompt
+    assert "表达排序方向、相对位置或有序答案" in prompt
+    assert "程序性片段不得抵消该排序贡献" in prompt
 
 
 def test_generate_codes_audits_request_response_and_parsed_result(monkeypatch) -> None:
