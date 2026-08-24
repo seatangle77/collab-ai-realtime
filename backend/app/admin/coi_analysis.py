@@ -12,6 +12,10 @@ from ..analysis.coi_analysis_service import (
     CoiAnalysisResult,
     build_coi_analysis,
 )
+from ..analysis.coi_composition_analysis_service import (
+    CoiCompositionAnalysisResult,
+    build_coi_composition_analysis,
+)
 from ..api_model import ApiModel
 from ..db import get_db
 from .deps import require_admin
@@ -80,3 +84,17 @@ async def create_coi_analysis(
 
     rows = await _load_rows(db, all_group_ids, payload.coder_role)
     return build_coi_analysis(mode=payload.mode, rows=rows)
+
+
+@router.post("/composition/", response_model=CoiCompositionAnalysisResult)
+async def create_coi_composition_analysis(
+    payload: CreateCoiAnalysisPayload,
+    db: AsyncSession = Depends(get_db),
+) -> CoiCompositionAnalysisResult:
+    """Run the focused four-phase code-composition analysis."""
+    all_group_ids: set[str] = set()
+    for group_ids in payload.group_ids_by_condition.values():
+        all_group_ids.update(group_ids)
+
+    rows = await _load_rows(db, all_group_ids, payload.coder_role)
+    return build_coi_composition_analysis(mode=payload.mode, rows=rows)

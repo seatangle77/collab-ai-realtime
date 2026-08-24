@@ -62,6 +62,7 @@ const menuGroups = computed<AdminMenuGroup[]>(() => [
       { path: '/admin/coi-ai-coding', label: 'CoI AI 编码员 C' },
       { path: '/admin/coi-agreement', label: 'CoI 最终协商' },
       { path: '/admin/coi-analysis', label: 'CoI 认知参与度分析' },
+      { path: '/admin/coi-composition-analysis', label: 'CoI 编码构成分析（新）' },
       { path: '/admin/ena-analysis', label: 'ENA 认知过程网络分析' },
     ],
   },

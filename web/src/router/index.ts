@@ -264,6 +264,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('../views/admin/AdminCoiAnalysisPage.vue'),
       },
       {
+        path: 'coi-composition-analysis',
+        name: 'AdminCoiCompositionAnalysis',
+        component: () => import('../views/admin/AdminCoiCompositionAnalysisPage.vue'),
+      },
+      {
         path: 'ena-analysis',
         name: 'AdminEnaAnalysis',
         component: () => import('../views/admin/AdminEnaAnalysisPage.vue'),
