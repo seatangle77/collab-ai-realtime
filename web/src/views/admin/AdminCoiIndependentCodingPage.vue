@@ -36,6 +36,7 @@ const COI_LABELS: Record<CoiCategory, { label: string; color: string; bg: string
   EX: { label: '探索', color: '#1d4ed8', bg: '#f0f5ff' },
   IN: { label: '整合', color: '#15803d', bg: '#f0fdf4' },
   RE: { label: '解决', color: '#b91c1c', bg: '#fff5f5' },
+  OTHER: { label: '其他（非认知）', color: '#4b5563', bg: '#f3f4f6' },
 }
 const COI_KEYS = Object.keys(COI_LABELS) as CoiCategory[]
 const CODER_OPTIONS: { label: string; value: IndependentCoderRole }[] = [
@@ -279,9 +280,14 @@ function scrollToFocused() {
 function setCategory(index: number, cat: CoiCategory) {
   const item = items.value[index]
   if (!item) return
-  item.categories = item.categories.includes(cat)
-    ? item.categories.filter(category => category !== cat)
-    : COI_KEYS.filter(category => [...item.categories, cat].includes(category))
+  if (cat === 'OTHER') {
+    item.categories = item.categories.includes('OTHER') ? [] : ['OTHER']
+    return
+  }
+  const current = item.categories.filter(category => category !== 'OTHER')
+  item.categories = current.includes(cat)
+    ? current.filter(category => category !== cat)
+    : COI_KEYS.filter(category => [...current, cat].includes(category))
 }
 
 function advance() {
@@ -428,6 +434,7 @@ function handleKeydown(e: KeyboardEvent) {
     case '2': e.preventDefault(); codeAndAdvance('EX'); break
     case '3': e.preventDefault(); codeAndAdvance('IN'); break
     case '4': e.preventDefault(); codeAndAdvance('RE'); break
+    case '5': e.preventDefault(); codeAndAdvance('OTHER'); break
     case '0': e.preventDefault(); advance(); break
     case 's':
     case 'S': e.preventDefault(); toggleStar(focusedIndex.value); break
@@ -476,7 +483,7 @@ async function handleSave() {
     <div class="page-header">
       <h2 class="page-title">CoI 独立编码</h2>
       <span class="header-desc">
-        键盘：<kbd>1</kbd>TE <kbd>2</kbd>EX <kbd>3</kbd>IN <kbd>4</kbd>RE <kbd>S</kbd>星标 <kbd>0</kbd>跳过 <kbd>↑↓</kbd>切换焦点行
+        键盘：<kbd>1</kbd>TE <kbd>2</kbd>EX <kbd>3</kbd>IN <kbd>4</kbd>RE <kbd>5</kbd>OTHER <kbd>S</kbd>星标 <kbd>0</kbd>跳过 <kbd>↑↓</kbd>切换焦点行
       </span>
     </div>
 

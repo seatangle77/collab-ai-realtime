@@ -23,6 +23,7 @@ const COI_LABELS: Record<CoiCategory, string> = {
   EX: '探索',
   IN: '整合',
   RE: '解决',
+  OTHER: '其他（非认知）',
 }
 const COI_KEYS = Object.keys(COI_LABELS) as CoiCategory[]
 const MAX_SELECTION = 20
@@ -208,7 +209,13 @@ async function handleGenerate() {
 }
 
 function toggleCategory(item: EditableAiCodingItem, category: CoiCategory) {
+  if (category === 'OTHER') {
+    item.coi_categories = item.coi_categories.includes('OTHER') ? [] : ['OTHER']
+    item.dirty = true
+    return
+  }
   const selected = new Set(item.coi_categories)
+  selected.delete('OTHER')
   if (selected.has(category)) selected.delete(category)
   else selected.add(category)
   item.coi_categories = COI_KEYS.filter(key => selected.has(key))

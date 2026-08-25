@@ -20,10 +20,10 @@ router = APIRouter(
     dependencies=[Depends(require_admin)],
 )
 
-COI_CATEGORIES = {"TE", "EX", "IN", "RE"}
+COI_CATEGORIES = {"TE", "EX", "IN", "RE", "OTHER"}
 CODER_ROLES = {"coder_a", "coder_b", "final"}
 
-CoiCategory = Literal["TE", "EX", "IN", "RE"]
+CoiCategory = Literal["TE", "EX", "IN", "RE", "OTHER"]
 CoderRole = Literal["coder_a", "coder_b", "final"]
 
 
@@ -159,7 +159,9 @@ def _normalize_coi_categories(coi_categories: list[str]) -> list[CoiCategory]:
     if len(coi_categories) > len(COI_CATEGORIES):
         raise HTTPException(status_code=400, detail="CoI 分类数量不能超过 4 个")
     selected = {_validate_coi_category(category) for category in coi_categories}
-    return [category for category in ("TE", "EX", "IN", "RE") if category in selected]  # type: ignore[misc]
+    if "OTHER" in selected and len(selected) > 1:
+        raise HTTPException(status_code=400, detail="OTHER 不能与 TE、EX、IN、RE 同时选择")
+    return [category for category in ("TE", "EX", "IN", "RE", "OTHER") if category in selected]  # type: ignore[misc]
 
 
 async def _get_session_group_id(db: AsyncSession, session_id: str) -> str:

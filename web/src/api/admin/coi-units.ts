@@ -1,6 +1,6 @@
 import { http } from '../http'
 
-export type CoiCategory = 'TE' | 'EX' | 'IN' | 'RE'
+export type CoiCategory = 'TE' | 'EX' | 'IN' | 'RE' | 'OTHER'
 export type CoiCoderRole = 'coder_a' | 'coder_b' | 'final'
 
 export interface CoiUnitIn {

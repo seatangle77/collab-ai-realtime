@@ -29,11 +29,11 @@ router = APIRouter(
     dependencies=[Depends(require_admin)],
 )
 
-COI_CATEGORIES = {"TE", "EX", "IN", "RE"}
+COI_CATEGORIES = {"TE", "EX", "IN", "RE", "OTHER"}
 MAX_UNITS_PER_REQUEST = 20
 MANUAL_PATH = Path(__file__).resolve().parents[1] / "resources" / "coi_ai_coding_manual.md"
 
-CoiCategory = Literal["TE", "EX", "IN", "RE"]
+CoiCategory = Literal["TE", "EX", "IN", "RE", "OTHER"]
 
 
 class AiCodingItemOut(ApiModel):
@@ -58,7 +58,7 @@ class GenerateAiCodesRequest(ApiModel):
 
 class SaveAiCodeIn(ApiModel):
     unit_id: str
-    coi_categories: list[CoiCategory] = Field(max_length=4)
+    coi_categories: list[CoiCategory] = Field(max_length=5)
     coding_reason: str = Field(min_length=1, max_length=2000)
 
 
@@ -103,8 +103,10 @@ def _normalize_categories(value: Any) -> list[CoiCategory]:
         raise ValueError("coi_categories 必须是数组")
     selected = {str(item).upper() for item in value}
     if not selected.issubset(COI_CATEGORIES):
-        raise ValueError("CoI 分类只能包含 TE、EX、IN、RE")
-    return [category for category in ("TE", "EX", "IN", "RE") if category in selected]  # type: ignore[misc]
+        raise ValueError("CoI 分类只能包含 TE、EX、IN、RE、OTHER")
+    if "OTHER" in selected and len(selected) > 1:
+        raise ValueError("OTHER 不能与 TE、EX、IN、RE 同时选择")
+    return [category for category in ("TE", "EX", "IN", "RE", "OTHER") if category in selected]  # type: ignore[misc]
 
 
 def _strip_json_fence(raw: str) -> str:
@@ -319,8 +321,8 @@ async def _generate_codes(
         "选出 TE 后仍须继续检查是否同时存在回答或观点（EX）、比较或综合（IN）、"
         "具体方案（RE），不得以‘主要功能’或‘TE 为主导’为由省略其他类别。\n"
         "若某条仅为重复、附和、程序性话语或无实质认知贡献，"
-        "coi_categories 必须返回空数组 []，reason 说明为何不编码；不得强行选择最接近的类别。\n"
-        "返回空数组前必须逐分句确认整条均无实质认知贡献。若原文使用物品名、字母、编号或简称"
+        "coi_categories 必须返回 [\"OTHER\"]，reason 说明为何不属于四个认知阶段；不得强行选择最接近的类别。\n"
+        "选择 OTHER 前必须逐分句确认整条均无实质认知贡献。若原文使用物品名、字母、编号或简称"
         "表达排序方向、相对位置或有序答案，这是具体排序方案，应编码为 RE；"
         "同一条中的程序性片段不得抵消该排序贡献。\n"
         "必须返回每个输入 unit_id，且不得增加不存在的 unit_id。\n\n"

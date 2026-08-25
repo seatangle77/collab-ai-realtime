@@ -32,6 +32,7 @@ const COI_LABELS: Record<CoiCategory, { label: string; color: string; bg: string
   EX: { label: '探索', color: '#1d4ed8', bg: '#f0f5ff' },
   IN: { label: '整合', color: '#15803d', bg: '#f0fdf4' },
   RE: { label: '解决', color: '#b91c1c', bg: '#fff5f5' },
+  OTHER: { label: '其他（非认知）', color: '#4b5563', bg: '#f3f4f6' },
 }
 const COI_KEYS = Object.keys(COI_LABELS) as CoiCategory[]
 
@@ -233,9 +234,14 @@ function fillAgreedFinals() {
 function setFinalCategory(index: number, cat: CoiCategory) {
   const item = items.value[index]
   if (!item) return
-  item.finalCategories = item.finalCategories.includes(cat)
-    ? item.finalCategories.filter(category => category !== cat)
-    : COI_KEYS.filter(category => [...item.finalCategories, cat].includes(category))
+  if (cat === 'OTHER') {
+    item.finalCategories = item.finalCategories.includes('OTHER') ? [] : ['OTHER']
+    return
+  }
+  const current = item.finalCategories.filter(category => category !== 'OTHER')
+  item.finalCategories = current.includes(cat)
+    ? current.filter(category => category !== cat)
+    : COI_KEYS.filter(category => [...current, cat].includes(category))
 }
 
 function tagLabel(cat: CoiCategory): string {
