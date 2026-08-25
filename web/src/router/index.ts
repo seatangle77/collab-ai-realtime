@@ -241,15 +241,12 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'coi-independent-coding',
         name: 'AdminCoiIndependentCoding',
-        component: () => import('../views/admin/AdminCoiCodingWorkspacePage.vue'),
+        component: () => import('../views/admin/AdminCoiIndependentCodingPage.vue'),
       },
       {
         path: 'coi-ai-coding',
         name: 'AdminCoiAiCoding',
-        redirect: {
-          path: '/admin/coi-independent-coding',
-          query: { coder: 'c' },
-        },
+        component: () => import('../views/admin/AdminCoiAiCodingPage.vue'),
       },
       {
         path: 'coi-agreement',

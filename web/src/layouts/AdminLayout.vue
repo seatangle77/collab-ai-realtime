@@ -59,6 +59,7 @@ const menuGroups = computed<AdminMenuGroup[]>(() => [
       { path: '/admin/coi-transcript-coding', label: 'CoI 预处理（录音转写）' },
       { path: '/admin/coi-units', label: 'CoI 观点整理' },
       { path: '/admin/coi-independent-coding', label: 'CoI 独立编码' },
+      { path: '/admin/coi-ai-coding', label: 'CoI AI 辅助编码' },
       { path: '/admin/coi-agreement', label: 'CoI 最终协商' },
       { path: '/admin/coi-analysis', label: 'CoI 认知参与度分析' },
       { path: '/admin/coi-composition-analysis', label: 'CoI 编码构成分析（新）' },

@@ -1,7 +1,7 @@
 import { http } from '../http'
 
 export type CoiCategory = 'TE' | 'EX' | 'IN' | 'RE' | 'OTHER'
-export type CoiCoderRole = 'coder_a' | 'coder_b' | 'final'
+export type CoiCoderRole = 'coder_a' | 'coder_b' | 'coder_c' | 'final'
 
 export interface CoiUnitIn {
   order_index: number

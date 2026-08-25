@@ -15,7 +15,7 @@ import {
 import type { AdminChatSession, AdminGroup } from '../../types/admin'
 import { coiCodesDraftKey, coiReviewStarsKey } from '../../utils/coiDraftKeys'
 
-type IndependentCoderRole = 'coder_a' | 'coder_b'
+type IndependentCoderRole = 'coder_a' | 'coder_b' | 'coder_c'
 
 interface CodingItem {
   unitId: string
@@ -42,6 +42,7 @@ const COI_KEYS = Object.keys(COI_LABELS) as CoiCategory[]
 const CODER_OPTIONS: { label: string; value: IndependentCoderRole }[] = [
   { label: '研究员 A', value: 'coder_a' },
   { label: '研究员 B', value: 'coder_b' },
+  { label: '研究员 C（AI 辅助）', value: 'coder_c' },
 ]
 
 const groups = ref<AdminGroup[]>([])

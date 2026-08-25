@@ -291,6 +291,14 @@ function readableSuggestion(value: string): string {
       </div>
     </div>
 
+    <el-alert
+      title="AI 编码结果会直接显示在「CoI 独立编码 → 研究员 C（AI 辅助）」中，无需另行复制。"
+      type="info"
+      :closable="false"
+      show-icon
+      style="margin-bottom: 12px"
+    />
+
     <el-card shadow="never">
       <div class="control-bar">
         <div class="control-group">

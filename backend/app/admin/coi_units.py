@@ -21,10 +21,10 @@ router = APIRouter(
 )
 
 COI_CATEGORIES = {"TE", "EX", "IN", "RE", "OTHER"}
-CODER_ROLES = {"coder_a", "coder_b", "final"}
+CODER_ROLES = {"coder_a", "coder_b", "coder_c", "final"}
 
 CoiCategory = Literal["TE", "EX", "IN", "RE", "OTHER"]
-CoderRole = Literal["coder_a", "coder_b", "final"]
+CoderRole = Literal["coder_a", "coder_b", "coder_c", "final"]
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -732,6 +732,21 @@ async def save_session_codes(
         [code.unit_id for code in payload.codes],
     )
 
+    existing_ai_metadata: dict[str, dict[str, Any]] = {}
+    if role == "coder_c":
+        existing_result = await db.execute(
+            text("""
+                SELECT unit_id, ai_original_categories, coding_reason, created_at
+                FROM coi_unit_codes
+                WHERE session_id = :sid AND coder_role = 'coder_c'
+            """),
+            {"sid": session_id},
+        )
+        existing_ai_metadata = {
+            row["unit_id"]: dict(row)
+            for row in existing_result.mappings().all()
+        }
+
     await db.execute(
         text("""
             DELETE FROM coi_unit_codes
@@ -765,17 +780,42 @@ async def save_session_codes(
             }
             for code in payload.codes
         ]
-        await db.execute(
-            text("""
-                INSERT INTO coi_unit_codes
-                    (id, unit_id, session_id, group_id, coder_role,
-                     coi_categories, coded_by, coded_at, updated_at)
-                VALUES
-                    (:id, :unit_id, :session_id, :group_id, :coder_role,
-                     :coi_categories, :coded_by, NOW(), NOW())
-            """),
-            rows,
-        )
+        if role == "coder_c":
+            ai_rows = [
+                {
+                    **row,
+                    "ai_original_categories": existing_ai_metadata.get(row["unit_id"], {}).get("ai_original_categories"),
+                    "coding_reason": existing_ai_metadata.get(row["unit_id"], {}).get("coding_reason")
+                    or "研究员 C 人工确认",
+                    "created_at": existing_ai_metadata.get(row["unit_id"], {}).get("created_at"),
+                }
+                for row in rows
+            ]
+            await db.execute(
+                text("""
+                    INSERT INTO coi_unit_codes
+                        (id, unit_id, session_id, group_id, coder_role,
+                         coi_categories, coded_by, ai_original_categories,
+                         coding_reason, coded_at, created_at, updated_at)
+                    VALUES
+                        (:id, :unit_id, :session_id, :group_id, :coder_role,
+                         :coi_categories, :coded_by, :ai_original_categories,
+                         :coding_reason, NOW(), COALESCE(:created_at, NOW()), NOW())
+                """),
+                ai_rows,
+            )
+        else:
+            await db.execute(
+                text("""
+                    INSERT INTO coi_unit_codes
+                        (id, unit_id, session_id, group_id, coder_role,
+                         coi_categories, coded_by, coded_at, updated_at)
+                    VALUES
+                        (:id, :unit_id, :session_id, :group_id, :coder_role,
+                         :coi_categories, :coded_by, NOW(), NOW())
+                """),
+                rows,
+            )
 
     await db.commit()
     return SaveCodesResponse(saved=len(payload.codes), coder_role=role)

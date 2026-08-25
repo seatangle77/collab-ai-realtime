@@ -24,9 +24,11 @@ export function clearCoiDownstreamDrafts(sessionId: string): void {
   localStorage.removeItem(coiUnitsDraftKey(sessionId))
   localStorage.removeItem(coiCodesDraftKey(sessionId, 'coder_a'))
   localStorage.removeItem(coiCodesDraftKey(sessionId, 'coder_b'))
+  localStorage.removeItem(coiCodesDraftKey(sessionId, 'coder_c'))
   localStorage.removeItem(coiCodesDraftKey(sessionId, 'final'))
   localStorage.removeItem(coiReviewStarsKey(sessionId, 'coder_a'))
   localStorage.removeItem(coiReviewStarsKey(sessionId, 'coder_b'))
+  localStorage.removeItem(coiReviewStarsKey(sessionId, 'coder_c'))
   localStorage.removeItem(coiReviewStarsKey(sessionId, 'final'))
   localStorage.removeItem(legacyCoiCodingDraftKey(sessionId))
 }
