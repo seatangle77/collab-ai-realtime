@@ -109,6 +109,17 @@ def _normalize_categories(value: Any) -> list[CoiCategory]:
     return [category for category in ("TE", "EX", "IN", "RE", "OTHER") if category in selected]  # type: ignore[misc]
 
 
+def _categories_to_db(coi_categories: list[CoiCategory]) -> list[str]:
+    """Store OTHER as an empty array because the legacy DB element type is varchar(2)."""
+    return [] if coi_categories == ["OTHER"] else list(coi_categories)
+
+
+def _categories_from_db(value: Any) -> list[CoiCategory]:
+    """A present AI-code row with an empty array is the persisted OTHER value."""
+    stored = list(value or [])
+    return ["OTHER"] if not stored else _normalize_categories(stored)
+
+
 def _strip_json_fence(raw: str) -> str:
     value = raw.strip()
     if value.startswith("```"):
@@ -122,6 +133,7 @@ def _strip_json_fence(raw: str) -> str:
 
 
 def _row_to_out(row: Any) -> AiCodingItemOut:
+    has_ai_result = bool(row["has_ai_result"])
     return AiCodingItemOut(
         unit_id=row["unit_id"],
         order_index=row["order_index"],
@@ -129,10 +141,10 @@ def _row_to_out(row: Any) -> AiCodingItemOut:
         start_time=row["start_time"],
         ai_segmentation_suggestion=row["ai_segmentation_suggestion"],
         ai_segmentation_reviewed_at=row["ai_segmentation_reviewed_at"],
-        coi_categories=list(row["coi_categories"] or []),
-        ai_original_categories=list(row["ai_original_categories"] or []),
+        coi_categories=_categories_from_db(row["coi_categories"]) if has_ai_result else [],
+        ai_original_categories=_categories_from_db(row["ai_original_categories"]) if has_ai_result else [],
         coding_reason=row["coding_reason"] or "",
-        has_ai_result=bool(row["has_ai_result"]),
+        has_ai_result=has_ai_result,
         coded_by=row["coded_by"],
         coded_at=row["coded_at"],
         updated_at=row["updated_at"],
@@ -502,7 +514,7 @@ async def generate_ai_codes(
                     for unit in units
                     if unit["id"] == item["unit_id"]
                 ),
-                "coi_categories": item["coi_categories"],
+                "coi_categories": _categories_to_db(item["coi_categories"]),
                 "coding_reason": item["coding_reason"],
             }
             for item in generated
@@ -575,7 +587,7 @@ async def save_ai_code_adjustments(
         {
             "unit_id": code.unit_id,
             "session_id": session_id,
-            "coi_categories": _normalize_categories(code.coi_categories),
+            "coi_categories": _categories_to_db(_normalize_categories(code.coi_categories)),
             "coding_reason": code.coding_reason.strip(),
         }
         for code in payload.codes

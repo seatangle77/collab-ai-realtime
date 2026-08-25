@@ -164,6 +164,17 @@ def _normalize_coi_categories(coi_categories: list[str]) -> list[CoiCategory]:
     return [category for category in ("TE", "EX", "IN", "RE", "OTHER") if category in selected]  # type: ignore[misc]
 
 
+def _categories_to_db(coi_categories: list[CoiCategory]) -> list[str]:
+    """Store OTHER as an empty array because the legacy DB element type is varchar(2)."""
+    return [] if coi_categories == ["OTHER"] else list(coi_categories)
+
+
+def _categories_from_db(coi_categories: Any) -> list[CoiCategory]:
+    """A present code row with an empty array is the persisted OTHER value."""
+    stored = list(coi_categories or [])
+    return ["OTHER"] if not stored else _normalize_coi_categories(stored)
+
+
 async def _get_session_group_id(db: AsyncSession, session_id: str) -> str:
     result = await db.execute(
         text("SELECT group_id FROM chat_sessions WHERE id = :sid"),
@@ -195,7 +206,7 @@ def _code_row_to_out(row: Any) -> CoiCodeOut:
     return CoiCodeOut(
         unit_id=row["unit_id"],
         coder_role=_validate_coder_role(row["coder_role"]),
-        coi_categories=_normalize_coi_categories(list(row["coi_categories"] or [])),
+        coi_categories=_categories_from_db(row["coi_categories"]),
         coded_by=row["coded_by"],
         coded_at=row["coded_at"],
         updated_at=row["updated_at"],
@@ -209,7 +220,7 @@ def _joined_code_to_out(row: Any, prefix: str = "code") -> CoiCodeOut | None:
     return CoiCodeOut(
         unit_id=unit_id,
         coder_role=_validate_coder_role(row[f"{prefix}_coder_role"]),
-        coi_categories=_normalize_coi_categories(list(row[f"{prefix}_coi_categories"] or [])),
+        coi_categories=_categories_from_db(row[f"{prefix}_coi_categories"]),
         coded_by=row[f"{prefix}_coded_by"],
         coded_at=row[f"{prefix}_coded_at"],
         updated_at=row[f"{prefix}_updated_at"],
@@ -760,7 +771,7 @@ async def save_session_codes(
                 "session_id": session_id,
                 "group_id": unit_group_by_id[code.unit_id],
                 "coder_role": role,
-                "coi_categories": code.coi_categories,
+                "coi_categories": _categories_to_db(code.coi_categories),
                 "coded_by": code.coded_by,
             }
             for code in payload.codes
