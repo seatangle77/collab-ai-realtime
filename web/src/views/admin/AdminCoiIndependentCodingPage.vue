@@ -176,6 +176,16 @@ function toggleStarredFilter() {
   nextTick(scrollToFocused)
 }
 
+function clearAllStars() {
+  if (starredCount.value === 0) return
+  for (const item of items.value) item.starred = false
+  persistReviewStars()
+  showStarredOnly.value = false
+  focusedIndex.value = 0
+  nextTick(scrollToFocused)
+  ElMessage.success(`已清除 ${coderLabel.value} 当前会话的全部星标`)
+}
+
 function checkDraft() {
   const key = draftKey()
   if (!key) return
@@ -547,6 +557,10 @@ async function handleSave() {
             >
               {{ showStarredOnly ? '显示全部' : `只看星标（${starredCount}）` }}
             </el-button>
+            <el-button
+              :disabled="starredCount === 0"
+              @click="clearAllStars"
+            >清除全部星标</el-button>
           </template>
           <el-button
             :disabled="!selectedSessionId"
