@@ -43,6 +43,8 @@ const filter = ref<'all' | 'uncoded' | 'coded' | 'adjusted'>('all')
 
 const selectedItems = computed(() => items.value.filter(item => item.selected))
 const codedCount = computed(() => items.value.filter(hasAiResult).length)
+const uncodedCount = computed(() => items.value.length - codedCount.value)
+const multiCodedCount = computed(() => items.value.filter(item => item.coi_categories.length > 1).length)
 const dirtyItems = computed(() => items.value.filter(item => item.dirty))
 const visibleItems = computed(() => items.value.filter((item) => {
   if (filter.value === 'uncoded') return !hasAiResult(item)
@@ -331,7 +333,11 @@ function readableSuggestion(value: string): string {
     <el-card v-if="items.length > 0" shadow="never" v-loading="loadingItems || reviewing || generating">
       <template #header>
         <div class="list-header">
-          <span>观点单元：已编码 {{ codedCount }} / {{ items.length }}</span>
+          <div class="summary-tags">
+            <span>观点单元：已编码 {{ codedCount }} / {{ items.length }}</span>
+            <el-tag size="small" type="danger">未编码 {{ uncodedCount }}</el-tag>
+            <el-tag v-if="multiCodedCount > 0" size="small" type="warning">多编码 {{ multiCodedCount }}</el-tag>
+          </div>
           <el-radio-group v-model="filter" size="small">
             <el-radio-button value="all">全部</el-radio-button>
             <el-radio-button value="uncoded">未编码</el-radio-button>
@@ -342,12 +348,24 @@ function readableSuggestion(value: string): string {
       </template>
 
       <div class="coding-list">
-        <div v-for="item in visibleItems" :key="item.unit_id" class="coding-row" :class="{ 'is-coded': hasAiResult(item), 'is-dirty': item.dirty }">
+        <div
+          v-for="item in visibleItems"
+          :key="item.unit_id"
+          class="coding-row"
+          :class="{
+            'is-coded': hasAiResult(item),
+            'is-uncoded': !hasAiResult(item),
+            'is-multi-coded': item.coi_categories.length > 1,
+            'is-dirty': item.dirty,
+          }"
+        >
           <div class="unit-line">
             <el-checkbox v-model="item.selected" @change="onSelectChange(item, Boolean($event))" />
             <span class="unit-index">{{ item.order_index }}</span>
             <span class="unit-time">{{ fmt(item.start_time) }}</span>
             <span class="unit-content">{{ item.content }}</span>
+            <el-tag v-if="!hasAiResult(item)" size="small" type="danger" effect="dark">未编码</el-tag>
+            <el-tag v-if="item.coi_categories.length > 1" size="small" type="warning" effect="dark">多编码</el-tag>
           </div>
 
           <div v-if="item.ai_segmentation_suggestion" class="segmentation-suggestion">
@@ -399,10 +417,13 @@ function readableSuggestion(value: string): string {
 .control-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .control-label { color: #606266; font-size: 14px; white-space: nowrap; }
 .list-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.summary-tags { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .coding-list { display: flex; flex-direction: column; gap: 8px; max-height: calc(100vh - 300px); overflow-y: auto; }
 .coding-row { border: 1px solid #ebeef5; border-left: 3px solid #dcdfe6; border-radius: 7px; padding: 12px; }
 .coding-row.is-coded { border-left-color: #67c23a; }
 .coding-row.is-dirty { background: #fffaf0; border-left-color: #e6a23c; }
+.coding-row.is-uncoded { background: #fff1f0; border-color: #f56c6c; }
+.coding-row.is-multi-coded { background: #fff3bf; border-color: #e6a23c; }
 .unit-line { display: flex; align-items: baseline; gap: 8px; }
 .unit-index { width: 28px; color: #909399; font-size: 12px; text-align: right; flex-shrink: 0; }
 .unit-time { width: 42px; color: #909399; font-size: 12px; flex-shrink: 0; }
