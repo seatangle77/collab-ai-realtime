@@ -4,6 +4,9 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+from fastapi import HTTPException
+
 from backend.app.admin import coi_ai_coding
 
 
@@ -53,9 +56,9 @@ def test_review_segmentation_parses_suggestions_without_real_ai(monkeypatch) -> 
     assert "不得出现 unit_id" in prompt
 
 
-def test_generate_codes_accepts_empty_categories_for_non_codeable_unit(monkeypatch) -> None:
+def test_generate_codes_uses_other_for_non_codeable_unit(monkeypatch) -> None:
     _FakeClient.response_content = """{"results":[
-        {"unit_id":"u1","coi_categories":[],"reason":"纯附和，无实质认知贡献"}
+        {"unit_id":"u1","coi_categories":["OTHER"],"reason":"纯附和，无实质认知贡献"}
     ]}"""
     monkeypatch.setattr(coi_ai_coding.nlp_settings, "qwen_api_key", "test-key")
     monkeypatch.setattr(coi_ai_coding, "AsyncOpenAI", _FakeClient)
@@ -66,36 +69,36 @@ def test_generate_codes_accepts_empty_categories_for_non_codeable_unit(monkeypat
 
     assert result == [{
         "unit_id": "u1",
-        "coi_categories": [],
+        "coi_categories": ["OTHER"],
         "coding_reason": "纯附和，无实质认知贡献",
     }]
     request = _FakeClient.latest.chat.completions.request
     assert request is not None
     prompt = request["messages"][1]["content"]
-    assert "coi_categories 必须返回空数组 []" in prompt
+    assert 'coi_categories 必须返回 ["OTHER"]' in prompt
     assert "表达排序方向、相对位置或有序答案" in prompt
     assert "程序性片段不得抵消该排序贡献" in prompt
-    assert '"coi_categories":["TE","EX"]' in prompt
-    assert "选出 TE 后仍须继续检查" in prompt
-    assert "不得以‘主要功能’或‘TE 为主导’为由省略其他类别" in prompt
+    assert '"coi_categories":["TE"]' in prompt
+    assert "必须且只能包含一个类别" in prompt
+    assert "不得返回两个或以上类别" in prompt
+    assert "短句可以承接前文形成 IN" in prompt
+    assert "长句或多个并列材料也可能仍是 EX" in prompt
+    assert "不得仅凭‘如果、因为、所以、对比、分类’等词或材料数量决定 EX/IN" in prompt
 
 
-def test_generate_codes_preserves_multiple_categories(monkeypatch) -> None:
+def test_generate_codes_rejects_multiple_categories(monkeypatch) -> None:
     _FakeClient.response_content = """{"results":[
         {"unit_id":"u1","coi_categories":["IN","TE"],"reason":"提出疑问并进行比较权衡"}
     ]}"""
     monkeypatch.setattr(coi_ai_coding.nlp_settings, "qwen_api_key", "test-key")
     monkeypatch.setattr(coi_ai_coding, "AsyncOpenAI", _FakeClient)
 
-    result = asyncio.run(coi_ai_coding._generate_codes([
-        {"id": "u1", "order_index": 1, "content": "提出疑问并比较多个条件。"},
-    ]))
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(coi_ai_coding._generate_codes([
+            {"id": "u1", "order_index": 1, "content": "提出疑问并比较多个条件。"},
+        ]))
 
-    assert result == [{
-        "unit_id": "u1",
-        "coi_categories": ["TE", "IN"],
-        "coding_reason": "提出疑问并进行比较权衡",
-    }]
+    assert exc_info.value.status_code == 502
 
 
 def test_generate_codes_audits_request_response_and_parsed_result(monkeypatch) -> None:

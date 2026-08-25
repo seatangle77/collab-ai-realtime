@@ -316,10 +316,15 @@ async def _generate_codes(
     user_prompt = (
         "请逐条编码以下观点单元。严格返回 JSON，不要输出 Markdown 或其他文字。\n"
         "输出格式：{\"results\":[{\"unit_id\":\"...\","
-        "\"coi_categories\":[\"TE\",\"EX\"],\"reason\":\"简短中文理由\"}]}\n"
-        "coi_categories 可以包含一个或多个类别。必须逐分句检查全部认知功能；"
-        "选出 TE 后仍须继续检查是否同时存在回答或观点（EX）、比较或综合（IN）、"
-        "具体方案（RE），不得以‘主要功能’或‘TE 为主导’为由省略其他类别。\n"
+        "\"coi_categories\":[\"TE\"],\"reason\":\"简短中文理由\"}]}\n"
+        "每条观点已经按独立认知贡献拆分。coi_categories 必须且只能包含一个类别，"
+        "即 TE、EX、IN、RE、OTHER 之一，不得返回两个或以上类别。"
+        "按完整认知贡献及其上下文作用判断：具体可执行方案选 RE；否则调用当前或前文信息，"
+        "建立关系并形成新的理解、比较判断、原则或阶段性结论，选 IN；"
+        "否则继续提供尚未整合的事实、观点、理由、假设、条件、解释或可能方案，选 EX；"
+        "否则仅提出开放的实质问题选 TE。观点切分与类别判断相互独立："
+        "短句可以承接前文形成 IN，长句或多个并列材料也可能仍是 EX。"
+        "不得仅凭‘如果、因为、所以、对比、分类’等词或材料数量决定 EX/IN。\n"
         "若某条仅为重复、附和、程序性话语或无实质认知贡献，"
         "coi_categories 必须返回 [\"OTHER\"]，reason 说明为何不属于四个认知阶段；不得强行选择最接近的类别。\n"
         "选择 OTHER 前必须逐分句确认整条均无实质认知贡献。若原文使用物品名、字母、编号或简称"
@@ -371,9 +376,12 @@ async def _generate_codes(
             reason = str(item.get("reason") or "").strip()
             if not reason:
                 raise ValueError("模型未返回编码理由")
+            categories = _normalize_categories(item.get("coi_categories"))
+            if len(categories) != 1:
+                raise ValueError("AI 正式编码每条必须且只能返回一个类别")
             by_id[unit_id] = {
                 "unit_id": unit_id,
-                "coi_categories": _normalize_categories(item.get("coi_categories")),
+                "coi_categories": categories,
                 "coding_reason": reason[:2000],
             }
         if set(by_id) != expected_ids:
