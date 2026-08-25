@@ -67,6 +67,7 @@ const splitTextareaRef = ref<HTMLTextAreaElement | null>(null)
 
 const totalCount = computed(() => items.value.length)
 const codedCount = computed(() => items.value.filter(item => item.categories.length > 0).length)
+const multiCodedCount = computed(() => items.value.filter(item => item.categories.length > 1).length)
 const starredCount = computed(() => items.value.filter(item => item.starred).length)
 const visibleItems = computed(() => items.value
   .map((item, index) => ({ item, index }))
@@ -538,7 +539,7 @@ async function handleSave() {
               style="width: 120px"
               :color="progressPct === 100 ? '#67c23a' : '#409eff'"
             />
-            <span class="progress-text">{{ codedCount }} / {{ totalCount }}</span>
+            <span class="progress-text">当前已编码 {{ codedCount }} / {{ totalCount }}</span>
             <el-button
               :type="showStarredOnly ? 'warning' : 'default'"
               :disabled="starredCount === 0 && !showStarredOnly"
@@ -590,6 +591,7 @@ async function handleSave() {
           <div class="list-tags">
             <el-tag size="small" type="success">已编 {{ codedCount }}</el-tag>
             <el-tag size="small" type="info">未编 {{ totalCount - codedCount }}</el-tag>
+            <el-tag v-if="multiCodedCount > 0" size="small" type="warning">多编码 {{ multiCodedCount }}</el-tag>
             <el-tag size="small" type="warning">星标 {{ starredCount }}</el-tag>
           </div>
         </div>
@@ -601,13 +603,19 @@ async function handleSave() {
           :id="`coi-code-${entry.index}`"
           :key="entry.item.unitId"
           class="coding-row"
-          :class="{ 'is-focused': entry.index === focusedIndex, 'is-coded': entry.item.categories.length > 0, 'is-starred': entry.item.starred }"
+          :class="{
+            'is-focused': entry.index === focusedIndex,
+            'is-coded': entry.item.categories.length > 0,
+            'is-multi-coded': entry.item.categories.length > 1,
+            'is-starred': entry.item.starred,
+          }"
           @click="focusedIndex = entry.index"
         >
           <div class="unit-top">
             <span class="unit-num">{{ entry.item.orderIndex }}</span>
             <span class="unit-time">{{ fmt(entry.item.startTime) }}</span>
             <span class="unit-content">{{ entry.item.content }}</span>
+            <el-tag v-if="entry.item.categories.length > 1" size="small" type="warning" effect="dark">多编码</el-tag>
             <button
               class="star-btn"
               :class="{ 'is-active': entry.item.starred }"
@@ -732,6 +740,14 @@ async function handleSave() {
 .coding-row.is-focused.is-coded { border-left-color: #409eff; }
 .coding-row.is-starred { box-shadow: inset 0 0 0 1px #f3d19e; background: #fffaf0; }
 .coding-row.is-focused.is-starred { background: #fff7e6; }
+.coding-row.is-multi-coded,
+.coding-row.is-multi-coded:hover,
+.coding-row.is-multi-coded.is-focused,
+.coding-row.is-multi-coded.is-starred {
+  border-color: #e6a23c;
+  border-left-color: #e6a23c;
+  background: #fff3bf;
+}
 .unit-top { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
 .unit-bottom { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .unit-num {
