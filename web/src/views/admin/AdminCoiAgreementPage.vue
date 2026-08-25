@@ -238,7 +238,7 @@ function setFinalCategory(index: number, cat: CoiCategory) {
     item.finalCategories = item.finalCategories.includes('OTHER') ? [] : ['OTHER']
     return
   }
-  const current = item.finalCategories.filter(category => category !== 'OTHER')
+  const current: CoiCategory[] = item.finalCategories.filter(category => category !== 'OTHER')
   item.finalCategories = current.includes(cat)
     ? current.filter(category => category !== cat)
     : COI_KEYS.filter(category => [...current, cat].includes(category))
