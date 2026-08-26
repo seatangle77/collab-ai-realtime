@@ -3,6 +3,8 @@ import type { CoiCategory } from '../api/admin/coi-units'
 export const COI_RELIABILITY_CATEGORIES: CoiCategory[] = ['TE', 'EX', 'IN', 'RE', 'OTHER']
 
 export interface CoiReliabilityInput {
+  groupId: string
+  groupName: string
   unitId: string
   sessionId: string
   sessionTitle: string

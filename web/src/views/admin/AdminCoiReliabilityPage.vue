@@ -26,20 +26,32 @@ const CATEGORY_LABELS: Record<CoiCategory, string> = {
 const router = useRouter()
 const groups = ref<AdminGroup[]>([])
 const sessions = ref<AdminChatSession[]>([])
-const selectedGroupId = ref('')
+const selectedGroupIds = ref<string[]>([])
 const selectedSessionId = ref(ALL_SESSIONS)
 const loadingGroups = ref(false)
 const loadingSessions = ref(false)
 const loadingReport = ref(false)
 const report = ref<CoiReliabilityResult | null>(null)
+const groupReports = ref<Array<{ groupId: string; groupName: string; report: CoiReliabilityResult }>>([])
 const generatedAt = ref<string | null>(null)
 
-const selectedGroup = computed(() => groups.value.find(group => group.id === selectedGroupId.value) ?? null)
+const selectedGroups = computed(() => groups.value.filter(group => selectedGroupIds.value.includes(group.id)))
+const isSingleGroup = computed(() => selectedGroupIds.value.length === 1)
+const allGroupsSelected = computed(() => groups.value.length > 0 && selectedGroupIds.value.length === groups.value.length)
 const scopeLabel = computed(() => {
-  if (!selectedGroup.value) return '尚未选择范围'
-  if (selectedSessionId.value === ALL_SESSIONS) return `${selectedGroup.value.name} · 全部会话`
+  if (selectedGroups.value.length === 0) return '尚未选择范围'
+  if (selectedGroups.value.length > 1) return `${selectedGroups.value.length} 个群组 · 全部会话`
+  const selectedGroup = selectedGroups.value[0]!
+  if (selectedSessionId.value === ALL_SESSIONS) return `${selectedGroup.name} · 全部会话`
   const session = sessions.value.find(item => item.id === selectedSessionId.value)
-  return `${selectedGroup.value.name} · ${session?.session_title ?? '当前会话'}`
+  return `${selectedGroup.name} · ${session?.session_title ?? '当前会话'}`
+})
+const groupReportRows = computed(() => {
+  const rows = groupReports.value.map(item => ({ ...item, isOverall: false }))
+  if (report.value && groupReports.value.length > 1) {
+    rows.push({ groupId: '__overall__', groupName: '全部选中群组（汇总）', report: report.value, isOverall: true })
+  }
+  return rows
 })
 
 onMounted(loadGroups)
@@ -56,15 +68,25 @@ async function loadGroups() {
   }
 }
 
+function clearResults() {
+  report.value = null
+  groupReports.value = []
+  generatedAt.value = null
+}
+
+function selectAllGroups() {
+  selectedGroupIds.value = allGroupsSelected.value ? [] : groups.value.map(group => group.id)
+  void onGroupChange()
+}
+
 async function onGroupChange() {
   sessions.value = []
   selectedSessionId.value = ALL_SESSIONS
-  report.value = null
-  generatedAt.value = null
-  if (!selectedGroupId.value) return
+  clearResults()
+  if (!isSingleGroup.value) return
   loadingSessions.value = true
   try {
-    const response = await listAdminChatSessions({ group_id: selectedGroupId.value, page_size: 200 })
+    const response = await listAdminChatSessions({ group_id: selectedGroupIds.value[0], page_size: 200 })
     sessions.value = response.items
   } catch (error: any) {
     ElMessage.error(error?.message || '加载会话失败')
@@ -74,12 +96,13 @@ async function onGroupChange() {
 }
 
 function onSessionChange() {
-  report.value = null
-  generatedAt.value = null
+  clearResults()
 }
 
-function toInputs(rows: AgreementUnit[], sessionTitle: string): CoiReliabilityInput[] {
+function toInputs(rows: AgreementUnit[], group: AdminGroup, sessionTitle: string): CoiReliabilityInput[] {
   return rows.map(row => ({
+    groupId: group.id,
+    groupName: group.name,
     unitId: row.unit.id,
     sessionId: row.unit.session_id,
     sessionTitle,
@@ -91,26 +114,38 @@ function toInputs(rows: AgreementUnit[], sessionTitle: string): CoiReliabilityIn
 }
 
 async function generateReport() {
-  if (!selectedGroupId.value) {
-    ElMessage.warning('请先选择群组')
-    return
-  }
-  const selectedSessions = selectedSessionId.value === ALL_SESSIONS
-    ? sessions.value
-    : sessions.value.filter(session => session.id === selectedSessionId.value)
-  if (selectedSessions.length === 0) {
-    ElMessage.warning('当前范围没有可分析的会话')
+  if (selectedGroupIds.value.length === 0) {
+    ElMessage.warning('请先选择至少一个群组')
     return
   }
 
   loadingReport.value = true
   try {
-    const results = await Promise.all(selectedSessions.map(async (session) => {
-      const rows = await getCoiAgreement(session.id)
-      return toInputs(rows, session.session_title)
+    const resultsByGroup = await Promise.all(selectedGroups.value.map(async (group) => {
+      const groupSessions = isSingleGroup.value
+        ? sessions.value
+        : (await listAdminChatSessions({ group_id: group.id, page_size: 200 })).items
+      const scopedSessions = isSingleGroup.value && selectedSessionId.value !== ALL_SESSIONS
+        ? groupSessions.filter(session => session.id === selectedSessionId.value)
+        : groupSessions
+      const inputs = (await Promise.all(scopedSessions.map(async (session) => {
+        const rows = await getCoiAgreement(session.id)
+        return toInputs(rows, group, session.session_title)
+      }))).flat()
+      return { groupId: group.id, groupName: group.name, inputs }
     }))
-    report.value = calculateCoiReliability(results.flat())
+    const allInputs = resultsByGroup.flatMap(item => item.inputs)
+    groupReports.value = resultsByGroup.map(item => ({
+      groupId: item.groupId,
+      groupName: item.groupName,
+      report: calculateCoiReliability(item.inputs),
+    }))
+    report.value = calculateCoiReliability(allInputs)
     generatedAt.value = new Date().toLocaleString('zh-CN', { hour12: false })
+    if (allInputs.length === 0) {
+      ElMessage.warning('当前范围没有可分析的观点')
+      return
+    }
     if (report.value.eligibleCount === 0) {
       ElMessage.warning('当前范围没有A和C均完成的单编码观点')
     }
@@ -131,6 +166,10 @@ function decimal(value: number | null): string {
   return value === null ? '--' : value.toFixed(3)
 }
 
+function groupRowClassName({ row }: { row: { isOverall: boolean } }): string {
+  return row.isOverall ? 'overall-table-row' : ''
+}
+
 function kappaStatus(value: number | null): { text: string; type: 'success' | 'warning' | 'danger' | 'info'; note: string } {
   if (value === null) return { text: '无法计算', type: 'info', note: '有效样本不足，或所有观点都落在同一类别。' }
   if (value >= 0.8) return { text: '一致性较强', type: 'success', note: '可以进入协商，同时仍应查看具体分歧。' }
@@ -144,8 +183,10 @@ function csvCell(value: string | number): string {
 
 function downloadCsv() {
   if (!report.value) return
-  const header = ['session_id', 'session_title', 'unit_id', 'order_index', 'content', 'coder_a', 'coder_c', 'agreed']
+  const header = ['group_id', 'group_name', 'session_id', 'session_title', 'unit_id', 'order_index', 'content', 'coder_a', 'coder_c', 'agreed']
   const rows = report.value.pairs.map(pair => [
+    pair.groupId,
+    pair.groupName,
     pair.sessionId,
     pair.sessionTitle,
     pair.unitId,
@@ -162,8 +203,22 @@ function downloadCsv() {
     ['observed_agreement', report.value.observedAgreement ?? ''],
     ['cohen_kappa', report.value.cohenKappa ?? ''],
   ]
+  const groupSummaryHeader = ['group_id', 'group_name', 'total_n', 'eligible_n', 'agreement', 'cohen_kappa', 'missing_n', 'multi_code_n']
+  const groupSummaryRows = groupReports.value.map(item => [
+    item.groupId,
+    item.groupName,
+    item.report.totalCount,
+    item.report.eligibleCount,
+    item.report.observedAgreement ?? '',
+    item.report.cohenKappa ?? '',
+    item.report.missingCount,
+    item.report.invalidMultiCount,
+  ])
   const content = [
     ...metadata.map(row => row.map(csvCell).join(',')),
+    '',
+    groupSummaryHeader.map(csvCell).join(','),
+    ...groupSummaryRows.map(row => row.map(csvCell).join(',')),
     '',
     header.map(csvCell).join(','),
     ...rows.map(row => row.map(csvCell).join(',')),
@@ -187,7 +242,7 @@ function downloadCsv() {
       </div>
       <div class="page-actions">
         <el-button :icon="Download" :disabled="!report" @click="downloadCsv">导出协商前CSV</el-button>
-        <el-button type="primary" :icon="Refresh" :loading="loadingReport" @click="generateReport">生成可靠性结果</el-button>
+        <el-button type="primary" :icon="Refresh" :loading="loadingReport" :disabled="loadingSessions" @click="generateReport">生成可靠性结果</el-button>
       </div>
     </div>
 
@@ -201,15 +256,16 @@ function downloadCsv() {
     <el-card shadow="never" class="control-card">
       <div class="control-bar">
         <div class="control-item">
-          <span class="control-label">群组</span>
-          <el-select v-model="selectedGroupId" placeholder="选择群组" filterable style="width: 220px" :loading="loadingGroups" @change="onGroupChange">
+          <span class="control-label">群组（可多选）</span>
+          <el-select v-model="selectedGroupIds" placeholder="选择一个或多个群组" filterable multiple collapse-tags collapse-tags-tooltip style="width: 320px" :loading="loadingGroups" @change="onGroupChange">
             <el-option v-for="group in groups" :key="group.id" :label="group.name" :value="group.id" />
           </el-select>
+          <el-button :disabled="groups.length === 0" @click="selectAllGroups">{{ allGroupsSelected ? '清空群组' : '全选群组' }}</el-button>
         </div>
         <div class="control-item">
           <span class="control-label">会话范围</span>
-          <el-select v-model="selectedSessionId" style="width: 280px" :disabled="!selectedGroupId" :loading="loadingSessions" @change="onSessionChange">
-            <el-option label="当前群组全部会话" :value="ALL_SESSIONS" />
+          <el-select v-model="selectedSessionId" style="width: 280px" :disabled="!isSingleGroup" :loading="loadingSessions" @change="onSessionChange">
+            <el-option :label="isSingleGroup ? '当前群组全部会话' : '所选群组全部会话'" :value="ALL_SESSIONS" />
             <el-option v-for="session in sessions" :key="session.id" :label="session.session_title" :value="session.id" />
           </el-select>
         </div>
@@ -218,6 +274,24 @@ function downloadCsv() {
     </el-card>
 
     <template v-if="report">
+      <el-card shadow="never">
+        <template #header>
+          <div class="section-header">
+            <div><strong>各群组与全部汇总</strong><span>每一组单独计算；最后一行将所有选中组的有效观点合并计算</span></div>
+          </div>
+        </template>
+        <el-table :data="groupReportRows" border empty-text="当前范围没有群组结果" :row-class-name="groupRowClassName">
+          <el-table-column prop="groupName" label="群组" min-width="180" />
+          <el-table-column label="全部观点" width="105" align="center"><template #default="scope">{{ scope.row.report.totalCount }}</template></el-table-column>
+          <el-table-column label="有效配对" width="105" align="center"><template #default="scope">{{ scope.row.report.eligibleCount }}</template></el-table-column>
+          <el-table-column label="一致率" width="110" align="center"><template #default="scope">{{ percentage(scope.row.report.observedAgreement) }}</template></el-table-column>
+          <el-table-column label="Cohen’s κ" width="115" align="center"><template #default="scope">{{ decimal(scope.row.report.cohenKappa) }}</template></el-table-column>
+          <el-table-column label="分歧" width="85" align="center"><template #default="scope">{{ scope.row.report.disagreementCount }}</template></el-table-column>
+          <el-table-column label="缺失" width="85" align="center"><template #default="scope">{{ scope.row.report.missingCount }}</template></el-table-column>
+          <el-table-column label="多编码异常" width="110" align="center"><template #default="scope">{{ scope.row.report.invalidMultiCount }}</template></el-table-column>
+        </el-table>
+      </el-card>
+
       <el-row :gutter="12">
         <el-col :xs="12" :sm="8" :lg="4">
           <el-card shadow="never" class="summary-card"><span>全部观点</span><strong>{{ report.totalCount }}</strong></el-card>
@@ -287,6 +361,7 @@ function downloadCsv() {
           </div>
         </template>
         <el-table :data="report.disagreements" border max-height="460" empty-text="当前范围没有A/C分歧">
+          <el-table-column prop="groupName" label="群组" min-width="140" show-overflow-tooltip />
           <el-table-column prop="sessionTitle" label="会话" min-width="150" show-overflow-tooltip />
           <el-table-column prop="orderIndex" label="序号" width="70" align="center" />
           <el-table-column prop="content" label="观点内容" min-width="360" />
@@ -337,6 +412,7 @@ function downloadCsv() {
 .matrix-table small { display: block; margin-top: 3px; color: #909399; font-weight: 400; }
 .matrix-table td.diagonal { color: #15803d; background: #f0fdf4; font-weight: 700; }
 .matrix-table td.mismatch { color: #b45309; background: #fff3bf; font-weight: 700; }
+.reliability-page :deep(.overall-table-row td.el-table__cell) { background: #eef5ff !important; font-weight: 700; }
 .empty-card { min-height: 320px; display: flex; align-items: center; justify-content: center; }
 @media (max-width: 800px) {
   .page-header { flex-direction: column; }
