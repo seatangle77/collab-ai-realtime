@@ -111,6 +111,7 @@ class AgreementUnitOut(ApiModel):
     unit: CoiUnitOut
     coder_a: CoiCodeOut | None
     coder_b: CoiCodeOut | None
+    coder_c: CoiCodeOut | None
     final: CoiCodeOut | None
     agreed: bool
 
@@ -844,6 +845,12 @@ async def get_session_agreement(
                    cb.coded_by AS coder_b_coded_by,
                    cb.coded_at AS coder_b_coded_at,
                    cb.updated_at AS coder_b_updated_at,
+                   cc.unit_id AS coder_c_unit_id,
+                   cc.coder_role AS coder_c_coder_role,
+                   cc.coi_categories AS coder_c_coi_categories,
+                   cc.coded_by AS coder_c_coded_by,
+                   cc.coded_at AS coder_c_coded_at,
+                   cc.updated_at AS coder_c_updated_at,
                    cf.unit_id AS final_unit_id,
                    cf.coder_role AS final_coder_role,
                    cf.coi_categories AS final_coi_categories,
@@ -855,6 +862,8 @@ async def get_session_agreement(
               ON ca.unit_id = u.id AND ca.coder_role = 'coder_a'
             LEFT JOIN coi_unit_codes cb
               ON cb.unit_id = u.id AND cb.coder_role = 'coder_b'
+            LEFT JOIN coi_unit_codes cc
+              ON cc.unit_id = u.id AND cc.coder_role = 'coder_c'
             LEFT JOIN coi_unit_codes cf
               ON cf.unit_id = u.id AND cf.coder_role = 'final'
             WHERE u.session_id = :sid
@@ -866,17 +875,21 @@ async def get_session_agreement(
     for row in result.mappings().all():
         coder_a = _joined_code_to_out(row, "coder_a")
         coder_b = _joined_code_to_out(row, "coder_b")
+        coder_c = _joined_code_to_out(row, "coder_c")
         final = _joined_code_to_out(row, "final")
         items.append(
             AgreementUnitOut(
                 unit=_unit_row_to_out(row),
                 coder_a=coder_a,
                 coder_b=coder_b,
+                coder_c=coder_c,
                 final=final,
                 agreed=(
                     coder_a is not None
                     and coder_b is not None
+                    and coder_c is not None
                     and set(coder_a.coi_categories) == set(coder_b.coi_categories)
+                    and set(coder_b.coi_categories) == set(coder_c.coi_categories)
                 ),
             )
         )

@@ -19,6 +19,7 @@ interface AgreementItem {
   startTime: number | null
   coderA: CoiCategory[]
   coderB: CoiCategory[]
+  coderC: CoiCategory[]
   finalCategories: CoiCategory[]
 }
 
@@ -51,7 +52,11 @@ const draftInfo = ref<{ savedAt: string; count: number } | null>(null)
 const totalCount = computed(() => items.value.length)
 const finalCount = computed(() => items.value.filter(item => item.finalCategories.length > 0).length)
 const agreedCount = computed(() => items.value.filter(item => isAgreed(item)).length)
-const disagreementCount = computed(() => items.value.filter(item => item.coderA.length && item.coderB.length && !isAgreed(item)).length)
+const partialAgreementCount = computed(() => items.value.filter(item => isPartiallyAgreed(item)).length)
+const disagreementCount = computed(() => items.value.filter(item =>
+  allCodersComplete(item) && !isAgreed(item) && !isPartiallyAgreed(item),
+).length)
+const incompleteCount = computed(() => items.value.filter(item => !allCodersComplete(item)).length)
 const progressPct = computed(() =>
   totalCount.value > 0 ? Math.round((finalCount.value / totalCount.value) * 100) : 0,
 )
@@ -168,6 +173,7 @@ function toAgreementItem(row: AgreementUnit): AgreementItem {
     startTime: row.unit.start_time,
     coderA: [...(row.coder_a?.coi_categories ?? [])],
     coderB: [...(row.coder_b?.coi_categories ?? [])],
+    coderC: [...(row.coder_c?.coi_categories ?? [])],
     finalCategories: [...(row.final?.coi_categories ?? [])],
   }
 }
@@ -196,28 +202,41 @@ function fmt(s: number | null): string {
   return `${m}:${sec}`
 }
 
+function categoriesEqual(left: CoiCategory[], right: CoiCategory[]): boolean {
+  return left.length === right.length && left.every(category => right.includes(category))
+}
+
+function allCodersComplete(item: AgreementItem): boolean {
+  return item.coderA.length > 0 && item.coderB.length > 0 && item.coderC.length > 0
+}
+
 function isAgreed(item: AgreementItem): boolean {
-  return item.coderA.length > 0
-    && item.coderB.length > 0
-    && item.coderA.length === item.coderB.length
-    && item.coderA.every(category => item.coderB.includes(category))
+  return allCodersComplete(item)
+    && categoriesEqual(item.coderA, item.coderB)
+    && categoriesEqual(item.coderB, item.coderC)
 }
 
 function isPartiallyAgreed(item: AgreementItem): boolean {
-  return !isAgreed(item) && item.coderA.some(category => item.coderB.includes(category))
+  return allCodersComplete(item)
+    && !isAgreed(item)
+    && (
+      categoriesEqual(item.coderA, item.coderB)
+      || categoriesEqual(item.coderA, item.coderC)
+      || categoriesEqual(item.coderB, item.coderC)
+    )
 }
 
 function statusType(item: AgreementItem): 'success' | 'warning' | 'info' {
   if (isAgreed(item)) return 'success'
-  if (item.coderA.length && item.coderB.length) return 'warning'
+  if (allCodersComplete(item)) return 'warning'
   return 'info'
 }
 
 function statusText(item: AgreementItem): string {
   if (isAgreed(item)) return '一致'
   if (isPartiallyAgreed(item)) return '部分一致'
-  if (item.coderA.length && item.coderB.length) return '不一致'
-  return '未完成 A/B'
+  if (allCodersComplete(item)) return '不一致'
+  return '未完成 A/B/C'
 }
 
 function fillAgreedFinals() {
@@ -284,7 +303,7 @@ async function handleSave() {
   <div class="page-container">
     <div class="page-header">
       <h2 class="page-title">CoI 最终协商</h2>
-      <span class="header-desc">查看 A/B 独立编码差异，并保存最终 CoI 编码</span>
+      <span class="header-desc">查看 A/B/C 独立编码差异，并保存最终 CoI 编码</span>
     </div>
 
     <el-card shadow="never" class="control-card">
@@ -363,7 +382,9 @@ async function handleSave() {
           <span class="list-title">协商列表</span>
           <div class="list-tags">
             <el-tag size="small" type="success">一致 {{ agreedCount }}</el-tag>
+            <el-tag size="small" type="warning">部分一致 {{ partialAgreementCount }}</el-tag>
             <el-tag size="small" type="warning">不一致 {{ disagreementCount }}</el-tag>
+            <el-tag size="small" type="info">未完成 {{ incompleteCount }}</el-tag>
             <el-tag size="small" type="info">最终已定 {{ finalCount }}</el-tag>
           </div>
         </div>
@@ -374,7 +395,7 @@ async function handleSave() {
           v-for="(item, i) in items"
           :key="item.unitId"
           class="agreement-row"
-          :class="{ 'is-final': item.finalCategories.length > 0, 'is-disagreement': item.coderA.length && item.coderB.length && !isAgreed(item) }"
+          :class="{ 'is-final': item.finalCategories.length > 0, 'is-disagreement': allCodersComplete(item) && !isAgreed(item) }"
         >
           <div class="unit-top">
             <span class="unit-num">{{ item.orderIndex }}</span>
@@ -396,6 +417,15 @@ async function handleSave() {
               <span class="code-label">研究员 B</span>
               <template v-if="item.coderB.length">
                 <el-tag v-for="cat in item.coderB" :key="cat" size="small" :color="COI_LABELS[cat].bg" effect="plain">
+                  {{ tagLabel(cat) }}
+                </el-tag>
+              </template>
+              <el-tag v-else size="small" type="info">未编码</el-tag>
+            </div>
+            <div class="code-cell">
+              <span class="code-label">研究员 C</span>
+              <template v-if="item.coderC.length">
+                <el-tag v-for="cat in item.coderC" :key="cat" size="small" :color="COI_LABELS[cat].bg" effect="plain">
                   {{ tagLabel(cat) }}
                 </el-tag>
               </template>
@@ -468,7 +498,7 @@ async function handleSave() {
 .unit-num { font-size: 11px; color: #c0c4cc; font-weight: 600; width: 24px; text-align: right; flex-shrink: 0; }
 .unit-time { font-size: 12px; color: #909399; width: 40px; flex-shrink: 0; }
 .unit-content { font-size: 15px; color: #303133; line-height: 1.7; word-break: break-word; }
-.code-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-left: 72px; margin-bottom: 10px; }
+.code-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-left: 72px; margin-bottom: 10px; }
 .code-cell { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .code-label, .final-label { font-size: 14px; color: #606266; white-space: nowrap; }
 .final-row { display: flex; align-items: center; gap: 12px; margin-left: 72px; flex-wrap: wrap; }

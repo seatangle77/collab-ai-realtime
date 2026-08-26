@@ -72,6 +72,7 @@ export interface AgreementUnit {
   unit: CoiUnit
   coder_a: CoiCode | null
   coder_b: CoiCode | null
+  coder_c: CoiCode | null
   final: CoiCode | null
   agreed: boolean
 }
