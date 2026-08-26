@@ -47,6 +47,7 @@ const saving = ref(false)
 const items = ref<AgreementItem[]>([])
 const hasDraft = ref(false)
 const draftInfo = ref<{ savedAt: string; count: number } | null>(null)
+const showOnlyDisagreements = ref(true)
 
 const totalCount = computed(() => items.value.length)
 const finalCount = computed(() => items.value.filter(item => item.finalCategories.length > 0).length)
@@ -55,6 +56,10 @@ const disagreementCount = computed(() => items.value.filter(item =>
   bothCodersComplete(item) && !isAgreed(item),
 ).length)
 const incompleteCount = computed(() => items.value.filter(item => !bothCodersComplete(item)).length)
+const visibleItems = computed(() => showOnlyDisagreements.value
+  ? items.value.filter(item => !isAgreed(item))
+  : items.value,
+)
 const progressPct = computed(() =>
   totalCount.value > 0 ? Math.round((finalCount.value / totalCount.value) * 100) : 0,
 )
@@ -147,7 +152,7 @@ function restoreDraft() {
     const categoriesByUnit = new Map(draft.codes.map(code => [code.unitId, code.categories]))
     items.value = items.value.map(item => ({
       ...item,
-      finalCategories: categoriesByUnit.get(item.unitId) ?? [],
+      finalCategories: categoriesByUnit.get(item.unitId) ?? (isAgreed(item) ? [...item.coderA] : []),
     }))
     ElMessage.success(`已恢复最终协商草稿：${draft.codes.length} 条`)
   } catch {
@@ -180,7 +185,10 @@ async function loadAgreement() {
   loadingItems.value = true
   try {
     const res = await getCoiAgreement(selectedSessionId.value)
-    items.value = res.map(toAgreementItem)
+    items.value = res.map(toAgreementItem).map(item => ({
+      ...item,
+      finalCategories: isAgreed(item) ? [...item.coderA] : item.finalCategories,
+    }))
     checkDraft()
     if (res.length === 0) {
       ElMessage.info('该会话暂无观点单元，请先完成「CoI 观点整理」')
@@ -223,20 +231,7 @@ function statusText(item: AgreementItem): string {
   return '未完成 A/C'
 }
 
-function fillAgreedFinals() {
-  let filled = 0
-  for (const item of items.value) {
-    if (!item.finalCategories.length && isAgreed(item)) {
-      item.finalCategories = [...item.coderA]
-      filled += 1
-    }
-  }
-  ElMessage.success(`已填入 ${filled} 条一致编码`)
-}
-
-function setFinalCategory(index: number, cat: CoiCategory) {
-  const item = items.value[index]
-  if (!item) return
+function setFinalCategory(item: AgreementItem, cat: CoiCategory) {
   if (cat === 'OTHER') {
     item.finalCategories = item.finalCategories.includes('OTHER') ? [] : ['OTHER']
     return
@@ -339,7 +334,6 @@ async function handleSave() {
             加载协商数据
           </el-button>
           <template v-if="items.length > 0">
-            <el-button @click="fillAgreedFinals">填入一致项</el-button>
             <el-button @click="saveDraft">保存草稿</el-button>
             <el-button type="primary" :loading="saving" @click="handleSave">保存最终编码</el-button>
           </template>
@@ -369,16 +363,26 @@ async function handleSave() {
             <el-tag size="small" type="warning">不一致 {{ disagreementCount }}</el-tag>
             <el-tag size="small" type="info">未完成 {{ incompleteCount }}</el-tag>
             <el-tag size="small" type="info">最终已定 {{ finalCount }}</el-tag>
+            <el-switch v-model="showOnlyDisagreements" size="small" active-text="只看不一致" />
           </div>
         </div>
       </template>
 
       <div class="agreement-list">
+        <el-empty
+          v-if="visibleItems.length === 0"
+          :image-size="80"
+          description="A与C全部一致，没有需要协商的观点"
+        />
         <div
-          v-for="(item, i) in items"
+          v-for="item in visibleItems"
           :key="item.unitId"
           class="agreement-row"
-          :class="{ 'is-final': item.finalCategories.length > 0, 'is-disagreement': bothCodersComplete(item) && !isAgreed(item) }"
+          :class="{
+            'is-final': item.finalCategories.length > 0,
+            'is-disagreement': bothCodersComplete(item) && !isAgreed(item) && item.finalCategories.length === 0,
+            'is-resolved-disagreement': bothCodersComplete(item) && !isAgreed(item) && item.finalCategories.length > 0,
+          }"
         >
           <div class="unit-top">
             <span class="unit-num">{{ item.orderIndex }}</span>
@@ -413,7 +417,17 @@ async function handleSave() {
 
           <div class="final-row">
             <span class="final-label">最终编码</span>
-            <div class="category-buttons">
+            <div v-if="isAgreed(item)" class="auto-final">
+              <el-tag type="success" size="small">已自动采用A–C一致编码</el-tag>
+              <el-tag
+                v-for="cat in item.finalCategories"
+                :key="cat"
+                size="small"
+                :color="COI_LABELS[cat].bg"
+                effect="plain"
+              >{{ tagLabel(cat) }}</el-tag>
+            </div>
+            <div v-else class="category-buttons">
               <button
                 v-for="cat in COI_KEYS"
                 :key="cat"
@@ -422,7 +436,7 @@ async function handleSave() {
                 :style="item.finalCategories.includes(cat)
                   ? { background: COI_LABELS[cat].color, borderColor: COI_LABELS[cat].color, color: '#fff' }
                   : { borderColor: COI_LABELS[cat].color, color: COI_LABELS[cat].color, background: COI_LABELS[cat].bg }"
-                @click="setFinalCategory(i, cat)"
+                @click="setFinalCategory(item, cat)"
               >{{ cat }} {{ COI_LABELS[cat].label }}</button>
               <button
                 v-if="item.finalCategories.length"
@@ -468,6 +482,7 @@ async function handleSave() {
 }
 .agreement-row.is-final { border-left: 3px solid #67c23a; }
 .agreement-row.is-disagreement { background: #fffaf0; border-color: #f3d19e; }
+.agreement-row.is-resolved-disagreement { background: #f0fdf4; border-color: #b7e4c7; }
 .unit-top { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
 .unit-num { font-size: 11px; color: #c0c4cc; font-weight: 600; width: 24px; text-align: right; flex-shrink: 0; }
 .unit-time { font-size: 12px; color: #909399; width: 40px; flex-shrink: 0; }
@@ -476,7 +491,7 @@ async function handleSave() {
 .code-cell { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .code-label, .final-label { font-size: 14px; color: #606266; white-space: nowrap; }
 .final-row { display: flex; align-items: center; gap: 12px; margin-left: 72px; flex-wrap: wrap; }
-.category-buttons { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.category-buttons, .auto-final { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .cat-btn {
   padding: 3px 12px;
   border: 1.5px solid;
