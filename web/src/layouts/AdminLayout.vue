@@ -60,6 +60,7 @@ const menuGroups = computed<AdminMenuGroup[]>(() => [
       { path: '/admin/coi-units', label: 'CoI 观点整理' },
       { path: '/admin/coi-independent-coding', label: 'CoI 独立编码' },
       { path: '/admin/coi-ai-coding', label: 'CoI AI 辅助编码' },
+      { path: '/admin/coi-reliability', label: 'CoI 协商前可靠性' },
       { path: '/admin/coi-agreement', label: 'CoI 最终协商' },
       { path: '/admin/coi-analysis', label: 'CoI 认知参与度分析' },
       { path: '/admin/coi-composition-analysis', label: 'CoI 编码构成分析（新）' },
