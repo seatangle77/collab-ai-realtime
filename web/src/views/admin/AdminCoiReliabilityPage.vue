@@ -231,6 +231,132 @@ function downloadCsv() {
   link.click()
   URL.revokeObjectURL(url)
 }
+
+function escapeHtml(value: string | number | null | undefined): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+}
+
+function htmlTable(headers: string[], rows: Array<Array<string | number>>, className = ''): string {
+  const head = headers.map(header => `<th>${escapeHtml(header)}</th>`).join('')
+  const body = rows.length > 0
+    ? rows.map(row => `<tr>${row.map(cell => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`).join('')
+    : `<tr><td colspan="${headers.length}" class="empty">无数据</td></tr>`
+  return `<div class="table-wrap"><table class="${className}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`
+}
+
+function downloadHtml() {
+  if (!report.value) return
+  const currentReport = report.value
+  const status = kappaStatus(currentReport.cohenKappa)
+  const groupRows = groupReportRows.value.map(item => [
+    item.groupName,
+    item.report.totalCount,
+    item.report.eligibleCount,
+    percentage(item.report.observedAgreement),
+    decimal(item.report.cohenKappa),
+    item.report.disagreementCount,
+    item.report.missingCount,
+    item.report.invalidMultiCount,
+  ])
+  const matrixHeaders = ['A \\ C', ...COI_RELIABILITY_CATEGORIES.map(category => `${category} ${CATEGORY_LABELS[category]}`)]
+  const matrixRows = COI_RELIABILITY_CATEGORIES.map(rowCategory => [
+    `${rowCategory} ${CATEGORY_LABELS[rowCategory]}`,
+    ...COI_RELIABILITY_CATEGORIES.map(columnCategory => currentReport.confusionMatrix[rowCategory][columnCategory]),
+  ])
+  const disagreementRows = currentReport.disagreements.map(pair => [
+    pair.groupName,
+    pair.sessionTitle,
+    pair.orderIndex,
+    pair.content,
+    pair.categoryA,
+    pair.categoryC,
+  ])
+  const html = `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CoI 协商前可靠性报告（A–C）</title>
+  <style>
+    :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; color: #1e2d40; background: #f4f6f9; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 32px 20px; }
+    main { max-width: 1120px; margin: 0 auto; padding: 38px 42px; background: #fff; border: 1px solid #dfe4ec; border-radius: 12px; box-shadow: 0 8px 30px rgba(30,45,64,.08); }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    h2 { margin: 34px 0 14px; padding-bottom: 9px; border-bottom: 2px solid #e7edf5; font-size: 19px; }
+    p { line-height: 1.7; }
+    .subtitle, .meta, .note { color: #65748b; }
+    .meta { display: grid; grid-template-columns: 120px 1fr; gap: 8px 14px; margin: 24px 0; padding: 16px 18px; background: #f6f8fb; border-radius: 8px; font-size: 14px; }
+    .meta strong { color: #334155; }
+    .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .card { padding: 16px; border: 1px solid #dfe4ec; border-radius: 8px; }
+    .card span { display: block; color: #718098; font-size: 13px; }
+    .card strong { display: block; margin-top: 5px; font-size: 25px; }
+    .interpretation { margin-top: 12px; padding: 14px 16px; background: #fff8e8; border-left: 4px solid #e6a23c; border-radius: 4px; }
+    .table-wrap { width: 100%; overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 10px 9px; border: 1px solid #dfe4ec; text-align: left; vertical-align: top; }
+    th { background: #f3f6fa; white-space: nowrap; }
+    .matrix th, .matrix td { text-align: center; }
+    .matrix tbody td:not(:first-child) { font-weight: 600; }
+    .empty { padding: 24px; color: #909399; text-align: center; }
+    .footer { margin-top: 34px; padding-top: 16px; border-top: 1px solid #e5eaf1; color: #7b8799; font-size: 12px; }
+    .print { position: fixed; top: 18px; right: 18px; padding: 9px 15px; color: #fff; background: #2563eb; border: 0; border-radius: 6px; cursor: pointer; }
+    @media (max-width: 760px) { main { padding: 24px 18px; } .cards { grid-template-columns: repeat(2, 1fr); } .meta { grid-template-columns: 1fr; } }
+    @media print { body { padding: 0; background: #fff; } main { max-width: none; padding: 0; border: 0; box-shadow: none; } .print { display: none; } h2 { break-after: avoid; } table, .card { break-inside: avoid; } }
+  </style>
+</head>
+<body>
+  <button class="print" onclick="window.print()">打印 / 保存为 PDF</button>
+  <main>
+    <h1>CoI 协商前可靠性报告（A–C）</h1>
+    <p class="subtitle">研究员A与AI辅助研究员C的独立单编码一致性分析</p>
+    <div class="meta">
+      <strong>分析范围</strong><span>${escapeHtml(scopeLabel.value)}</span>
+      <strong>生成时间</strong><span>${escapeHtml(generatedAt.value)}</span>
+      <strong>数据性质</strong><span>生成时的实时计算结果；此HTML文件是独立导出副本，不会修改任何编码。</span>
+    </div>
+
+    <h2>结果摘要</h2>
+    <div class="cards">
+      <div class="card"><span>全部观点</span><strong>${currentReport.totalCount}</strong></div>
+      <div class="card"><span>有效A/C配对</span><strong>${currentReport.eligibleCount}</strong></div>
+      <div class="card"><span>原始一致率</span><strong>${percentage(currentReport.observedAgreement)}</strong></div>
+      <div class="card"><span>Cohen’s κ</span><strong>${decimal(currentReport.cohenKappa)}</strong></div>
+      <div class="card"><span>一致</span><strong>${currentReport.agreedCount}</strong></div>
+      <div class="card"><span>分歧</span><strong>${currentReport.disagreementCount}</strong></div>
+      <div class="card"><span>缺失A或C</span><strong>${currentReport.missingCount}</strong></div>
+      <div class="card"><span>多编码异常</span><strong>${currentReport.invalidMultiCount}</strong></div>
+    </div>
+    <div class="interpretation"><strong>${escapeHtml(status.text)}</strong>：${escapeHtml(status.note)}</div>
+
+    <h2>各群组与全部汇总</h2>
+    ${htmlTable(['群组', '全部观点', '有效配对', '一致率', 'Cohen’s κ', '分歧', '缺失', '多编码异常'], groupRows)}
+
+    <h2>A–C 编码混淆矩阵</h2>
+    <p class="note">行代表研究员A，列代表研究员C；对角线表示一致。</p>
+    ${htmlTable(matrixHeaders, matrixRows, 'matrix')}
+
+    <h2>分歧明细（${currentReport.disagreementCount}条）</h2>
+    ${htmlTable(['群组', '会话', '序号', '观点内容', '研究员A', '研究员C'], disagreementRows)}
+
+    <p class="footer">说明：可靠性不是编码正确率，也不存在自动“70%及格”。如结果偏低，应保留本轮结果、优化编码手册，并重新进行独立编码。</p>
+  </main>
+</body>
+</html>`
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `coi-reliability-a-c-${new Date().toISOString().slice(0, 10)}.html`
+  link.click()
+  URL.revokeObjectURL(url)
+}
 </script>
 
 <template>
@@ -242,6 +368,7 @@ function downloadCsv() {
       </div>
       <div class="page-actions">
         <el-button :icon="Download" :disabled="!report" @click="downloadCsv">导出协商前CSV</el-button>
+        <el-button :icon="Download" :disabled="!report" @click="downloadHtml">导出HTML报告</el-button>
         <el-button type="primary" :icon="Refresh" :loading="loadingReport" :disabled="loadingSessions" @click="generateReport">生成可靠性结果</el-button>
       </div>
     </div>
