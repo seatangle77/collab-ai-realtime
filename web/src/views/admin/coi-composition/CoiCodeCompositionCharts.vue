@@ -158,6 +158,10 @@ function conditionColor(condition: string): string {
         <span>0%</span><span>10%</span><span>20%</span><span>30%</span><span>40%</span>
       </div>
     </div>
+    <footer class="figure-caption">
+      <strong>图 1　CoI 四阶段编码占比的分组水平条形图。</strong>
+      <span>条形表示各实验条件内会话等权平均后的阶段占比；所有阶段使用相同的 0–40% 横轴，便于直接比较。</span>
+    </footer>
   </el-card>
 
   <el-card class="chart-card" shadow="never">
@@ -201,6 +205,10 @@ function conditionColor(condition: string): string {
         </div>
       </section>
     </div>
+    <footer class="figure-caption">
+      <strong>图 2　相对无辅助条件的 CoI 阶段占比差异图。</strong>
+      <span>横轴表示智能眼镜或 APP 通知相对无辅助条件的百分点变化（pp）；正值表示占比更高，负值表示占比更低。图中差异为描述性结果，不代表统计显著。</span>
+    </footer>
   </el-card>
 
   <el-collapse class="detail-collapse">
@@ -274,6 +282,8 @@ function conditionColor(condition: string): string {
 .mean-bar { position: absolute; z-index: 1; top: 2px; left: 0; height: 18px; border-radius: 3px; }
 .mean-value { color: #344054; font-size: 12px; font-variant-numeric: tabular-nums; }
 .mean-axis { display: flex; justify-content: space-between; margin: 5px 66px 0 234px; color: #94a3b8; font-size: 11px; }
+.figure-caption { display: flex; flex-direction: column; gap: 4px; margin: 18px 12px 2px 148px; padding-top: 12px; border-top: 1px solid #eef2f6; color: #66758a; font-size: 11px; line-height: 1.65; }
+.figure-caption strong { color: #3f4f63; font-weight: 650; }
 
 .delta-chart { padding: 4px 12px 0; }
 .delta-axis { display: flex; justify-content: space-between; margin: 0 66px 2px 234px; color: #94a3b8; font-size: 11px; }
@@ -321,6 +331,7 @@ function conditionColor(condition: string): string {
   .condition-name { text-align: left; }
   .mean-lane, .delta-lane { grid-template-columns: 66px minmax(0, 1fr) 58px; gap: 6px; }
   .mean-axis, .delta-axis { margin-left: 132px; margin-right: 68px; }
+  .figure-caption { margin-left: 12px; }
   .condition-legend { display: none; }
   .descriptive-note { white-space: normal; }
 }
