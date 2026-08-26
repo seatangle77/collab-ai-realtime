@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Refresh } from '@element-plus/icons-vue'
+import { Download, Refresh } from '@element-plus/icons-vue'
 import { listAdminGroups } from '../../api/admin/groups'
 import {
   createCoiCompositionAnalysis,
@@ -13,6 +13,7 @@ import SampleSelector from './task-score/SampleSelector.vue'
 import CoiPostHocTable from './coi/CoiPostHocTable.vue'
 import { coderRoleLabel, conditionLabel, formatNumber, pValueText, testLabel } from './coi/reportHelpers'
 import CoiCodeCompositionCharts from './coi-composition/CoiCodeCompositionCharts.vue'
+import { buildCoiCompositionReportHtml } from './coi-composition/reportHelpers'
 
 const conditionColumns = ['no_assistance', 'glasses', 'app_notification']
 const coderRole = ref<CoiAnalysisCoderRole>('final')
@@ -91,6 +92,27 @@ async function fetchReport() {
   }
 }
 
+function downloadHtmlReport() {
+  if (!report.value) {
+    ElMessage.warning('请先生成分析结果')
+    return
+  }
+  const html = buildCoiCompositionReportHtml(
+    report.value,
+    coderRole.value,
+    conditionColumns,
+    selectedGroupIdsByCondition,
+    groupOptionsByCondition.value,
+  )
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `coi-composition-analysis-${new Date().toISOString().slice(0, 10)}.html`
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
 onMounted(fetchGroupsAndReport)
 </script>
 
@@ -102,6 +124,7 @@ onMounted(fetchGroupsAndReport)
         <p>只比较 TE、EX、IN、RE 四阶段编码构成；原“认知参与度分析”页面保持不变。</p>
       </div>
       <div class="page-actions">
+        <el-button :icon="Download" :disabled="!report" @click="downloadHtmlReport">下载 HTML 报告</el-button>
         <el-button :icon="Refresh" :loading="loading" type="primary" @click="fetchReport">重新生成</el-button>
       </div>
     </div>
