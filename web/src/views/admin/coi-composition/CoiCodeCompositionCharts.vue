@@ -17,11 +17,16 @@ const phases = [
   { metric: 're_ratio', key: 're_ratio', short: 'RE', label: 'Resolution' },
 ] as const
 
-const conditionStyles: Record<string, { short: string; color: string }> = {
-  no_assistance: { short: '无辅助', color: '#64748b' },
-  glasses: { short: '智能眼镜', color: '#3b82f6' },
-  app_notification: { short: 'APP 通知', color: '#f97316' },
+const conditionStyles: Record<string, { color: string }> = {
+  no_assistance: { color: '#64748b' },
+  glasses: { color: '#3b82f6' },
+  app_notification: { color: '#f97316' },
 }
+
+const BASELINE = 'no_assistance'
+const MEAN_SCALE_MAX = 0.4
+const DISTRIBUTION_SCALE_MAX = 0.5
+const DELTA_SCALE_MAX = 8
 
 function meanFor(metric: string, condition: string): number {
   return props.metrics
@@ -30,7 +35,7 @@ function meanFor(metric: string, condition: string): number {
     ?.mean ?? 0
 }
 
-const alignedRows = computed(() => phases.map(phase => ({
+const meanRows = computed(() => phases.map(phase => ({
   ...phase,
   conditions: props.conditions.map(condition => ({
     condition,
@@ -38,23 +43,74 @@ const alignedRows = computed(() => phases.map(phase => ({
   })),
 })))
 
+// 差值只用于描述变化方向和大小，不把它解释为统计显著性。
+const deltaRows = computed(() => phases.map(phase => ({
+  ...phase,
+  comparisons: props.conditions
+    .filter(condition => condition !== BASELINE)
+    .map(condition => ({
+      condition,
+      delta: (meanFor(phase.metric, condition) - meanFor(phase.metric, BASELINE)) * 100,
+    })),
+})))
+
 function valuesFor(key: keyof CoiCompositionObservation, condition: string): number[] {
   return props.observations
     .filter((item) => item.condition === condition)
     .map((item) => Number(item[key]))
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b)
 }
 
-function dotLeft(index: number, length: number): number {
-  if (length <= 1) return 50
-  return 14 + (index % 6) * 14 + (Math.floor(index / 6) % 2) * 4
+function quantile(values: number[], percentile: number): number {
+  if (!values.length) return 0
+  const index = (values.length - 1) * percentile
+  const lower = Math.floor(index)
+  const remainder = index - lower
+  const lowerValue = values[lower] ?? 0
+  const upperValue = values[lower + 1] ?? lowerValue
+  return lowerValue + (upperValue - lowerValue) * remainder
 }
+
+const distributionRows = computed(() => phases.map(phase => ({
+  ...phase,
+  conditions: props.conditions.map(condition => {
+    const values = valuesFor(phase.key, condition)
+    return {
+      condition,
+      min: values[0] ?? 0,
+      q1: quantile(values, 0.25),
+      median: quantile(values, 0.5),
+      q3: quantile(values, 0.75),
+      max: values[values.length - 1] ?? 0,
+      mean: meanFor(phase.metric, condition),
+    }
+  }),
+})))
 
 function percent(value: number): string {
   return `${(value * 100).toFixed(1)}%`
 }
 
-function plotPercent(value: number): number {
-  return Math.min(100, Math.max(0, value * 200))
+function signedPoints(value: number): string {
+  if (Math.abs(value) < 0.05) return '0.0'
+  return `${value > 0 ? '+' : ''}${value.toFixed(1)}`
+}
+
+function meanWidth(value: number): number {
+  return Math.min(100, Math.max(0, value / MEAN_SCALE_MAX * 100))
+}
+
+function distributionPosition(value: number): number {
+  return Math.min(100, Math.max(0, value / DISTRIBUTION_SCALE_MAX * 100))
+}
+
+function deltaWidth(value: number): number {
+  return Math.min(50, Math.abs(value) / (DELTA_SCALE_MAX * 2) * 100)
+}
+
+function deltaLeft(value: number): number {
+  return value < 0 ? 50 - deltaWidth(value) : 50
 }
 
 function conditionColor(condition: string): string {
@@ -68,9 +124,9 @@ function conditionColor(condition: string): string {
       <div class="card-heading">
         <div>
           <strong>四阶段条件对比</strong>
-          <span>四个阶段统一使用0–50%刻度；同一行直接比较三个条件</span>
+          <span>条件内会话等权平均；所有阶段使用同一 0–40% 刻度</span>
         </div>
-        <div class="condition-legend">
+        <div class="condition-legend" aria-label="实验条件图例">
           <span v-for="condition in conditions" :key="condition">
             <i :style="{ background: conditionColor(condition) }" />{{ conditionLabel(condition) }}
           </span>
@@ -78,24 +134,29 @@ function conditionColor(condition: string): string {
       </div>
     </template>
 
-    <div class="aligned-chart">
-      <div v-for="row in alignedRows" :key="row.metric" class="aligned-row">
-        <div class="phase-name"><strong>{{ row.short }}</strong><span>{{ row.label }}</span></div>
-        <div class="aligned-plot" :aria-label="`${row.label}三条件均值`">
-          <div class="vertical-grid"><i v-for="tick in 6" :key="tick" /></div>
-          <div
-            v-for="entry in row.conditions"
-            :key="entry.condition"
-            class="condition-series"
-            :style="{ '--series-color': conditionColor(entry.condition) }"
-          >
-            <span class="value-line" :style="{ width: `${plotPercent(entry.value)}%` }" />
-            <span class="value-dot" :style="{ left: `${plotPercent(entry.value)}%` }" />
-            <span class="value-text" :style="{ left: `${plotPercent(entry.value)}%` }">{{ percent(entry.value) }}</span>
+    <div class="mean-chart" role="img" aria-label="四个 CoI 阶段在三个实验条件下的平均编码占比分组条形图">
+      <section v-for="row in meanRows" :key="row.metric" class="mean-group">
+        <div class="phase-name">
+          <strong>{{ row.short }}</strong>
+          <span>{{ row.label }}</span>
+        </div>
+        <div class="mean-lanes">
+          <div v-for="entry in row.conditions" :key="entry.condition" class="mean-lane">
+            <span class="condition-name">{{ conditionLabel(entry.condition) }}</span>
+            <div class="bar-track">
+              <i v-for="tick in 5" :key="tick" class="grid-line" :style="{ left: `${(tick - 1) * 25}%` }" />
+              <span
+                class="mean-bar"
+                :style="{ width: `${meanWidth(entry.value)}%`, background: conditionColor(entry.condition) }"
+              />
+            </div>
+            <strong class="mean-value">{{ percent(entry.value) }}</strong>
           </div>
         </div>
+      </section>
+      <div class="mean-axis" aria-hidden="true">
+        <span>0%</span><span>10%</span><span>20%</span><span>30%</span><span>40%</span>
       </div>
-      <div class="aligned-axis"><span>0%</span><span>10%</span><span>20%</span><span>30%</span><span>40%</span><span>50%</span></div>
     </div>
   </el-card>
 
@@ -103,81 +164,164 @@ function conditionColor(condition: string): string {
     <template #header>
       <div class="card-heading">
         <div>
-          <strong>组级分布</strong>
-          <span>每个点代表一场会话，横线表示条件均值；四个面板均使用0–50%刻度</span>
+          <strong>相对无辅助的变化</strong>
+          <span>正值表示高于无辅助，负值表示低于无辅助；单位为百分点（pp）</span>
         </div>
+        <span class="descriptive-note">描述性差异，不代表统计显著</span>
       </div>
     </template>
-    <div class="phase-grid">
-      <section v-for="phase in phases" :key="phase.metric" class="phase-panel">
-        <header>
-          <span class="phase-chip">{{ phase.short }}</span>
-          <div><strong>{{ phase.label }}</strong><small>编码占比</small></div>
-        </header>
-        <div class="plot-area">
-          <div class="y-axis"><span>50%</span><span>40%</span><span>30%</span><span>20%</span><span>10%</span><span>0%</span></div>
-          <div class="plot-columns">
-            <div v-for="condition in conditions" :key="condition" class="plot-column">
-              <div class="grid-lines"><i /><i /><i /><i /><i /><i /></div>
+
+    <div class="delta-chart" role="img" aria-label="智能眼镜和 APP 通知相对无辅助条件的四阶段百分点差异">
+      <div class="delta-axis" aria-hidden="true">
+        <span>−8</span><span>−4</span><span>0</span><span>+4</span><span>+8 pp</span>
+      </div>
+      <section v-for="row in deltaRows" :key="row.metric" class="delta-group">
+        <div class="phase-name">
+          <strong>{{ row.short }}</strong>
+          <span>{{ row.label }}</span>
+        </div>
+        <div class="delta-lanes">
+          <div v-for="entry in row.comparisons" :key="entry.condition" class="delta-lane">
+            <span class="condition-name">{{ conditionLabel(entry.condition) }}</span>
+            <div class="delta-track">
+              <i class="zero-line" />
               <span
-                v-for="(value, index) in valuesFor(phase.key, condition)"
-                :key="`${condition}-${index}`"
-                class="plot-dot"
-                :style="{ bottom: `${plotPercent(value)}%`, left: `${dotLeft(index, valuesFor(phase.key, condition).length)}%`, background: conditionColor(condition) }"
-                :title="`${conditionLabel(condition)}: ${percent(value)}`"
+                class="delta-bar"
+                :style="{
+                  left: `${deltaLeft(entry.delta)}%`,
+                  width: `${deltaWidth(entry.delta)}%`,
+                  background: conditionColor(entry.condition),
+                }"
               />
-              <span class="mean-line" :style="{ bottom: `${plotPercent(meanFor(phase.metric, condition))}%`, borderColor: conditionColor(condition) }" />
-              <div class="plot-label">{{ conditionLabel(condition) }}</div>
             </div>
+            <strong class="delta-value" :class="{ positive: entry.delta > 0, negative: entry.delta < 0 }">
+              {{ signedPoints(entry.delta) }} pp
+            </strong>
           </div>
         </div>
       </section>
     </div>
   </el-card>
+
+  <el-collapse class="detail-collapse">
+    <el-collapse-item name="distribution">
+      <template #title>
+        <div class="collapse-title">
+          <strong>查看 36 场会话的分布</strong>
+          <span>箱线图显示中位数、四分位区间与全距；菱形表示均值</span>
+        </div>
+      </template>
+      <div class="boxplot-grid">
+        <section v-for="row in distributionRows" :key="row.metric" class="boxplot-panel">
+          <header><strong>{{ row.short }}</strong><span>{{ row.label }}</span></header>
+          <div v-for="entry in row.conditions" :key="entry.condition" class="boxplot-row">
+            <span class="boxplot-label">{{ conditionLabel(entry.condition) }}</span>
+            <div class="boxplot-track">
+              <i v-for="tick in 6" :key="tick" class="grid-line" :style="{ left: `${(tick - 1) * 20}%` }" />
+              <span
+                class="whisker"
+                :style="{
+                  left: `${distributionPosition(entry.min)}%`,
+                  width: `${distributionPosition(entry.max) - distributionPosition(entry.min)}%`,
+                  borderColor: conditionColor(entry.condition),
+                }"
+              />
+              <span
+                class="quartile-box"
+                :style="{
+                  left: `${distributionPosition(entry.q1)}%`,
+                  width: `${distributionPosition(entry.q3) - distributionPosition(entry.q1)}%`,
+                  borderColor: conditionColor(entry.condition),
+                  background: `${conditionColor(entry.condition)}22`,
+                }"
+              />
+              <span class="median-line" :style="{ left: `${distributionPosition(entry.median)}%`, background: conditionColor(entry.condition) }" />
+              <span class="mean-diamond" :style="{ left: `${distributionPosition(entry.mean)}%`, background: conditionColor(entry.condition) }" />
+            </div>
+            <strong class="boxplot-value">{{ percent(entry.mean) }}</strong>
+          </div>
+          <div class="boxplot-axis" aria-hidden="true">
+            <span>0%</span><span>10%</span><span>20%</span><span>30%</span><span>40%</span><span>50%</span>
+          </div>
+        </section>
+      </div>
+    </el-collapse-item>
+  </el-collapse>
 </template>
 
 <style scoped>
 .chart-card { border: 1px solid #e3e9f2; border-radius: 10px; }
 .card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .card-heading > div:first-child { display: flex; flex-direction: column; gap: 4px; }
+.card-heading strong { color: #26364b; }
 .card-heading span { color: #718096; font-size: 12px; }
 .condition-legend { display: flex; gap: 14px; flex-wrap: wrap; }
 .condition-legend span { display: flex; align-items: center; gap: 5px; color: #475569; font-size: 12px; font-weight: 650; }
 .condition-legend i { width: 9px; height: 9px; border-radius: 50%; }
-.aligned-chart { padding: 4px 12px 0; }
-.aligned-row { display: grid; grid-template-columns: 116px minmax(0, 1fr); align-items: center; gap: 18px; margin: 16px 0; }
-.phase-name { display: flex; flex-direction: column; align-items: flex-end; }
-.phase-name strong { color: #26364b; font-size: 14px; }
+.descriptive-note { padding: 5px 9px; border-radius: 5px; background: #fff7ed; color: #9a5b13 !important; white-space: nowrap; }
+.phase-name { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; }
+.phase-name strong { color: #26364b; font-size: 15px; }
 .phase-name span { color: #8a97aa; font-size: 10px; }
-.aligned-plot { position: relative; display: grid; grid-template-rows: repeat(3, 18px); min-height: 54px; }
-.vertical-grid { position: absolute; inset: 0; display: flex; justify-content: space-between; pointer-events: none; }
-.vertical-grid i { height: 100%; border-left: 1px dashed #e1e7ef; }
-.condition-series { position: relative; min-width: 0; --series-color: #64748b; }
-.value-line { position: absolute; top: 8px; left: 0; height: 2px; border-radius: 99px; background: var(--series-color); opacity: .25; }
-.value-dot { position: absolute; top: 4px; width: 10px; height: 10px; margin-left: -5px; border: 2px solid white; border-radius: 50%; background: var(--series-color); box-shadow: 0 1px 3px rgba(15,23,42,.2); }
-.value-text { position: absolute; top: 1px; margin-left: 9px; color: #344054; font-size: 11px; font-weight: 700; white-space: nowrap; }
-.aligned-axis { display: flex; justify-content: space-between; margin-left: 134px; color: #94a3b8; font-size: 11px; }
-.phase-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-.phase-panel { padding: 14px; border: 1px solid #e5eaf2; border-radius: 9px; background: #fbfcfe; }
-.phase-panel header { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; }
-.phase-panel header > div { display: flex; flex-direction: column; }
-.phase-panel header strong { color: #26364b; font-size: 13px; }
-.phase-panel header small { color: #8a97aa; font-size: 11px; }
-.phase-chip { display: grid; width: 32px; height: 28px; place-items: center; border-radius: 7px; color: #324055; background: #e9eef5; font-size: 12px; font-weight: 800; }
-.plot-area { display: grid; grid-template-columns: 38px minmax(0, 1fr); height: 190px; }
-.y-axis { display: flex; flex-direction: column; justify-content: space-between; padding: 0 7px 21px 0; color: #9aa7ba; font-size: 10px; text-align: right; }
-.plot-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; min-width: 0; }
-.plot-column { position: relative; height: 168px; border-left: 1px solid #eef2f6; border-right: 1px solid #eef2f6; }
-.grid-lines { position: absolute; inset: 0 0 0; display: flex; flex-direction: column; justify-content: space-between; }
-.grid-lines i { display: block; border-top: 1px dashed #e5eaf1; }
-.plot-dot { position: absolute; z-index: 2; width: 7px; height: 7px; margin: 0 0 -3.5px -3.5px; border: 1.5px solid white; border-radius: 50%; box-shadow: 0 1px 3px rgba(15,23,42,.28); }
-.mean-line { position: absolute; z-index: 3; left: 9%; right: 9%; margin-bottom: -1px; border-top: 2px solid; }
-.plot-label { position: absolute; top: 174px; left: 50%; transform: translateX(-50%); color: #66758a; font-size: 10px; white-space: nowrap; }
-@media (max-width: 1100px) { .phase-grid { grid-template-columns: 1fr; } }
+.condition-name { overflow: hidden; color: #64748b; font-size: 11px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.grid-line { position: absolute; z-index: 0; top: 0; bottom: 0; border-left: 1px dashed #e4eaf2; }
+
+.mean-chart { padding: 4px 12px 0; }
+.mean-group { display: grid; grid-template-columns: 116px minmax(0, 1fr); gap: 20px; padding: 17px 0; border-bottom: 1px solid #eef2f6; }
+.mean-group:last-of-type { border-bottom: 0; }
+.mean-lanes { display: flex; flex-direction: column; gap: 8px; }
+.mean-lane { display: grid; grid-template-columns: 78px minmax(0, 1fr) 54px; align-items: center; gap: 10px; min-height: 23px; }
+.bar-track { position: relative; height: 22px; }
+.mean-bar { position: absolute; z-index: 1; top: 2px; left: 0; height: 18px; border-radius: 3px; }
+.mean-value { color: #344054; font-size: 12px; font-variant-numeric: tabular-nums; }
+.mean-axis { display: flex; justify-content: space-between; margin: 5px 66px 0 234px; color: #94a3b8; font-size: 11px; }
+
+.delta-chart { padding: 4px 12px 0; }
+.delta-axis { display: flex; justify-content: space-between; margin: 0 66px 2px 234px; color: #94a3b8; font-size: 11px; }
+.delta-group { display: grid; grid-template-columns: 116px minmax(0, 1fr); gap: 20px; padding: 15px 0; border-top: 1px solid #eef2f6; }
+.delta-lanes { display: flex; flex-direction: column; gap: 9px; }
+.delta-lane { display: grid; grid-template-columns: 78px minmax(0, 1fr) 66px; align-items: center; gap: 10px; min-height: 24px; }
+.delta-track { position: relative; height: 20px; background: linear-gradient(to right, transparent 24.8%, #e7ecf3 25%, transparent 25.2%, transparent 74.8%, #e7ecf3 75%, transparent 75.2%); }
+.zero-line { position: absolute; z-index: 0; top: 0; bottom: 0; left: 50%; border-left: 1.5px solid #9aa7b8; }
+.delta-bar { position: absolute; z-index: 1; top: 3px; height: 14px; border-radius: 2px; }
+.delta-value { color: #475569; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.delta-value.positive::before { content: '↑ '; }
+.delta-value.negative::before { content: '↓ '; }
+
+.detail-collapse { overflow: hidden; border: 1px solid #e3e9f2; border-radius: 10px; background: #fff; }
+.detail-collapse :deep(.el-collapse-item__header) { height: auto; min-height: 62px; padding: 0 20px; border-bottom: 0; }
+.detail-collapse :deep(.el-collapse-item__wrap) { border-top: 1px solid #eef2f6; border-bottom: 0; }
+.detail-collapse :deep(.el-collapse-item__content) { padding: 18px 20px 20px; }
+.collapse-title { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+.collapse-title strong { color: #26364b; }
+.collapse-title span { color: #7f8da1; font-size: 12px; font-weight: 400; }
+.boxplot-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 36px; }
+.boxplot-panel header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; color: #26364b; }
+.boxplot-panel header strong { display: grid; width: 31px; height: 27px; place-items: center; border-radius: 6px; background: #edf1f6; font-size: 12px; }
+.boxplot-panel header span { color: #718096; font-size: 12px; }
+.boxplot-row { display: grid; grid-template-columns: 72px minmax(0, 1fr) 48px; align-items: center; gap: 8px; min-height: 31px; }
+.boxplot-label { color: #64748b; font-size: 10px; text-align: right; white-space: nowrap; }
+.boxplot-track { position: relative; height: 22px; }
+.whisker { position: absolute; z-index: 1; top: 10px; border-top: 1.5px solid; }
+.whisker::before, .whisker::after { position: absolute; top: -4px; height: 8px; border-left: 1.5px solid; border-color: inherit; content: ''; }
+.whisker::before { left: 0; }
+.whisker::after { right: 0; }
+.quartile-box { position: absolute; z-index: 2; top: 5px; height: 12px; border: 1.5px solid; border-radius: 2px; }
+.median-line { position: absolute; z-index: 3; top: 5px; width: 2px; height: 12px; margin-left: -1px; }
+.mean-diamond { position: absolute; z-index: 4; top: 8px; width: 7px; height: 7px; margin-left: -3.5px; transform: rotate(45deg); border: 1px solid white; }
+.boxplot-value { color: #475569; font-size: 11px; font-variant-numeric: tabular-nums; }
+.boxplot-axis { display: flex; justify-content: space-between; margin: 2px 56px 0 80px; color: #94a3b8; font-size: 9px; }
+
+@media (max-width: 1100px) {
+  .boxplot-grid { grid-template-columns: 1fr; }
+}
 @media (max-width: 720px) {
   .card-heading { flex-direction: column; }
-  .aligned-row { grid-template-columns: 62px minmax(0, 1fr); gap: 10px; }
+  .mean-group, .delta-group { grid-template-columns: 52px minmax(0, 1fr); gap: 8px; }
   .phase-name span { display: none; }
-  .aligned-axis { margin-left: 72px; }
+  .condition-name { text-align: left; }
+  .mean-lane, .delta-lane { grid-template-columns: 66px minmax(0, 1fr) 58px; gap: 6px; }
+  .mean-axis, .delta-axis { margin-left: 132px; margin-right: 68px; }
+  .condition-legend { display: none; }
+  .descriptive-note { white-space: normal; }
 }
 </style>

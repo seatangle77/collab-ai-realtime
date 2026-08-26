@@ -264,6 +264,9 @@ const routes: RouteRecordRaw[] = [
         redirect: '/admin/coi-transcript-coding',
       },
       {
+        // Legacy analysis kept reachable only for historical report review.
+        // It is intentionally absent from AdminLayout because its multi-code-derived
+        // metrics no longer match the current one-code-per-unit research workflow.
         path: 'coi-analysis',
         name: 'AdminCoiAnalysis',
         component: () => import('../views/admin/AdminCoiAnalysisPage.vue'),

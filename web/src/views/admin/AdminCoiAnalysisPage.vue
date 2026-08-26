@@ -1,4 +1,8 @@
 <script setup lang="ts">
+// Legacy CoI analysis page retained for historical report reproduction only.
+// The current single-code workflow uses AdminCoiCompositionAnalysisPage instead;
+// do not add this page back to the primary admin navigation without revalidating
+// its multi-code, mixed-order, and weighted-score metrics.
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Download, Printer, Refresh } from '@element-plus/icons-vue'

@@ -62,7 +62,8 @@ const menuGroups = computed<AdminMenuGroup[]>(() => [
       { path: '/admin/coi-ai-coding', label: 'CoI AI 辅助编码' },
       { path: '/admin/coi-reliability', label: 'CoI 协商前可靠性' },
       { path: '/admin/coi-agreement', label: 'CoI 最终协商' },
-      { path: '/admin/coi-analysis', label: 'CoI 认知参与度分析' },
+      // 旧版 /admin/coi-analysis 基于多编码衍生指标，已由下面的单编码构成分析替代；
+      // 菜单入口有意隐藏，路由暂时保留用于历史报告回溯。
       { path: '/admin/coi-composition-analysis', label: 'CoI 编码构成分析（新）' },
       { path: '/admin/ena-analysis', label: 'ENA 认知过程网络分析' },
     ],
