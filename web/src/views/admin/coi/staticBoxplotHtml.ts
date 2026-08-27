@@ -64,12 +64,13 @@ function niceMaximum(value: number): number {
   if (value <= 0) return 1
   const magnitude = 10 ** Math.floor(Math.log10(value))
   const normalized = value / magnitude
-  return (normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 2.5 ? 2.5 : normalized <= 5 ? 5 : 10) * magnitude
+  const steps = [1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 7, 8, 9, 10]
+  return (steps.find(step => normalized <= step) ?? 10) * magnitude
 }
 
 export function staticSessionBoxplotHtml(options: StaticBoxplotOptions): string {
   const width = 720
-  const height = 320
+  const height = 380
   const left = 62
   const right = 18
   const top = 30

@@ -18,7 +18,7 @@ const props = withDefaults(defineProps<{
 })
 
 const WIDTH = 720
-const HEIGHT = 320
+const HEIGHT = 380
 const LEFT = 62
 const RIGHT = 18
 const TOP = 30
@@ -77,7 +77,8 @@ function niceMaximum(value: number): number {
   if (value <= 0) return 1
   const magnitude = 10 ** Math.floor(Math.log10(value))
   const normalized = value / magnitude
-  const nice = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 2.5 ? 2.5 : normalized <= 5 ? 5 : 10
+  const steps = [1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 7, 8, 9, 10]
+  const nice = steps.find(step => normalized <= step) ?? 10
   return nice * magnitude
 }
 
