@@ -146,31 +146,14 @@ function pointX(groupX: number, index: number): number {
             :points="`${group.x + 43},${y(group.stats.mean) - 5} ${group.x + 48},${y(group.stats.mean)} ${group.x + 43},${y(group.stats.mean) + 5} ${group.x + 38},${y(group.stats.mean)}`"
           />
           <circle
-            v-for="(value, index) in group.condition === 'no_assistance' ? group.values : []"
+            v-for="(value, index) in group.values"
             :key="`${group.condition}-${index}`"
             class="raw-point"
             :cx="pointX(group.x, index)"
             :cy="y(value)"
-            r="2.6"
-            :stroke="group.color"
+            r="2.4"
+            :fill="group.color"
           ><title>{{ conditionLabel(group.condition) }} · {{ format(value) }}</title></circle>
-          <rect
-            v-for="(value, index) in group.condition === 'glasses' ? group.values : []"
-            :key="`${group.condition}-${index}`"
-            class="raw-point"
-            :x="pointX(group.x, index) - 2.5"
-            :y="y(value) - 2.5"
-            width="5"
-            height="5"
-            :stroke="group.color"
-          ><title>{{ conditionLabel(group.condition) }} · {{ format(value) }}</title></rect>
-          <polygon
-            v-for="(value, index) in group.condition !== 'no_assistance' && group.condition !== 'glasses' ? group.values : []"
-            :key="`${group.condition}-${index}`"
-            class="raw-point"
-            :points="`${pointX(group.x, index)},${y(value) - 3} ${pointX(group.x, index) + 2.8},${y(value) + 2.3} ${pointX(group.x, index) - 2.8},${y(value) + 2.3}`"
-            :stroke="group.color"
-          ><title>{{ conditionLabel(group.condition) }} · {{ format(value) }}</title></polygon>
         </template>
         <text class="condition-label" :x="group.x" :y="TOP + PLOT_HEIGHT + 26" text-anchor="middle">{{ conditionLabel(group.condition) }}</text>
         <text class="n-label" :x="group.x" :y="TOP + PLOT_HEIGHT + 43" text-anchor="middle">n={{ group.stats.n }}</text>
@@ -196,19 +179,19 @@ svg { display:block; width:100%; height:auto; overflow:visible; }
 .median { stroke-width:2.5; }
 .ci, .ci-cap { stroke-width:2; }
 .mean { stroke:white; stroke-width:1; }
-.raw-point { fill:white; fill-opacity:.92; stroke-width:1.25; opacity:.95; }
+.raw-point { opacity:.82; }
 .boxplot-panel footer { display:flex; justify-content:center; gap:16px; flex-wrap:wrap; color:#718096; font-size:9px; }
 .boxplot-panel footer span { display:flex; align-items:center; gap:5px; }
 .boxplot-panel footer i { display:inline-block; }
 .box-key { width:12px; height:8px; border:1.5px solid #64748b; background:#64748b18; }
-.point-key { width:4px; height:4px; border:1.25px solid #374151; border-radius:50%; background:white; }
+.point-key { width:5px; height:5px; border-radius:50%; background:#374151; }
 .mean-key { width:14px; height:2px; background:#64748b; transform:rotate(90deg); }
 @media print {
   .boxplot-panel { border-color:#777; }
   .box[data-condition="no_assistance"] { stroke:#111 !important; fill:#e5e5e5 !important; }
-  .box[data-condition="glasses"] { stroke:#111 !important; fill:#fff !important; stroke-dasharray:7 3; }
-  .box[data-condition="app_notification"] { stroke:#111 !important; fill:#fff !important; stroke-dasharray:2 2; }
-  .whisker,.whisker-cap,.median,.ci,.ci-cap,.raw-point { stroke:#111 !important; }
+  .box[data-condition="glasses"],.box[data-condition="app_notification"] { stroke:#111 !important; fill:#fff !important; }
+  .whisker,.whisker-cap,.median,.ci,.ci-cap { stroke:#111 !important; }
+  .raw-point { fill:#111 !important; }
   .mean { fill:#111 !important; }
 }
 </style>

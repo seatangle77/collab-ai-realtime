@@ -9,6 +9,7 @@ import {
 } from '../../api/admin/coi-composition-analysis'
 import type { CoiAnalysisCoderRole, MetricSummary } from '../../api/admin/coi-analysis'
 import type { AdminGroup } from '../../types/admin'
+import { exportRowsToCsv } from '../../utils/csv'
 import SampleSelector from './task-score/SampleSelector.vue'
 import CoiPostHocTable from './coi/CoiPostHocTable.vue'
 import { coderRoleLabel, conditionLabel, formatNumber, pValueText, testLabel } from './coi/reportHelpers'
@@ -117,6 +118,31 @@ function downloadHtmlReport(language: CoiCompositionReportLanguage) {
   URL.revokeObjectURL(url)
 }
 
+function downloadCsv() {
+  if (!report.value) return
+  const groupNameById = new Map(groups.value.map(group => [group.id, group.name]))
+  exportRowsToCsv({
+    filename: `coi-composition-analysis-${new Date().toISOString().slice(0, 10)}.csv`,
+    rows: report.value.observations,
+    columns: [
+      { key: 'group_name', title: '群组名称', format: row => groupNameById.get(row.group_id) ?? '' },
+      { key: 'group_id', title: '群组ID' },
+      { key: 'session_id', title: '会话ID' },
+      { key: 'condition', title: '实验条件', format: row => conditionLabel(row.condition) },
+      { key: 'unit_count', title: '四阶段有效编码总数' },
+      { key: 'total_count', title: '全部编码总数' },
+      { key: 'te_count', title: 'TE编码数' },
+      { key: 'ex_count', title: 'EX编码数' },
+      { key: 'in_count', title: 'IN编码数' },
+      { key: 're_count', title: 'RE编码数' },
+      { key: 'te_ratio', title: 'TE占比' },
+      { key: 'ex_ratio', title: 'EX占比' },
+      { key: 'in_ratio', title: 'IN占比' },
+      { key: 're_ratio', title: 'RE占比' },
+    ],
+  })
+}
+
 onMounted(fetchGroupsAndReport)
 </script>
 
@@ -128,6 +154,7 @@ onMounted(fetchGroupsAndReport)
         <p>只比较 TE、EX、IN、RE 四阶段编码构成；原“认知参与度分析”页面保持不变。</p>
       </div>
       <div class="page-actions">
+        <el-button :icon="Download" :disabled="!report" @click="downloadCsv">下载 CSV</el-button>
         <el-button :icon="Download" :disabled="!report" @click="downloadHtmlReport('zh')">下载中文 HTML</el-button>
         <el-button :icon="Download" :disabled="!report" @click="downloadHtmlReport('en')">Download English HTML</el-button>
         <el-button :icon="Refresh" :loading="loading" type="primary" @click="fetchReport">重新生成</el-button>

@@ -97,9 +97,7 @@ export function staticSessionBoxplotHtml(options: StaticBoxplotOptions): string 
     const points = values.map((value, index) => {
       const pointX = x + (jitter[index % jitter.length] ?? 0)
       const title = `<title>${escapeHtml(label)} · ${format(value)}</title>`
-      if (condition === 'glasses') return `<rect x="${pointX - 2.5}" y="${y(value) - 2.5}" width="5" height="5" fill="#fff" stroke="${color}" stroke-width="1.25">${title}</rect>`
-      if (condition === 'app_notification') return `<polygon points="${pointX},${y(value) - 3} ${pointX + 2.8},${y(value) + 2.3} ${pointX - 2.8},${y(value) + 2.3}" fill="#fff" stroke="${color}" stroke-width="1.25">${title}</polygon>`
-      return `<circle cx="${pointX}" cy="${y(value)}" r="2.6" fill="#fff" stroke="${color}" stroke-width="1.25">${title}</circle>`
+      return `<circle cx="${pointX}" cy="${y(value)}" r="2.4" fill="${color}" fill-opacity=".82">${title}</circle>`
     }).join('')
     const marks = stats.n ? `
       <line x1="${x}" x2="${x}" y1="${y(stats.high)}" y2="${y(stats.low)}" stroke="${color}" stroke-width="1.6"/>

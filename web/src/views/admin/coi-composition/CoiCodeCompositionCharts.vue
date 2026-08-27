@@ -76,13 +76,13 @@ const scaleLabel = computed(() => `四个阶段使用共同的0–${(composition
     </template>
 
     <section class="composition-overview">
-      <header><strong>条件平均构成</strong><span>每个条形合计为100%；颜色与纹理共同区分四个阶段</span></header>
+      <header><strong>条件平均构成</strong><span>每个条形合计为100%；条形内直接标注阶段与平均占比</span></header>
       <svg viewBox="0 0 760 182" role="img" aria-label="三种实验条件的CoI四阶段平均构成百分比堆叠条形图">
         <defs>
           <pattern id="phase-te" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#374151" /></pattern>
-          <pattern id="phase-ex" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#1d4ed8" /><path d="M-2,2 L2,-2 M0,8 L8,0 M6,10 L10,6" stroke="#fff" stroke-width="1.2" opacity=".65" /></pattern>
-          <pattern id="phase-in" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#047857" /><circle cx="2" cy="2" r="1" fill="#fff" opacity=".7" /><circle cx="6" cy="6" r="1" fill="#fff" opacity=".7" /></pattern>
-          <pattern id="phase-re" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#b91c1c" /><path d="M0,4 H8 M4,0 V8" stroke="#fff" stroke-width="1" opacity=".6" /></pattern>
+          <pattern id="phase-ex" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#2563eb" /></pattern>
+          <pattern id="phase-in" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#16a34a" /></pattern>
+          <pattern id="phase-re" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#f97316" /></pattern>
         </defs>
         <g v-for="row in compositionRows" :key="row.condition">
           <text class="condition-text" x="126" :y="row.y + 20" text-anchor="end">{{ conditionLabel(row.condition) }}</text>
@@ -120,7 +120,7 @@ const scaleLabel = computed(() => `四个阶段使用共同的0–${(composition
 
     <footer class="figure-caption">
       <strong>图 1　三种实验条件下CoI四阶段的平均构成与会话级分布。</strong>
-      <span>上方100%堆叠条形图用于概览条件平均构成；下方箱体表示中位数和四分位区间，须线延伸至1.5倍四分位距内的最远值，小型点符号为每场会话，右侧菱形与误差线表示均值及其95%置信区间。圆形、方形和三角形分别对应无辅助、智能眼镜和APP通知，因此黑白打印时仍可区分。</span>
+      <span>上方100%堆叠条形图用于概览条件平均构成；下方箱体表示中位数和四分位区间，须线延伸至1.5倍四分位距内的最远值，小型实心圆点为每场会话，右侧菱形与误差线表示均值及其95%置信区间。</span>
     </footer>
   </el-card>
 </template>
@@ -142,7 +142,7 @@ const scaleLabel = computed(() => `四个阶段使用共同的0–${(composition
 .phase-legend { display:flex; justify-content:center; gap:18px; flex-wrap:wrap; color:#4b5563; font-size:10px; }
 .phase-legend span { display:flex; align-items:center; gap:5px; }
 .phase-legend i { width:14px; height:9px; border:1px solid #374151; }
-.phase-legend .te { background:#374151; }.phase-legend .ex { background:repeating-linear-gradient(135deg,#1d4ed8 0,#1d4ed8 3px,#fff 3px,#fff 4px); }.phase-legend .in { background:#047857; }.phase-legend .re { background:#b91c1c; }
+.phase-legend .te { background:#374151; }.phase-legend .ex { background:#2563eb; }.phase-legend .in { background:#16a34a; }.phase-legend .re { background:#f97316; }
 .figure-caption { display:flex; flex-direction:column; gap:4px; margin:18px 4px 2px; padding-top:12px; border-top:1px solid #eef2f6; color:#66758a; font-size:11px; line-height:1.65; }
 .figure-caption strong { color:#3f4f63; font-weight:650; }
 @media(max-width:900px){.boxplot-layout{grid-template-columns:1fr}}

@@ -10,6 +10,7 @@ import {
 } from '../../api/admin/coi-rate-analysis'
 import type { CoiAnalysisCoderRole, MetricConditionStats } from '../../api/admin/coi-analysis'
 import type { AdminGroup } from '../../types/admin'
+import { exportRowsToCsv } from '../../utils/csv'
 import SampleSelector from './task-score/SampleSelector.vue'
 import { coderRoleLabel, conditionLabel, formatNumber, pValueText } from './coi/reportHelpers'
 import CoiRateCharts from './coi-rate/CoiRateCharts.vue'
@@ -110,6 +111,37 @@ function downloadReport(language: CoiRateReportLanguage) {
   URL.revokeObjectURL(url)
 }
 
+function downloadCsv() {
+  if (!report.value) return
+  exportRowsToCsv({
+    filename: `coi-rate-analysis-${new Date().toISOString().slice(0, 10)}.csv`,
+    rows: report.value.observations,
+    columns: [
+      { key: 'group_name', title: '群组名称', format: row => row.group_name ?? '' },
+      { key: 'group_id', title: '群组ID' },
+      { key: 'session_id', title: '会话ID' },
+      { key: 'session_title', title: '会话名称', format: row => row.session_title ?? '' },
+      { key: 'condition', title: '实验条件', format: row => conditionLabel(row.condition) },
+      { key: 'started_at', title: '开始时间' },
+      { key: 'ended_at', title: '结束时间' },
+      { key: 'duration_minutes', title: '会话时长_分钟' },
+      { key: 'coded_unit_count', title: '已编码观点数' },
+      { key: 'phase_code_count', title: '四阶段编码总数' },
+      { key: 'te_count', title: 'TE编码数' },
+      { key: 'ex_count', title: 'EX编码数' },
+      { key: 'in_count', title: 'IN编码数' },
+      { key: 're_count', title: 'RE编码数' },
+      { key: 'other_count', title: 'OTHER编码数' },
+      { key: 'total_rate', title: '四阶段总产生率_每分钟' },
+      { key: 'te_rate', title: 'TE产生率_每分钟' },
+      { key: 'ex_rate', title: 'EX产生率_每分钟' },
+      { key: 'in_rate', title: 'IN产生率_每分钟' },
+      { key: 're_rate', title: 'RE产生率_每分钟' },
+      { key: 'other_rate', title: 'OTHER产生率_每分钟' },
+    ],
+  })
+}
+
 onMounted(loadGroups)
 </script>
 
@@ -118,6 +150,7 @@ onMounted(loadGroups)
     <div class="page-header">
       <div><div class="title-line"><h1>CoI 观点产生率分析</h1><el-tag type="success" effect="plain">真实会话时长</el-tag></div><p>比较三种实验条件下每分钟产生的TE、EX、IN与RE编码数量。</p></div>
       <div class="page-actions">
+        <el-button :icon="Download" :disabled="!report" @click="downloadCsv">下载 CSV</el-button>
         <el-button :icon="Download" :disabled="!report" @click="downloadReport('zh')">下载中文 HTML</el-button>
         <el-button :icon="Download" :disabled="!report" @click="downloadReport('en')">Download English HTML</el-button>
         <el-button :icon="Refresh" :loading="loading" type="primary" @click="generateReport">重新生成</el-button>

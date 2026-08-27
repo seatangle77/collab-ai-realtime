@@ -50,6 +50,15 @@ const panelRows = computed(() => panels.map(panel => ({
   values: valuesFor(panel.key),
   maximum: panel.metric === 'total_rate' ? totalMaximum.value : phaseMaximum.value,
 })))
+const meanPanels = computed(() => panels.map(panel => ({
+  ...panel,
+  conditions: props.conditions.map(condition => ({
+    condition,
+    value: props.metrics.find(item => item.metric === panel.metric)?.conditions.find(item => item.condition === condition)?.mean ?? 0,
+  })),
+})))
+const totalMeanMaximum = computed(() => Math.max(...meanPanels.value[0]!.conditions.map(item => item.value), 1) * 1.08)
+const phaseMeanMaximum = computed(() => Math.max(...meanPanels.value.slice(1).flatMap(panel => panel.conditions.map(item => item.value)), 0.1) * 1.08)
 const contrastRows = computed(() => props.contrasts.filter(item => item.metric !== 'total_rate'))
 const contrastMaximum = computed(() => {
   const maximum = Math.max(...contrastRows.value.flatMap(item => [item.mean_difference, item.ci_low ?? 0, item.ci_high ?? 0].map(Math.abs)), 0.1)
@@ -67,9 +76,36 @@ function color(condition: string): string {
 function signed(value: number): string {
   return `${value > 0 ? '+' : ''}${value.toFixed(2)}`
 }
+
+function barWidth(value: number, maximum: number): number {
+  return Math.min(100, Math.max(0, value / maximum * 100))
+}
 </script>
 
 <template>
+  <el-card class="academic-chart-card" shadow="never">
+    <template #header><div class="chart-heading"><div><strong>条件平均观点产生率</strong><span>基础条形图用于快速比较三个条件的平均值；四个阶段面板使用共同刻度</span></div></div></template>
+    <section v-if="meanPanels[0]" class="mean-total-panel">
+      <h3>全部四阶段观点产生率</h3>
+      <div v-for="entry in meanPanels[0].conditions" :key="entry.condition" class="mean-bar-row">
+        <span>{{ conditionLabel(entry.condition) }}</span>
+        <div class="mean-bar-track"><i :style="{ width: `${barWidth(entry.value, totalMeanMaximum)}%`, background: color(entry.condition) }" /></div>
+        <strong>{{ entry.value.toFixed(3) }}/min</strong>
+      </div>
+    </section>
+    <div class="mean-phase-grid">
+      <section v-for="panel in meanPanels.slice(1)" :key="panel.metric" class="mean-phase-panel">
+        <h3>{{ panel.title.replace(' · ', ' ') }} 产生率</h3>
+        <div v-for="entry in panel.conditions" :key="entry.condition" class="mean-bar-row compact">
+          <span>{{ conditionLabel(entry.condition) }}</span>
+          <div class="mean-bar-track"><i :style="{ width: `${barWidth(entry.value, phaseMeanMaximum)}%`, background: color(entry.condition) }" /></div>
+          <strong>{{ entry.value.toFixed(3) }}</strong>
+        </div>
+      </section>
+    </div>
+    <footer class="figure-caption"><strong>图 1　三种实验条件的平均CoI观点产生率。</strong><span>条形长度表示条件均值；这是描述性概览，是否存在稳定差异仍以置换检验、置信区间和下方会话级分布为准。</span></footer>
+  </el-card>
+
   <el-card class="academic-chart-card" shadow="never">
     <template #header>
       <div class="chart-heading">
@@ -89,7 +125,7 @@ function signed(value: number): string {
         unit-label="编码次数／分钟"
       />
     </div>
-    <footer class="figure-caption"><strong>图 1　三个实验条件下的CoI观点产生率分布。</strong><span>箱体表示中位数和四分位区间，须线延伸至1.5倍四分位距内的最远值，小型点符号为每场会话；圆形、方形和三角形分别对应无辅助、智能眼镜和APP通知，右侧菱形与误差线表示均值及其95%置信区间。</span></footer>
+    <footer class="figure-caption"><strong>图 2　三个实验条件下的CoI观点产生率分布。</strong><span>箱体表示中位数和四分位区间，须线延伸至1.5倍四分位距内的最远值，小型实心圆点为每场会话；右侧菱形与误差线表示均值及其95%置信区间。</span></footer>
   </el-card>
 
   <el-card class="academic-chart-card" shadow="never">
@@ -121,6 +157,14 @@ function signed(value: number): string {
 .chart-heading strong { color:#26364b; }
 .chart-heading span { color:#718096; font-size:12px; }
 .boxplot-layout { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; }
+.mean-total-panel { padding:2px 12px 18px; border-bottom:1px solid #e2e8f0; }
+.mean-total-panel h3,.mean-phase-panel h3 { margin:0 0 10px; color:#26364b; font-size:13px; }
+.mean-phase-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:22px 34px; padding:20px 12px 4px; }
+.mean-bar-row { display:grid; grid-template-columns:94px minmax(0,1fr) 86px; align-items:center; gap:10px; min-height:32px; color:#475569; font-size:11px; }
+.mean-bar-row.compact { grid-template-columns:86px minmax(0,1fr) 58px; }
+.mean-bar-track { height:14px; background:repeating-linear-gradient(to right,#f1f4f8 0,#f1f4f8 calc(25% - 1px),#d8e0e9 25%,#f1f4f8 calc(25% + 1px)); }
+.mean-bar-track i { display:block; height:14px; border-radius:2px; }
+.mean-bar-row strong { color:#253247; font-variant-numeric:tabular-nums; }
 .wide-panel { grid-column:1 / -1; }
 .figure-caption { display:flex; flex-direction:column; gap:4px; margin:18px 4px 2px; padding-top:12px; border-top:1px solid #eef2f6; color:#66758a; font-size:11px; line-height:1.65; }
 .figure-caption strong { color:#3f4f63; font-weight:650; }
@@ -137,5 +181,5 @@ function signed(value: number): string {
 .effect-point { position:absolute; top:7px; width:10px; height:10px; margin-left:-5px; transform:rotate(45deg); border:1px solid white; box-shadow:0 0 0 1px rgba(15,23,42,.15); }
 .effect-value { color:#3f4f63; font-size:11px; font-variant-numeric:tabular-nums; }
 .effect-value small { color:#7d899a; font-weight:500; }
-@media(max-width:900px){.boxplot-layout{grid-template-columns:1fr}.wide-panel{grid-column:auto}.forest-row{grid-template-columns:126px minmax(0,1fr) 118px;gap:7px}.forest-axis{margin-left:140px;margin-right:126px}}
+@media(max-width:900px){.boxplot-layout,.mean-phase-grid{grid-template-columns:1fr}.wide-panel{grid-column:auto}.forest-row{grid-template-columns:126px minmax(0,1fr) 118px;gap:7px}.forest-axis{margin-left:140px;margin-right:126px}}
 </style>
