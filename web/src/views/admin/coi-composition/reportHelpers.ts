@@ -194,9 +194,16 @@ export function buildCoiCompositionReportHtml(
   const descriptiveHeader = conditionColumns.map(condition => `<th colspan="6">${escapeHtml(conditionLabel(condition, language))}</th>`).join('')
   const descriptiveSubheader = conditionColumns.map(() => `<th>n</th><th>M</th><th>SD</th><th>${isZh ? '中位数' : 'Median'}</th><th>${isZh ? '最小值' : 'Min'}</th><th>${isZh ? '最大值' : 'Max'}</th>`).join('')
 
-  const testRows = report.statistical_tests.map(test => `
-    <tr><th>${escapeHtml(metricLabel(test.metric, test.label, language))}</th><td>${escapeHtml(testLabel(test.test, language))}</td><td>${escapeHtml(test.statistic_name || '—')}=${escapeHtml(formatNumber(test.statistic))}</td><td>${escapeHtml(pValueText(test.p_value))}</td><td>${escapeHtml(pValueText(test.p_value_adjusted))}</td><td>${escapeHtml(test.effect_size_name || '—')}=${escapeHtml(formatNumber(test.effect_size))}</td><td>${escapeHtml(testNote(test, language))}</td></tr>
-  `).join('')
+  const testRows = report.statistical_tests.map(test => {
+    const rawNominal = test.p_value != null && test.p_value < 0.05
+    const adjustedSignificant = test.p_value_adjusted != null && test.p_value_adjusted < 0.05
+    const rawStatus = rawNominal && !adjustedSignificant
+      ? `<small class="p-status">${isZh ? '未经 BH 校正' : 'Unadjusted'}</small>`
+      : ''
+    return `
+      <tr><th>${escapeHtml(metricLabel(test.metric, test.label, language))}</th><td>${escapeHtml(testLabel(test.test, language))}</td><td>${escapeHtml(test.statistic_name || '—')}=${escapeHtml(formatNumber(test.statistic))}</td><td><span class="${rawNominal ? 'p-raw-nominal' : ''}">${escapeHtml(pValueText(test.p_value))}</span>${rawStatus}</td><td><strong class="${adjustedSignificant ? 'p-adjusted-significant' : ''}">${escapeHtml(pValueText(test.p_value_adjusted))}</strong></td><td>${escapeHtml(test.effect_size_name || '—')}=${escapeHtml(formatNumber(test.effect_size))}</td><td>${escapeHtml(testNote(test, language))}</td></tr>
+    `
+  }).join('')
 
   const postHocSections = report.post_hoc_tests.map(item => {
     const label = metricLabel(item.metric, item.label, language)
@@ -230,6 +237,7 @@ export function buildCoiCompositionReportHtml(
     h1 { margin: 0 0 6px; font-size: 25px; } h2 { margin: 28px 0 10px; padding-bottom: 6px; border-bottom: 1px solid #d8e0eb; font-size: 17px; } h3 { font-size: 14px; }
     .meta, .note { color: #56657a; font-size: 12px; } .result { padding: 14px 16px; border-left: 4px solid #16a34a; background: #f2faf5; }
     table { width: 100%; margin: 10px 0 18px; border-collapse: collapse; font-size: 11px; } th, td { padding: 7px 8px; border: 1px solid #d8e0eb; text-align: left; vertical-align: top; } th { background: #f4f7fa; }
+    .p-raw-nominal { display: inline-block; padding: 1px 5px; border: 1px solid #fed7aa; border-radius: 4px; color: #b45309; background: #fff7ed; font-weight: 700; } .p-adjusted-significant { display: inline-block; padding: 1px 5px; border: 1px solid #fecaca; border-radius: 4px; color: #b91c1c; background: #fef2f2; } .p-status { display: block; margin-top: 2px; color: #b45309; font-size: 9px; }
     figure { margin: 20px 0 30px; padding: 18px 20px; border: 1px solid #d8e0eb; border-radius: 8px; page-break-inside: avoid; }
     figcaption { margin-top: 16px; padding-top: 10px; border-top: 1px solid #e4eaf2; color: #455468; font-size: 11px; }
     .stacked-overview{margin-bottom:16px;padding:12px 14px 8px;border:1px solid #d3dbe5;border-radius:8px}.stacked-overview h3{display:flex;flex-direction:column;margin:0;font-size:13px}.stacked-overview h3 span{color:#5f6d80;font-size:10px;font-weight:400}.stacked-overview svg{display:block;width:100%;height:auto}.stack-label{fill:#334155;font-size:12px;font-weight:650}.stack-text{fill:#fff;font-size:10px;font-weight:650;paint-order:stroke;stroke:#17203355;stroke-width:2px}@media print{.stacked-overview{border-color:#777}.stacked-overview svg{filter:grayscale(1) contrast(1.35)}.stack-text{stroke:none}}
@@ -251,7 +259,8 @@ export function buildCoiCompositionReportHtml(
   <h2>5. ${isZh ? '四阶段描述性统计' : 'Descriptive statistics by phase'}</h2>
   <table><thead><tr><th rowspan="2">${isZh ? '阶段' : 'Phase'}</th>${descriptiveHeader}</tr><tr>${descriptiveSubheader}</tr></thead><tbody>${descriptiveRows}</tbody></table>
   <h2>6. ${isZh ? '阶段层面检验' : 'Phase-level tests'}</h2>
-  <table><thead><tr><th>${isZh ? '阶段' : 'Phase'}</th><th>${isZh ? '检验' : 'Test'}</th><th>${isZh ? '统计量' : 'Statistic'}</th><th>p</th><th>${isZh ? '校正后 p（BH）' : 'BH-adjusted p'}</th><th>${isZh ? '效应量' : 'Effect size'}</th><th>${isZh ? '说明' : 'Interpretation'}</th></tr></thead><tbody>${testRows}</tbody></table>
+  <p class="note">${isZh ? '颜色说明：橙色表示原始 p < 0.05；红色表示 BH 校正后 p < 0.05。' : 'Color key: orange indicates an unadjusted p < .05; red indicates a BH-adjusted p < .05.'}</p>
+  <table><thead><tr><th>${isZh ? '阶段' : 'Phase'}</th><th>${isZh ? '检验' : 'Test'}</th><th>${isZh ? '统计量' : 'Statistic'}</th><th>${isZh ? '原始 p' : 'Unadjusted p'}</th><th>${isZh ? 'BH 校正后 p' : 'BH-adjusted p'}</th><th>${isZh ? '效应量' : 'Effect size'}</th><th>${isZh ? '说明' : 'Interpretation'}</th></tr></thead><tbody>${testRows}</tbody></table>
   <h2>7. ${isZh ? '事后检验' : 'Post hoc tests'}</h2>${postHocSections}
   <h2>8. ${isZh ? '会话级分析数据' : 'Session-level analysis data'}</h2>
   <table><thead><tr><th>${isZh ? '群组' : 'Group'}</th><th>${isZh ? '会话 ID' : 'Session ID'}</th><th>${isZh ? '条件' : 'Condition'}</th><th>${isZh ? '有效观点' : 'Valid units'}</th><th>TE</th><th>EX</th><th>IN</th><th>RE</th><th>TE%</th><th>EX%</th><th>IN%</th><th>RE%</th></tr></thead><tbody>${observationRows}</tbody></table>

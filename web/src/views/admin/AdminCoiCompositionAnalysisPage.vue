@@ -238,13 +238,25 @@ onMounted(fetchGroupsAndReport)
     </el-card>
 
     <el-card class="analysis-card" shadow="never">
-      <template #header><div class="card-title"><strong>第二步：阶段层面的跟进检验</strong><span>仅在 TE/EX/IN/RE 四项之间进行 BH 校正</span></div></template>
+      <template #header><div class="card-title"><strong>第二步：阶段层面的跟进检验</strong><span>橙色表示原始 p&lt;0.05；红色表示 BH 校正后 p&lt;0.05</span></div></template>
       <el-table v-loading="loading" :data="report?.statistical_tests ?? []" border>
         <el-table-column prop="label" label="阶段" min-width="190" />
         <el-table-column label="检验" min-width="180"><template #default="{ row }">{{ testLabel(row.test) }}</template></el-table-column>
         <el-table-column label="统计量" width="120" align="center"><template #default="{ row }">{{ row.statistic_name || '—' }}={{ formatNumber(row.statistic) }}</template></el-table-column>
-        <el-table-column label="p" width="90" align="center"><template #default="{ row }">{{ pValueText(row.p_value) }}</template></el-table-column>
-        <el-table-column label="p_adj (BH)" width="120" align="center"><template #default="{ row }"><strong>{{ pValueText(row.p_value_adjusted) }}</strong></template></el-table-column>
+        <el-table-column label="原始 p" width="120" align="center">
+          <template #default="{ row }">
+            <span
+              class="p-value"
+              :class="{ 'p-raw-nominal': row.p_value != null && row.p_value < 0.05 }"
+              :title="row.p_value != null && row.p_value < 0.05 ? '原始 p < 0.05；是否通过多重比较校正请查看右侧 BH 校正后 p' : ''"
+            >{{ pValueText(row.p_value) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="BH 校正后 p" width="140" align="center">
+          <template #default="{ row }">
+            <strong class="p-value" :class="{ 'p-adjusted-significant': row.p_value_adjusted != null && row.p_value_adjusted < 0.05 }">{{ pValueText(row.p_value_adjusted) }}</strong>
+          </template>
+        </el-table-column>
         <el-table-column label="Effect size" min-width="170"><template #default="{ row }">{{ row.effect_size_name || '—' }}={{ formatNumber(row.effect_size) }}</template></el-table-column>
         <el-table-column prop="note" label="说明" min-width="300" />
       </el-table>
@@ -282,5 +294,8 @@ onMounted(fetchGroupsAndReport)
 .metric-summary { display: flex; flex-direction: column; gap: 3px; }
 .metric-summary strong { color: #1f2e43; font-size: 14px; }
 .metric-summary span { color: #7b899d; font-size: 11px; }
+.p-value { display: inline-block; min-width: 52px; padding: 2px 7px; border-radius: 5px; font-variant-numeric: tabular-nums; }
+.p-raw-nominal { color: #b45309; background: #fff7ed; font-weight: 750; box-shadow: inset 0 0 0 1px #fed7aa; }
+.p-adjusted-significant { color: #b91c1c; background: #fef2f2; box-shadow: inset 0 0 0 1px #fecaca; }
 @media (max-width: 1000px) { .global-result { grid-template-columns: 1fr; } .global-result dl { width: 100%; } }
 </style>
