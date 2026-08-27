@@ -2,6 +2,7 @@ import type { CoiCompositionAnalysisResult } from '../../../api/admin/coi-compos
 import type { CoiAnalysisCoderRole, PostHocResult, StatisticalTestResult } from '../../../api/admin/coi-analysis'
 import type { AdminGroup } from '../../../types/admin'
 import { formatNumber, pValueText } from '../coi/reportHelpers'
+import { STATIC_BOXPLOT_CSS, staticSessionBoxplotHtml } from '../coi/staticBoxplotHtml'
 
 export type CoiCompositionReportLanguage = 'zh' | 'en'
 
@@ -114,60 +115,34 @@ function globalNote(report: CoiCompositionAnalysisResult, language: CoiCompositi
     : 'No statistically significant overall difference in CoI composition was detected across the three conditions.'
 }
 
-function meanFor(report: CoiCompositionAnalysisResult, metric: string, condition: string): number {
-  return report.metrics.find(item => item.metric === metric)
-    ?.conditions.find(item => item.condition === condition)?.mean ?? 0
-}
-
 function figuresHtml(
   report: CoiCompositionAnalysisResult,
   conditionColumns: string[],
   language: CoiCompositionReportLanguage,
 ): string {
   const phases = [
-    { metric: 'te_ratio', short: 'TE', name: language === 'zh' ? '触发事件' : 'Triggering Event' },
-    { metric: 'ex_ratio', short: 'EX', name: language === 'zh' ? '探索' : 'Exploration' },
-    { metric: 'in_ratio', short: 'IN', name: language === 'zh' ? '整合' : 'Integration' },
-    { metric: 're_ratio', short: 'RE', name: language === 'zh' ? '解决' : 'Resolution' },
-  ]
-  const colors: Record<string, string> = {
-    no_assistance: '#64748b', glasses: '#3b82f6', app_notification: '#f97316',
-  }
-  const meanRows = phases.map(phase => `
-    <div class="mean-group">
-      <div class="phase-label"><strong>${phase.short}</strong><span>${phase.name}</span></div>
-      <div>${conditionColumns.map(condition => {
-        const value = meanFor(report, phase.metric, condition)
-        return `<div class="mean-row"><span>${escapeHtml(conditionLabel(condition, language))}</span><div class="mean-track"><i style="width:${Math.min(100, value / 0.4 * 100)}%;background:${colors[condition] ?? '#64748b'}"></i></div><strong>${percent(value)}</strong></div>`
-      }).join('')}</div>
-    </div>
-  `).join('')
-
-  const comparisons = conditionColumns.filter(condition => condition !== 'no_assistance')
-  const deltaRows = phases.map(phase => `
-    <div class="delta-group">
-      <div class="phase-label"><strong>${phase.short}</strong><span>${phase.name}</span></div>
-      <div>${comparisons.map(condition => {
-        const delta = (meanFor(report, phase.metric, condition) - meanFor(report, phase.metric, 'no_assistance')) * 100
-        const width = Math.min(50, Math.abs(delta) / 16 * 100)
-        const left = delta < 0 ? 50 - width : 50
-        const value = `${delta > 0 ? '+' : ''}${delta.toFixed(1)} pp`
-        return `<div class="delta-row"><span>${escapeHtml(conditionLabel(condition, language))}</span><div class="delta-track"><b></b><i style="left:${left}%;width:${width}%;background:${colors[condition] ?? '#64748b'}"></i></div><strong>${escapeHtml(value)}</strong></div>`
-      }).join('')}</div>
-    </div>
-  `).join('')
-
-  const figureOneCaption = language === 'zh'
-    ? '<strong>图 1.</strong> 三种辅助条件下 Community of Inquiry（CoI）四阶段的平均编码占比。各场会话先分别计算阶段占比，再在条件内等权平均。TE = 触发事件；EX = 探索；IN = 整合；RE = 解决。'
-    : '<strong>Figure 1.</strong> Mean proportions of the four Community of Inquiry (CoI) phases across the three assistance conditions. Phase proportions were first calculated within each session and then averaged across sessions, with each session weighted equally. TE = Triggering Event; EX = Exploration; IN = Integration; RE = Resolution.'
-  const figureTwoCaption = language === 'zh'
-    ? '<strong>图 2.</strong> 智能眼镜和 APP 通知条件相对无辅助条件的 CoI 阶段平均占比差异。数值表示百分点差异（pp）；正值表示高于无辅助，负值表示低于无辅助。该图呈现描述性差异，不代表统计显著。'
-    : '<strong>Figure 2.</strong> Differences in mean CoI phase proportions between each assisted condition and the no-assistance condition. Values represent percentage-point differences (pp); positive values indicate higher proportions and negative values indicate lower proportions. These are descriptive differences and do not imply statistical significance.'
-
-  return `
-    <figure><div class="mean-axis"><span>0%</span><span>10%</span><span>20%</span><span>30%</span><span>40%</span></div>${meanRows}<figcaption>${figureOneCaption}</figcaption></figure>
-    <figure><div class="delta-axis"><span>−8</span><span>−4</span><span>0</span><span>+4</span><span>+8 pp</span></div>${deltaRows}<figcaption>${figureTwoCaption}</figcaption></figure>
-  `
+    { key: 'te_ratio', title: language === 'zh' ? 'TE · 触发事件' : 'TE · Triggering Event', subtitle: language === 'zh' ? '触发事件占四阶段编码的比例' : 'Triggering Event as a proportion of four-phase codes' },
+    { key: 'ex_ratio', title: language === 'zh' ? 'EX · 探索' : 'EX · Exploration', subtitle: language === 'zh' ? '探索占四阶段编码的比例' : 'Exploration as a proportion of four-phase codes' },
+    { key: 'in_ratio', title: language === 'zh' ? 'IN · 整合' : 'IN · Integration', subtitle: language === 'zh' ? '整合占四阶段编码的比例' : 'Integration as a proportion of four-phase codes' },
+    { key: 're_ratio', title: language === 'zh' ? 'RE · 解决' : 'RE · Resolution', subtitle: language === 'zh' ? '解决占四阶段编码的比例' : 'Resolution as a proportion of four-phase codes' },
+  ] as const
+  const labels = Object.fromEntries(conditionColumns.map(condition => [condition, conditionLabel(condition, language)]))
+  const compositionMaximum = Math.min(1, Math.max(0.5, Math.ceil(Math.max(...report.observations.flatMap(item => [item.te_ratio, item.ex_ratio, item.in_ratio, item.re_ratio]), 0) * 10) / 10))
+  const panels = phases.map(phase => staticSessionBoxplotHtml({
+    title: phase.title,
+    subtitle: phase.subtitle,
+    conditions: conditionColumns,
+    valuesByCondition: Object.fromEntries(conditionColumns.map(condition => [condition, report.observations.filter(item => item.condition === condition).map(item => item[phase.key])])),
+    conditionLabels: labels,
+    maximum: compositionMaximum,
+    percent: true,
+    unitLabel: language === 'zh' ? '阶段占比' : 'Phase proportion',
+    language,
+  })).join('')
+  const caption = language === 'zh'
+    ? `<strong>图 1.</strong> 三种实验条件下CoI四阶段编码占比的会话级分布。箱体表示中位数和四分位区间，须线为1.5倍四分位距范围，圆点为每场会话，菱形与误差线表示均值及95%置信区间。四个面板使用共同的0–${(compositionMaximum * 100).toFixed(0)}%纵轴。`
+    : `<strong>Figure 1.</strong> Session-level distributions of the four CoI phase proportions across the three conditions. Boxes show medians and interquartile ranges, whiskers extend to 1.5 IQR, points show sessions, and diamonds with error bars show means and 95% confidence intervals. All panels share a 0–${(compositionMaximum * 100).toFixed(0)}% scale.`
+  return `<figure><div class="boxplot-grid">${panels}</div><figcaption>${caption}</figcaption></figure>`
 }
 
 export function buildCoiCompositionReportHtml(
@@ -235,15 +210,7 @@ export function buildCoiCompositionReportHtml(
     table { width: 100%; margin: 10px 0 18px; border-collapse: collapse; font-size: 11px; } th, td { padding: 7px 8px; border: 1px solid #d8e0eb; text-align: left; vertical-align: top; } th { background: #f4f7fa; }
     figure { margin: 20px 0 30px; padding: 18px 20px; border: 1px solid #d8e0eb; border-radius: 8px; page-break-inside: avoid; }
     figcaption { margin-top: 16px; padding-top: 10px; border-top: 1px solid #e4eaf2; color: #455468; font-size: 11px; }
-    .phase-label { display: flex; flex-direction: column; justify-content: center; text-align: right; } .phase-label span { color: #7b899d; font-size: 9px; }
-    .mean-axis, .delta-axis { display: flex; justify-content: space-between; margin: 0 58px 6px 190px; color: #8a98aa; font-size: 9px; }
-    .mean-group, .delta-group { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 14px; padding: 10px 0; border-top: 1px solid #edf1f5; }
-    .mean-row, .delta-row { display: grid; grid-template-columns: 76px minmax(0, 1fr) 48px; align-items: center; gap: 8px; min-height: 21px; color: #64748b; font-size: 9px; }
-    .mean-row > span, .delta-row > span { text-align: right; } .mean-row > strong, .delta-row > strong { color: #334155; font-size: 9px; }
-    .mean-track { height: 15px; background: repeating-linear-gradient(to right, transparent 0, transparent calc(25% - 1px), #e5eaf1 25%); }
-    .mean-track i { display: block; height: 15px; border-radius: 2px; }
-    .delta-track { position: relative; height: 15px; background: linear-gradient(to right, transparent 24.8%, #e5eaf1 25%, transparent 25.2%, transparent 74.8%, #e5eaf1 75%, transparent 75.2%); }
-    .delta-track b { position: absolute; top: 0; bottom: 0; left: 50%; border-left: 1px solid #8996a8; } .delta-track i { position: absolute; top: 2px; height: 11px; border-radius: 2px; }
+    ${STATIC_BOXPLOT_CSS}
     @media print { body { margin: 16mm; } h2 { page-break-after: avoid; } table { page-break-inside: avoid; } }
   </style>
 </head>
