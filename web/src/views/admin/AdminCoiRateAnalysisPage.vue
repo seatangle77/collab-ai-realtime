@@ -210,13 +210,25 @@ onMounted(loadGroups)
     </el-card>
 
     <el-card class="analysis-card" shadow="never">
-      <template #header><div class="card-title"><strong>条件总体置换检验</strong><span>总产生率与四阶段共5项，p值使用BH校正</span></div></template>
+      <template #header><div class="card-title"><strong>条件总体置换检验</strong><span>橙色表示原始 p&lt;0.05；红色表示 BH 校正后 p&lt;0.05</span></div></template>
       <el-table v-loading="loading" :data="report?.statistical_tests ?? []" border>
         <el-table-column prop="label" label="指标" min-width="180" />
         <el-table-column prop="method" label="检验" min-width="170" />
         <el-table-column label="统计量" width="130"><template #default="{ row }">{{ row.statistic_name }}={{ formatNumber(row.statistic) }}</template></el-table-column>
-        <el-table-column label="p" width="90"><template #default="{ row }">{{ pValueText(row.p_value) }}</template></el-table-column>
-        <el-table-column label="p_adj (BH)" width="120"><template #default="{ row }"><strong>{{ pValueText(row.p_value_adjusted) }}</strong></template></el-table-column>
+        <el-table-column label="原始 p" width="120" align="center">
+          <template #default="{ row }">
+            <span
+              class="p-value"
+              :class="{ 'p-raw-nominal': row.p_value != null && row.p_value < 0.05 }"
+              :title="row.p_value != null && row.p_value < 0.05 ? '原始 p < 0.05；是否通过多重比较校正请查看右侧 BH 校正后 p' : ''"
+            >{{ pValueText(row.p_value) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="BH 校正后 p" width="140" align="center">
+          <template #default="{ row }">
+            <strong class="p-value" :class="{ 'p-adjusted-significant': row.p_value_adjusted != null && row.p_value_adjusted < 0.05 }">{{ pValueText(row.p_value_adjusted) }}</strong>
+          </template>
+        </el-table-column>
         <el-table-column label="η²" width="90"><template #default="{ row }">{{ formatNumber(row.effect_size) }}</template></el-table-column>
         <el-table-column prop="note" label="说明" min-width="300" />
       </el-table>
@@ -288,6 +300,9 @@ onMounted(loadGroups)
 .metric-summary { display:flex; flex-direction:column; gap:3px; }
 .metric-summary strong { color:#1f2e43; }
 .metric-summary span { color:#7b899d; font-size:11px; }
+.p-value { display:inline-block; min-width:52px; padding:2px 7px; border-radius:5px; font-variant-numeric:tabular-nums; }
+.p-raw-nominal { color:#b45309; background:#fff7ed; font-weight:750; box-shadow:inset 0 0 0 1px #fed7aa; }
+.p-adjusted-significant { color:#b91c1c; background:#fef2f2; box-shadow:inset 0 0 0 1px #fecaca; }
 .other-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
 .other-grid div { display:flex; flex-direction:column; gap:4px; padding:14px 16px; border:1px solid #e3e9f2; border-radius:8px; }
 .other-grid span { color:#748197; font-size:12px; }
