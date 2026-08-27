@@ -16,6 +16,10 @@ from ..analysis.coi_composition_analysis_service import (
     CoiCompositionAnalysisResult,
     build_coi_composition_analysis,
 )
+from ..analysis.coi_rate_analysis_service import (
+    CoiRateAnalysisResult,
+    build_coi_rate_analysis,
+)
 from ..api_model import ApiModel
 from ..db import get_db
 from .deps import require_admin
@@ -67,6 +71,40 @@ async def _load_rows(
     return [dict(row) for row in result.mappings().all()]
 
 
+async def _load_rate_rows(
+    db: AsyncSession,
+    group_ids: set[str],
+    coder_role: CoderRole,
+) -> list[dict]:
+    """Load real finalized units together with the persisted session duration."""
+    if not group_ids:
+        return []
+    result = await db.execute(
+        text("""
+            SELECT
+                u.session_id,
+                cs.session_title,
+                cs.started_at,
+                cs.ended_at,
+                cs.status,
+                u.group_id,
+                selected_code.coi_categories,
+                g.condition,
+                g.name AS group_name
+            FROM coi_units u
+            JOIN chat_sessions cs ON cs.id = u.session_id
+            JOIN groups g ON g.id = u.group_id
+            LEFT JOIN coi_unit_codes selected_code
+              ON selected_code.unit_id = u.id
+             AND selected_code.coder_role = :coder_role
+            WHERE u.group_id = ANY(:group_ids)
+            ORDER BY u.session_id, u.order_index
+        """),
+        {"group_ids": list(group_ids), "coder_role": coder_role},
+    )
+    return [dict(row) for row in result.mappings().all()]
+
+
 class CreateCoiAnalysisPayload(ApiModel):
     mode: AnalysisMode = "two_conditions"
     group_ids_by_condition: dict[str, list[str]]
@@ -98,3 +136,17 @@ async def create_coi_composition_analysis(
 
     rows = await _load_rows(db, all_group_ids, payload.coder_role)
     return build_coi_composition_analysis(mode=payload.mode, rows=rows)
+
+
+@router.post("/rate/", response_model=CoiRateAnalysisResult)
+async def create_coi_rate_analysis(
+    payload: CreateCoiAnalysisPayload,
+    db: AsyncSession = Depends(get_db),
+) -> CoiRateAnalysisResult:
+    """Compare real CoI code counts per persisted chat-session minute."""
+    all_group_ids: set[str] = set()
+    for group_ids in payload.group_ids_by_condition.values():
+        all_group_ids.update(group_ids)
+
+    rows = await _load_rate_rows(db, all_group_ids, payload.coder_role)
+    return build_coi_rate_analysis(mode=payload.mode, rows=rows)

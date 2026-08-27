@@ -65,6 +65,7 @@ const menuGroups = computed<AdminMenuGroup[]>(() => [
       // 旧版 /admin/coi-analysis 基于多编码衍生指标，已由下面的单编码构成分析替代；
       // 菜单入口有意隐藏，路由暂时保留用于历史报告回溯。
       { path: '/admin/coi-composition-analysis', label: 'CoI 编码构成分析（新）' },
+      { path: '/admin/coi-rate-analysis', label: 'CoI 观点产生率分析' },
       { path: '/admin/ena-analysis', label: 'ENA 认知过程网络分析' },
     ],
   },
