@@ -28,14 +28,14 @@ const PLOT_HEIGHT = HEIGHT - TOP - BOTTOM
 const BOX_WIDTH = 62
 
 const colors: Record<string, string> = {
-  no_assistance: '#64748b',
-  glasses: '#3b82f6',
-  app_notification: '#f97316',
+  no_assistance: '#374151',
+  glasses: '#1d4ed8',
+  app_notification: '#c2410c',
 }
 const jitterPattern = [-24, -16, -8, 0, 8, 16, 24, -20, -12, -4, 4, 12, 20]
 
 function color(condition: string): string {
-  return colors[condition] ?? '#64748b'
+  return colors[condition] ?? '#374151'
 }
 
 function quantile(values: number[], percentile: number): number {
@@ -133,7 +133,8 @@ function pointX(groupX: number, index: number): number {
             :width="BOX_WIDTH"
             :height="Math.max(2, y(group.stats.q1) - y(group.stats.q3))"
             :stroke="group.color"
-            :fill="`${group.color}20`"
+            :fill="`${group.color}38`"
+            :data-condition="group.condition"
           />
           <line class="median" :stroke="group.color" :x1="group.x - BOX_WIDTH / 2" :x2="group.x + BOX_WIDTH / 2" :y1="y(group.stats.median)" :y2="y(group.stats.median)" />
           <line class="ci" :stroke="group.color" :x1="group.x + 43" :x2="group.x + 43" :y1="y(group.stats.ciHigh)" :y2="y(group.stats.ciLow)" />
@@ -145,13 +146,31 @@ function pointX(groupX: number, index: number): number {
             :points="`${group.x + 43},${y(group.stats.mean) - 5} ${group.x + 48},${y(group.stats.mean)} ${group.x + 43},${y(group.stats.mean) + 5} ${group.x + 38},${y(group.stats.mean)}`"
           />
           <circle
-            v-for="(value, index) in group.values"
+            v-for="(value, index) in group.condition === 'no_assistance' ? group.values : []"
             :key="`${group.condition}-${index}`"
             class="raw-point"
             :cx="pointX(group.x, index)"
             :cy="y(value)"
+            r="2.6"
             :stroke="group.color"
           ><title>{{ conditionLabel(group.condition) }} · {{ format(value) }}</title></circle>
+          <rect
+            v-for="(value, index) in group.condition === 'glasses' ? group.values : []"
+            :key="`${group.condition}-${index}`"
+            class="raw-point"
+            :x="pointX(group.x, index) - 2.5"
+            :y="y(value) - 2.5"
+            width="5"
+            height="5"
+            :stroke="group.color"
+          ><title>{{ conditionLabel(group.condition) }} · {{ format(value) }}</title></rect>
+          <polygon
+            v-for="(value, index) in group.condition !== 'no_assistance' && group.condition !== 'glasses' ? group.values : []"
+            :key="`${group.condition}-${index}`"
+            class="raw-point"
+            :points="`${pointX(group.x, index)},${y(value) - 3} ${pointX(group.x, index) + 2.8},${y(value) + 2.3} ${pointX(group.x, index) - 2.8},${y(value) + 2.3}`"
+            :stroke="group.color"
+          ><title>{{ conditionLabel(group.condition) }} · {{ format(value) }}</title></polygon>
         </template>
         <text class="condition-label" :x="group.x" :y="TOP + PLOT_HEIGHT + 26" text-anchor="middle">{{ conditionLabel(group.condition) }}</text>
         <text class="n-label" :x="group.x" :y="TOP + PLOT_HEIGHT + 43" text-anchor="middle">n={{ group.stats.n }}</text>
@@ -177,11 +196,19 @@ svg { display:block; width:100%; height:auto; overflow:visible; }
 .median { stroke-width:2.5; }
 .ci, .ci-cap { stroke-width:2; }
 .mean { stroke:white; stroke-width:1; }
-.raw-point { r:4; fill:white; fill-opacity:.82; stroke-width:1.5; opacity:.9; }
+.raw-point { fill:white; fill-opacity:.92; stroke-width:1.25; opacity:.95; }
 .boxplot-panel footer { display:flex; justify-content:center; gap:16px; flex-wrap:wrap; color:#718096; font-size:9px; }
 .boxplot-panel footer span { display:flex; align-items:center; gap:5px; }
 .boxplot-panel footer i { display:inline-block; }
 .box-key { width:12px; height:8px; border:1.5px solid #64748b; background:#64748b18; }
-.point-key { width:6px; height:6px; border:1.5px solid #64748b; border-radius:50%; background:white; }
+.point-key { width:4px; height:4px; border:1.25px solid #374151; border-radius:50%; background:white; }
 .mean-key { width:14px; height:2px; background:#64748b; transform:rotate(90deg); }
+@media print {
+  .boxplot-panel { border-color:#777; }
+  .box[data-condition="no_assistance"] { stroke:#111 !important; fill:#e5e5e5 !important; }
+  .box[data-condition="glasses"] { stroke:#111 !important; fill:#fff !important; stroke-dasharray:7 3; }
+  .box[data-condition="app_notification"] { stroke:#111 !important; fill:#fff !important; stroke-dasharray:2 2; }
+  .whisker,.whisker-cap,.median,.ci,.ci-cap,.raw-point { stroke:#111 !important; }
+  .mean { fill:#111 !important; }
+}
 </style>

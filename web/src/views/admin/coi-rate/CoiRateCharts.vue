@@ -24,9 +24,9 @@ const panels = [
 ] as const
 
 const conditionColors: Record<string, string> = {
-  no_assistance: '#64748b',
-  glasses: '#3b82f6',
-  app_notification: '#f97316',
+  no_assistance: '#374151',
+  glasses: '#1d4ed8',
+  app_notification: '#c2410c',
 }
 
 function valuesFor(key: keyof CoiRateObservation): Record<string, number[]> {
@@ -73,7 +73,7 @@ function signed(value: number): string {
   <el-card class="academic-chart-card" shadow="never">
     <template #header>
       <div class="chart-heading">
-        <div><strong>会话级观点产生率分布</strong><span>箱线图显示中位数与四分位区间；所有12场会话均以圆点展示</span></div>
+        <div><strong>会话级观点产生率分布</strong><span>箱线图显示中位数与四分位区间；所有12场会话均以小型点符号展示</span></div>
       </div>
     </template>
     <div class="boxplot-layout">
@@ -89,7 +89,7 @@ function signed(value: number): string {
         unit-label="编码次数／分钟"
       />
     </div>
-    <footer class="figure-caption"><strong>图 1　三个实验条件下的CoI观点产生率分布。</strong><span>箱体表示中位数和四分位区间，须线延伸至1.5倍四分位距内的最远值，圆点为每场会话；右侧菱形与误差线表示均值及其95%置信区间。</span></footer>
+    <footer class="figure-caption"><strong>图 1　三个实验条件下的CoI观点产生率分布。</strong><span>箱体表示中位数和四分位区间，须线延伸至1.5倍四分位距内的最远值，小型点符号为每场会话；圆形、方形和三角形分别对应无辅助、智能眼镜和APP通知，右侧菱形与误差线表示均值及其95%置信区间。</span></footer>
   </el-card>
 
   <el-card class="academic-chart-card" shadow="never">

@@ -1,5 +1,5 @@
 export const STATIC_BOXPLOT_CSS = `
-.boxplot-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.boxplot-grid .wide{grid-column:1/-1}.report-boxplot{min-width:0;padding:12px 14px 8px;border:1px solid #dfe6ee;border-radius:8px}.report-boxplot h3{display:flex;flex-direction:column;margin:0 0 4px;font-size:13px}.report-boxplot h3 span{color:#718096;font-size:10px;font-weight:400}.report-boxplot svg{display:block;width:100%;height:auto}.report-boxplot .grid{stroke:#e7ecf2;stroke-width:1;stroke-dasharray:3 3}.report-boxplot .axis{stroke:#aeb8c5;stroke-width:1}.report-boxplot .tick,.report-boxplot .label,.report-boxplot .unit{fill:#718096;font-size:10px}.report-boxplot .sample{fill:#98a3b2;font-size:9px}.report-boxplot .legend{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;color:#718096;font-size:9px}.report-boxplot .legend span{display:flex;align-items:center;gap:4px}.report-boxplot .box-key{width:11px;height:7px;border:1.5px solid #64748b;background:#64748b18}.report-boxplot .point-key{width:5px;height:5px;border:1.5px solid #64748b;border-radius:50%}.report-boxplot .mean-key{width:13px;border-top:2px solid #64748b}@media(max-width:760px){.boxplot-grid{grid-template-columns:1fr}.boxplot-grid .wide{grid-column:auto}}
+.boxplot-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.boxplot-grid .wide{grid-column:1/-1}.report-boxplot{min-width:0;padding:12px 14px 8px;border:1px solid #d3dbe5;border-radius:8px}.report-boxplot h3{display:flex;flex-direction:column;margin:0 0 4px;font-size:13px}.report-boxplot h3 span{color:#5f6d80;font-size:10px;font-weight:400}.report-boxplot svg{display:block;width:100%;height:auto}.report-boxplot .grid{stroke:#dce3eb;stroke-width:1;stroke-dasharray:3 3}.report-boxplot .axis{stroke:#7c8796;stroke-width:1}.report-boxplot .tick,.report-boxplot .label,.report-boxplot .unit{fill:#4b596c;font-size:10px}.report-boxplot .sample{fill:#697689;font-size:9px}.report-boxplot .legend{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;color:#4b596c;font-size:9px}.report-boxplot .legend span{display:flex;align-items:center;gap:4px}.report-boxplot .box-key{width:11px;height:7px;border:1.5px solid #374151;background:#3741512b}.report-boxplot .point-key{width:4px;height:4px;border:1.25px solid #374151;border-radius:50%}.report-boxplot .mean-key{width:13px;border-top:2px solid #374151}@media(max-width:760px){.boxplot-grid{grid-template-columns:1fr}.boxplot-grid .wide{grid-column:auto}}@media print{.report-boxplot{border-color:#777}.report-boxplot svg{filter:grayscale(1) contrast(1.35)}}
 `
 
 interface StaticBoxplotOptions {
@@ -16,9 +16,9 @@ interface StaticBoxplotOptions {
 }
 
 const COLORS: Record<string, string> = {
-  no_assistance: '#64748b',
-  glasses: '#3b82f6',
-  app_notification: '#f97316',
+  no_assistance: '#374151',
+  glasses: '#1d4ed8',
+  app_notification: '#c2410c',
 }
 
 function escapeHtml(value: unknown): string {
@@ -92,9 +92,15 @@ export function staticSessionBoxplotHtml(options: StaticBoxplotOptions): string 
     const values = (options.valuesByCondition[condition] ?? []).filter(Number.isFinite)
     const stats = statistics(values)
     const x = left + plotWidth * (groupIndex + 0.5) / options.conditions.length
-    const color = COLORS[condition] ?? '#64748b'
+    const color = COLORS[condition] ?? '#374151'
     const label = options.conditionLabels[condition] ?? condition
-    const points = values.map((value, index) => `<circle cx="${x + (jitter[index % jitter.length] ?? 0)}" cy="${y(value)}" r="4" fill="#fff" fill-opacity=".82" stroke="${color}" stroke-width="1.5"><title>${escapeHtml(label)} · ${format(value)}</title></circle>`).join('')
+    const points = values.map((value, index) => {
+      const pointX = x + (jitter[index % jitter.length] ?? 0)
+      const title = `<title>${escapeHtml(label)} · ${format(value)}</title>`
+      if (condition === 'glasses') return `<rect x="${pointX - 2.5}" y="${y(value) - 2.5}" width="5" height="5" fill="#fff" stroke="${color}" stroke-width="1.25">${title}</rect>`
+      if (condition === 'app_notification') return `<polygon points="${pointX},${y(value) - 3} ${pointX + 2.8},${y(value) + 2.3} ${pointX - 2.8},${y(value) + 2.3}" fill="#fff" stroke="${color}" stroke-width="1.25">${title}</polygon>`
+      return `<circle cx="${pointX}" cy="${y(value)}" r="2.6" fill="#fff" stroke="${color}" stroke-width="1.25">${title}</circle>`
+    }).join('')
     const marks = stats.n ? `
       <line x1="${x}" x2="${x}" y1="${y(stats.high)}" y2="${y(stats.low)}" stroke="${color}" stroke-width="1.6"/>
       <line x1="${x - 17}" x2="${x + 17}" y1="${y(stats.high)}" y2="${y(stats.high)}" stroke="${color}" stroke-width="1.6"/>

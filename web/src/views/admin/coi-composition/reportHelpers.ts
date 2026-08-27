@@ -127,6 +127,28 @@ function figuresHtml(
     { key: 're_ratio', title: language === 'zh' ? 'RE · 解决' : 'RE · Resolution', subtitle: language === 'zh' ? '解决占四阶段编码的比例' : 'Resolution as a proportion of four-phase codes' },
   ] as const
   const labels = Object.fromEntries(conditionColumns.map(condition => [condition, conditionLabel(condition, language)]))
+  const phaseStyles = [
+    { metric: 'te_ratio', short: 'TE', pattern: 'report-phase-te' },
+    { metric: 'ex_ratio', short: 'EX', pattern: 'report-phase-ex' },
+    { metric: 'in_ratio', short: 'IN', pattern: 'report-phase-in' },
+    { metric: 're_ratio', short: 'RE', pattern: 'report-phase-re' },
+  ]
+  const stackedRows = conditionColumns.map((condition, rowIndex) => {
+    const phasesForCondition = phaseStyles.map(phase => ({
+      ...phase,
+      value: report.metrics.find(item => item.metric === phase.metric)?.conditions.find(item => item.condition === condition)?.mean ?? 0,
+    }))
+    const total = phasesForCondition.reduce((sum, phase) => sum + phase.value, 0) || 1
+    let cursor = 0
+    const segments = phasesForCondition.map(phase => {
+      const start = cursor
+      const width = phase.value / total
+      cursor += width
+      return `<rect x="${145 + start * 560}" y="${26 + rowIndex * 48}" width="${width * 560}" height="30" fill="url(#${phase.pattern})" stroke="#fff" stroke-width="1.5"/><text class="stack-text" x="${145 + (start + width / 2) * 560}" y="${45 + rowIndex * 48}" text-anchor="middle">${phase.short} ${(phase.value * 100).toFixed(1)}%</text>`
+    }).join('')
+    return `<text class="stack-label" x="126" y="${46 + rowIndex * 48}" text-anchor="end">${escapeHtml(conditionLabel(condition, language))}</text>${segments}`
+  }).join('')
+  const stackedChart = `<section class="stacked-overview"><h3>${language === 'zh' ? '条件平均构成' : 'Mean composition by condition'}<span>${language === 'zh' ? '每个条形合计为100%；颜色与纹理共同区分四个阶段' : 'Each bar totals 100%; color and pattern jointly identify phases'}</span></h3><svg viewBox="0 0 760 182" role="img"><defs><pattern id="report-phase-te" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#374151"/></pattern><pattern id="report-phase-ex" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#1d4ed8"/><path d="M-2,2 L2,-2 M0,8 L8,0 M6,10 L10,6" stroke="#fff" stroke-width="1.2" opacity=".65"/></pattern><pattern id="report-phase-in" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#047857"/><circle cx="2" cy="2" r="1" fill="#fff"/><circle cx="6" cy="6" r="1" fill="#fff"/></pattern><pattern id="report-phase-re" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#b91c1c"/><path d="M0,4 H8 M4,0 V8" stroke="#fff" stroke-width="1" opacity=".65"/></pattern></defs>${stackedRows}</svg></section>`
   const compositionMaximum = Math.min(1, Math.max(0.5, Math.ceil(Math.max(...report.observations.flatMap(item => [item.te_ratio, item.ex_ratio, item.in_ratio, item.re_ratio]), 0) * 10) / 10))
   const panels = phases.map(phase => staticSessionBoxplotHtml({
     title: phase.title,
@@ -140,9 +162,9 @@ function figuresHtml(
     language,
   })).join('')
   const caption = language === 'zh'
-    ? `<strong>图 1.</strong> 三种实验条件下CoI四阶段编码占比的会话级分布。箱体表示中位数和四分位区间，须线为1.5倍四分位距范围，圆点为每场会话，菱形与误差线表示均值及95%置信区间。四个面板使用共同的0–${(compositionMaximum * 100).toFixed(0)}%纵轴。`
-    : `<strong>Figure 1.</strong> Session-level distributions of the four CoI phase proportions across the three conditions. Boxes show medians and interquartile ranges, whiskers extend to 1.5 IQR, points show sessions, and diamonds with error bars show means and 95% confidence intervals. All panels share a 0–${(compositionMaximum * 100).toFixed(0)}% scale.`
-  return `<figure><div class="boxplot-grid">${panels}</div><figcaption>${caption}</figcaption></figure>`
+    ? `<strong>图 1.</strong> 上图为三个条件的平均四阶段构成（每个条形合计100%）；下图为会话级占比分布。箱体表示中位数和四分位区间，须线为1.5倍四分位距范围，小型点符号为每场会话，菱形与误差线表示均值及95%置信区间。四个分布面板使用共同的0–${(compositionMaximum * 100).toFixed(0)}%纵轴。`
+    : `<strong>Figure 1.</strong> The upper chart shows mean four-phase composition by condition (each bar totals 100%); the lower panels show session-level distributions. Boxes show medians and interquartile ranges, whiskers extend to 1.5 IQR, small symbols show sessions, and diamonds with error bars show means and 95% confidence intervals. Distribution panels share a 0–${(compositionMaximum * 100).toFixed(0)}% scale.`
+  return `<figure>${stackedChart}<div class="boxplot-grid">${panels}</div><figcaption>${caption}</figcaption></figure>`
 }
 
 export function buildCoiCompositionReportHtml(
@@ -210,6 +232,7 @@ export function buildCoiCompositionReportHtml(
     table { width: 100%; margin: 10px 0 18px; border-collapse: collapse; font-size: 11px; } th, td { padding: 7px 8px; border: 1px solid #d8e0eb; text-align: left; vertical-align: top; } th { background: #f4f7fa; }
     figure { margin: 20px 0 30px; padding: 18px 20px; border: 1px solid #d8e0eb; border-radius: 8px; page-break-inside: avoid; }
     figcaption { margin-top: 16px; padding-top: 10px; border-top: 1px solid #e4eaf2; color: #455468; font-size: 11px; }
+    .stacked-overview{margin-bottom:16px;padding:12px 14px 8px;border:1px solid #d3dbe5;border-radius:8px}.stacked-overview h3{display:flex;flex-direction:column;margin:0;font-size:13px}.stacked-overview h3 span{color:#5f6d80;font-size:10px;font-weight:400}.stacked-overview svg{display:block;width:100%;height:auto}.stack-label{fill:#334155;font-size:12px;font-weight:650}.stack-text{fill:#fff;font-size:10px;font-weight:650;paint-order:stroke;stroke:#17203355;stroke-width:2px}@media print{.stacked-overview{border-color:#777}.stacked-overview svg{filter:grayscale(1) contrast(1.35)}.stack-text{stroke:none}}
     ${STATIC_BOXPLOT_CSS}
     @media print { body { margin: 16mm; } h2 { page-break-after: avoid; } table { page-break-inside: avoid; } }
   </style>
