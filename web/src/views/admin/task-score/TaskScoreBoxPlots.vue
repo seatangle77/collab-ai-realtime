@@ -67,7 +67,12 @@ function statsFor(values: number[], condition: string): BoxStats | null {
   }
 }
 
-function ticksFor(min: number, max: number): number[] {
+function ticksFor(min: number, max: number, interval?: number): number[] {
+  if (interval) {
+    const ticks: number[] = []
+    for (let value = min; value <= max; value += interval) ticks.push(value)
+    return ticks.reverse()
+  }
   const mid = (min + max) / 2
   return [max, mid, min]
 }
@@ -85,7 +90,7 @@ const plots = computed<BoxPlot[]>(() => PLOT_METRICS.map((metric) => {
   const synergyValues = props.observations.flatMap(obs => [obs.weak_synergy, obs.strong_synergy])
   const synergyLimit = Math.max(5, Math.ceil(Math.max(...synergyValues.map(Math.abs), 1) * 1.08 / 5) * 5)
   const domain = metric.key === 'gs'
-    ? { min: 0, max: Math.max(10, Math.ceil(Math.max(...allValues, 1) * 1.05 / 10) * 10) }
+    ? { min: 0, max: Math.max(100, Math.ceil(Math.max(...allValues, 1) * 1.05 / 20) * 20) }
     : { min: -synergyLimit, max: synergyLimit }
   return {
     key: metric.key,
@@ -93,7 +98,7 @@ const plots = computed<BoxPlot[]>(() => PLOT_METRICS.map((metric) => {
     note: metric.note,
     min: domain.min,
     max: domain.max,
-    ticks: ticksFor(domain.min, domain.max),
+    ticks: ticksFor(domain.min, domain.max, metric.key === 'gs' ? 20 : undefined),
     boxes,
   }
 }))

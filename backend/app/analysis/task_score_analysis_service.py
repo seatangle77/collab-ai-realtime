@@ -537,7 +537,7 @@ def _generate_task_score_charts(
     try:
         test_by_metric = {t.metric: t for t in statistical_tests}
         gs_values = [obs.gs for obs in observations]
-        gs_upper = max(10.0, math.ceil(max(gs_values, default=1.0) * 1.05 / 10.0) * 10.0)
+        gs_upper = max(100.0, math.ceil(max(gs_values, default=1.0) * 1.05 / 20.0) * 20.0)
         synergy_values = [
             value
             for obs in observations
@@ -573,6 +573,7 @@ def _generate_task_score_charts(
                     panel_label=f"({chr(97 + panel_index)})",
                     condition_labels=text["condition_labels"],
                     y_limits=axis_limits[metric],
+                    y_tick_interval=20.0 if metric == "gs" else None,
                     zero_reference=metric in {"weak_synergy", "strong_synergy"},
                     annotation_y=0.91,
                 )

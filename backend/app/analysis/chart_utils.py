@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import matplotlib.font_manager as fm
 import matplotlib.patheffects as path_effects
+from matplotlib.ticker import MultipleLocator
 import numpy as np
 
 # Try to find a CJK-capable font — file path first, then name-based fallback
@@ -161,6 +162,7 @@ def draw_boxplot(
     panel_label: str | None = None,
     condition_labels: dict[str, str] | None = None,
     y_limits: tuple[float, float] | None = None,
+    y_tick_interval: float | None = None,
     zero_reference: bool = False,
     annotation_y: float = 0.97,
 ) -> None:
@@ -192,6 +194,8 @@ def draw_boxplot(
 
     if y_limits is not None:
         ax.set_ylim(*y_limits)
+    if y_tick_interval is not None:
+        ax.yaxis.set_major_locator(MultipleLocator(y_tick_interval))
     if zero_reference:
         ax.axhline(0, color="#4b5563", linewidth=1.5, linestyle="--", zorder=2)
 
