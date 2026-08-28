@@ -17,6 +17,7 @@ interface StaticBoxplotOptions {
   wide?: boolean
   panelLabel?: string
   statisticLabel?: string
+  showPoints?: boolean
 }
 
 function escapeHtml(value: unknown): string {
@@ -84,7 +85,7 @@ export function staticSessionBoxplotHtml(options: StaticBoxplotOptions): string 
     const x = left + plotWidth * (groupIndex + 0.5) / options.conditions.length
     const color = academicConditionColor(condition)
     const label = options.conditionLabels[condition] ?? condition
-    const points = values.map((value, index) => {
+    const points = options.showPoints === false ? '' : values.map((value, index) => {
       const pointX = x + (jitter[index % jitter.length] ?? 0)
       const title = `<title>${escapeHtml(label)} · ${format(value)}</title>`
       return `<circle cx="${pointX}" cy="${y(value)}" r="2.4" fill="${color}" fill-opacity=".82">${title}</circle>`
@@ -104,9 +105,14 @@ export function staticSessionBoxplotHtml(options: StaticBoxplotOptions): string 
     return `${marks}<text class="label" x="${x}" y="${top + plotHeight + 26}" text-anchor="middle">${escapeHtml(label)}</text><text class="sample" x="${x}" y="${top + plotHeight + 46}" text-anchor="middle">n=${stats.n} · M=${mean}</text>`
   }).join('')
 
+  const pointLegend = options.showPoints === false
+    ? ''
+    : options.language === 'zh'
+      ? '<span><i class="point-key"></i>每场会话</span>'
+      : '<span><i class="point-key"></i>Session</span>'
   const legend = options.language === 'zh'
-    ? '<span><i class="box-key"></i>中位数与四分位区间</span><span><i class="point-key"></i>每场会话</span><span><i class="mean-key"></i>均值及95% CI</span>'
-    : '<span><i class="box-key"></i>Median and IQR</span><span><i class="point-key"></i>Session</span><span><i class="mean-key"></i>Mean and 95% CI</span>'
+    ? `<span><i class="box-key"></i>中位数与四分位区间</span>${pointLegend}<span><i class="mean-key"></i>均值及95% CI</span>`
+    : `<span><i class="box-key"></i>Median and IQR</span>${pointLegend}<span><i class="mean-key"></i>Mean and 95% CI</span>`
 
   return `<section class="report-boxplot${options.wide ? ' wide' : ''}"><h3>${escapeHtml(options.title)}<span>${escapeHtml(options.subtitle)}</span></h3><svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(options.title)}"><defs><style>text{font-family:Arial,Helvetica,sans-serif;text-rendering:geometricPrecision}.grid{stroke:#dce3eb;stroke-width:1.2;stroke-dasharray:3 3}.axis{stroke:#64748b;stroke-width:1.6}.tick{fill:#334155;font-size:14px;font-weight:650}.label{fill:#0f172a;font-size:15px;font-weight:750}.sample{fill:#64748b;font-size:12px;font-weight:600}.panel-title{fill:#0f172a;font-size:17px;font-weight:800}.panel-subtitle{fill:#526071;font-size:12px;font-weight:600}.statistic{fill:#334155;font-size:12px;font-weight:700}.axis-label{fill:#1e293b;font-size:14px;font-weight:750}</style></defs><text class="panel-title" x="18" y="25">${escapeHtml(options.panelLabel ? `${options.panelLabel}  ${options.title}` : options.title)}</text><text class="panel-subtitle" x="18" y="46">${escapeHtml(options.subtitle)}</text>${options.statisticLabel ? `<text class="statistic" x="${width - right}" y="25" text-anchor="end">${escapeHtml(options.statisticLabel)}</text>` : ''}${ticks}<line class="axis" x1="${left}" x2="${left}" y1="${top}" y2="${top + plotHeight}"/><line class="axis" x1="${left}" x2="${width - right}" y1="${top + plotHeight}" y2="${top + plotHeight}"/><text class="axis-label" x="22" y="${top + plotHeight / 2}" transform="rotate(-90 22 ${top + plotHeight / 2})" text-anchor="middle">${escapeHtml(options.unitLabel)}</text>${groups}<text class="axis-label" x="${left + plotWidth / 2}" y="${height - 12}" text-anchor="middle">Experimental Condition</text></svg><div class="legend">${legend}</div></section>`
 }

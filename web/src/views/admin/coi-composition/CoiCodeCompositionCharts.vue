@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { Download, ZoomIn } from '@element-plus/icons-vue'
-import type { MetricSummary, StatisticalTestResult } from '../../../api/admin/coi-analysis'
+import type { MetricSummary, PostHocResult, StatisticalTestResult } from '../../../api/admin/coi-analysis'
 import type { CoiCompositionObservation, CompositionGlobalTest } from '../../../api/admin/coi-composition-analysis'
 import CoiSessionBoxplot from '../coi/CoiSessionBoxplot.vue'
+import CoiCompositionPublicationFigure from './CoiCompositionPublicationFigure.vue'
 import { downloadSvgElement, serializeSvgElement } from '../task-score/analysisExport'
 import { academicNiceMaximum, academicNumber, academicPValue } from '../task-score/academicChartStyle'
 
@@ -12,6 +13,7 @@ const props = defineProps<{
   observations: CoiCompositionObservation[]
   conditions: string[]
   tests: StatisticalTestResult[]
+  postHocTests: PostHocResult[]
   globalTest: CompositionGlobalTest
 }>()
 
@@ -95,6 +97,13 @@ function downloadOverview() {
       </div>
     </template>
 
+    <CoiCompositionPublicationFigure
+      :observations="observations"
+      :conditions="conditions"
+      :tests="tests"
+      :post-hoc-tests="postHocTests"
+    />
+
     <section class="composition-overview">
       <header><div><strong>Mean Composition by Condition</strong><span>Each bar totals 100%; labels show phase and mean proportion.</span></div><div class="chart-actions"><el-tooltip content="Enlarge chart"><el-button :icon="ZoomIn" circle size="small" @click="openOverview" /></el-tooltip><el-tooltip content="Download SVG"><el-button :icon="Download" circle size="small" @click="downloadOverview" /></el-tooltip></div></header>
       <svg ref="overviewSvgRef" viewBox="0 0 800 282" role="img" aria-label="Mean four-phase CoI composition by condition" @click="openOverview">
@@ -147,6 +156,7 @@ function downloadOverview() {
         unit-label="Phase Proportion (%)"
         :panel-label="panel.panelLabel"
         :statistic-label="panel.statisticLabel"
+        :show-points="false"
       />
     </div>
 

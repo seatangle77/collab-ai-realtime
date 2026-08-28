@@ -224,6 +224,7 @@ onMounted(fetchGroupsAndReport)
       :observations="report.observations"
       :conditions="conditionColumns"
       :tests="report.statistical_tests"
+      :post-hoc-tests="report.post_hoc_tests"
       :global-test="report.global_test"
     />
 

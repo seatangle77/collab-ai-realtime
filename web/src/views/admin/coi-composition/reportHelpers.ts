@@ -5,6 +5,7 @@ import { formatNumber, pValueText } from '../coi/reportHelpers'
 import { STATIC_BOXPLOT_CSS, staticSessionBoxplotHtml } from '../coi/staticBoxplotHtml'
 import { chartModalHtml, INTERACTIVE_CHART_CSS, INTERACTIVE_CHART_SCRIPT } from '../task-score/analysisExport'
 import { academicNiceMaximum, academicNumber, academicPValue } from '../task-score/academicChartStyle'
+import { buildCoiCompositionPublicationSvg } from './publicationFigure'
 
 export type CoiCompositionReportLanguage = 'zh' | 'en'
 
@@ -123,6 +124,12 @@ function figuresHtml(
   language: CoiCompositionReportLanguage,
 ): string {
   const chartLanguage: CoiCompositionReportLanguage = 'en'
+  const publicationSvg = buildCoiCompositionPublicationSvg({
+    observations: report.observations,
+    conditions: conditionColumns,
+    tests: report.statistical_tests,
+    postHocTests: report.post_hoc_tests,
+  })
   const phases = [
     { key: 'te_ratio', title: 'TE · Triggering Event', subtitle: 'Proportion of four-phase codes' },
     { key: 'ex_ratio', title: 'EX · Exploration', subtitle: 'Proportion of four-phase codes' },
@@ -169,11 +176,15 @@ function figuresHtml(
     language: chartLanguage,
     panelLabel: `(${String.fromCharCode(98 + index)})`,
     statisticLabel: test ? `BH-adjusted ${academicPValue(test.p_value_adjusted)}${test.effect_size_name && test.effect_size != null ? ` · ${test.effect_size_name} = ${academicNumber(test.effect_size, 2)}` : ''}` : '',
+    showPoints: false,
   })}).join('')
-  const caption = language === 'zh'
-    ? `<strong>图 1.</strong> 上图为三个条件的平均四阶段构成（每个条形合计100%）；下图为会话级占比分布。箱体表示中位数和四分位区间，须线为1.5倍四分位距范围，小型实心圆点为每场会话，菱形与误差线表示均值及95%置信区间。各阶段使用与其数据范围匹配的规范百分比纵轴。`
-    : `<strong>Figure 1.</strong> The upper chart shows mean four-phase composition by condition (each bar totals 100%); the lower panels show session-level distributions. Boxes show medians and interquartile ranges, whiskers extend to 1.5 IQR, small solid circles show sessions, and diamonds with error bars show means and 95% confidence intervals. Each phase uses a compact percentage scale matched to its observed range.`
-  return `<figure>${stackedChart}<div class="boxplot-grid">${panels}</div><figcaption>${caption}</figcaption></figure>`
+  const publicationCaption = language === 'zh'
+    ? '<strong>图 1.</strong> 四个 CoI 阶段在三种实验条件下的合并论文图。面板中的 p 值已进行四阶段多重比较校正；组间括号为事后比较校正后的 p 值。显著结果以红色显示。'
+    : '<strong>Figure 1.</strong> Combined publication figure for all four CoI phases across the three experimental conditions. Panel p values are corrected across the four phase-level tests, and bracketed p values are corrected post hoc comparisons. Significant results are highlighted in red.'
+  const detailCaption = language === 'zh'
+    ? `<strong>图 2.</strong> 上图为三个条件的平均四阶段构成（每个条形合计100%）；下图为会话级占比分布。箱体表示中位数和四分位区间，须线为1.5倍四分位距范围，菱形与误差线表示均值及95%置信区间。各阶段使用与其数据范围匹配的规范百分比纵轴。`
+    : `<strong>Figure 2.</strong> The upper chart shows mean four-phase composition by condition (each bar totals 100%); the lower panels show session-level distributions. Boxes show medians and interquartile ranges, whiskers extend to 1.5 IQR, and diamonds with error bars show means and 95% confidence intervals. Each phase uses a compact percentage scale matched to its observed range.`
+  return `<figure class="publication-report-figure">${publicationSvg}<figcaption>${publicationCaption}</figcaption></figure><figure>${stackedChart}<div class="boxplot-grid">${panels}</div><figcaption>${detailCaption}</figcaption></figure>`
 }
 
 export function buildCoiCompositionReportHtml(
@@ -249,7 +260,7 @@ export function buildCoiCompositionReportHtml(
     .p-raw-nominal { display: inline-block; padding: 1px 5px; border: 1px solid #fed7aa; border-radius: 4px; color: #b45309; background: #fff7ed; font-weight: 700; } .p-adjusted-significant { display: inline-block; padding: 1px 5px; border: 1px solid #fecaca; border-radius: 4px; color: #b91c1c; background: #fef2f2; } .p-status { display: block; margin-top: 2px; color: #b45309; font-size: 9px; }
     figure { margin: 20px 0 30px; padding: 18px 20px; border: 1px solid #d8e0eb; border-radius: 8px; page-break-inside: avoid; }
     figcaption { margin-top: 16px; padding-top: 10px; border-top: 1px solid #e4eaf2; color: #455468; font-size: 11px; }
-    .stacked-overview{margin-bottom:16px;padding:12px 14px 8px;border:1px solid #d3dbe5;border-radius:8px}.stacked-overview h3{display:flex;flex-direction:column;margin:0;font-size:16px}.stacked-overview h3 span{color:#526071;font-size:13px;font-weight:550}.stacked-overview svg{display:block;width:100%;height:auto}.stack-label{fill:#0f172a;font-size:15px;font-weight:750}.stack-text{fill:#fff;font-size:13px;font-weight:750;paint-order:stroke;stroke:#17203388;stroke-width:2px}${INTERACTIVE_CHART_CSS}@media print{.stacked-overview{border-color:#777}.stacked-overview svg{filter:grayscale(1) contrast(1.35)}.stack-text{stroke:none}}
+    .publication-report-figure>svg{display:block;width:100%;height:auto}.stacked-overview{margin-bottom:16px;padding:12px 14px 8px;border:1px solid #d3dbe5;border-radius:8px}.stacked-overview h3{display:flex;flex-direction:column;margin:0;font-size:16px}.stacked-overview h3 span{color:#526071;font-size:13px;font-weight:550}.stacked-overview svg{display:block;width:100%;height:auto}.stack-label{fill:#0f172a;font-size:15px;font-weight:750}.stack-text{fill:#fff;font-size:13px;font-weight:750;paint-order:stroke;stroke:#17203388;stroke-width:2px}${INTERACTIVE_CHART_CSS}@media print{.stacked-overview{border-color:#777}.stacked-overview svg{filter:grayscale(1) contrast(1.35)}.stack-text{stroke:none}}
     ${STATIC_BOXPLOT_CSS}
     @media print { body { margin: 16mm; } h2 { page-break-after: avoid; } table { page-break-inside: avoid; } }
   </style>

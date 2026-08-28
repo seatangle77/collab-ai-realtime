@@ -14,6 +14,7 @@ const props = withDefaults(defineProps<{
   unitLabel?: string
   panelLabel?: string
   statisticLabel?: string
+  showPoints?: boolean
 }>(), {
   subtitle: '',
   maximum: undefined,
@@ -21,6 +22,7 @@ const props = withDefaults(defineProps<{
   unitLabel: '',
   panelLabel: '',
   statisticLabel: '',
+  showPoints: true,
 })
 const svgRef = ref<SVGElement | null>(null)
 const previewVisible = ref(false)
@@ -162,6 +164,7 @@ function downloadChart() {
             :points="`${group.x + 43},${y(group.stats.mean) - 5} ${group.x + 48},${y(group.stats.mean)} ${group.x + 43},${y(group.stats.mean) + 5} ${group.x + 38},${y(group.stats.mean)}`"
           />
           <circle
+            v-if="showPoints"
             v-for="(value, index) in group.values"
             :key="`${group.condition}-${index}`"
             class="raw-point"
@@ -176,7 +179,7 @@ function downloadChart() {
       </g>
       <text :x="LEFT + PLOT_WIDTH / 2" :y="HEIGHT - 12" text-anchor="middle" class="axis-label">Experimental Condition</text>
     </svg>
-    <footer><span><i class="box-key" />Median and IQR</span><span><i class="point-key" />Session</span><span><i class="mean-key" />Mean and 95% CI</span></footer>
+    <footer><span><i class="box-key" />Median and IQR</span><span v-if="showPoints"><i class="point-key" />Session</span><span><i class="mean-key" />Mean and 95% CI</span></footer>
     <el-dialog v-model="previewVisible" :title="title" width="96vw" top="2vh" append-to-body><div class="coi-large-chart" v-html="previewMarkup" /></el-dialog>
   </section>
 </template>
