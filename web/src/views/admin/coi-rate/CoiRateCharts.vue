@@ -9,7 +9,7 @@ import type {
 } from '../../../api/admin/coi-rate-analysis'
 import CoiSessionBoxplot from '../coi/CoiSessionBoxplot.vue'
 import { downloadSvgElement, serializeSvgElement } from '../task-score/analysisExport'
-import { academicConditionColor, academicConditionLabel, academicNumber, academicPValue } from '../task-score/academicChartStyle'
+import { academicConditionColor, academicConditionLabel, academicNiceMaximum, academicNumber, academicPValue, academicTicks } from '../task-score/academicChartStyle'
 
 const props = defineProps<{
   metrics: CoiRateMetricSummary[]
@@ -34,23 +34,13 @@ function valuesFor(key: keyof CoiRateObservation): Record<string, number[]> {
   ]))
 }
 
-function niceMaximum(value: number): number {
-  if (value <= 0) return 1
-  const magnitude = 10 ** Math.floor(Math.log10(value))
-  const normalized = value / magnitude
-  const steps = [1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 7, 8, 9, 10]
-  return (steps.find(step => normalized <= step) ?? 10) * magnitude
-}
-
-const totalMaximum = computed(() => niceMaximum(Math.max(...props.observations.map(item => item.total_rate), 0) * 1.08))
-const phaseMaximum = computed(() => niceMaximum(Math.max(...props.observations.flatMap(item => [item.te_rate, item.ex_rate, item.in_rate, item.re_rate]), 0) * 1.08))
 const panelRows = computed(() => panels.map((panel, index) => {
   const test = props.tests.find(item => item.metric === panel.metric)
   return {
   ...panel,
   panelLabel: `(${String.fromCharCode(97 + index)})`,
   values: valuesFor(panel.key),
-  maximum: panel.metric === 'total_rate' ? totalMaximum.value : phaseMaximum.value,
+  maximum: academicNiceMaximum(Math.max(...props.observations.map(item => Number(item[panel.key])).filter(Number.isFinite), 0) * 1.03),
   statisticLabel: test ? `BH-adjusted ${academicPValue(test.p_value_adjusted)} · η² = ${academicNumber(test.effect_size, 2)}` : '',
   }
 }))
@@ -64,8 +54,8 @@ const meanPanels = computed(() => panels.map((panel, panelIndex) => ({
     n: props.metrics.find(item => item.metric === panel.metric)?.conditions.find(item => item.condition === condition)?.n ?? 0,
   })),
 })))
-const totalMeanMaximum = computed(() => niceMaximum(Math.max(...meanPanels.value[0]!.conditions.map(item => item.value), 1) * 1.08))
-const phaseMeanMaximum = computed(() => niceMaximum(Math.max(...meanPanels.value.slice(1).flatMap(panel => panel.conditions.map(item => item.value)), 0.1) * 1.08))
+const totalMeanMaximum = computed(() => academicNiceMaximum(Math.max(...meanPanels.value[0]!.conditions.map(item => item.value), 1) * 1.03))
+const phaseMeanMaximum = computed(() => academicNiceMaximum(Math.max(...meanPanels.value.slice(1).flatMap(panel => panel.conditions.map(item => item.value)), 0.1) * 1.03))
 const contrastRows = computed(() => props.contrasts)
 const contrastMaximum = computed(() => {
   const maximum = Math.max(...contrastRows.value.flatMap(item => [item.mean_difference, item.ci_low ?? 0, item.ci_high ?? 0].map(Math.abs)), 0.1)
@@ -92,7 +82,7 @@ function phasePanelLeft(index: number) { return 24 + (index % 2) * 590 }
 function phasePanelTop(index: number) { return 286 + Math.floor(index / 2) * 244 }
 function svgBarWidth(value: number, maximum: number, width: number) { return Math.max(0, Math.min(width, value / maximum * width)) }
 function contrastX(value: number) { return 390 + Math.min(1, Math.max(0, (value + contrastMaximum.value) / (contrastMaximum.value * 2))) * 500 }
-function axisTicks(maximum: number) { return Array.from({ length: 5 }, (_, index) => maximum * index / 4) }
+function axisTicks(maximum: number) { return academicTicks(maximum) }
 function totalAxisX(value: number) { return 225 + value / totalMeanMaximum.value * 800 }
 function phaseAxisX(value: number, left: number) { return left + 165 + value / phaseMeanMaximum.value * 340 }
 function contrastTicks() { return Array.from({ length: 5 }, (_, index) => -contrastMaximum.value + contrastMaximum.value * 2 * index / 4) }

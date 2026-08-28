@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { Download, ZoomIn } from '@element-plus/icons-vue'
 import { downloadSvgElement, serializeSvgElement } from '../task-score/analysisExport'
-import { academicConditionColor, academicConditionLabel } from '../task-score/academicChartStyle'
+import { academicConditionColor, academicConditionLabel, academicNiceMaximum, academicTicks } from '../task-score/academicChartStyle'
 
 const props = withDefaults(defineProps<{
   title: string
@@ -79,17 +79,8 @@ function statistics(values: number[]) {
   return { n: sorted.length, q1, median, q3, whiskerLow, whiskerHigh, mean, ciLow: mean - margin, ciHigh: mean + margin }
 }
 
-function niceMaximum(value: number): number {
-  if (value <= 0) return 1
-  const magnitude = 10 ** Math.floor(Math.log10(value))
-  const normalized = value / magnitude
-  const steps = [1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 7, 8, 9, 10]
-  const nice = steps.find(step => normalized <= step) ?? 10
-  return nice * magnitude
-}
-
 const allValues = computed(() => props.conditions.flatMap(condition => props.valuesByCondition[condition] ?? []).filter(Number.isFinite))
-const domainMaximum = computed(() => props.maximum ?? niceMaximum(Math.max(...allValues.value, 0) * 1.08))
+const domainMaximum = computed(() => props.maximum ?? academicNiceMaximum(Math.max(...allValues.value, 0) * 1.03))
 const groups = computed(() => props.conditions.map((condition, index) => ({
   condition,
   color: color(condition),
@@ -97,9 +88,9 @@ const groups = computed(() => props.conditions.map((condition, index) => ({
   values: props.valuesByCondition[condition] ?? [],
   stats: statistics(props.valuesByCondition[condition] ?? []),
 })))
-const ticks = computed(() => Array.from({ length: 5 }, (_, index) => ({
-  value: domainMaximum.value * index / 4,
-  y: TOP + PLOT_HEIGHT - PLOT_HEIGHT * index / 4,
+const ticks = computed(() => academicTicks(domainMaximum.value).map(value => ({
+  value,
+  y: TOP + PLOT_HEIGHT - PLOT_HEIGHT * value / domainMaximum.value,
 })))
 
 function y(value: number): number {

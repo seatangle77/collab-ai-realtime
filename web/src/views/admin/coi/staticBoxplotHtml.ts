@@ -1,4 +1,4 @@
-import { academicConditionColor } from '../task-score/academicChartStyle'
+import { academicConditionColor, academicNiceMaximum, academicTicks } from '../task-score/academicChartStyle'
 
 export const STATIC_BOXPLOT_CSS = `
 .boxplot-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.boxplot-grid .wide{grid-column:1/-1}.report-boxplot{min-width:0;padding:12px 14px 8px;border:1px solid #d3dbe5;border-radius:8px}.report-boxplot h3{display:flex;flex-direction:column;margin:0 0 4px;font-size:16px}.report-boxplot h3 span{color:#526071;font-size:13px;font-weight:550}.report-boxplot svg{display:block;width:100%;height:auto}.report-boxplot .grid{stroke:#dce3eb;stroke-width:1.2;stroke-dasharray:3 3}.report-boxplot .axis{stroke:#64748b;stroke-width:1.6}.report-boxplot .tick,.report-boxplot .label,.report-boxplot .unit{fill:#334155;font-size:14px;font-weight:650}.report-boxplot .label{fill:#0f172a;font-size:15px;font-weight:750}.report-boxplot .sample{fill:#64748b;font-size:12px;font-weight:600}.report-boxplot .legend{display:flex;justify-content:center;gap:16px;flex-wrap:wrap;color:#475569;font-size:12px;font-weight:600}.report-boxplot .legend span{display:flex;align-items:center;gap:4px}.report-boxplot .box-key{width:11px;height:7px;border:1.5px solid #374151;background:#3741512b}.report-boxplot .point-key{width:4px;height:4px;border:1.25px solid #374151;border-radius:50%}.report-boxplot .mean-key{width:13px;border-top:2px solid #374151}@media(max-width:760px){.boxplot-grid{grid-template-columns:1fr}.boxplot-grid .wide{grid-column:auto}}@media print{.report-boxplot{border-color:#777}.report-boxplot svg{filter:grayscale(1) contrast(1.35)}}
@@ -58,14 +58,6 @@ function statistics(input: number[]) {
   return { n: values.length, q1, median, q3, low, high, mean, ciLow: mean - margin, ciHigh: mean + margin }
 }
 
-function niceMaximum(value: number): number {
-  if (value <= 0) return 1
-  const magnitude = 10 ** Math.floor(Math.log10(value))
-  const normalized = value / magnitude
-  const steps = [1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 7, 8, 9, 10]
-  return (steps.find(step => normalized <= step) ?? 10) * magnitude
-}
-
 export function staticSessionBoxplotHtml(options: StaticBoxplotOptions): string {
   const width = 760
   const height = 452
@@ -76,13 +68,12 @@ export function staticSessionBoxplotHtml(options: StaticBoxplotOptions): string 
   const plotWidth = width - left - right
   const plotHeight = height - top - bottom
   const allValues = options.conditions.flatMap(condition => options.valuesByCondition[condition] ?? [])
-  const maximum = options.maximum ?? niceMaximum(Math.max(...allValues, 0) * 1.08)
+  const maximum = options.maximum ?? academicNiceMaximum(Math.max(...allValues, 0) * 1.03)
   const y = (value: number) => top + plotHeight - Math.min(1, Math.max(0, value / maximum)) * plotHeight
   const format = (value: number) => options.percent ? `${(value * 100).toFixed(0)}%` : value.toFixed(maximum <= 2 ? 2 : 1)
   const jitter = [-24, -16, -8, 0, 8, 16, 24, -20, -12, -4, 4, 12, 20]
 
-  const ticks = Array.from({ length: 5 }, (_, index) => {
-    const value = maximum * index / 4
+  const ticks = academicTicks(maximum).map(value => {
     const tickY = y(value)
     return `<line class="grid" x1="${left}" x2="${width - right}" y1="${tickY}" y2="${tickY}"/><text class="tick" x="${left - 9}" y="${tickY + 4}" text-anchor="end">${format(value)}</text>`
   }).join('')

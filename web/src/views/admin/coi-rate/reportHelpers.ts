@@ -7,7 +7,7 @@ import type { AdminGroup } from '../../../types/admin'
 import { coderRoleLabel, conditionLabel } from '../coi/reportHelpers'
 import { STATIC_BOXPLOT_CSS, staticSessionBoxplotHtml } from '../coi/staticBoxplotHtml'
 import { chartModalHtml, INTERACTIVE_CHART_CSS, INTERACTIVE_CHART_SCRIPT } from '../task-score/analysisExport'
-import { academicConditionColor, academicNumber, academicPValue } from '../task-score/academicChartStyle'
+import { academicConditionColor, academicNiceMaximum, academicNumber, academicPValue, academicTicks } from '../task-score/academicChartStyle'
 
 export type CoiRateReportLanguage = 'zh' | 'en'
 
@@ -63,14 +63,6 @@ function statsFor(metric: CoiRateMetricSummary, condition: string): MetricCondit
   return metric.conditions.find(item => item.condition === condition)
 }
 
-function niceMaximum(value: number): number {
-  if (value <= 0) return 1
-  const magnitude = 10 ** Math.floor(Math.log10(value))
-  const normalized = value / magnitude
-  const steps = [1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 7, 8, 9, 10]
-  return (steps.find(step => normalized <= step) ?? 10) * magnitude
-}
-
 function selectedGroupNames(
   condition: string,
   selected: Record<string, string[]>,
@@ -113,8 +105,6 @@ export function buildCoiRateReportHtml(
     { key: 'in_rate', title: 'IN · Integration', subtitle: 'Rate (codes/min)', wide: false },
     { key: 're_rate', title: 'RE · Resolution', subtitle: 'Rate (codes/min)', wide: false },
   ] as const
-  const totalMaximum = niceMaximum(Math.max(...report.observations.map(item => item.total_rate), 0) * 1.08)
-  const phaseMaximum = niceMaximum(Math.max(...report.observations.flatMap(item => [item.te_rate, item.ex_rate, item.in_rate, item.re_rate]), 0) * 1.08)
   const meanPanels = panels.map((panel, panelIndex) => ({
     ...panel,
     panelLabel: `(${String.fromCharCode(97 + panelIndex)})`,
@@ -124,32 +114,33 @@ export function buildCoiRateReportHtml(
       n: report.metrics.find(metric => metric.metric === panel.key)?.conditions.find(item => item.condition === condition)?.n ?? 0,
     })),
   }))
-  const totalMeanMaximum = niceMaximum(Math.max(...(meanPanels[0]?.values.map(item => item.value) ?? []), 1) * 1.08)
-  const phaseMeanMaximum = niceMaximum(Math.max(...meanPanels.slice(1).flatMap(panel => panel.values.map(item => item.value)), 0.1) * 1.08)
+  const totalMeanMaximum = academicNiceMaximum(Math.max(...(meanPanels[0]?.values.map(item => item.value) ?? []), 1) * 1.03)
+  const phaseMeanMaximum = academicNiceMaximum(Math.max(...meanPanels.slice(1).flatMap(panel => panel.values.map(item => item.value)), 0.1) * 1.03)
   const testLabel = (metric: string) => {
     const test = report.statistical_tests.find(item => item.metric === metric)
     return test ? `BH-adjusted ${academicPValue(test.p_value_adjusted)} · η² = ${academicNumber(test.effect_size, 2)}` : ''
   }
-  const axisTicks = (maximum: number) => Array.from({ length: 5 }, (_, index) => maximum * index / 4)
-  const totalAxis = axisTicks(totalMeanMaximum).map(tick => `<line x1="${225 + tick / totalMeanMaximum * 800}" x2="${225 + tick / totalMeanMaximum * 800}" y1="48" y2="205" class="grid-line"/><text x="${225 + tick / totalMeanMaximum * 800}" y="225" text-anchor="middle">${tick.toFixed(2)}</text>`).join('')
+  const totalAxis = academicTicks(totalMeanMaximum).map(tick => `<line x1="${225 + tick / totalMeanMaximum * 800}" x2="${225 + tick / totalMeanMaximum * 800}" y1="48" y2="205" class="grid-line"/><text x="${225 + tick / totalMeanMaximum * 800}" y="225" text-anchor="middle">${tick.toFixed(2)}</text>`).join('')
   const meanTotalRows = meanPanels[0]!.values.map((item, index) => `<text x="205" y="${76 + index * 48}" text-anchor="end" class="condition">${escapeHtml(EN_CONDITIONS[item.condition] ?? item.condition)}</text><rect x="225" y="${57 + index * 48}" width="${Math.max(0, Math.min(800, item.value / totalMeanMaximum * 800))}" height="24" fill="${academicConditionColor(item.condition)}"/><text x="${Math.min(1100, 235 + item.value / totalMeanMaximum * 800)}" y="${76 + index * 48}" class="value">${number(item.value)} (n=${item.n})</text>`).join('')
   const meanPhasePanels = meanPanels.slice(1).map((panel, panelIndex) => {
     const left = 24 + (panelIndex % 2) * 590
     const top = 286 + Math.floor(panelIndex / 2) * 244
-    const phaseAxis = axisTicks(phaseMeanMaximum).map(tick => `<line x1="${left + 165 + tick / phaseMeanMaximum * 340}" x2="${left + 165 + tick / phaseMeanMaximum * 340}" y1="${top + 18}" y2="${top + 172}" class="grid-line"/><text x="${left + 165 + tick / phaseMeanMaximum * 340}" y="${top + 191}" text-anchor="middle">${tick.toFixed(2)}</text>`).join('')
+    const phaseAxis = academicTicks(phaseMeanMaximum).map(tick => `<line x1="${left + 165 + tick / phaseMeanMaximum * 340}" x2="${left + 165 + tick / phaseMeanMaximum * 340}" y1="${top + 18}" y2="${top + 172}" class="grid-line"/><text x="${left + 165 + tick / phaseMeanMaximum * 340}" y="${top + 191}" text-anchor="middle">${tick.toFixed(2)}</text>`).join('')
     const rows = panel.values.map((item, index) => `<text x="${left + 145}" y="${top + 44 + index * 46}" text-anchor="end" class="condition">${escapeHtml(EN_CONDITIONS[item.condition] ?? item.condition)}</text><rect x="${left + 165}" y="${top + 26 + index * 46}" width="${Math.max(0, Math.min(340, item.value / phaseMeanMaximum * 340))}" height="23" fill="${academicConditionColor(item.condition)}"/><text x="${left + 515}" y="${top + 44 + index * 46}" class="value">${number(item.value)}</text>`).join('')
     return `<text x="${left}" y="${top}" class="chart-title">${panel.panelLabel} ${escapeHtml(panel.title.replace(' · ', ' '))}</text><text x="${left + 550}" y="${top}" text-anchor="end" class="stat-label">${escapeHtml(testLabel(panel.key))}</text>${phaseAxis}<line x1="${left + 165}" x2="${left + 505}" y1="${top + 172}" y2="${top + 172}" class="axis-line"/>${rows}<text x="${left + 335}" y="${top + 216}" text-anchor="middle" class="axis-title">Rate (codes/min)</text>`
   }).join('')
   const meanRateSvg = `<svg class="mean-rate-svg" viewBox="0 0 1200 790" role="img" aria-label="Mean CoI idea-generation rates by condition"><defs><style>text{font-family:Arial,Helvetica,sans-serif;text-rendering:geometricPrecision}.chart-title{fill:#0f172a;font-size:18px;font-weight:800}.condition{fill:#1e293b;font-size:14px;font-weight:700}.value{fill:#1e293b;font-size:13px;font-weight:750}.stat-label{fill:#334155;font-size:11px;font-weight:700}.grid-line{stroke:#dfe6ee;stroke-width:1;stroke-dasharray:3 3}.axis-line{stroke:#64748b;stroke-width:1.5}.axis-title{fill:#1e293b;font-size:14px;font-weight:750}.numeric-axis text{fill:#475569;font-size:12px;font-weight:650}</style></defs><text x="24" y="30" class="chart-title">(a) All Four CoI Phases</text><text x="1170" y="30" text-anchor="end" class="stat-label">${escapeHtml(testLabel('total_rate'))}</text><g class="numeric-axis">${totalAxis}<line x1="225" x2="1025" y1="205" y2="205" class="axis-line"/><text x="625" y="250" text-anchor="middle" class="axis-title">Rate (codes/min)</text></g>${meanTotalRows}<line x1="24" x2="1176" y1="270" y2="270" stroke="#cbd5e1" stroke-width="1.5"/>${meanPhasePanels}</svg>`
   const rateFigures = panels.map((panel, panelIndex) => {
     const test = report.statistical_tests.find(item => item.metric === panel.key)
+    const valuesByCondition = Object.fromEntries(conditions.map(condition => [condition, report.observations.filter(item => item.condition === condition).map(item => item[panel.key])]))
+    const maximum = academicNiceMaximum(Math.max(...Object.values(valuesByCondition).flat(), 0) * 1.03)
     return staticSessionBoxplotHtml({
     title: panel.title,
     subtitle: panel.subtitle,
     conditions,
-    valuesByCondition: Object.fromEntries(conditions.map(condition => [condition, report.observations.filter(item => item.condition === condition).map(item => item[panel.key])])),
+    valuesByCondition,
     conditionLabels: labels,
-    maximum: panel.key === 'total_rate' ? totalMaximum : phaseMaximum,
+    maximum,
     unitLabel: 'Rate (codes/min)',
     language: 'en',
     wide: panel.wide,

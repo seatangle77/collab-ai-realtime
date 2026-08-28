@@ -5,7 +5,7 @@ import type { MetricSummary, StatisticalTestResult } from '../../../api/admin/co
 import type { CoiCompositionObservation, CompositionGlobalTest } from '../../../api/admin/coi-composition-analysis'
 import CoiSessionBoxplot from '../coi/CoiSessionBoxplot.vue'
 import { downloadSvgElement, serializeSvgElement } from '../task-score/analysisExport'
-import { academicNumber, academicPValue } from '../task-score/academicChartStyle'
+import { academicNiceMaximum, academicNumber, academicPValue } from '../task-score/academicChartStyle'
 
 const props = defineProps<{
   metrics: MetricSummary[]
@@ -63,17 +63,14 @@ const panelRows = computed(() => panels.map((panel, index) => ({
   ...panel,
   panelLabel: `(${String.fromCharCode(98 + index)})`,
   values: valuesFor(panel.key),
+  maximum: academicNiceMaximum(Math.max(...props.observations.map(item => Number(item[panel.key])).filter(Number.isFinite), 0) * 1.03),
   statisticLabel: (() => {
     const test = props.tests.find(item => item.metric === panel.metric)
     if (!test) return ''
     return `BH-adjusted ${academicPValue(test.p_value_adjusted)}${test.effect_size_name && test.effect_size != null ? ` · ${test.effect_size_name} = ${academicNumber(test.effect_size, 2)}` : ''}`
   })(),
 })))
-const compositionMaximum = computed(() => {
-  const maximum = Math.max(...props.observations.flatMap(item => [item.te_ratio, item.ex_ratio, item.in_ratio, item.re_ratio]), 0)
-  return Math.min(1, Math.max(0.5, Math.ceil(maximum * 10) / 10))
-})
-const scaleLabel = computed(() => `All four phases share a 0–${(compositionMaximum.value * 100).toFixed(0)}% scale for direct comparison.`)
+const scaleLabel = 'Each phase uses a compact, data-appropriate percentage scale.'
 const overviewSvgRef = ref<SVGElement | null>(null)
 const previewVisible = ref(false)
 const previewMarkup = ref('')
@@ -145,7 +142,7 @@ function downloadOverview() {
         :subtitle="panel.subtitle"
         :conditions="conditions"
         :values-by-condition="panel.values"
-        :maximum="compositionMaximum"
+        :maximum="panel.maximum"
         percent
         unit-label="Phase Proportion (%)"
         :panel-label="panel.panelLabel"
