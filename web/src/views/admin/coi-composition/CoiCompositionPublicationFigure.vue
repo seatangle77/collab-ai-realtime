@@ -15,7 +15,7 @@ const props = defineProps<{
 
 const figureContainer = ref<HTMLElement | null>(null)
 const previewVisible = ref(false)
-const previewMarkup = ref('')
+const previewSrc = ref('')
 const figureMarkup = computed(() => buildCoiCompositionPublicationSvg({
   observations: props.observations,
   conditions: props.conditions,
@@ -30,7 +30,7 @@ function figureSvg(): SVGElement | null {
 function openPreview() {
   const svg = figureSvg()
   if (!svg) return
-  previewMarkup.value = serializeSvgElement(svg)
+  previewSrc.value = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(serializeSvgElement(svg))}`
   previewVisible.value = true
 }
 
@@ -51,7 +51,8 @@ function downloadFigure() {
     </header>
     <div ref="figureContainer" class="figure-svg" v-html="figureMarkup" @click="openPreview" />
     <el-dialog v-model="previewVisible" title="CoI Phase Proportions by Experimental Condition" width="96vw" top="2vh" append-to-body>
-      <div class="publication-large" v-html="previewMarkup" />
+      <div class="publication-large"><img :src="previewSrc" alt="Enlarged CoI phase proportions" /></div>
+      <template #footer><el-button :icon="Download" type="primary" @click="downloadFigure">Save SVG</el-button></template>
     </el-dialog>
   </section>
 </template>
@@ -66,5 +67,5 @@ function downloadFigure() {
 .figure-svg { cursor: zoom-in; }
 .figure-svg :deep(svg) { display: block; width: 100%; height: auto; }
 :global(.publication-large) { overflow: auto; background: #fff; }
-:global(.publication-large svg) { display: block; width: 1800px; max-width: none; height: auto; }
+:global(.publication-large img) { display: block; width: 2000px; max-width: none; height: auto; }
 </style>

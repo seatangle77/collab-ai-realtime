@@ -75,12 +75,12 @@ const panelRows = computed(() => panels.map((panel, index) => ({
 const scaleLabel = 'Each phase uses a compact, data-appropriate percentage scale.'
 const overviewSvgRef = ref<SVGElement | null>(null)
 const previewVisible = ref(false)
-const previewMarkup = ref('')
+const previewSrc = ref('')
 const conditionLabelsEn: Record<string, string> = { no_assistance: 'No Assistance', glasses: 'Smart Glasses', app_notification: 'App Notification' }
 const conditionLabelEn = (condition: string) => conditionLabelsEn[condition] ?? condition
 function openOverview() {
   if (!overviewSvgRef.value) return
-  previewMarkup.value = serializeSvgElement(overviewSvgRef.value)
+  previewSrc.value = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(serializeSvgElement(overviewSvgRef.value))}`
   previewVisible.value = true
 }
 function downloadOverview() {
@@ -167,7 +167,10 @@ function downloadOverview() {
       <strong>Figure 1. Mean composition and session-level distributions of the four CoI phases.</strong>
       <span>The upper 100% stacked bars summarize condition means. Box plots show medians, IQRs, session observations, and means with 95% confidence intervals.</span>
     </footer>
-    <el-dialog v-model="previewVisible" title="Mean Composition by Condition" width="96vw" top="2vh" append-to-body><div class="coi-composition-large" v-html="previewMarkup" /></el-dialog>
+    <el-dialog v-model="previewVisible" title="Mean Composition by Condition" width="96vw" top="2vh" append-to-body>
+      <div class="coi-composition-large"><img :src="previewSrc" alt="Enlarged mean CoI composition" /></div>
+      <template #footer><el-button :icon="Download" type="primary" @click="downloadOverview">Save SVG</el-button></template>
+    </el-dialog>
   </el-card>
 </template>
 
@@ -198,7 +201,7 @@ function downloadOverview() {
 .phase-legend .te { background:#4B5563; }.phase-legend .ex { background:#0072B2; }.phase-legend .in { background:#009E73; }.phase-legend .re { background:#D55E00; }
 .figure-caption { display:flex; flex-direction:column; gap:4px; margin:18px 4px 2px; padding-top:12px; border-top:1px solid #eef2f6; color:#66758a; font-size:11px; line-height:1.65; }
 .figure-caption strong { color:#3f4f63; font-weight:650; }
-:global(.coi-composition-large){overflow:auto;background:#fff}:global(.coi-composition-large svg){display:block;width:1800px;max-width:none;height:auto}
+:global(.coi-composition-large){overflow:auto;background:#fff}:global(.coi-composition-large img){display:block;width:1800px;max-width:none;height:auto}
 @media(max-width:900px){.boxplot-layout{grid-template-columns:1fr}}
 @media print {
   .composition-overview { border-color:#777; }

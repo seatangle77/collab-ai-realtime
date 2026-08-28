@@ -150,13 +150,14 @@ function downloadActiveChart() {
         class="chart-image"
         @click="previewVisible = true"
       />
-      <el-image-viewer
-        v-if="previewVisible"
-        :url-list="[activeChartSrc]"
-        :initial-index="0"
-        :hide-on-click-modal="true"
-        @close="previewVisible = false"
-      />
+      <el-dialog v-model="previewVisible" title="Primary Outcome Box Plots" width="96vw" top="2vh" append-to-body>
+        <div class="task-score-large-preview">
+          <img :src="activeChartSrc" alt="Enlarged primary outcome box plots" />
+        </div>
+        <template #footer>
+          <el-button :icon="Download" type="primary" @click="downloadActiveChart">Save SVG</el-button>
+        </template>
+      </el-dialog>
     </div>
 
     <!-- 旧 SVG 兜底 -->
@@ -294,6 +295,18 @@ function downloadActiveChart() {
   display: block;
   cursor: zoom-in;
   border-radius: 4px;
+}
+
+:global(.task-score-large-preview) {
+  overflow: auto;
+  background: #fff;
+}
+
+:global(.task-score-large-preview img) {
+  display: block;
+  width: 1800px;
+  max-width: none;
+  height: auto;
 }
 
 .boxplot-grid {

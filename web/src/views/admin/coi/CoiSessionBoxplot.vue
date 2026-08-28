@@ -26,7 +26,7 @@ const props = withDefaults(defineProps<{
 })
 const svgRef = ref<SVGElement | null>(null)
 const previewVisible = ref(false)
-const previewMarkup = ref('')
+const previewSrc = ref('')
 const conditionLabelEn = academicConditionLabel
 const fileStem = computed(() => props.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'coi-boxplot')
 
@@ -113,7 +113,7 @@ function pointX(groupX: number, index: number): number {
 
 function openPreview() {
   if (!svgRef.value) return
-  previewMarkup.value = serializeSvgElement(svgRef.value)
+  previewSrc.value = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(serializeSvgElement(svgRef.value))}`
   previewVisible.value = true
 }
 
@@ -180,7 +180,10 @@ function downloadChart() {
       <text :x="LEFT + PLOT_WIDTH / 2" :y="HEIGHT - 12" text-anchor="middle" class="axis-label">Experimental Condition</text>
     </svg>
     <footer><span><i class="box-key" />Median and IQR</span><span v-if="showPoints"><i class="point-key" />Session</span><span><i class="mean-key" />Mean and 95% CI</span></footer>
-    <el-dialog v-model="previewVisible" :title="title" width="96vw" top="2vh" append-to-body><div class="coi-large-chart" v-html="previewMarkup" /></el-dialog>
+    <el-dialog v-model="previewVisible" :title="title" width="96vw" top="2vh" append-to-body>
+      <div class="coi-large-chart"><img :src="previewSrc" :alt="`Enlarged ${title}`" /></div>
+      <template #footer><el-button :icon="Download" type="primary" @click="downloadChart">Save SVG</el-button></template>
+    </el-dialog>
   </section>
 </template>
 
@@ -213,7 +216,7 @@ svg { display:block; width:100%; height:auto; overflow:visible; cursor:zoom-in; 
 .box-key { width:12px; height:8px; border:1.5px solid #64748b; background:#64748b18; }
 .point-key { width:5px; height:5px; border-radius:50%; background:#374151; }
 .mean-key { width:14px; height:2px; background:#64748b; transform:rotate(90deg); }
-:global(.coi-large-chart){overflow:auto;background:#fff}:global(.coi-large-chart svg){display:block;width:1800px;max-width:none;height:auto}
+:global(.coi-large-chart){overflow:auto;background:#fff}:global(.coi-large-chart img){display:block;width:1800px;max-width:none;height:auto}
 @media print {
   .boxplot-panel { border-color:#777; }
   .box[data-condition="no_assistance"] { stroke:#111 !important; fill:#e5e5e5 !important; }
