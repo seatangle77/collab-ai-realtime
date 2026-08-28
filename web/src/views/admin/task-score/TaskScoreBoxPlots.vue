@@ -67,15 +67,6 @@ function statsFor(values: number[], condition: string): BoxStats | null {
   }
 }
 
-function paddedDomain(values: number[]): { min: number; max: number } {
-  if (values.length === 0) return { min: 0, max: 1 }
-  const rawMin = Math.min(...values)
-  const rawMax = Math.max(...values)
-  const span = rawMax - rawMin || Math.max(1, Math.abs(rawMax) || 1)
-  const pad = span * 0.12
-  return { min: rawMin - pad, max: rawMax + pad }
-}
-
 function ticksFor(min: number, max: number): number[] {
   const mid = (min + max) / 2
   return [max, mid, min]
@@ -91,7 +82,11 @@ const plots = computed<BoxPlot[]>(() => PLOT_METRICS.map((metric) => {
     ))
     .filter((box): box is BoxStats => box !== null)
   const allValues = boxes.flatMap((box) => [box.min, box.q1, box.median, box.q3, box.max])
-  const domain = paddedDomain(allValues)
+  const synergyValues = props.observations.flatMap(obs => [obs.weak_synergy, obs.strong_synergy])
+  const synergyLimit = Math.max(5, Math.ceil(Math.max(...synergyValues.map(Math.abs), 1) * 1.08 / 5) * 5)
+  const domain = metric.key === 'gs'
+    ? { min: 0, max: Math.max(10, Math.ceil(Math.max(...allValues, 1) * 1.05 / 10) * 10) }
+    : { min: -synergyLimit, max: synergyLimit }
   return {
     key: metric.key,
     label: metric.label,

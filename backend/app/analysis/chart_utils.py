@@ -118,8 +118,9 @@ def pvalue_label(p: float | None) -> str:
         return "p = —"
     if p < 0.001:
         return "p < .001"
-    marker = "*" if p < 0.05 else ""
-    return f"{marker}p = {p:.3f}".replace("0.", ".")
+    if p < 0.05:
+        return f"*p = {p:.3f}".replace("0.", ".")
+    return f"p = {p:.3f} · n.s.".replace("0.", ".")
 
 
 def annotate_pvalue(
@@ -159,6 +160,8 @@ def draw_boxplot(
     effect_size_name: str | None = None,
     panel_label: str | None = None,
     condition_labels: dict[str, str] | None = None,
+    y_limits: tuple[float, float] | None = None,
+    zero_reference: bool = False,
 ) -> None:
     _apply_base_style(ax)
 
@@ -185,6 +188,11 @@ def draw_boxplot(
     for patch, color in zip(bp["boxes"], colors):
         patch.set_facecolor(color)
         patch.set_alpha(0.82)
+
+    if y_limits is not None:
+        ax.set_ylim(*y_limits)
+    if zero_reference:
+        ax.axhline(0, color="#4b5563", linewidth=1.5, linestyle="--", zorder=2)
 
     # median value labels inside boxes
     for i, (pos, vals) in enumerate(zip(positions, plot_data)):

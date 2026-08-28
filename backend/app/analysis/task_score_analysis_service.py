@@ -536,6 +536,22 @@ def _generate_task_score_charts(
         return {}
     try:
         test_by_metric = {t.metric: t for t in statistical_tests}
+        gs_values = [obs.gs for obs in observations]
+        gs_upper = max(10.0, math.ceil(max(gs_values, default=1.0) * 1.05 / 10.0) * 10.0)
+        synergy_values = [
+            value
+            for obs in observations
+            for value in (obs.weak_synergy, obs.strong_synergy)
+        ]
+        synergy_limit = max(
+            5.0,
+            math.ceil(max((abs(value) for value in synergy_values), default=1.0) * 1.08 / 5.0) * 5.0,
+        )
+        axis_limits = {
+            "gs": (0.0, gs_upper),
+            "weak_synergy": (-synergy_limit, synergy_limit),
+            "strong_synergy": (-synergy_limit, synergy_limit),
+        }
 
         def _draw_chart(text: dict[str, Any]) -> tuple[str, str]:
             fig, axes = plt.subplots(1, 3, figsize=text["figsize"])
@@ -556,6 +572,8 @@ def _generate_task_score_charts(
                     effect_size_name=test_by_metric.get(metric).effect_size_name if test_by_metric.get(metric) else None,
                     panel_label=f"({chr(97 + panel_index)})",
                     condition_labels=text["condition_labels"],
+                    y_limits=axis_limits[metric],
+                    zero_reference=metric in {"weak_synergy", "strong_synergy"},
                 )
             fig.tight_layout(pad=2.0)
             return fig_to_base64_pair(fig)
