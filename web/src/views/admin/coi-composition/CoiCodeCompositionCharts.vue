@@ -63,7 +63,7 @@ function valuesFor(key: keyof CoiCompositionObservation): Record<string, number[
 
 const panelRows = computed(() => panels.map((panel, index) => ({
   ...panel,
-  panelLabel: `(${String.fromCharCode(98 + index)})`,
+  panelLabel: `(${String.fromCharCode(97 + index)})`,
   values: valuesFor(panel.key),
   maximum: academicNiceMaximum(Math.max(...props.observations.map(item => Number(item[panel.key])).filter(Number.isFinite), 0) * 1.03),
   statisticLabel: (() => {
@@ -113,7 +113,7 @@ function downloadOverview() {
           <pattern id="phase-in" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#009E73" /></pattern>
           <pattern id="phase-re" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#D55E00" /></pattern>
         </defs>
-        <text x="24" y="28" class="overview-title">(a) Mean CoI Composition by Condition</text>
+        <text x="24" y="28" class="overview-title">Mean CoI Composition by Condition</text>
         <text x="776" y="28" text-anchor="end" class="overview-stat">PERMANOVA {{ academicPValue(globalTest.p_value) }} · R² = {{ academicNumber(globalTest.effect_size, 2) }}</text>
         <g v-for="row in compositionRows" :key="row.condition" :transform="`translate(0 42)`">
           <text class="condition-text" x="156" :y="row.y + 20" text-anchor="end">{{ conditionLabelEn(row.condition) }}</text>
