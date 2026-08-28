@@ -28,6 +28,10 @@ export function conditionLabel(condition: string): string {
   return CONDITION_LABELS[condition] ?? condition
 }
 
+export function taskLabel(taskId: string): string {
+  return TASK_OPTIONS.find((item) => item.value === taskId)?.label ?? taskId
+}
+
 export function modeDescription(mode: TaskScoreAnalysisMode): string {
   return mode === 'two_conditions'
     ? 'no_assistance vs glasses'

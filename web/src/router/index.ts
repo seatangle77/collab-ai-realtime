@@ -214,6 +214,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('../views/admin/AdminTaskScoreReportPage.vue'),
       },
       {
+        path: 'task-score-individual-report',
+        name: 'AdminTaskScoreIndividualReport',
+        component: () => import('../views/admin/AdminTaskScoreIndividualReportPage.vue'),
+      },
+      {
         path: 'questionnaire-entries',
         name: 'AdminQuestionnaireEntries',
         component: () => import('../views/admin/AdminQuestionnaireEntriesPage.vue'),
