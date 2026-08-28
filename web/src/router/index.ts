@@ -229,6 +229,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('../views/admin/AdminQuestionnaireReportPage.vue'),
       },
       {
+        path: 'questionnaire-hierarchical-report',
+        name: 'AdminQuestionnaireHierarchicalReport',
+        component: () => import('../views/admin/AdminQuestionnaireHierarchicalReportPage.vue'),
+      },
+      {
         path: 'coi-utterances',
         name: 'AdminCoiUtterances',
         redirect: '/admin/coi-transcript-coding',

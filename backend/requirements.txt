@@ -17,6 +17,7 @@ webrtcvad
 numpy
 scipy
 matplotlib
+statsmodels>=0.14,<0.15
 librosa
 soundfile
 

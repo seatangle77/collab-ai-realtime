@@ -57,6 +57,7 @@ const menuGroups = computed<AdminMenuGroup[]>(() => [
       { path: '/admin/task-score-individual-report', label: '个人→小组变化' },
       { path: '/admin/questionnaire-entries', label: '量表填写记录' },
       { path: '/admin/questionnaire-report', label: '量表分析' },
+      { path: '/admin/questionnaire-hierarchical-report', label: '量表层级稳健性' },
       { path: '/admin/coi-transcript-coding', label: 'CoI 预处理（录音转写）' },
       { path: '/admin/coi-units', label: 'CoI 观点整理' },
       { path: '/admin/coi-independent-coding', label: 'CoI 独立编码' },
