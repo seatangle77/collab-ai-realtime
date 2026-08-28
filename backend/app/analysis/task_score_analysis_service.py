@@ -22,7 +22,7 @@ except ImportError:  # pragma: no cover - exercised only in deployments without 
 
 try:
     import matplotlib.pyplot as plt
-    from .chart_utils import condition_color, condition_label as _cond_label, fig_to_base64, draw_boxplot
+    from .chart_utils import condition_color, condition_label as _cond_label, fig_to_base64_pair, draw_boxplot
     _CHARTS_AVAILABLE = True
 except ImportError:
     _CHARTS_AVAILABLE = False
@@ -537,7 +537,7 @@ def _generate_task_score_charts(
     try:
         p_by_metric = {t.metric: t.p_value for t in statistical_tests}
 
-        def _draw_chart(text: dict[str, Any]) -> str:
+        def _draw_chart(text: dict[str, Any]) -> tuple[str, str]:
             fig, axes = plt.subplots(1, 3, figsize=text["figsize"])
             fig.patch.set_facecolor("white")
             for ax, (metric, title, ylabel) in zip(axes, text["plot_metrics"]):
@@ -555,12 +555,14 @@ def _generate_task_score_charts(
                     condition_labels=text["condition_labels"],
                 )
             fig.tight_layout(pad=2.0)
-            return fig_to_base64(fig)
+            return fig_to_base64_pair(fig)
 
-        return {
-            text["chart_key"]: _draw_chart(text)
-            for text in TASK_SCORE_CHART_TEXT.values()
-        }
+        charts: dict[str, str] = {}
+        for text in TASK_SCORE_CHART_TEXT.values():
+            png_uri, svg_uri = _draw_chart(text)
+            charts[text["chart_key"]] = png_uri
+            charts[f'{text["chart_key"]}_svg'] = svg_uri
+        return charts
     except Exception:
         return {}
 

@@ -18,7 +18,8 @@ import {
   taskLabel,
 } from './task-score/reportHelpers'
 import IndividualScoreChart from './task-score-individual/IndividualScoreChart.vue'
-import { buildIndividualTaskScoreReportHtml } from './task-score-individual/reportHelpers'
+import { buildIndividualTaskScoreCsv, buildIndividualTaskScoreReportHtml } from './task-score-individual/reportHelpers'
+import { downloadTextFile, type ReportLanguage } from './task-score/analysisExport'
 
 const filters = reactive({
   mode: 'three_conditions' as TaskScoreAnalysisMode,
@@ -91,19 +92,26 @@ async function fetchReport() {
   }
 }
 
-function reportHtml() {
-  return report.value ? buildIndividualTaskScoreReportHtml(report.value) : ''
+function reportHtml(language: ReportLanguage = 'zh') {
+  return report.value ? buildIndividualTaskScoreReportHtml(report.value, language) : ''
 }
 
-function downloadHtmlReport() {
+function downloadHtmlReport(language: ReportLanguage) {
   if (!report.value) return ElMessage.warning('请先生成分析结果')
-  const blob = new Blob([reportHtml()], { type: 'text/html;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `task-score-individual-report-${filters.mode}-${new Date().toISOString().slice(0, 10)}.html`
-  link.click()
-  URL.revokeObjectURL(url)
+  downloadTextFile(
+    reportHtml(language),
+    `task-score-individual-report-${language}-${filters.mode}-${new Date().toISOString().slice(0, 10)}.html`,
+    'text/html;charset=utf-8',
+  )
+}
+
+function downloadCsv() {
+  if (!report.value) return ElMessage.warning('请先生成分析结果')
+  downloadTextFile(
+    buildIndividualTaskScoreCsv(report.value),
+    `task-score-individual-data-${filters.mode}-${new Date().toISOString().slice(0, 10)}.csv`,
+    'text/csv;charset=utf-8',
+  )
 }
 
 function printReportAsPdf() {
@@ -111,7 +119,7 @@ function printReportAsPdf() {
   const printWindow = window.open('', '_blank')
   if (!printWindow) return ElMessage.error('浏览器阻止了打印窗口，请允许弹窗后重试')
   printWindow.document.open()
-  printWindow.document.write(reportHtml())
+  printWindow.document.write(reportHtml('zh'))
   printWindow.document.close()
   printWindow.focus()
   printWindow.setTimeout(() => printWindow.print(), 300)
@@ -128,7 +136,9 @@ onMounted(fetchGroups)
         <p>比较每个人的独立分数 IS 与所在小组的最终分数 GS，正改善值表示小组结果更好。</p>
       </div>
       <div class="page-actions">
-        <el-button :icon="Download" :disabled="!report" @click="downloadHtmlReport">下载匿名 HTML</el-button>
+        <el-button :icon="Download" :disabled="!report" @click="downloadCsv">下载 CSV</el-button>
+        <el-button :icon="Download" :disabled="!report" @click="downloadHtmlReport('zh')">下载中文 HTML</el-button>
+        <el-button :icon="Download" :disabled="!report" @click="downloadHtmlReport('en')">Download English HTML</el-button>
         <el-button :icon="Printer" :disabled="!report" @click="printReportAsPdf">打印/PDF</el-button>
         <el-button :icon="Refresh" :loading="loading" type="primary" @click="fetchReport">生成分析</el-button>
       </div>

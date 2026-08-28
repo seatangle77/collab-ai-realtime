@@ -18,10 +18,12 @@ import SampleSelector from './task-score/SampleSelector.vue'
 import TaskScoreBoxPlots from './task-score/TaskScoreBoxPlots.vue'
 import {
   TASK_OPTIONS,
+  buildTaskScoreCsv,
   buildTaskScoreReportHtml,
   conditionLabel,
   modeDescription,
 } from './task-score/reportHelpers'
+import { downloadTextFile, type ReportLanguage } from './task-score/analysisExport'
 
 const filters = reactive({
   mode: 'two_conditions' as TaskScoreAnalysisMode,
@@ -110,7 +112,7 @@ function ensureReportReady(): boolean {
   return true
 }
 
-function reportHtml(): string {
+function reportHtml(language: ReportLanguage = 'zh'): string {
   if (!report.value) return ''
   return buildTaskScoreReportHtml({
     report: report.value,
@@ -119,18 +121,25 @@ function reportHtml(): string {
     conditionColumns: conditionColumns.value,
     selectedGroupIdsByCondition,
     groupOptionsByCondition: groupOptionsByCondition.value,
-  })
+  }, language)
 }
 
-function downloadHtmlReport() {
+function downloadHtmlReport(language: ReportLanguage) {
   if (!ensureReportReady()) return
-  const blob = new Blob([reportHtml()], { type: 'text/html;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `task-score-report-${filters.mode}-${new Date().toISOString().slice(0, 10)}.html`
-  link.click()
-  URL.revokeObjectURL(url)
+  downloadTextFile(
+    reportHtml(language),
+    `task-score-report-${language}-${filters.mode}-${new Date().toISOString().slice(0, 10)}.html`,
+    'text/html;charset=utf-8',
+  )
+}
+
+function downloadCsv() {
+  if (!ensureReportReady() || !report.value) return
+  downloadTextFile(
+    buildTaskScoreCsv(report.value),
+    `task-score-data-${filters.mode}-${new Date().toISOString().slice(0, 10)}.csv`,
+    'text/csv;charset=utf-8',
+  )
 }
 
 function printReportAsPdf() {
@@ -141,7 +150,7 @@ function printReportAsPdf() {
     return
   }
   printWindow.document.open()
-  printWindow.document.write(reportHtml())
+  printWindow.document.write(reportHtml('zh'))
   printWindow.document.close()
   printWindow.focus()
   printWindow.setTimeout(() => {
@@ -160,7 +169,9 @@ onMounted(fetchGroups)
         <p>手动选择每个实验条件纳入的小组，再汇总 GS、AIS、Best IS、弱协同值和强协同值。</p>
       </div>
       <div class="page-actions">
-        <el-button :icon="Download" :disabled="!report" @click="downloadHtmlReport">下载 HTML 报告</el-button>
+        <el-button :icon="Download" :disabled="!report" @click="downloadCsv">下载 CSV</el-button>
+        <el-button :icon="Download" :disabled="!report" @click="downloadHtmlReport('zh')">下载中文 HTML</el-button>
+        <el-button :icon="Download" :disabled="!report" @click="downloadHtmlReport('en')">Download English HTML</el-button>
         <el-button :icon="Printer" :disabled="!report" @click="printReportAsPdf">打印/PDF</el-button>
         <el-button :icon="Refresh" :loading="loading" type="primary" @click="fetchReport">生成分析</el-button>
       </div>

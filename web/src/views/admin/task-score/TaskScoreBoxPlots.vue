@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { Download, ZoomIn } from '@element-plus/icons-vue'
 import type { TaskScoreObservation } from '../../../api/admin/task-score-analysis'
-import { conditionLabel, formatNumber } from './reportHelpers'
+import { conditionLabelEn, formatNumber } from './reportHelpers'
 
 type PlotMetricKey = 'gs' | 'weak_synergy' | 'strong_synergy'
 
@@ -12,32 +12,14 @@ const props = defineProps<{
   charts?: Record<string, string>
 }>()
 
-const chartLanguage = ref<'zh' | 'en'>('zh')
 const previewVisible = ref(false)
-const chartLabels = {
-  zh: {
-    cardTitle: '主要结果箱线图',
-    cardDesc: 'GS、弱协同值、强协同值按条件展示分布',
-    alt: '主要结果箱线图',
-  },
-  en: {
-    cardTitle: 'Primary Outcome Box Plots',
-    cardDesc: 'GS, weak synergy, and strong synergy distributions by condition',
-    alt: 'primary outcome box plots',
-  },
-}
-const hasEnglishChart = computed(() => Boolean(props.charts?.['box_plots_en']))
-const activeLabels = computed(() => chartLabels[chartLanguage.value])
-const activeChartKey = computed(() => chartLanguage.value === 'en' && hasEnglishChart.value ? 'box_plots_en' : 'box_plots')
-const activeChartSrc = computed(() => props.charts?.[activeChartKey.value] ?? '')
-const activeChartFileName = computed(() =>
-  `task-score-box-plots-${chartLanguage.value}-${new Date().toISOString().slice(0, 10)}.png`
-)
+const activeChartSrc = computed(() => props.charts?.box_plots_en_svg ?? props.charts?.box_plots_en ?? '')
+const activeChartFileName = computed(() => `task-score-box-plots-en-${new Date().toISOString().slice(0, 10)}.svg`)
 
 const PLOT_METRICS: Array<{ key: PlotMetricKey; label: string; note: string }> = [
-  { key: 'gs', label: 'GS 小组最终分数', note: '任务分数越低表示小组最终表现越好' },
-  { key: 'weak_synergy', label: '弱协同值（AIS - GS）', note: '正值表示小组表现优于成员平均个人水平' },
-  { key: 'strong_synergy', label: '强协同值（Best IS - GS）', note: '正值表示小组表现优于组内最佳个人水平' },
+  { key: 'gs', label: 'GS Group Final Score', note: 'Lower scores indicate better group performance.' },
+  { key: 'weak_synergy', label: 'Weak Synergy (AIS - GS)', note: 'Positive values indicate performance above the average individual.' },
+  { key: 'strong_synergy', label: 'Strong Synergy (Best IS - GS)', note: 'Positive values indicate performance above the best individual.' },
 ]
 
 interface BoxStats {
@@ -152,34 +134,25 @@ function downloadActiveChart() {
     <template #header>
       <div class="card-title">
         <div class="card-heading">
-          <strong>{{ activeLabels.cardTitle }}</strong>
-          <span>{{ activeLabels.cardDesc }}</span>
+          <strong>Primary Outcome Box Plots</strong>
+          <span>GS, weak synergy, and strong synergy distributions by condition</span>
         </div>
-        <el-segmented
-          v-if="charts?.['box_plots_en']"
-          v-model="chartLanguage"
-          size="small"
-          :options="[
-            { label: '中文', value: 'zh' },
-            { label: 'English', value: 'en' },
-          ]"
-        />
       </div>
     </template>
 
     <!-- matplotlib 图（优先） -->
     <div v-if="activeChartSrc" class="chart-image-shell">
       <div class="chart-image-actions">
-        <el-tooltip content="放大预览" placement="top">
+        <el-tooltip content="Enlarge chart" placement="top">
           <el-button :icon="ZoomIn" class="chart-tool-button" circle @click="previewVisible = true" />
         </el-tooltip>
-        <el-tooltip content="下载 PNG" placement="top">
+        <el-tooltip content="Download SVG" placement="top">
           <el-button :icon="Download" class="chart-tool-button" circle @click="downloadActiveChart" />
         </el-tooltip>
       </div>
       <img
         :src="activeChartSrc"
-        :alt="activeLabels.alt"
+        alt="Primary outcome box plots"
         class="chart-image"
         @click="previewVisible = true"
       />
@@ -246,7 +219,7 @@ function downloadActiveChart() {
               class="median-line"
             />
             <text :x="xFor(index, plot.boxes.length)" y="202" text-anchor="middle" class="condition-label">
-              {{ conditionLabel(box.condition) }}
+              {{ conditionLabelEn(box.condition) }}
             </text>
             <text :x="xFor(index, plot.boxes.length)" y="218" text-anchor="middle" class="n-label">
               n={{ box.n }}

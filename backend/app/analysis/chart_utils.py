@@ -82,6 +82,18 @@ def fig_to_base64(fig: plt.Figure) -> str:
     return f"data:image/png;base64,{data}"
 
 
+def fig_to_base64_pair(fig: plt.Figure) -> tuple[str, str]:
+    """Render one figure as a high-resolution PNG and a scalable SVG data URI."""
+    png_buf = io.BytesIO()
+    svg_buf = io.BytesIO()
+    fig.savefig(png_buf, format="png", dpi=DPI, bbox_inches="tight", facecolor="white")
+    fig.savefig(svg_buf, format="svg", bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    png = base64.b64encode(png_buf.getvalue()).decode("utf-8")
+    svg = base64.b64encode(svg_buf.getvalue()).decode("utf-8")
+    return f"data:image/png;base64,{png}", f"data:image/svg+xml;base64,{svg}"
+
+
 def condition_color(condition: str) -> str:
     return CONDITION_COLORS.get(condition, "#888888")
 
