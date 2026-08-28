@@ -47,7 +47,15 @@ const missingSelectedConditions = computed(() =>
 )
 
 function statFor(condition: string) {
-  return report.value?.individual_stats.find((item) => item.condition === condition)
+  return report.value?.baseline_stats.find((item) => item.condition === condition)
+}
+
+function improvementFor(condition: string) {
+  return report.value?.improvement_summaries.find((item) => item.condition === condition)
+}
+
+function positionLabel(position: string) {
+  return ({ best: '原最佳成员', middle: '原中间成员', weakest: '原最弱成员' } as Record<string, string>)[position] ?? position
 }
 
 async function fetchGroups() {
@@ -116,8 +124,8 @@ onMounted(fetchGroups)
   <div class="analysis-page">
     <div class="page-header">
       <div>
-        <h1>个人任务成绩分析</h1>
-        <p>展示个人独立任务成绩，用于检查实验条件之间的个人能力基线。</p>
+        <h1>个人到小组成绩变化分析</h1>
+        <p>比较每个人的独立分数 IS 与所在小组的最终分数 GS，正改善值表示小组结果更好。</p>
       </div>
       <div class="page-actions">
         <el-button :icon="Download" :disabled="!report" @click="downloadHtmlReport">下载匿名 HTML</el-button>
@@ -127,7 +135,7 @@ onMounted(fetchGroups)
     </div>
 
     <el-alert
-      title="个人分数用于展示；实验条件按小组分配，因此推断统计以小组为聚类与置换单位，不会把同组3人当作独立实验单位。"
+      title="这不是个人前测—个人后测：系统没有个人后测。本页比较个人独立答案 IS 与小组共同答案 GS；同组3人共享一个 GS，推断统计始终以小组为单位。"
       type="info"
       :closable="false"
       show-icon
@@ -198,18 +206,42 @@ onMounted(fetchGroups)
 
     <el-card class="analysis-card table-card" shadow="never">
       <template #header>
-        <div class="card-title"><strong>个人分数描述统计</strong><span>分数越低表示越接近专家排序</span></div>
+        <div class="card-title"><strong>个人到小组改善</strong><span>改善值 = IS−GS；正数表示小组优于该成员原答案</span></div>
       </template>
       <el-table v-loading="loading" :data="conditionColumns" border>
         <el-table-column label="条件" min-width="150">
           <template #default="{ row }"><strong>{{ conditionLabel(row) }}</strong></template>
         </el-table-column>
-        <el-table-column label="个人 n" width="100"><template #default="{ row }">{{ statFor(row)?.n ?? 0 }}</template></el-table-column>
-        <el-table-column label="小组 n" width="100"><template #default="{ row }">{{ report?.groups_by_condition[row] ?? 0 }}</template></el-table-column>
-        <el-table-column label="M" width="110"><template #default="{ row }">{{ formatNumber(statFor(row)?.mean ?? null) }}</template></el-table-column>
-        <el-table-column label="SD" width="110"><template #default="{ row }">{{ formatNumber(statFor(row)?.sd ?? null) }}</template></el-table-column>
-        <el-table-column label="Median" width="110"><template #default="{ row }">{{ formatNumber(statFor(row)?.median ?? null) }}</template></el-table-column>
-        <el-table-column label="Min–Max" min-width="130"><template #default="{ row }">{{ formatNumber(statFor(row)?.min ?? null) }}–{{ formatNumber(statFor(row)?.max ?? null) }}</template></el-table-column>
+        <el-table-column label="个人/小组 n" width="120"><template #default="{ row }">{{ improvementFor(row)?.individual_count ?? 0 }}/{{ improvementFor(row)?.group_count ?? 0 }}</template></el-table-column>
+        <el-table-column label="平均改善" width="110"><template #default="{ row }"><strong>{{ formatNumber(improvementFor(row)?.mean ?? null) }}</strong></template></el-table-column>
+        <el-table-column label="SD" width="100"><template #default="{ row }">{{ formatNumber(improvementFor(row)?.sd ?? null) }}</template></el-table-column>
+        <el-table-column label="Median" width="100"><template #default="{ row }">{{ formatNumber(improvementFor(row)?.median ?? null) }}</template></el-table-column>
+        <el-table-column label="改善人数" width="105"><template #default="{ row }">{{ improvementFor(row)?.improved_count ?? 0 }}</template></el-table-column>
+        <el-table-column label="不变" width="80"><template #default="{ row }">{{ improvementFor(row)?.unchanged_count ?? 0 }}</template></el-table-column>
+        <el-table-column label="变差人数" width="105"><template #default="{ row }">{{ improvementFor(row)?.worsened_count ?? 0 }}</template></el-table-column>
+        <el-table-column label="改善比例" width="105"><template #default="{ row }">{{ formatNumber(improvementFor(row)?.improved_percentage ?? null) }}%</template></el-table-column>
+      </el-table>
+    </el-card>
+
+    <el-card class="analysis-card table-card" shadow="never">
+      <template #header>
+        <div class="card-title"><strong>各条件内是否整体改善</strong><span>检验每组 AIS−GS 是否偏离0；多个条件使用 Holm 校正</span></div>
+      </template>
+      <el-table :data="report?.within_condition_tests ?? []" border>
+        <el-table-column label="条件" min-width="150"><template #default="{ row }"><strong>{{ conditionLabel(row.condition) }}</strong></template></el-table-column>
+        <el-table-column prop="group_count" label="独立小组 n" width="115" />
+        <el-table-column label="小组平均改善" width="130"><template #default="{ row }">{{ formatNumber(row.mean_group_improvement) }}</template></el-table-column>
+        <el-table-column label="原始 p" width="105"><template #default="{ row }">{{ formatNumber(row.p_value) }}</template></el-table-column>
+        <el-table-column label="Holm 校正后 p" width="145"><template #default="{ row }">{{ formatNumber(row.p_value_adjusted) }}</template></el-table-column>
+        <el-table-column label="效应量 dz" width="110"><template #default="{ row }">{{ formatNumber(row.effect_size) }}</template></el-table-column>
+        <el-table-column label="结论" min-width="150">
+          <template #default="{ row }">
+            <el-tag v-if="row.status !== 'ok'" type="info">数据不足</el-tag>
+            <el-tag v-else-if="row.significant && row.mean_group_improvement > 0" type="success">显著改善</el-tag>
+            <el-tag v-else-if="row.significant" type="danger">显著变差</el-tag>
+            <el-tag v-else type="info">未检出显著变化</el-tag>
+          </template>
+        </el-table-column>
       </el-table>
     </el-card>
 
@@ -217,7 +249,7 @@ onMounted(fetchGroups)
 
     <el-card class="analysis-card table-card" shadow="never">
       <template #header>
-        <div class="card-title"><strong>按任务分层</strong><span>检查条件差异是否可能来自任务难度</span></div>
+        <div class="card-title"><strong>按任务分层的改善值</strong><span>比较每种任务中个人答案到小组答案改善了多少</span></div>
       </template>
       <el-table :data="report?.task_summaries ?? []" border>
         <el-table-column label="任务" min-width="150"><template #default="{ row }"><strong>{{ taskLabel(row.task_id) }}</strong></template></el-table-column>
@@ -234,9 +266,37 @@ onMounted(fetchGroups)
       </el-table>
     </el-card>
 
+    <el-card class="analysis-card table-card" shadow="never">
+      <template #header>
+        <div class="card-title"><strong>不同起点成员的改善</strong><span>每组按个人独立分从低到高排列；并列时按参与者编码稳定排序</span></div>
+      </template>
+      <el-table :data="report?.member_position_summaries ?? []" border>
+        <el-table-column label="成员位置" min-width="150"><template #default="{ row }"><strong>{{ positionLabel(row.position) }}</strong></template></el-table-column>
+        <el-table-column v-for="condition in conditionColumns" :key="condition" :label="conditionLabel(condition)" min-width="180">
+          <template #default="{ row }">
+            <span>n={{ row.conditions.find((item: any) => item.condition === condition)?.n ?? 0 }}；平均改善={{ formatNumber(row.conditions.find((item: any) => item.condition === condition)?.mean ?? null) }}</span>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
+    <el-card class="analysis-card table-card" shadow="never">
+      <template #header>
+        <div class="card-title"><strong>个人独立分基线</strong><span>仅用于说明讨论前起点；分数越低越好</span></div>
+      </template>
+      <el-table :data="conditionColumns" border>
+        <el-table-column label="条件" min-width="150"><template #default="{ row }"><strong>{{ conditionLabel(row) }}</strong></template></el-table-column>
+        <el-table-column label="个人 n" width="100"><template #default="{ row }">{{ statFor(row)?.n ?? 0 }}</template></el-table-column>
+        <el-table-column label="M" width="110"><template #default="{ row }">{{ formatNumber(statFor(row)?.mean ?? null) }}</template></el-table-column>
+        <el-table-column label="SD" width="110"><template #default="{ row }">{{ formatNumber(statFor(row)?.sd ?? null) }}</template></el-table-column>
+        <el-table-column label="Median" width="110"><template #default="{ row }">{{ formatNumber(statFor(row)?.median ?? null) }}</template></el-table-column>
+        <el-table-column label="Min–Max" min-width="130"><template #default="{ row }">{{ formatNumber(statFor(row)?.min ?? null) }}–{{ formatNumber(statFor(row)?.max ?? null) }}</template></el-table-column>
+      </el-table>
+    </el-card>
+
     <el-card class="analysis-card" shadow="never">
       <template #header>
-        <div class="card-title"><strong>小组聚类置换检验</strong><span>同组3人始终作为一个整体</span></div>
+        <div class="card-title"><strong>平均改善值的条件检验</strong><span>每组一个平均改善值（等于 AIS−GS），并在任务内置换条件标签</span></div>
       </template>
       <el-descriptions :column="4" border>
         <el-descriptions-item label="方法">小组聚类、任务内分层置换</el-descriptions-item>
@@ -249,7 +309,7 @@ onMounted(fetchGroups)
 
     <el-card v-if="filters.mode === 'three_conditions'" class="analysis-card table-card" shadow="never">
       <template #header>
-        <div class="card-title"><strong>条件两两比较</strong><span>仅总体 p&lt;.05 时执行；负均值差表示条件 B 分数更低、表现更好</span></div>
+        <div class="card-title"><strong>条件两两比较</strong><span>仅总体 p&lt;.05 时执行；正均值差表示条件 B 改善更多</span></div>
       </template>
       <el-table :data="report?.pairwise_tests ?? []" border>
         <el-table-column label="条件 A" min-width="130"><template #default="{ row }">{{ conditionLabel(row.condition_a) }}</template></el-table-column>
@@ -274,7 +334,10 @@ onMounted(fetchGroups)
         <el-table-column prop="group_id" label="小组" min-width="120" />
         <el-table-column prop="participant_id" label="参与者编码" min-width="160" />
         <el-table-column prop="participant_name" label="姓名" min-width="120" />
-        <el-table-column prop="score" label="个人分数" width="110" sortable />
+        <el-table-column prop="individual_score" label="个人 IS" width="100" sortable />
+        <el-table-column prop="group_score" label="小组 GS" width="100" sortable />
+        <el-table-column prop="improvement" label="改善 IS−GS" width="125" sortable />
+        <el-table-column label="原组内位置" width="120"><template #default="{ row }">{{ positionLabel(row.member_position) }}</template></el-table-column>
       </el-table>
     </el-card>
 

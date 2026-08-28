@@ -1,4 +1,4 @@
-"""Admin API for read-only individual task-score baseline analysis."""
+"""Admin API for read-only individual-to-group task-score change analysis."""
 from __future__ import annotations
 
 import json

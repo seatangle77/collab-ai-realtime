@@ -16,6 +16,7 @@ def _row(
     condition: str,
     task_id: str,
     scores: tuple[float, float, float],
+    gs: float = 0,
 ) -> dict:
     individual_scores = [
         {
@@ -33,6 +34,7 @@ def _row(
         "result_json": {
             "individual_scores": individual_scores,
             "ais": round(sum(scores) / 3, 2),
+            "gs": gs,
         },
     }
 
@@ -54,7 +56,7 @@ def test_expands_each_group_to_three_individuals() -> None:
     assert result.ais_consistency.status == "ok"
 
 
-def test_individual_condition_mean_matches_mean_group_ais() -> None:
+def test_baseline_mean_matches_mean_group_ais() -> None:
     rows = [
         _row("1", "no_assistance", "moon_survival", (9, 12, 15)),
         _row("2", "no_assistance", "lost_at_sea", (15, 18, 21)),
@@ -63,9 +65,31 @@ def test_individual_condition_mean_matches_mean_group_ais() -> None:
     ]
     result = build_task_score_individual_analysis(mode="two_conditions", task_id="all", rows=rows)
 
-    no_assistance = next(item for item in result.individual_stats if item.condition == "no_assistance")
+    no_assistance = next(item for item in result.baseline_stats if item.condition == "no_assistance")
     expected = sum(row["result_json"]["ais"] for row in rows[:2]) / 2
     assert no_assistance.mean == expected
+
+
+def test_pairs_each_individual_score_with_shared_group_score() -> None:
+    result = build_task_score_individual_analysis(
+        mode="two_conditions",
+        task_id="all",
+        rows=[
+            _row("1", "no_assistance", "moon_survival", (8, 12, 16), gs=10),
+            _row("2", "glasses", "moon_survival", (9, 10, 11), gs=10),
+        ],
+    )
+
+    first_group = [item for item in result.observations if item.group_id == "g-1"]
+    assert [item.member_position for item in first_group] == ["best", "middle", "weakest"]
+    assert [item.improvement for item in first_group] == [-2, 2, 6]
+    assert all(item.group_score == 10 for item in first_group)
+
+    summary = next(item for item in result.improvement_summaries if item.condition == "no_assistance")
+    assert summary.improved_count == 2
+    assert summary.unchanged_count == 0
+    assert summary.worsened_count == 1
+    assert summary.improved_percentage == 66.7
 
 
 def test_task_filter_and_condition_mode_are_respected() -> None:
@@ -114,6 +138,19 @@ def test_ais_mismatch_is_flagged_and_excluded() -> None:
     assert any(item.reason == "ais_mismatch" for item in result.excluded_entries)
 
 
+def test_invalid_group_score_is_excluded() -> None:
+    invalid = _row("bad", "no_assistance", "moon_survival", (10, 12, 14))
+    invalid["result_json"].pop("gs")
+    result = build_task_score_individual_analysis(
+        mode="two_conditions",
+        task_id="all",
+        rows=[invalid, _row("ok", "glasses", "moon_survival", (8, 9, 10), gs=7)],
+    )
+
+    assert result.total_groups == 1
+    assert any(item.reason == "invalid_group_score" for item in result.excluded_entries)
+
+
 def test_cluster_permutation_test_uses_groups_and_returns_result() -> None:
     rows = []
     for index in range(4):
@@ -125,6 +162,10 @@ def test_cluster_permutation_test_uses_groups_and_returns_result() -> None:
     assert result.statistical_test.cluster_unit == "group"
     assert result.statistical_test.p_value is not None
     assert result.statistical_test.effect_size is not None
+    assert "平均改善值" in result.statistical_test.note
+    assert len(result.within_condition_tests) == 2
+    assert all(item.group_count == 4 for item in result.within_condition_tests)
+    assert all(item.p_value_adjusted is not None for item in result.within_condition_tests)
 
 
 def test_three_conditions_return_holm_adjusted_pairwise_tests() -> None:

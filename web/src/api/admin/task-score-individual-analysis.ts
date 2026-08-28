@@ -8,12 +8,49 @@ export interface IndividualScoreObservation {
   condition: string
   participant_id: string
   participant_name: string | null
-  score: number
+  individual_score: number
+  group_score: number
+  improvement: number
+  member_position: 'best' | 'middle' | 'weakest'
 }
 
 export interface IndividualTaskSummary {
   task_id: string
   conditions: MetricConditionStats[]
+}
+
+export interface IndividualImprovementSummary {
+  condition: string
+  individual_count: number
+  group_count: number
+  mean: number | null
+  sd: number | null
+  median: number | null
+  min: number | null
+  max: number | null
+  improved_count: number
+  unchanged_count: number
+  worsened_count: number
+  improved_percentage: number | null
+}
+
+export interface IndividualMemberPositionSummary {
+  position: 'best' | 'middle' | 'weakest'
+  conditions: MetricConditionStats[]
+}
+
+export interface IndividualWithinConditionTest {
+  condition: string
+  group_count: number
+  mean_group_improvement: number | null
+  p_value: number | null
+  p_value_adjusted: number | null
+  significant: boolean | null
+  effect_size_name: string
+  effect_size: number | null
+  method: string
+  status: 'ok' | 'insufficient_data' | 'dependency_missing' | 'calculation_error'
+  note: string
 }
 
 export interface IndividualAisConsistency {
@@ -65,8 +102,11 @@ export interface TaskScoreIndividualAnalysisResult {
   groups_by_condition: Record<string, number>
   individuals_by_condition: Record<string, number>
   score_direction: 'lower_is_better'
-  individual_stats: MetricConditionStats[]
+  baseline_stats: MetricConditionStats[]
+  improvement_summaries: IndividualImprovementSummary[]
+  within_condition_tests: IndividualWithinConditionTest[]
   task_summaries: IndividualTaskSummary[]
+  member_position_summaries: IndividualMemberPositionSummary[]
   ais_consistency: IndividualAisConsistency
   statistical_test: IndividualClusterTest
   pairwise_tests: IndividualPairwiseResult[]

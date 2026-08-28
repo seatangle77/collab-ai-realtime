@@ -1,8 +1,8 @@
-"""Read-only individual task-score baseline analysis.
+"""Read-only individual-to-group task-score change analysis.
 
-Individual scores are displayed at participant level, while inferential tests keep
-the group as the assignment/cluster unit. Condition labels are permuted between
-whole groups (within task strata); individual rows are never permuted separately.
+Each participant's independent score (IS) is paired with the shared final group
+score (GS). Improvement is IS - GS, so a positive value means the group answer is
+better. Inferential tests keep the group as the assignment/cluster unit.
 """
 from __future__ import annotations
 
@@ -31,7 +31,10 @@ class IndividualScoreObservation(ApiModel):
     condition: str
     participant_id: str
     participant_name: str | None = None
-    score: float
+    individual_score: float
+    group_score: float
+    improvement: float
+    member_position: Literal["best", "middle", "weakest"]
 
 
 class IndividualScoreExcludedEntry(ApiModel):
@@ -45,6 +48,7 @@ class IndividualScoreExcludedEntry(ApiModel):
         "invalid_participant",
         "duplicate_participant",
         "ais_mismatch",
+        "invalid_group_score",
     ]
     note: str
 
@@ -52,6 +56,40 @@ class IndividualScoreExcludedEntry(ApiModel):
 class IndividualTaskSummary(ApiModel):
     task_id: str
     conditions: list[MetricConditionStats]
+
+
+class IndividualImprovementSummary(ApiModel):
+    condition: str
+    individual_count: int
+    group_count: int
+    mean: float | None = None
+    sd: float | None = None
+    median: float | None = None
+    min: float | None = None
+    max: float | None = None
+    improved_count: int = 0
+    unchanged_count: int = 0
+    worsened_count: int = 0
+    improved_percentage: float | None = None
+
+
+class IndividualMemberPositionSummary(ApiModel):
+    position: Literal["best", "middle", "weakest"]
+    conditions: list[MetricConditionStats]
+
+
+class IndividualWithinConditionTest(ApiModel):
+    condition: str
+    group_count: int
+    mean_group_improvement: float | None = None
+    p_value: float | None = None
+    p_value_adjusted: float | None = None
+    significant: bool | None = None
+    effect_size_name: str = "Cohen's dz"
+    effect_size: float | None = None
+    method: str = "two-sided group-level sign-flip permutation test with Holm correction"
+    status: Literal["ok", "insufficient_data", "dependency_missing", "calculation_error"]
+    note: str
 
 
 class IndividualAisConsistency(ApiModel):
@@ -94,8 +132,11 @@ class TaskScoreIndividualAnalysisResult(ApiModel):
     groups_by_condition: dict[str, int]
     individuals_by_condition: dict[str, int]
     score_direction: str = "lower_is_better"
-    individual_stats: list[MetricConditionStats]
+    baseline_stats: list[MetricConditionStats]
+    improvement_summaries: list[IndividualImprovementSummary]
+    within_condition_tests: list[IndividualWithinConditionTest]
     task_summaries: list[IndividualTaskSummary]
+    member_position_summaries: list[IndividualMemberPositionSummary]
     ais_consistency: IndividualAisConsistency
     statistical_test: IndividualClusterTest
     pairwise_tests: list[IndividualPairwiseResult]
@@ -117,6 +158,32 @@ def _condition_stats(values: list[float], condition: str) -> MetricConditionStat
     )
 
 
+def _improvement_summary(
+    values: list[float],
+    condition: str,
+    group_count: int,
+) -> IndividualImprovementSummary:
+    if not values:
+        return IndividualImprovementSummary(condition=condition, individual_count=0, group_count=group_count)
+    improved_count = sum(value > 0 for value in values)
+    unchanged_count = sum(value == 0 for value in values)
+    worsened_count = sum(value < 0 for value in values)
+    return IndividualImprovementSummary(
+        condition=condition,
+        individual_count=len(values),
+        group_count=group_count,
+        mean=round(mean(values), 3),
+        sd=round(stdev(values), 3) if len(values) > 1 else None,
+        median=round(median(values), 3),
+        min=round(min(values), 3),
+        max=round(max(values), 3),
+        improved_count=improved_count,
+        unchanged_count=unchanged_count,
+        worsened_count=worsened_count,
+        improved_percentage=round(improved_count / len(values) * 100, 1),
+    )
+
+
 def _pseudo_f(values: "np.ndarray", labels: "np.ndarray") -> tuple[float, float]:
     unique_labels = np.unique(labels)
     n = len(values)
@@ -129,7 +196,7 @@ def _pseudo_f(values: "np.ndarray", labels: "np.ndarray") -> tuple[float, float]
         within_ss += float(((group - group.mean()) ** 2).sum())
     between_ss = max(0.0, total_ss - within_ss)
     if total_ss <= 0 or n <= k or within_ss <= 0:
-        raise ValueError("小组平均个人分缺少足够变异")
+        raise ValueError("小组平均改善值缺少足够变异")
     return (between_ss / (k - 1)) / (within_ss / (n - k)), between_ss / total_ss
 
 
@@ -170,7 +237,7 @@ def _cluster_test(
             p_value=round(float(p_value), 4),
             effect_size=round(float(eta_squared), 4),
             status="ok",
-            note="个人分数用于描述；推断统计先取每组三人的平均个人分，再在相同任务内整体置换小组条件标签4999次。",
+            note="每人的改善值为个人独立分IS减小组最终分GS；推断统计先取每组三人的平均改善值，再在相同任务内整体置换小组条件标签4999次。",
         )
     except Exception as exc:
         return IndividualClusterTest(status="calculation_error", note=f"小组聚类置换检验失败：{exc}")
@@ -213,6 +280,67 @@ def _holm_adjust(p_values: list[float]) -> list[float]:
     for adjusted, (original_index, _) in zip(adjusted_sorted, indexed):
         result[original_index] = adjusted
     return result
+
+
+def _within_condition_tests(
+    group_scores: list[tuple[str, str, str, float]],
+    conditions: list[str],
+) -> list[IndividualWithinConditionTest]:
+    if np is None:
+        return [
+            IndividualWithinConditionTest(
+                condition=condition,
+                group_count=sum(item[1] == condition for item in group_scores),
+                status="dependency_missing",
+                note="缺少 numpy，无法执行组内改善置换检验",
+            )
+            for condition in conditions
+        ]
+
+    tests: list[IndividualWithinConditionTest] = []
+    valid_indices: list[int] = []
+    raw_p_values: list[float] = []
+    for condition_index, condition in enumerate(conditions):
+        values = np.asarray([item[3] for item in group_scores if item[1] == condition], dtype=float)
+        if len(values) < 2:
+            tests.append(IndividualWithinConditionTest(
+                condition=condition,
+                group_count=len(values),
+                status="insufficient_data",
+                note="至少需要2个完整小组",
+            ))
+            continue
+        try:
+            observed = float(values.mean())
+            rng = np.random.default_rng(_RNG_SEED + 100 + condition_index)
+            signs = rng.choice(np.asarray([-1.0, 1.0]), size=(PERMUTATIONS, len(values)))
+            permuted_means = (signs * values).mean(axis=1)
+            exceedances = int((np.abs(permuted_means) >= abs(observed) - 1e-12).sum())
+            p_value = (exceedances + 1) / (PERMUTATIONS + 1)
+            sample_sd = float(values.std(ddof=1))
+            tests.append(IndividualWithinConditionTest(
+                condition=condition,
+                group_count=len(values),
+                mean_group_improvement=round(observed, 3),
+                p_value=round(p_value, 4),
+                effect_size=round(observed / sample_sd, 4) if sample_sd > 0 else None,
+                status="ok",
+                note="先计算每组 AIS−GS，再检验小组平均改善是否偏离0；正值表示小组答案更好。",
+            ))
+            valid_indices.append(len(tests) - 1)
+            raw_p_values.append(p_value)
+        except Exception as exc:
+            tests.append(IndividualWithinConditionTest(
+                condition=condition,
+                group_count=len(values),
+                status="calculation_error",
+                note=f"组内改善置换检验失败：{exc}",
+            ))
+
+    for test_index, adjusted in zip(valid_indices, _holm_adjust(raw_p_values)):
+        tests[test_index].p_value_adjusted = round(adjusted, 4)
+        tests[test_index].significant = adjusted < 0.05
+    return tests
 
 
 def _pairwise_tests(
@@ -297,6 +425,11 @@ def build_task_score_individual_analysis(
             continue
 
         group_mean = mean(item[2] for item in parsed)
+        try:
+            group_score = float(result_json.get("gs"))
+        except (TypeError, ValueError):
+            excluded.append(IndividualScoreExcludedEntry(**base, reason="invalid_group_score", note="缺少有效的小组最终分GS"))
+            continue
         ais_value = result_json.get("ais")
         if ais_value is not None:
             try:
@@ -313,21 +446,27 @@ def build_task_score_individual_analysis(
                 excluded.append(IndividualScoreExcludedEntry(**base, reason="ais_mismatch", note="已保存AIS不是有效数字"))
                 continue
 
-        group_scores.append((group_id, condition, row_task, group_mean))
-        observations.extend(
-            IndividualScoreObservation(
+        group_improvement = group_mean - group_score
+        group_scores.append((group_id, condition, row_task, group_improvement))
+        sorted_participants = sorted(parsed, key=lambda item: (item[2], item[0]))
+        positions = ("best", "middle", "weakest")
+        for position, (participant_id, participant_name, score) in zip(positions, sorted_participants):
+            observations.append(IndividualScoreObservation(
                 **base,
                 participant_id=participant_id,
                 participant_name=participant_name,
-                score=score,
-            )
-            for participant_id, participant_name, score in parsed
-        )
+                individual_score=score,
+                group_score=group_score,
+                improvement=round(score - group_score, 3),
+                member_position=position,
+            ))
 
-    values_by_condition: dict[str, list[float]] = defaultdict(list)
+    baseline_values_by_condition: dict[str, list[float]] = defaultdict(list)
+    improvement_values_by_condition: dict[str, list[float]] = defaultdict(list)
     for observation in observations:
-        values_by_condition[observation.condition].append(observation.score)
-    individual_stats = [_condition_stats(values_by_condition[condition], condition) for condition in conditions]
+        baseline_values_by_condition[observation.condition].append(observation.individual_score)
+        improvement_values_by_condition[observation.condition].append(observation.improvement)
+    baseline_stats = [_condition_stats(baseline_values_by_condition[condition], condition) for condition in conditions]
 
     task_ids = sorted({observation.task_id for observation in observations})
     task_summaries = [
@@ -335,7 +474,7 @@ def build_task_score_individual_analysis(
             task_id=current_task,
             conditions=[
                 _condition_stats(
-                    [item.score for item in observations if item.task_id == current_task and item.condition == condition],
+                    [item.improvement for item in observations if item.task_id == current_task and item.condition == condition],
                     condition,
                 )
                 for condition in conditions
@@ -345,7 +484,32 @@ def build_task_score_individual_analysis(
     ]
 
     groups_by_condition = {condition: sum(item[1] == condition for item in group_scores) for condition in conditions}
-    individuals_by_condition = {condition: len(values_by_condition[condition]) for condition in conditions}
+    individuals_by_condition = {condition: len(baseline_values_by_condition[condition]) for condition in conditions}
+    improvement_summaries = [
+        _improvement_summary(
+            improvement_values_by_condition[condition],
+            condition,
+            groups_by_condition[condition],
+        )
+        for condition in conditions
+    ]
+    member_position_summaries = [
+        IndividualMemberPositionSummary(
+            position=position,
+            conditions=[
+                _condition_stats(
+                    [
+                        item.improvement
+                        for item in observations
+                        if item.member_position == position and item.condition == condition
+                    ],
+                    condition,
+                )
+                for condition in conditions
+            ],
+        )
+        for position in ("best", "middle", "weakest")
+    ]
     checked_groups = len(ais_differences)
     consistent_groups = sum(value <= 0.011 for value in ais_differences)
     consistency = IndividualAisConsistency(
@@ -361,6 +525,7 @@ def build_task_score_individual_analysis(
     )
 
     statistical_test = _cluster_test(group_scores, conditions)
+    within_condition_tests = _within_condition_tests(group_scores, conditions)
     pairwise_tests = (
         _pairwise_tests(group_scores, conditions)
         if statistical_test.status == "ok"
@@ -377,8 +542,11 @@ def build_task_score_individual_analysis(
         total_individuals=len(observations),
         groups_by_condition=groups_by_condition,
         individuals_by_condition=individuals_by_condition,
-        individual_stats=individual_stats,
+        baseline_stats=baseline_stats,
+        improvement_summaries=improvement_summaries,
+        within_condition_tests=within_condition_tests,
         task_summaries=task_summaries,
+        member_position_summaries=member_position_summaries,
         ais_consistency=consistency,
         statistical_test=statistical_test,
         pairwise_tests=pairwise_tests,
