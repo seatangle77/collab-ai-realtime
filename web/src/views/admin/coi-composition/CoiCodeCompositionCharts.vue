@@ -1,15 +1,18 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { Download, ZoomIn } from '@element-plus/icons-vue'
-import type { MetricSummary } from '../../../api/admin/coi-analysis'
-import type { CoiCompositionObservation } from '../../../api/admin/coi-composition-analysis'
+import type { MetricSummary, StatisticalTestResult } from '../../../api/admin/coi-analysis'
+import type { CoiCompositionObservation, CompositionGlobalTest } from '../../../api/admin/coi-composition-analysis'
 import CoiSessionBoxplot from '../coi/CoiSessionBoxplot.vue'
 import { downloadSvgElement, serializeSvgElement } from '../task-score/analysisExport'
+import { academicNumber, academicPValue } from '../task-score/academicChartStyle'
 
 const props = defineProps<{
   metrics: MetricSummary[]
   observations: CoiCompositionObservation[]
   conditions: string[]
+  tests: StatisticalTestResult[]
+  globalTest: CompositionGlobalTest
 }>()
 
 const panels = [
@@ -56,9 +59,15 @@ function valuesFor(key: keyof CoiCompositionObservation): Record<string, number[
   ]))
 }
 
-const panelRows = computed(() => panels.map(panel => ({
+const panelRows = computed(() => panels.map((panel, index) => ({
   ...panel,
+  panelLabel: `(${String.fromCharCode(98 + index)})`,
   values: valuesFor(panel.key),
+  statisticLabel: (() => {
+    const test = props.tests.find(item => item.metric === panel.metric)
+    if (!test) return ''
+    return `BH-adjusted ${academicPValue(test.p_value_adjusted)}${test.effect_size_name && test.effect_size != null ? ` · ${test.effect_size_name} = ${academicNumber(test.effect_size, 2)}` : ''}`
+  })(),
 })))
 const compositionMaximum = computed(() => {
   const maximum = Math.max(...props.observations.flatMap(item => [item.te_ratio, item.ex_ratio, item.in_ratio, item.re_ratio]), 0)
@@ -91,28 +100,38 @@ function downloadOverview() {
 
     <section class="composition-overview">
       <header><div><strong>Mean Composition by Condition</strong><span>Each bar totals 100%; labels show phase and mean proportion.</span></div><div class="chart-actions"><el-tooltip content="Enlarge chart"><el-button :icon="ZoomIn" circle size="small" @click="openOverview" /></el-tooltip><el-tooltip content="Download SVG"><el-button :icon="Download" circle size="small" @click="downloadOverview" /></el-tooltip></div></header>
-      <svg ref="overviewSvgRef" viewBox="0 0 760 182" role="img" aria-label="Mean four-phase CoI composition by condition" @click="openOverview">
+      <svg ref="overviewSvgRef" viewBox="0 0 800 282" role="img" aria-label="Mean four-phase CoI composition by condition" @click="openOverview">
         <defs>
-          <pattern id="phase-te" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#374151" /></pattern>
-          <pattern id="phase-ex" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#2563eb" /></pattern>
-          <pattern id="phase-in" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#16a34a" /></pattern>
-          <pattern id="phase-re" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#f97316" /></pattern>
+          <pattern id="phase-te" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#4B5563" /></pattern>
+          <pattern id="phase-ex" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#0072B2" /></pattern>
+          <pattern id="phase-in" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#009E73" /></pattern>
+          <pattern id="phase-re" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#D55E00" /></pattern>
         </defs>
-        <g v-for="row in compositionRows" :key="row.condition">
-          <text class="condition-text" x="126" :y="row.y + 20" text-anchor="end">{{ conditionLabelEn(row.condition) }}</text>
+        <text x="24" y="28" class="overview-title">(a) Mean CoI Composition by Condition</text>
+        <text x="776" y="28" text-anchor="end" class="overview-stat">PERMANOVA {{ academicPValue(globalTest.p_value) }} · R² = {{ academicNumber(globalTest.effect_size, 2) }}</text>
+        <g v-for="row in compositionRows" :key="row.condition" :transform="`translate(0 42)`">
+          <text class="condition-text" x="156" :y="row.y + 20" text-anchor="end">{{ conditionLabelEn(row.condition) }}</text>
           <g v-for="segment in row.segments" :key="segment.metric">
             <rect
               class="stack-segment"
-              :x="145 + segment.start * 560"
+              :x="175 + segment.start * 560"
               :y="row.y"
               :width="segment.width * 560"
               height="30"
               :fill="`url(#${segment.pattern})`"
             />
-            <text class="segment-text" :x="145 + (segment.start + segment.width / 2) * 560" :y="row.y + 19" text-anchor="middle">
+            <text class="segment-text" :x="175 + (segment.start + segment.width / 2) * 560" :y="row.y + 19" text-anchor="middle">
               {{ segment.short }} {{ (segment.value * 100).toFixed(1) }}%
             </text>
           </g>
+        </g>
+        <g class="overview-axis">
+          <line x1="175" x2="735" y1="232" y2="232" />
+          <g v-for="tick in [0, 25, 50, 75, 100]" :key="tick">
+            <line :x1="175 + tick * 5.6" :x2="175 + tick * 5.6" y1="232" y2="238" />
+            <text :x="175 + tick * 5.6" y="253" text-anchor="middle">{{ tick }}%</text>
+          </g>
+          <text x="455" y="276" text-anchor="middle" class="axis-label">Mean Code Composition (%)</text>
         </g>
       </svg>
       <div class="phase-legend"><span><i class="te" />TE Triggering Event</span><span><i class="ex" />EX Exploration</span><span><i class="in" />IN Integration</span><span><i class="re" />RE Resolution</span></div>
@@ -128,7 +147,9 @@ function downloadOverview() {
         :values-by-condition="panel.values"
         :maximum="compositionMaximum"
         percent
-        unit-label="Phase Proportion"
+        unit-label="Phase Proportion (%)"
+        :panel-label="panel.panelLabel"
+        :statistic-label="panel.statisticLabel"
       />
     </div>
 
@@ -154,12 +175,17 @@ function downloadOverview() {
 .chart-actions{display:flex;gap:7px;flex-shrink:0}
 .composition-overview svg { display:block; width:100%; max-height:280px; cursor:zoom-in; font-family:Arial,"Helvetica Neue",sans-serif; text-rendering:geometricPrecision; }
 .condition-text { fill:#0f172a; font-size:15px; font-weight:750; }
+.overview-title { fill:#0f172a; font-size:17px; font-weight:800; }
+.overview-stat { fill:#334155; font-size:12px; font-weight:700; }
+.overview-axis line { stroke:#64748b; stroke-width:1.4; }
+.overview-axis text { fill:#475569; font-size:12px; font-weight:650; }
+.overview-axis .axis-label { fill:#1e293b; font-size:14px; font-weight:750; }
 .segment-text { fill:#fff; font-size:13px; font-weight:750; paint-order:stroke; stroke:#17203388; stroke-width:2px; }
 .stack-segment { stroke:#fff; stroke-width:1.5; }
 .phase-legend { display:flex; justify-content:center; gap:20px; flex-wrap:wrap; color:#334155; font-size:13px; font-weight:650; }
 .phase-legend span { display:flex; align-items:center; gap:5px; }
 .phase-legend i { width:14px; height:9px; border:1px solid #374151; }
-.phase-legend .te { background:#374151; }.phase-legend .ex { background:#2563eb; }.phase-legend .in { background:#16a34a; }.phase-legend .re { background:#f97316; }
+.phase-legend .te { background:#4B5563; }.phase-legend .ex { background:#0072B2; }.phase-legend .in { background:#009E73; }.phase-legend .re { background:#D55E00; }
 .figure-caption { display:flex; flex-direction:column; gap:4px; margin:18px 4px 2px; padding-top:12px; border-top:1px solid #eef2f6; color:#66758a; font-size:11px; line-height:1.65; }
 .figure-caption strong { color:#3f4f63; font-weight:650; }
 :global(.coi-composition-large){overflow:auto;background:#fff}:global(.coi-composition-large svg){display:block;width:1800px;max-width:none;height:auto}

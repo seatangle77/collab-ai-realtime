@@ -535,12 +535,12 @@ def _generate_task_score_charts(
     if not _CHARTS_AVAILABLE:
         return {}
     try:
-        p_by_metric = {t.metric: t.p_value for t in statistical_tests}
+        test_by_metric = {t.metric: t for t in statistical_tests}
 
         def _draw_chart(text: dict[str, Any]) -> tuple[str, str]:
             fig, axes = plt.subplots(1, 3, figsize=text["figsize"])
             fig.patch.set_facecolor("white")
-            for ax, (metric, title, ylabel) in zip(axes, text["plot_metrics"]):
+            for panel_index, (ax, (metric, title, ylabel)) in enumerate(zip(axes, text["plot_metrics"])):
                 data_by_condition = {
                     c: [getattr(obs, metric) for obs in observations if obs.condition == c]
                     for c in conditions
@@ -551,7 +551,10 @@ def _generate_task_score_charts(
                     conditions=conditions,
                     title=title,
                     ylabel=ylabel,
-                    p_value=p_by_metric.get(metric),
+                    p_value=test_by_metric.get(metric).p_value if test_by_metric.get(metric) else None,
+                    effect_size=test_by_metric.get(metric).effect_size if test_by_metric.get(metric) else None,
+                    effect_size_name=test_by_metric.get(metric).effect_size_name if test_by_metric.get(metric) else None,
+                    panel_label=f"({chr(97 + panel_index)})",
                     condition_labels=text["condition_labels"],
                 )
             fig.tight_layout(pad=2.0)

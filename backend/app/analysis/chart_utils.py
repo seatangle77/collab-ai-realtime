@@ -43,9 +43,9 @@ plt.rcParams["axes.unicode_minus"] = False
 # ---------------------------------------------------------------------------
 
 CONDITION_COLORS: dict[str, str] = {
-    "no_assistance":    "#1f77b4",   # blue
-    "glasses":          "#e69f00",   # gold-orange
-    "app_notification": "#2ca02c",   # green
+    "no_assistance":    "#4B5563",   # neutral slate
+    "glasses":          "#0072B2",   # color-blind-safe blue
+    "app_notification": "#D55E00",   # color-blind-safe vermillion
 }
 
 CONDITION_LABELS: dict[str, str] = {
@@ -115,14 +115,11 @@ def legend_handles(conditions: Sequence[str]) -> list[mpatches.Patch]:
 
 def pvalue_label(p: float | None) -> str:
     if p is None:
-        return "n.s."
+        return "p = —"
     if p < 0.001:
-        return "*** p < 0.001"
-    if p < 0.01:
-        return f"** p = {p:.3f}"
-    if p < 0.05:
-        return f"* p = {p:.3f}"
-    return "n.s."
+        return "p < .001"
+    marker = "*" if p < 0.05 else ""
+    return f"{marker}p = {p:.3f}".replace("0.", ".")
 
 
 def annotate_pvalue(
@@ -158,6 +155,9 @@ def draw_boxplot(
     title: str,
     ylabel: str,
     p_value: float | None = None,
+    effect_size: float | None = None,
+    effect_size_name: str | None = None,
+    panel_label: str | None = None,
     condition_labels: dict[str, str] | None = None,
 ) -> None:
     _apply_base_style(ax)
@@ -215,10 +215,20 @@ def draw_boxplot(
 
     ylabel_obj = ax.set_ylabel(ylabel, fontsize=11, fontweight="black", color="#111111")
     _strengthen_text(ylabel_obj, 0.35, "#111111")
-    title_obj = ax.set_title(title, fontsize=13, fontweight="black", pad=8, color="#111111")
+    xlabel_obj = ax.set_xlabel("Experimental Condition", fontsize=10, fontweight="bold", color="#333333", labelpad=8)
+    _strengthen_text(xlabel_obj, 0.25, "#333333")
+    display_title = f"{panel_label}  {title}" if panel_label else title
+    title_obj = ax.set_title(display_title, fontsize=13, fontweight="black", pad=8, color="#111111", loc="left")
     _strengthen_text(title_obj, 0.35, "#111111")
 
-    annotate_pvalue(ax, p_value, x=0.5, y=0.97, fontsize=12, nonsig_fontweight="black", stroke_width=0.4)
+    annotate_pvalue(ax, p_value, x=0.5, y=0.97, fontsize=11, nonsig_fontweight="black", stroke_width=0.35)
+    if effect_size is not None and effect_size_name:
+        effect_obj = ax.text(
+            0.98, 0.97, f"{effect_size_name} = {effect_size:.2f}",
+            ha="right", va="bottom", transform=ax.transAxes,
+            fontsize=10, color="#333333", fontweight="bold",
+        )
+        _strengthen_text(effect_obj, 0.25, "#333333")
 
 
 # ---------------------------------------------------------------------------

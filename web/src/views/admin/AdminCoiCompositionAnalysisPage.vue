@@ -223,6 +223,8 @@ onMounted(fetchGroupsAndReport)
       :metrics="report.metrics"
       :observations="report.observations"
       :conditions="conditionColumns"
+      :tests="report.statistical_tests"
+      :global-test="report.global_test"
     />
 
     <el-card class="analysis-card" shadow="never">

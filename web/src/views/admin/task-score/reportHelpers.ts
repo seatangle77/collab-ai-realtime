@@ -18,6 +18,7 @@ import {
   INTERACTIVE_CHART_SCRIPT,
   type ReportLanguage,
 } from './analysisExport'
+import { academicConditionColor, academicNumber, academicPValue } from './academicChartStyle'
 
 export const CONDITION_LABELS: Record<string, string> = {
   no_assistance: '无辅助',
@@ -170,6 +171,7 @@ interface ReportBoxStats {
   median: number
   q3: number
   max: number
+  mean: number
 }
 
 function percentile(sorted: number[], p: number): number {
@@ -192,6 +194,7 @@ function boxStats(values: number[]): ReportBoxStats | null {
     median: percentile(sorted, 0.5),
     q3: percentile(sorted, 0.75),
     max: sorted[sorted.length - 1]!,
+    mean: sorted.reduce((sum, value) => sum + value, 0) / sorted.length,
   }
 }
 
@@ -199,6 +202,8 @@ function taskScoreBoxPlotSvg(
   observations: TaskScoreObservation[],
   conditionColumns: string[],
   metric: { key: PlotMetricKey; label: string; note: string },
+  test: StatisticalTestResult | undefined,
+  panelLabel: string,
 ): string {
   const boxes = conditionColumns.map((condition) => ({
     condition,
@@ -215,7 +220,7 @@ function taskScoreBoxPlotSvg(
   const max = rawMax + span * 0.12
   const y = (value: number) => 190 - ((value - min) / (max - min || 1)) * 150
   const x = (index: number) => boxes.length <= 1 ? 360 : 120 + index * (480 / (boxes.length - 1))
-  const color = (condition: string) => condition === 'glasses' ? '#2563eb' : condition === 'app_notification' ? '#16a34a' : '#64748b'
+  const color = academicConditionColor
   const tickValues = [max, (min + max) / 2, min]
   const ticks = tickValues.map((tick) => `
     <line x1="72" x2="660" y1="${y(tick)}" y2="${y(tick)}" class="grid-line" />
@@ -233,23 +238,26 @@ function taskScoreBoxPlotSvg(
       <rect x="${cx - 32}" y="${top}" width="64" height="${height}" rx="4" fill="${color(box.condition)}" fill-opacity="0.78" />
       <line x1="${cx - 32}" x2="${cx + 32}" y1="${y(box.stats.median)}" y2="${y(box.stats.median)}" class="median-line" />
       <text x="${cx}" y="218" text-anchor="middle" class="condition-label">${escapeHtml(conditionLabelEn(box.condition))}</text>
-      <text x="${cx}" y="236" text-anchor="middle" class="tick-label">n=${box.stats.n}</text>
+      <text x="${cx}" y="236" text-anchor="middle" class="tick-label">n=${box.stats.n} · M=${academicNumber(box.stats.mean, 2)} · Md=${academicNumber(box.stats.median, 2)}</text>
     `
   }).join('')
   return `
-      <svg class="boxplot-svg" viewBox="0 0 720 250" role="img" aria-label="${escapeHtml(metric.label)}">
+      <svg class="boxplot-svg" viewBox="0 0 720 278" role="img" aria-label="${escapeHtml(metric.label)}">
+        <text x="72" y="20" class="panel-title">${panelLabel} ${escapeHtml(metric.label)}</text>
+        <text x="660" y="20" text-anchor="end" class="stat-label">${escapeHtml(academicPValue(test?.p_value))}${test?.effect_size_name && test.effect_size != null ? ` · ${escapeHtml(test.effect_size_name)} = ${academicNumber(test.effect_size, 2)}` : ''}</text>
         <line x1="72" y1="40" x2="72" y2="190" class="axis-line" />
         <line x1="72" y1="190" x2="660" y2="190" class="axis-line" />
         ${ticks}
         ${boxShapes}
       <text x="18" y="125" transform="rotate(-90 18 125)" text-anchor="middle" class="axis-label">Score</text>
+      <text x="366" y="266" text-anchor="middle" class="axis-label">Experimental Condition</text>
       </svg>
   `
 }
 
 function taskScoreBoxPlotsHtml(report: TaskScoreAnalysisResult, conditionColumns: string[], language: ReportLanguage): string {
-  return TASK_SCORE_PLOT_METRICS.map((metric) => interactiveChartHtml(
-    `${taskScoreBoxPlotSvg(report.observations, conditionColumns, metric)}<p class="note">${escapeHtml(metric.note)}</p>`,
+  return TASK_SCORE_PLOT_METRICS.map((metric, index) => interactiveChartHtml(
+    `${taskScoreBoxPlotSvg(report.observations, conditionColumns, metric, report.statistical_tests.find(test => test.metric === metric.key), `(${String.fromCharCode(97 + index)})`)}<p class="note">${escapeHtml(metric.note)}</p>`,
     escapeHtml(metric.label),
     `task-score-${metric.key}.svg`,
     language,
@@ -420,8 +428,10 @@ export function buildTaskScoreReportHtml(params: BuildReportHtmlParams, language
     .axis-line, .whisker { stroke: #64748b; stroke-width: 1.4; }
     .grid-line { stroke: #d9e2ef; stroke-width: 1; }
     .median-line { stroke: #111827; stroke-width: 2; }
-    .tick-label, .condition-label, .axis-label { fill: #64748b; font-size: 11px; }
+    .tick-label, .condition-label, .axis-label { fill: #475569; font-size: 11px; font-weight: 600; }
     .condition-label { fill: #172033; font-weight: 700; }
+    .panel-title { fill: #0f172a; font-size: 15px; font-weight: 800; }
+    .stat-label { fill: #334155; font-size: 11px; font-weight: 700; }
     ${INTERACTIVE_CHART_CSS}
     @media print { body { margin: 18mm; } h2 { page-break-after: avoid; } }
   </style>

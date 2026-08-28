@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { Download, ZoomIn } from '@element-plus/icons-vue'
 import { downloadSvgElement, serializeSvgElement } from '../task-score/analysisExport'
+import { academicConditionColor, academicConditionLabel } from '../task-score/academicChartStyle'
 
 const props = withDefaults(defineProps<{
   title: string
@@ -11,42 +12,36 @@ const props = withDefaults(defineProps<{
   maximum?: number
   percent?: boolean
   unitLabel?: string
+  panelLabel?: string
+  statisticLabel?: string
 }>(), {
   subtitle: '',
   maximum: undefined,
   percent: false,
   unitLabel: '',
+  panelLabel: '',
+  statisticLabel: '',
 })
 const svgRef = ref<SVGElement | null>(null)
 const previewVisible = ref(false)
 const previewMarkup = ref('')
-const conditionLabelsEn: Record<string, string> = {
-  no_assistance: 'No Assistance',
-  glasses: 'Smart Glasses',
-  app_notification: 'App Notification',
-}
-const conditionLabelEn = (condition: string) => conditionLabelsEn[condition] ?? condition
+const conditionLabelEn = academicConditionLabel
 const fileStem = computed(() => props.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'coi-boxplot')
 
-const WIDTH = 720
-const HEIGHT = 380
-const LEFT = 62
-const RIGHT = 18
-const TOP = 30
-const BOTTOM = 62
+const WIDTH = 760
+const HEIGHT = 452
+const LEFT = 88
+const RIGHT = 24
+const TOP = 72
+const BOTTOM = 96
 const PLOT_WIDTH = WIDTH - LEFT - RIGHT
 const PLOT_HEIGHT = HEIGHT - TOP - BOTTOM
 const BOX_WIDTH = 62
 
-const colors: Record<string, string> = {
-  no_assistance: '#374151',
-  glasses: '#1d4ed8',
-  app_notification: '#c2410c',
-}
 const jitterPattern = [-24, -16, -8, 0, 8, 16, 24, -20, -12, -4, 4, 12, 20]
 
 function color(condition: string): string {
-  return colors[condition] ?? '#374151'
+  return academicConditionColor(condition)
 }
 
 function quantile(values: number[], percentile: number): number {
@@ -115,6 +110,10 @@ function format(value: number): string {
   return props.percent ? `${(value * 100).toFixed(0)}%` : value.toFixed(domainMaximum.value <= 2 ? 2 : 1)
 }
 
+function meanLabel(value: number): string {
+  return props.percent ? `${(value * 100).toFixed(1)}%` : value.toFixed(domainMaximum.value <= 2 ? 2 : 1)
+}
+
 function pointX(groupX: number, index: number): number {
   return groupX + (jitterPattern[index % jitterPattern.length] ?? 0)
 }
@@ -134,6 +133,9 @@ function downloadChart() {
   <section class="boxplot-panel">
     <header><div><strong>{{ title }}</strong><span v-if="subtitle">{{ subtitle }}</span></div><div class="chart-actions"><el-tooltip content="Enlarge chart"><el-button :icon="ZoomIn" circle size="small" @click="openPreview" /></el-tooltip><el-tooltip content="Download SVG"><el-button :icon="Download" circle size="small" @click="downloadChart" /></el-tooltip></div></header>
     <svg ref="svgRef" :viewBox="`0 0 ${WIDTH} ${HEIGHT}`" role="img" :aria-label="`${title}: box plots, session observations, means, and 95% confidence intervals`" @click="openPreview">
+      <text x="18" y="25" class="panel-title">{{ panelLabel ? `${panelLabel}  ` : '' }}{{ title }}</text>
+      <text v-if="subtitle" x="18" y="46" class="panel-subtitle">{{ subtitle }}</text>
+      <text v-if="statisticLabel" :x="WIDTH - RIGHT" y="25" text-anchor="end" class="statistic-label">{{ statisticLabel }}</text>
       <g class="grid">
         <template v-for="tick in ticks" :key="tick.value">
           <line :x1="LEFT" :x2="WIDTH - RIGHT" :y1="tick.y" :y2="tick.y" />
@@ -141,7 +143,8 @@ function downloadChart() {
         </template>
       </g>
       <line class="axis-line" :x1="LEFT" :x2="LEFT" :y1="TOP" :y2="TOP + PLOT_HEIGHT" />
-      <text v-if="unitLabel" class="unit-label" :x="LEFT" :y="15">{{ unitLabel }}</text>
+      <line class="axis-line" :x1="LEFT" :x2="WIDTH - RIGHT" :y1="TOP + PLOT_HEIGHT" :y2="TOP + PLOT_HEIGHT" />
+      <text v-if="unitLabel" class="axis-label" x="22" :y="TOP + PLOT_HEIGHT / 2" :transform="`rotate(-90 22 ${TOP + PLOT_HEIGHT / 2})`" text-anchor="middle">{{ unitLabel }}</text>
 
       <g v-for="group in groups" :key="group.condition">
         <template v-if="group.stats.n">
@@ -178,8 +181,9 @@ function downloadChart() {
           ><title>{{ conditionLabelEn(group.condition) }} · {{ format(value) }}</title></circle>
         </template>
         <text class="condition-label" :x="group.x" :y="TOP + PLOT_HEIGHT + 26" text-anchor="middle">{{ conditionLabelEn(group.condition) }}</text>
-        <text class="n-label" :x="group.x" :y="TOP + PLOT_HEIGHT + 43" text-anchor="middle">n={{ group.stats.n }}</text>
+        <text class="n-label" :x="group.x" :y="TOP + PLOT_HEIGHT + 46" text-anchor="middle">n={{ group.stats.n }} · M={{ meanLabel(group.stats.mean) }}</text>
       </g>
+      <text :x="LEFT + PLOT_WIDTH / 2" :y="HEIGHT - 12" text-anchor="middle" class="axis-label">Experimental Condition</text>
     </svg>
     <footer><span><i class="box-key" />Median and IQR</span><span><i class="point-key" />Session</span><span><i class="mean-key" />Mean and 95% CI</span></footer>
     <el-dialog v-model="previewVisible" :title="title" width="96vw" top="2vh" append-to-body><div class="coi-large-chart" v-html="previewMarkup" /></el-dialog>
@@ -195,8 +199,11 @@ function downloadChart() {
 .chart-actions{display:flex;gap:7px;flex-shrink:0}
 svg { display:block; width:100%; height:auto; overflow:visible; cursor:zoom-in; font-family:Arial,"Helvetica Neue",sans-serif; text-rendering:geometricPrecision; }
 .grid line { stroke:#e7ecf2; stroke-width:1; stroke-dasharray:3 3; }
-.grid text, .unit-label, .condition-label, .n-label { fill:#334155; font-size:14px; font-weight:650; }
-.unit-label { fill:#1e293b; font-weight:700; }
+.grid text, .condition-label, .n-label { fill:#334155; font-size:14px; font-weight:650; }
+.panel-title { fill:#0f172a; font-size:17px; font-weight:800; }
+.panel-subtitle { fill:#526071; font-size:12px; font-weight:600; }
+.statistic-label { fill:#334155; font-size:12px; font-weight:700; }
+.axis-label { fill:#1e293b; font-size:14px; font-weight:750; }
 .condition-label { fill:#0f172a; font-size:15px; font-weight:750; }
 .n-label { fill:#64748b; font-size:12px; font-weight:600; }
 .axis-line { stroke:#64748b; stroke-width:1.6; }

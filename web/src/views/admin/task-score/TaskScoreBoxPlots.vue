@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { Download, ZoomIn } from '@element-plus/icons-vue'
 import type { TaskScoreObservation } from '../../../api/admin/task-score-analysis'
 import { conditionLabelEn, formatNumber } from './reportHelpers'
+import { academicConditionColor } from './academicChartStyle'
 
 type PlotMetricKey = 'gs' | 'weak_synergy' | 'strong_synergy'
 
@@ -115,9 +116,7 @@ function xFor(index: number, total: number): number {
 }
 
 function conditionColor(condition: string): string {
-  if (condition === 'glasses') return '#2563eb'
-  if (condition === 'app_notification') return '#16a34a'
-  return '#64748b'
+  return academicConditionColor(condition)
 }
 
 function downloadActiveChart() {

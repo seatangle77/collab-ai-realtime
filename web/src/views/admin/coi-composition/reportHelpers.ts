@@ -4,6 +4,7 @@ import type { AdminGroup } from '../../../types/admin'
 import { formatNumber, pValueText } from '../coi/reportHelpers'
 import { STATIC_BOXPLOT_CSS, staticSessionBoxplotHtml } from '../coi/staticBoxplotHtml'
 import { chartModalHtml, INTERACTIVE_CHART_CSS, INTERACTIVE_CHART_SCRIPT } from '../task-score/analysisExport'
+import { academicNumber, academicPValue } from '../task-score/academicChartStyle'
 
 export type CoiCompositionReportLanguage = 'zh' | 'en'
 
@@ -146,13 +147,16 @@ function figuresHtml(
       const start = cursor
       const width = phase.value / total
       cursor += width
-      return `<rect x="${145 + start * 560}" y="${26 + rowIndex * 48}" width="${width * 560}" height="30" fill="url(#${phase.pattern})" stroke="#fff" stroke-width="1.5"/><text class="stack-text" x="${145 + (start + width / 2) * 560}" y="${45 + rowIndex * 48}" text-anchor="middle">${phase.short} ${(phase.value * 100).toFixed(1)}%</text>`
+      return `<rect x="${175 + start * 560}" y="${68 + rowIndex * 48}" width="${width * 560}" height="30" fill="url(#${phase.pattern})" stroke="#fff" stroke-width="1.5"/><text class="stack-text" x="${175 + (start + width / 2) * 560}" y="${87 + rowIndex * 48}" text-anchor="middle">${phase.short} ${(phase.value * 100).toFixed(1)}%</text>`
     }).join('')
-    return `<text class="stack-label" x="126" y="${46 + rowIndex * 48}" text-anchor="end">${escapeHtml(conditionLabel(condition, chartLanguage))}</text>${segments}`
+    return `<text class="stack-label" x="156" y="${88 + rowIndex * 48}" text-anchor="end">${escapeHtml(conditionLabel(condition, chartLanguage))}</text>${segments}`
   }).join('')
-  const stackedChart = `<section class="stacked-overview"><h3>Mean Composition by Condition<span>Each bar totals 100%; phases and mean proportions are labeled directly.</span></h3><svg viewBox="0 0 760 182" role="img"><defs><style>text{font-family:Arial,Helvetica,sans-serif;text-rendering:geometricPrecision}.stack-label{fill:#0f172a;font-size:15px;font-weight:750}.stack-text{fill:#fff;font-size:13px;font-weight:750;paint-order:stroke;stroke:#17203388;stroke-width:2px}</style><pattern id="report-phase-te" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#374151"/></pattern><pattern id="report-phase-ex" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#2563eb"/></pattern><pattern id="report-phase-in" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#16a34a"/></pattern><pattern id="report-phase-re" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#f97316"/></pattern></defs>${stackedRows}</svg></section>`
+  const axisTicks = [0, 25, 50, 75, 100].map(tick => `<line x1="${175 + tick * 5.6}" x2="${175 + tick * 5.6}" y1="232" y2="238"/><text x="${175 + tick * 5.6}" y="253" text-anchor="middle">${tick}%</text>`).join('')
+  const stackedChart = `<section class="stacked-overview"><h3>Mean Composition by Condition<span>Each bar totals 100%; phases and mean proportions are labeled directly.</span></h3><svg viewBox="0 0 800 282" role="img"><defs><style>text{font-family:Arial,Helvetica,sans-serif;text-rendering:geometricPrecision}.stack-label{fill:#0f172a;font-size:15px;font-weight:750}.stack-text{fill:#fff;font-size:13px;font-weight:750;paint-order:stroke;stroke:#17203388;stroke-width:2px}.overview-title{fill:#0f172a;font-size:17px;font-weight:800}.overview-stat{fill:#334155;font-size:12px;font-weight:700}.overview-axis line{stroke:#64748b;stroke-width:1.4}.overview-axis text{fill:#475569;font-size:12px;font-weight:650}.overview-axis .axis-label{fill:#1e293b;font-size:14px;font-weight:750}</style><pattern id="report-phase-te" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#4B5563"/></pattern><pattern id="report-phase-ex" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#0072B2"/></pattern><pattern id="report-phase-in" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#009E73"/></pattern><pattern id="report-phase-re" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#D55E00"/></pattern></defs><text x="24" y="28" class="overview-title">(a) Mean CoI Composition by Condition</text><text x="776" y="28" text-anchor="end" class="overview-stat">PERMANOVA ${escapeHtml(academicPValue(report.global_test.p_value))} · R² = ${academicNumber(report.global_test.effect_size, 2)}</text>${stackedRows}<g class="overview-axis"><line x1="175" x2="735" y1="232" y2="232"/>${axisTicks}<text x="455" y="276" text-anchor="middle" class="axis-label">Mean Code Composition (%)</text></g></svg></section>`
   const compositionMaximum = Math.min(1, Math.max(0.5, Math.ceil(Math.max(...report.observations.flatMap(item => [item.te_ratio, item.ex_ratio, item.in_ratio, item.re_ratio]), 0) * 10) / 10))
-  const panels = phases.map(phase => staticSessionBoxplotHtml({
+  const panels = phases.map((phase, index) => {
+    const test = report.statistical_tests.find(item => item.metric === phase.key)
+    return staticSessionBoxplotHtml({
     title: phase.title,
     subtitle: phase.subtitle,
     conditions: conditionColumns,
@@ -160,9 +164,11 @@ function figuresHtml(
     conditionLabels: labels,
     maximum: compositionMaximum,
     percent: true,
-    unitLabel: 'Phase Proportion',
+    unitLabel: 'Phase Proportion (%)',
     language: chartLanguage,
-  })).join('')
+    panelLabel: `(${String.fromCharCode(98 + index)})`,
+    statisticLabel: test ? `BH-adjusted ${academicPValue(test.p_value_adjusted)}${test.effect_size_name && test.effect_size != null ? ` · ${test.effect_size_name} = ${academicNumber(test.effect_size, 2)}` : ''}` : '',
+  })}).join('')
   const caption = language === 'zh'
     ? `<strong>图 1.</strong> 上图为三个条件的平均四阶段构成（每个条形合计100%）；下图为会话级占比分布。箱体表示中位数和四分位区间，须线为1.5倍四分位距范围，小型实心圆点为每场会话，菱形与误差线表示均值及95%置信区间。四个分布面板使用共同的0–${(compositionMaximum * 100).toFixed(0)}%纵轴。`
     : `<strong>Figure 1.</strong> The upper chart shows mean four-phase composition by condition (each bar totals 100%); the lower panels show session-level distributions. Boxes show medians and interquartile ranges, whiskers extend to 1.5 IQR, small solid circles show sessions, and diamonds with error bars show means and 95% confidence intervals. Distribution panels share a 0–${(compositionMaximum * 100).toFixed(0)}% scale.`

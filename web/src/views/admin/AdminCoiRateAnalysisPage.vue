@@ -197,7 +197,7 @@ onMounted(loadGroups)
       <el-alert v-if="report?.excluded_sessions.length" type="warning" :closable="false" show-icon style="margin-top:12px" :title="`${report.excluded_sessions.length}场会话因时间或编码问题被排除，请查看页面底部明细。`" />
     </el-card>
 
-    <CoiRateCharts v-if="report" :metrics="report.metrics" :observations="report.observations" :contrasts="report.contrasts" :conditions="conditions" />
+    <CoiRateCharts v-if="report" :metrics="report.metrics" :observations="report.observations" :contrasts="report.contrasts" :conditions="conditions" :tests="report.statistical_tests" />
 
     <el-card class="analysis-card" shadow="never">
       <template #header><div class="card-title"><strong>产生率描述性统计</strong><span>每场会话等权；单位为编码次数/分钟</span></div></template>

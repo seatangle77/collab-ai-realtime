@@ -255,7 +255,13 @@ onMounted(fetchGroups)
       </el-table>
     </el-card>
 
-    <IndividualScoreChart :observations="report?.observations ?? []" :conditions="conditionColumns" />
+    <IndividualScoreChart
+      :observations="report?.observations ?? []"
+      :conditions="conditionColumns"
+      :summaries="report?.improvement_summaries ?? []"
+      :within-condition-tests="report?.within_condition_tests ?? []"
+      :omnibus-test="report?.statistical_test ?? null"
+    />
 
     <el-card class="analysis-card table-card" shadow="never">
       <template #header>
