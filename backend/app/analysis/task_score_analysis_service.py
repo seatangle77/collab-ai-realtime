@@ -568,12 +568,13 @@ def _generate_task_score_charts(
                     title=title,
                     ylabel=ylabel,
                     p_value=test_by_metric.get(metric).p_value if test_by_metric.get(metric) else None,
-                    effect_size=test_by_metric.get(metric).effect_size if test_by_metric.get(metric) else None,
-                    effect_size_name=test_by_metric.get(metric).effect_size_name if test_by_metric.get(metric) else None,
+                    effect_size=None,
+                    effect_size_name=None,
                     panel_label=f"({chr(97 + panel_index)})",
                     condition_labels=text["condition_labels"],
                     y_limits=axis_limits[metric],
                     zero_reference=metric in {"weak_synergy", "strong_synergy"},
+                    annotation_y=0.91,
                 )
             fig.tight_layout(pad=2.0)
             return fig_to_base64_pair(fig)

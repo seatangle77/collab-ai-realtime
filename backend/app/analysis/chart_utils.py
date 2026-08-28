@@ -162,6 +162,7 @@ def draw_boxplot(
     condition_labels: dict[str, str] | None = None,
     y_limits: tuple[float, float] | None = None,
     zero_reference: bool = False,
+    annotation_y: float = 0.97,
 ) -> None:
     _apply_base_style(ax)
 
@@ -229,10 +230,10 @@ def draw_boxplot(
     title_obj = ax.set_title(display_title, fontsize=13, fontweight="black", pad=8, color="#111111", loc="left")
     _strengthen_text(title_obj, 0.35, "#111111")
 
-    annotate_pvalue(ax, p_value, x=0.5, y=0.97, fontsize=11, nonsig_fontweight="black", stroke_width=0.35)
+    annotate_pvalue(ax, p_value, x=0.5, y=annotation_y, fontsize=11, nonsig_fontweight="black", stroke_width=0.35)
     if effect_size is not None and effect_size_name:
         effect_obj = ax.text(
-            0.98, 0.97, f"{effect_size_name} = {effect_size:.2f}",
+            0.98, annotation_y, f"{effect_size_name} = {effect_size:.2f}",
             ha="right", va="bottom", transform=ax.transAxes,
             fontsize=10, color="#333333", fontweight="bold",
         )
