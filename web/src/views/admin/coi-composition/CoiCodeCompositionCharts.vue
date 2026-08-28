@@ -132,6 +132,9 @@ function downloadOverview() {
           </g>
         </g>
         <g class="overview-axis">
+          <line x1="165" x2="165" y1="68" y2="194" />
+          <line v-for="tickY in [83, 131, 179]" :key="`condition-${tickY}`" x1="165" x2="173" :y1="tickY" :y2="tickY" />
+          <text x="28" y="131" transform="rotate(-90 28 131)" text-anchor="middle" class="axis-label">Experimental Condition</text>
           <line x1="175" x2="735" y1="232" y2="232" />
           <g v-for="tick in [0, 25, 50, 75, 100]" :key="tick">
             <line :x1="175 + tick * 5.6" :x2="175 + tick * 5.6" y1="232" y2="238" />

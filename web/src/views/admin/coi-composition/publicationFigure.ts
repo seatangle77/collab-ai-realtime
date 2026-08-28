@@ -4,7 +4,6 @@ import {
   academicConditionColor,
   academicConditionLabel,
   academicNiceMaximum,
-  academicPValue,
   academicTicks,
 } from '../task-score/academicChartStyle'
 
@@ -64,12 +63,12 @@ function phasePanel(
   panelIndex: number,
 ): string {
   const panelWidth = 480
-  const panelHeight = 380
+  const panelHeight = 408
   const panelX = 14 + panelIndex * 496
   const panelY = 48
   const left = 66
   const right = 14
-  const top = 94
+  const top = 122
   const bottom = 72
   const plotWidth = panelWidth - left - right
   const plotHeight = panelHeight - top - bottom
@@ -111,20 +110,28 @@ function phasePanel(
       <text class="condition" x="${x}" y="${top + plotHeight + 28}" text-anchor="middle">${escapeXml(academicConditionLabel(condition))}</text>`
   }).join('')
 
-  const significantPairs = input.postHocTests
+  const postHocPairs = input.postHocTests
     .find(item => item.metric === phase.key)?.pairs
-    .filter(pair => pair.significant && pair.p_value_adjusted != null) ?? []
-  const brackets = significantPairs.slice(0, 2).map((pair, index) => {
+    .filter(pair => pair.p_value_adjusted != null) ?? []
+  const brackets = postHocPairs.slice(0, 3).map((pair, index) => {
     const x1 = conditionX(pair.condition_a)
     const x2 = conditionX(pair.condition_b)
-    const bracketY = 73 - index * 18
-    return `<path class="sig-bracket" d="M ${x1} ${bracketY + 8} V ${bracketY} H ${x2} V ${bracketY + 8}"/><text class="sig-text" x="${(x1 + x2) / 2}" y="${bracketY - 5}" text-anchor="middle">${escapeXml(academicPValue(pair.p_value_adjusted))}*</text>`
+    const bracketY = 105 - index * 22
+    const pairSignificant = pair.significant === true
+    const label = pairSignificant
+      ? `p = ${Number(pair.p_value_adjusted).toFixed(3).replace(/^0/, '')}*`
+      : 'n.s.'
+    return `<path class="pair-bracket${pairSignificant ? ' significant' : ''}" d="M ${x1} ${bracketY + 7} V ${bracketY} H ${x2} V ${bracketY + 7}"/><text class="pair-text${pairSignificant ? ' significant' : ''}" x="${(x1 + x2) / 2}" y="${bracketY - 4}" text-anchor="middle">${escapeXml(label)}</text>`
   }).join('')
+
+  const overallLabel = pValue == null
+    ? 'p = —'
+    : `p = ${pValue.toFixed(3).replace(/^0/, '')}${significant ? '*' : ' · n.s.'}`
 
   return `<g transform="translate(${panelX} ${panelY})">
     <rect class="panel" width="${panelWidth}" height="${panelHeight}" rx="8"/>
     <text class="panel-title" x="18" y="29">(${String.fromCharCode(97 + panelIndex)}) ${phase.short} · ${phase.title}</text>
-    <text class="panel-p${significant ? ' significant' : ''}" x="${panelWidth - 16}" y="29" text-anchor="end">All conditions: ${escapeXml(academicPValue(pValue))}${significant ? '*' : ''}</text>
+    <text class="panel-p${significant ? ' significant' : ''}" x="${panelWidth - 16}" y="29" text-anchor="end">${escapeXml(overallLabel)}</text>
     ${brackets}${ticks}
     <line class="axis" x1="${left}" x2="${left}" y1="${top}" y2="${top + plotHeight}"/>
     <line class="axis" x1="${left}" x2="${panelWidth - right}" y1="${top + plotHeight}" y2="${top + plotHeight}"/>
@@ -135,14 +142,15 @@ function phasePanel(
 
 export function buildCoiCompositionPublicationSvg(input: PublicationFigureInput): string {
   const panels = PHASES.map((phase, index) => phasePanel(input, phase, index)).join('')
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 468" role="img" aria-label="CoI phase proportions by experimental condition with p values">
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 520" role="img" aria-label="CoI phase proportions by experimental condition with p values">
     <defs><style>
-      text{font-family:Arial,Helvetica,sans-serif;text-rendering:geometricPrecision}.figure-title{fill:#0f172a;font-size:22px;font-weight:800}.figure-note{fill:#64748b;font-size:13px;font-weight:650}.panel{fill:#fff;stroke:#cbd5e1;stroke-width:1.2}.panel-title{fill:#0f172a;font-size:16px;font-weight:800}.panel-p{fill:#475569;font-size:13px;font-weight:750}.panel-p.significant,.sig-text{fill:#c81e1e;font-weight:850}.sig-text{font-size:13px}.sig-bracket{fill:none;stroke:#c81e1e;stroke-width:2}.grid{stroke:#e5eaf0;stroke-width:1;stroke-dasharray:3 3}.tick{fill:#475569;font-size:11px;font-weight:600}.axis{stroke:#64748b;stroke-width:1.4}.axis-label{fill:#334155;font-size:11px;font-weight:700}.condition{fill:#1e293b;font-size:12px;font-weight:700}.whisker{stroke-width:1.8}.box{stroke-width:2}.median{stroke-width:2.6}.median-label{fill:#172033;font-size:11px;font-weight:800;paint-order:stroke;stroke:#fff;stroke-width:3px;stroke-linejoin:round}
+      text{font-family:Arial,Helvetica,sans-serif;text-rendering:geometricPrecision}.figure-title{fill:#0f172a;font-size:22px;font-weight:800}.figure-note{fill:#64748b;font-size:13px;font-weight:650}.panel{fill:#fff;stroke:#cbd5e1;stroke-width:1.2}.panel-title{fill:#0f172a;font-size:16px;font-weight:800}.panel-p{fill:#475569;font-size:13px;font-weight:750}.panel-p.significant,.pair-text.significant{fill:#c81e1e;font-weight:850}.pair-text{fill:#64748b;font-size:12px;font-weight:700}.pair-bracket{fill:none;stroke:#94a3b8;stroke-width:1.4}.pair-bracket.significant{stroke:#c81e1e;stroke-width:2}.grid{stroke:#e5eaf0;stroke-width:1;stroke-dasharray:3 3}.tick{fill:#475569;font-size:11px;font-weight:600}.axis{stroke:#64748b;stroke-width:1.4}.axis-label{fill:#334155;font-size:11px;font-weight:700}.condition{fill:#1e293b;font-size:12px;font-weight:700}.whisker{stroke-width:1.8}.box{stroke-width:2}.median{stroke-width:2.6}.median-label{fill:#172033;font-size:11px;font-weight:800;paint-order:stroke;stroke:#fff;stroke-width:3px;stroke-linejoin:round}
     </style></defs>
-    <rect width="2000" height="468" fill="#fff"/>
+    <rect width="2000" height="520" fill="#fff"/>
     <text class="figure-title" x="20" y="31">CoI Phase Proportions by Experimental Condition</text>
     <text class="figure-note" x="1980" y="31" text-anchor="end"><tspan fill="#c81e1e">Red</tspan> indicates p &lt; .05</text>
     ${panels}
-    <text class="figure-note" x="1000" y="456" text-anchor="middle">Box = middle 50% · horizontal line and label = median · whiskers = values within 1.5 IQR</text>
+    <text class="figure-note" x="1000" y="480" text-anchor="middle">Panel p values are BH-adjusted · bracket p values are post-hoc adjusted · n.s. = not significant</text>
+    <text class="figure-note" x="1000" y="503" text-anchor="middle">Box = middle 50% · horizontal line and label = median · whiskers = values within 1.5 IQR</text>
   </svg>`
 }
