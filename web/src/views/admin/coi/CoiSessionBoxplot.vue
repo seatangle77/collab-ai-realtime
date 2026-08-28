@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { conditionLabel } from './reportHelpers'
+import { computed, ref } from 'vue'
+import { Download, ZoomIn } from '@element-plus/icons-vue'
+import { downloadSvgElement, serializeSvgElement } from '../task-score/analysisExport'
 
 const props = withDefaults(defineProps<{
   title: string
@@ -16,6 +17,16 @@ const props = withDefaults(defineProps<{
   percent: false,
   unitLabel: '',
 })
+const svgRef = ref<SVGElement | null>(null)
+const previewVisible = ref(false)
+const previewMarkup = ref('')
+const conditionLabelsEn: Record<string, string> = {
+  no_assistance: 'No Assistance',
+  glasses: 'Smart Glasses',
+  app_notification: 'App Notification',
+}
+const conditionLabelEn = (condition: string) => conditionLabelsEn[condition] ?? condition
+const fileStem = computed(() => props.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'coi-boxplot')
 
 const WIDTH = 720
 const HEIGHT = 380
@@ -107,12 +118,22 @@ function format(value: number): string {
 function pointX(groupX: number, index: number): number {
   return groupX + (jitterPattern[index % jitterPattern.length] ?? 0)
 }
+
+function openPreview() {
+  if (!svgRef.value) return
+  previewMarkup.value = serializeSvgElement(svgRef.value)
+  previewVisible.value = true
+}
+
+function downloadChart() {
+  if (svgRef.value) downloadSvgElement(svgRef.value, `${fileStem.value}.svg`)
+}
 </script>
 
 <template>
   <section class="boxplot-panel">
-    <header><strong>{{ title }}</strong><span v-if="subtitle">{{ subtitle }}</span></header>
-    <svg :viewBox="`0 0 ${WIDTH} ${HEIGHT}`" role="img" :aria-label="`${title}：三种实验条件的箱线图、会话原始点、均值与95%置信区间`">
+    <header><div><strong>{{ title }}</strong><span v-if="subtitle">{{ subtitle }}</span></div><div class="chart-actions"><el-tooltip content="Enlarge chart"><el-button :icon="ZoomIn" circle size="small" @click="openPreview" /></el-tooltip><el-tooltip content="Download SVG"><el-button :icon="Download" circle size="small" @click="downloadChart" /></el-tooltip></div></header>
+    <svg ref="svgRef" :viewBox="`0 0 ${WIDTH} ${HEIGHT}`" role="img" :aria-label="`${title}: box plots, session observations, means, and 95% confidence intervals`" @click="openPreview">
       <g class="grid">
         <template v-for="tick in ticks" :key="tick.value">
           <line :x1="LEFT" :x2="WIDTH - RIGHT" :y1="tick.y" :y2="tick.y" />
@@ -154,39 +175,44 @@ function pointX(groupX: number, index: number): number {
             :cy="y(value)"
             r="2.4"
             :fill="group.color"
-          ><title>{{ conditionLabel(group.condition) }} · {{ format(value) }}</title></circle>
+          ><title>{{ conditionLabelEn(group.condition) }} · {{ format(value) }}</title></circle>
         </template>
-        <text class="condition-label" :x="group.x" :y="TOP + PLOT_HEIGHT + 26" text-anchor="middle">{{ conditionLabel(group.condition) }}</text>
+        <text class="condition-label" :x="group.x" :y="TOP + PLOT_HEIGHT + 26" text-anchor="middle">{{ conditionLabelEn(group.condition) }}</text>
         <text class="n-label" :x="group.x" :y="TOP + PLOT_HEIGHT + 43" text-anchor="middle">n={{ group.stats.n }}</text>
       </g>
     </svg>
-    <footer><span><i class="box-key" />中位数与四分位区间</span><span><i class="point-key" />每场会话</span><span><i class="mean-key" />均值及95% CI</span></footer>
+    <footer><span><i class="box-key" />Median and IQR</span><span><i class="point-key" />Session</span><span><i class="mean-key" />Mean and 95% CI</span></footer>
+    <el-dialog v-model="previewVisible" :title="title" width="96vw" top="2vh" append-to-body><div class="coi-large-chart" v-html="previewMarkup" /></el-dialog>
   </section>
 </template>
 
 <style scoped>
 .boxplot-panel { min-width:0; padding:14px 16px 10px; border:1px solid #e2e8f0; border-radius:9px; background:#fff; }
-.boxplot-panel header { display:flex; flex-direction:column; gap:2px; margin-bottom:4px; }
-.boxplot-panel header strong { color:#26364b; font-size:14px; }
-.boxplot-panel header span { color:#7a8799; font-size:11px; }
-svg { display:block; width:100%; height:auto; overflow:visible; }
+.boxplot-panel header { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:4px; }
+.boxplot-panel header > div:first-child { display:flex; flex-direction:column; gap:3px; }
+.boxplot-panel header strong { color:#172033; font-size:16px; font-weight:750; }
+.boxplot-panel header span { color:#526071; font-size:13px; font-weight:550; }
+.chart-actions{display:flex;gap:7px;flex-shrink:0}
+svg { display:block; width:100%; height:auto; overflow:visible; cursor:zoom-in; font-family:Arial,"Helvetica Neue",sans-serif; text-rendering:geometricPrecision; }
 .grid line { stroke:#e7ecf2; stroke-width:1; stroke-dasharray:3 3; }
-.grid text, .unit-label, .condition-label, .n-label { fill:#718096; font-size:11px; }
-.unit-label { font-weight:650; }
-.n-label { fill:#9aa5b4; font-size:9px; }
-.axis-line { stroke:#aeb8c5; stroke-width:1; }
+.grid text, .unit-label, .condition-label, .n-label { fill:#334155; font-size:14px; font-weight:650; }
+.unit-label { fill:#1e293b; font-weight:700; }
+.condition-label { fill:#0f172a; font-size:15px; font-weight:750; }
+.n-label { fill:#64748b; font-size:12px; font-weight:600; }
+.axis-line { stroke:#64748b; stroke-width:1.6; }
 .whisker, .whisker-cap { stroke-width:1.6; }
 .box { stroke-width:2; }
 .median { stroke-width:2.5; }
 .ci, .ci-cap { stroke-width:2; }
 .mean { stroke:white; stroke-width:1; }
-.raw-point { opacity:.82; }
-.boxplot-panel footer { display:flex; justify-content:center; gap:16px; flex-wrap:wrap; color:#718096; font-size:9px; }
+.raw-point { opacity:.9; }
+.boxplot-panel footer { display:flex; justify-content:center; gap:18px; flex-wrap:wrap; color:#475569; font-size:12px; font-weight:600; }
 .boxplot-panel footer span { display:flex; align-items:center; gap:5px; }
 .boxplot-panel footer i { display:inline-block; }
 .box-key { width:12px; height:8px; border:1.5px solid #64748b; background:#64748b18; }
 .point-key { width:5px; height:5px; border-radius:50%; background:#374151; }
 .mean-key { width:14px; height:2px; background:#64748b; transform:rotate(90deg); }
+:global(.coi-large-chart){overflow:auto;background:#fff}:global(.coi-large-chart svg){display:block;width:1800px;max-width:none;height:auto}
 @media print {
   .boxplot-panel { border-color:#777; }
   .box[data-condition="no_assistance"] { stroke:#111 !important; fill:#e5e5e5 !important; }

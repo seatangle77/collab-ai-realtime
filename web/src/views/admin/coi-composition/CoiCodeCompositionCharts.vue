@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import { Download, ZoomIn } from '@element-plus/icons-vue'
 import type { MetricSummary } from '../../../api/admin/coi-analysis'
 import type { CoiCompositionObservation } from '../../../api/admin/coi-composition-analysis'
 import CoiSessionBoxplot from '../coi/CoiSessionBoxplot.vue'
-import { conditionLabel } from '../coi/reportHelpers'
+import { downloadSvgElement, serializeSvgElement } from '../task-score/analysisExport'
 
 const props = defineProps<{
   metrics: MetricSummary[]
@@ -12,10 +13,10 @@ const props = defineProps<{
 }>()
 
 const panels = [
-  { metric: 'te_ratio', key: 'te_ratio', title: 'TE · Triggering Event', subtitle: '触发事件占四阶段编码的比例' },
-  { metric: 'ex_ratio', key: 'ex_ratio', title: 'EX · Exploration', subtitle: '探索占四阶段编码的比例' },
-  { metric: 'in_ratio', key: 'in_ratio', title: 'IN · Integration', subtitle: '整合占四阶段编码的比例' },
-  { metric: 're_ratio', key: 're_ratio', title: 'RE · Resolution', subtitle: '解决占四阶段编码的比例' },
+  { metric: 'te_ratio', key: 'te_ratio', title: 'TE · Triggering Event', subtitle: 'Proportion of four-phase codes' },
+  { metric: 'ex_ratio', key: 'ex_ratio', title: 'EX · Exploration', subtitle: 'Proportion of four-phase codes' },
+  { metric: 'in_ratio', key: 'in_ratio', title: 'IN · Integration', subtitle: 'Proportion of four-phase codes' },
+  { metric: 're_ratio', key: 're_ratio', title: 'RE · Resolution', subtitle: 'Proportion of four-phase codes' },
 ] as const
 const phaseStyles = [
   { metric: 'te_ratio', short: 'TE', pattern: 'phase-te' },
@@ -63,21 +64,34 @@ const compositionMaximum = computed(() => {
   const maximum = Math.max(...props.observations.flatMap(item => [item.te_ratio, item.ex_ratio, item.in_ratio, item.re_ratio]), 0)
   return Math.min(1, Math.max(0.5, Math.ceil(maximum * 10) / 10))
 })
-const scaleLabel = computed(() => `四个阶段使用共同的0–${(compositionMaximum.value * 100).toFixed(0)}%纵轴，便于直接比较`)
+const scaleLabel = computed(() => `All four phases share a 0–${(compositionMaximum.value * 100).toFixed(0)}% scale for direct comparison.`)
+const overviewSvgRef = ref<SVGElement | null>(null)
+const previewVisible = ref(false)
+const previewMarkup = ref('')
+const conditionLabelsEn: Record<string, string> = { no_assistance: 'No Assistance', glasses: 'Smart Glasses', app_notification: 'App Notification' }
+const conditionLabelEn = (condition: string) => conditionLabelsEn[condition] ?? condition
+function openOverview() {
+  if (!overviewSvgRef.value) return
+  previewMarkup.value = serializeSvgElement(overviewSvgRef.value)
+  previewVisible.value = true
+}
+function downloadOverview() {
+  if (overviewSvgRef.value) downloadSvgElement(overviewSvgRef.value, 'coi-mean-composition.svg')
+}
 </script>
 
 <template>
   <el-card class="academic-chart-card" shadow="never">
     <template #header>
       <div class="chart-heading">
-        <strong>会话级CoI四阶段构成分布</strong>
+        <strong>Session-Level Four-Phase CoI Composition</strong>
         <span>{{ scaleLabel }}</span>
       </div>
     </template>
 
     <section class="composition-overview">
-      <header><strong>条件平均构成</strong><span>每个条形合计为100%；条形内直接标注阶段与平均占比</span></header>
-      <svg viewBox="0 0 760 182" role="img" aria-label="三种实验条件的CoI四阶段平均构成百分比堆叠条形图">
+      <header><div><strong>Mean Composition by Condition</strong><span>Each bar totals 100%; labels show phase and mean proportion.</span></div><div class="chart-actions"><el-tooltip content="Enlarge chart"><el-button :icon="ZoomIn" circle size="small" @click="openOverview" /></el-tooltip><el-tooltip content="Download SVG"><el-button :icon="Download" circle size="small" @click="downloadOverview" /></el-tooltip></div></header>
+      <svg ref="overviewSvgRef" viewBox="0 0 760 182" role="img" aria-label="Mean four-phase CoI composition by condition" @click="openOverview">
         <defs>
           <pattern id="phase-te" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#374151" /></pattern>
           <pattern id="phase-ex" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#2563eb" /></pattern>
@@ -85,7 +99,7 @@ const scaleLabel = computed(() => `四个阶段使用共同的0–${(composition
           <pattern id="phase-re" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#f97316" /></pattern>
         </defs>
         <g v-for="row in compositionRows" :key="row.condition">
-          <text class="condition-text" x="126" :y="row.y + 20" text-anchor="end">{{ conditionLabel(row.condition) }}</text>
+          <text class="condition-text" x="126" :y="row.y + 20" text-anchor="end">{{ conditionLabelEn(row.condition) }}</text>
           <g v-for="segment in row.segments" :key="segment.metric">
             <rect
               class="stack-segment"
@@ -101,7 +115,7 @@ const scaleLabel = computed(() => `四个阶段使用共同的0–${(composition
           </g>
         </g>
       </svg>
-      <div class="phase-legend"><span><i class="te" />TE 触发事件</span><span><i class="ex" />EX 探索</span><span><i class="in" />IN 整合</span><span><i class="re" />RE 解决</span></div>
+      <div class="phase-legend"><span><i class="te" />TE Triggering Event</span><span><i class="ex" />EX Exploration</span><span><i class="in" />IN Integration</span><span><i class="re" />RE Resolution</span></div>
     </section>
 
     <div class="boxplot-layout">
@@ -114,14 +128,15 @@ const scaleLabel = computed(() => `四个阶段使用共同的0–${(composition
         :values-by-condition="panel.values"
         :maximum="compositionMaximum"
         percent
-        unit-label="阶段占比"
+        unit-label="Phase Proportion"
       />
     </div>
 
     <footer class="figure-caption">
-      <strong>图 1　三种实验条件下CoI四阶段的平均构成与会话级分布。</strong>
-      <span>上方100%堆叠条形图用于概览条件平均构成；下方箱体表示中位数和四分位区间，须线延伸至1.5倍四分位距内的最远值，小型实心圆点为每场会话，右侧菱形与误差线表示均值及其95%置信区间。</span>
+      <strong>Figure 1. Mean composition and session-level distributions of the four CoI phases.</strong>
+      <span>The upper 100% stacked bars summarize condition means. Box plots show medians, IQRs, session observations, and means with 95% confidence intervals.</span>
     </footer>
+    <el-dialog v-model="previewVisible" title="Mean Composition by Condition" width="96vw" top="2vh" append-to-body><div class="coi-composition-large" v-html="previewMarkup" /></el-dialog>
   </el-card>
 </template>
 
@@ -132,19 +147,22 @@ const scaleLabel = computed(() => `四个阶段使用共同的0–${(composition
 .chart-heading span { color:#718096; font-size:12px; }
 .boxplot-layout { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; }
 .composition-overview { margin-bottom:18px; padding:14px 16px 10px; border:1px solid #d7dee8; border-radius:9px; }
-.composition-overview header { display:flex; flex-direction:column; gap:2px; }
-.composition-overview header strong { color:#26364b; font-size:14px; }
-.composition-overview header span { color:#66758a; font-size:11px; }
-.composition-overview svg { display:block; width:100%; max-height:250px; }
-.condition-text { fill:#334155; font-size:12px; font-weight:650; }
-.segment-text { fill:#fff; font-size:10px; font-weight:650; paint-order:stroke; stroke:#17203355; stroke-width:2px; }
+.composition-overview header { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.composition-overview header > div:first-child { display:flex; flex-direction:column; gap:3px; }
+.composition-overview header strong { color:#172033; font-size:16px; font-weight:750; }
+.composition-overview header span { color:#526071; font-size:13px; font-weight:550; }
+.chart-actions{display:flex;gap:7px;flex-shrink:0}
+.composition-overview svg { display:block; width:100%; max-height:280px; cursor:zoom-in; font-family:Arial,"Helvetica Neue",sans-serif; text-rendering:geometricPrecision; }
+.condition-text { fill:#0f172a; font-size:15px; font-weight:750; }
+.segment-text { fill:#fff; font-size:13px; font-weight:750; paint-order:stroke; stroke:#17203388; stroke-width:2px; }
 .stack-segment { stroke:#fff; stroke-width:1.5; }
-.phase-legend { display:flex; justify-content:center; gap:18px; flex-wrap:wrap; color:#4b5563; font-size:10px; }
+.phase-legend { display:flex; justify-content:center; gap:20px; flex-wrap:wrap; color:#334155; font-size:13px; font-weight:650; }
 .phase-legend span { display:flex; align-items:center; gap:5px; }
 .phase-legend i { width:14px; height:9px; border:1px solid #374151; }
 .phase-legend .te { background:#374151; }.phase-legend .ex { background:#2563eb; }.phase-legend .in { background:#16a34a; }.phase-legend .re { background:#f97316; }
 .figure-caption { display:flex; flex-direction:column; gap:4px; margin:18px 4px 2px; padding-top:12px; border-top:1px solid #eef2f6; color:#66758a; font-size:11px; line-height:1.65; }
 .figure-caption strong { color:#3f4f63; font-weight:650; }
+:global(.coi-composition-large){overflow:auto;background:#fff}:global(.coi-composition-large svg){display:block;width:1800px;max-width:none;height:auto}
 @media(max-width:900px){.boxplot-layout{grid-template-columns:1fr}}
 @media print {
   .composition-overview { border-color:#777; }

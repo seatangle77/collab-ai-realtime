@@ -19,10 +19,26 @@ export function buildCsv(rows: unknown[][]): string {
   return `\uFEFF${rows.map((row) => row.map(csvCell).join(',')).join('\r\n')}`
 }
 
-export function downloadSvgElement(svg: SVGElement, filename: string) {
+export function serializeSvgElement(svg: SVGElement): string {
   const clone = svg.cloneNode(true) as SVGElement
   clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
-  const source = `<?xml version="1.0" encoding="UTF-8"?>\n${new XMLSerializer().serializeToString(clone)}`
+  const sourceNodes = [svg, ...Array.from(svg.querySelectorAll<SVGElement>('*'))]
+  const cloneNodes = [clone, ...Array.from(clone.querySelectorAll<SVGElement>('*'))]
+  const properties = ['fill', 'stroke', 'stroke-width', 'stroke-dasharray', 'opacity', 'font-family', 'font-size', 'font-weight', 'paint-order', 'text-rendering']
+  sourceNodes.forEach((sourceNode, index) => {
+    const targetNode = cloneNodes[index]
+    if (!targetNode) return
+    const computed = window.getComputedStyle(sourceNode)
+    for (const property of properties) {
+      const value = computed.getPropertyValue(property)
+      if (value) targetNode.style.setProperty(property, value)
+    }
+  })
+  return new XMLSerializer().serializeToString(clone)
+}
+
+export function downloadSvgElement(svg: SVGElement, filename: string) {
+  const source = `<?xml version="1.0" encoding="UTF-8"?>\n${serializeSvgElement(svg)}`
   downloadTextFile(source, filename, 'image/svg+xml;charset=utf-8')
 }
 
@@ -49,9 +65,15 @@ export const INTERACTIVE_CHART_SCRIPT = `
       var blob=new Blob([svgSource(svg)],{type:'image/svg+xml;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');
       a.href=url;a.download=name;a.click();setTimeout(function(){URL.revokeObjectURL(url)},0);
     }
+    document.querySelectorAll('figure svg').forEach(function(svg,index){
+      if(svg.closest('.interactive-chart'))return;
+      svg.style.cursor='zoom-in';svg.dataset.reportChart=String(index+1);
+      var actions=document.createElement('div');actions.className='chart-actions';actions.innerHTML='<button type="button" data-chart-action="zoom">Enlarge</button><button type="button" data-chart-action="download" data-filename="chart-'+(index+1)+'.svg">Download SVG</button>';
+      svg.parentNode.insertBefore(actions,svg);
+    });
     document.addEventListener('click',function(event){
-      var target=event.target.closest('[data-chart-action],.interactive-chart svg');if(!target)return;
-      var card=target.closest('.interactive-chart'),svg=card&&card.querySelector('svg');if(!svg)return;
+      var target=event.target.closest('[data-chart-action],.interactive-chart svg,figure svg');if(!target)return;
+      var card=target.closest('.interactive-chart')||target.parentElement,svg=target.tagName&&target.tagName.toLowerCase()==='svg'?target:card&&card.querySelector('svg');if(!svg)return;
       if(target.dataset.chartAction==='download'){download(svg,target.dataset.filename||'chart.svg');return;}
       var modal=document.querySelector('.chart-modal');modal.querySelector('.chart-modal-stage').innerHTML=svg.outerHTML;modal.classList.add('open');document.body.style.overflow='hidden';
     });

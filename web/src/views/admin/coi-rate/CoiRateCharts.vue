@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import { Download, ZoomIn } from '@element-plus/icons-vue'
 import type {
   CoiRateContrast,
   CoiRateMetricSummary,
   CoiRateObservation,
 } from '../../../api/admin/coi-rate-analysis'
 import CoiSessionBoxplot from '../coi/CoiSessionBoxplot.vue'
-import { conditionLabel } from '../coi/reportHelpers'
+import { downloadSvgElement, serializeSvgElement } from '../task-score/analysisExport'
 
 const props = defineProps<{
   metrics: CoiRateMetricSummary[]
@@ -16,11 +17,11 @@ const props = defineProps<{
 }>()
 
 const panels = [
-  { metric: 'total_rate', key: 'total_rate', title: '全部四阶段观点', subtitle: 'TE＋EX＋IN＋RE编码次数／会话分钟数' },
-  { metric: 'te_rate', key: 'te_rate', title: 'TE · Triggering Event', subtitle: '每分钟触发事件编码数' },
-  { metric: 'ex_rate', key: 'ex_rate', title: 'EX · Exploration', subtitle: '每分钟探索编码数' },
-  { metric: 'in_rate', key: 'in_rate', title: 'IN · Integration', subtitle: '每分钟整合编码数' },
-  { metric: 're_rate', key: 're_rate', title: 'RE · Resolution', subtitle: '每分钟解决编码数' },
+  { metric: 'total_rate', key: 'total_rate', title: 'All Four CoI Phases', subtitle: 'TE + EX + IN + RE codes per session minute' },
+  { metric: 'te_rate', key: 'te_rate', title: 'TE · Triggering Event', subtitle: 'Codes per minute' },
+  { metric: 'ex_rate', key: 'ex_rate', title: 'EX · Exploration', subtitle: 'Codes per minute' },
+  { metric: 'in_rate', key: 'in_rate', title: 'IN · Integration', subtitle: 'Codes per minute' },
+  { metric: 're_rate', key: 're_rate', title: 'RE · Resolution', subtitle: 'Codes per minute' },
 ] as const
 
 const conditionColors: Record<string, string> = {
@@ -66,10 +67,6 @@ const contrastMaximum = computed(() => {
   return Math.ceil(maximum * 10) / 10
 })
 
-function contrastPosition(value: number): number {
-  return Math.min(100, Math.max(0, 50 + value / (contrastMaximum.value * 2) * 100))
-}
-
 function color(condition: string): string {
   return conditionColors[condition] ?? '#64748b'
 }
@@ -78,39 +75,46 @@ function signed(value: number): string {
   return `${value > 0 ? '+' : ''}${value.toFixed(2)}`
 }
 
-function barWidth(value: number, maximum: number): number {
-  return Math.min(100, Math.max(0, value / maximum * 100))
+const conditionLabelsEn: Record<string, string> = { no_assistance: 'No Assistance', glasses: 'Smart Glasses', app_notification: 'App Notification' }
+const conditionLabelEn = (condition: string) => conditionLabelsEn[condition] ?? condition
+const metricLabelsEn: Record<string, string> = { te_rate: 'TE Triggering Event', ex_rate: 'EX Exploration', in_rate: 'IN Integration', re_rate: 'RE Resolution' }
+const meanSvgRef = ref<SVGElement | null>(null)
+const forestSvgRef = ref<SVGElement | null>(null)
+const previewVisible = ref(false)
+const previewTitle = ref('')
+const previewMarkup = ref('')
+const forestHeight = computed(() => 90 + contrastRows.value.length * 64)
+function phasePanelLeft(index: number) { return 30 + (index % 2) * 590 }
+function phasePanelTop(index: number) { return 245 + Math.floor(index / 2) * 225 }
+function svgBarWidth(value: number, maximum: number, width: number) { return Math.max(0, Math.min(width, value / maximum * width)) }
+function contrastX(value: number) { return 390 + Math.min(1, Math.max(0, (value + contrastMaximum.value) / (contrastMaximum.value * 2))) * 500 }
+function openChart(svg: SVGElement | null, title: string) {
+  if (!svg) return
+  previewTitle.value = title
+  previewMarkup.value = serializeSvgElement(svg)
+  previewVisible.value = true
+}
+function downloadChart(svg: SVGElement | null, filename: string) {
+  if (svg) downloadSvgElement(svg, filename)
 }
 </script>
 
 <template>
   <el-card class="academic-chart-card" shadow="never">
-    <template #header><div class="chart-heading"><div><strong>条件平均观点产生率</strong><span>基础条形图用于快速比较三个条件的平均值；四个阶段面板使用共同刻度</span></div></div></template>
-    <section v-if="meanPanels[0]" class="mean-total-panel">
-      <h3>全部四阶段观点产生率</h3>
-      <div v-for="entry in meanPanels[0].conditions" :key="entry.condition" class="mean-bar-row">
-        <span>{{ conditionLabel(entry.condition) }}</span>
-        <div class="mean-bar-track"><i :style="{ width: `${barWidth(entry.value, totalMeanMaximum)}%`, background: color(entry.condition) }" /></div>
-        <strong>{{ entry.value.toFixed(3) }}/min</strong>
-      </div>
-    </section>
-    <div class="mean-phase-grid">
-      <section v-for="panel in meanPanels.slice(1)" :key="panel.metric" class="mean-phase-panel">
-        <h3>{{ panel.title.replace(' · ', ' ') }} 产生率</h3>
-        <div v-for="entry in panel.conditions" :key="entry.condition" class="mean-bar-row compact">
-          <span>{{ conditionLabel(entry.condition) }}</span>
-          <div class="mean-bar-track"><i :style="{ width: `${barWidth(entry.value, phaseMeanMaximum)}%`, background: color(entry.condition) }" /></div>
-          <strong>{{ entry.value.toFixed(3) }}</strong>
-        </div>
-      </section>
-    </div>
-    <footer class="figure-caption"><strong>图 1　三种实验条件的平均CoI观点产生率。</strong><span>条形长度表示条件均值；这是描述性概览，是否存在稳定差异仍以置换检验、置信区间和下方会话级分布为准。</span></footer>
+    <template #header><div class="chart-heading"><div><strong>Mean CoI Idea-Generation Rates</strong><span>Condition means; all four phase panels share one scale.</span></div><div class="chart-actions"><el-tooltip content="Enlarge chart"><el-button :icon="ZoomIn" circle @click="openChart(meanSvgRef, 'Mean CoI Idea-Generation Rates')" /></el-tooltip><el-tooltip content="Download SVG"><el-button :icon="Download" circle @click="downloadChart(meanSvgRef, 'coi-mean-idea-generation-rates.svg')" /></el-tooltip></div></div></template>
+    <svg v-if="meanPanels[0]" ref="meanSvgRef" class="rate-svg" viewBox="0 0 1200 700" role="img" aria-label="Mean CoI idea-generation rates by condition" @click="openChart(meanSvgRef, 'Mean CoI Idea-Generation Rates')">
+      <text x="30" y="34" class="chart-title">All Four CoI Phases</text><text x="1170" y="34" text-anchor="end" class="axis-note">Codes per minute</text>
+      <g v-for="(entry, index) in meanPanels[0].conditions" :key="entry.condition"><text x="205" :y="76 + index * 48" text-anchor="end" class="condition">{{ conditionLabelEn(entry.condition) }}</text><rect x="225" :y="57 + index * 48" width="800" height="24" fill="#eef2f7"/><rect x="225" :y="57 + index * 48" :width="svgBarWidth(entry.value, totalMeanMaximum, 800)" height="24" :fill="color(entry.condition)"/><text x="1045" :y="76 + index * 48" class="value">{{ entry.value.toFixed(3) }}</text></g>
+      <line x1="30" x2="1170" y1="220" y2="220" class="panel-line"/>
+      <g v-for="(panel, panelIndex) in meanPanels.slice(1)" :key="panel.metric"><text :x="phasePanelLeft(panelIndex)" :y="phasePanelTop(panelIndex)" class="chart-title">{{ panel.title.replace(' · ', ' ') }}</text><text :x="phasePanelLeft(panelIndex) + 540" :y="phasePanelTop(panelIndex)" text-anchor="end" class="axis-note">Codes per minute</text><g v-for="(entry, index) in panel.conditions" :key="entry.condition"><text :x="phasePanelLeft(panelIndex) + 145" :y="phasePanelTop(panelIndex) + 44 + index * 46" text-anchor="end" class="condition">{{ conditionLabelEn(entry.condition) }}</text><rect :x="phasePanelLeft(panelIndex) + 165" :y="phasePanelTop(panelIndex) + 26 + index * 46" width="310" height="23" fill="#eef2f7"/><rect :x="phasePanelLeft(panelIndex) + 165" :y="phasePanelTop(panelIndex) + 26 + index * 46" :width="svgBarWidth(entry.value, phaseMeanMaximum, 310)" height="23" :fill="color(entry.condition)"/><text :x="phasePanelLeft(panelIndex) + 490" :y="phasePanelTop(panelIndex) + 44 + index * 46" class="value">{{ entry.value.toFixed(3) }}</text></g></g>
+    </svg>
+    <footer class="figure-caption"><strong>Figure 1. Mean CoI idea-generation rates across the three conditions.</strong><span>Bar length represents the condition mean. Inferential tests and session-level distributions determine whether differences are stable.</span></footer>
   </el-card>
 
   <el-card class="academic-chart-card" shadow="never">
     <template #header>
       <div class="chart-heading">
-        <div><strong>会话级观点产生率分布</strong><span>箱线图显示中位数与四分位区间；所有12场会话均以小型点符号展示</span></div>
+        <div><strong>Session-Level Idea-Generation Rate Distributions</strong><span>Box plots show medians, IQRs, all sessions, means, and 95% confidence intervals.</span></div>
       </div>
     </template>
     <div class="boxplot-layout">
@@ -123,40 +127,43 @@ function barWidth(value: number, maximum: number): number {
         :conditions="conditions"
         :values-by-condition="panel.values"
         :maximum="panel.maximum"
-        unit-label="编码次数／分钟"
+        unit-label="Codes per Minute"
       />
     </div>
-    <footer class="figure-caption"><strong>图 2　三个实验条件下的CoI观点产生率分布。</strong><span>箱体表示中位数和四分位区间，须线延伸至1.5倍四分位距内的最远值，小型实心圆点为每场会话；右侧菱形与误差线表示均值及其95%置信区间。</span></footer>
+    <footer class="figure-caption"><strong>Figure 2. Session-level CoI idea-generation rate distributions.</strong><span>Boxes show medians and IQRs; points show sessions; diamonds and error bars show means and 95% confidence intervals.</span></footer>
   </el-card>
 
   <el-card class="academic-chart-card" shadow="never">
-    <template #header><div class="chart-heading"><div><strong>相对无辅助条件的效应差异</strong><span>均值差和会话级Bootstrap 95%置信区间；单位为编码次数／分钟</span></div></div></template>
-    <div class="forest-chart">
-      <div class="forest-axis"><span>−{{ contrastMaximum.toFixed(1) }}</span><span>0</span><span>+{{ contrastMaximum.toFixed(1) }}</span></div>
-      <div v-for="row in contrastRows" :key="`${row.metric}-${row.comparison_condition}`" class="forest-row">
-        <span class="forest-label"><strong>{{ row.label.replace(' 产生率', '') }}</strong><small>{{ conditionLabel(row.comparison_condition) }} − 无辅助</small></span>
-        <div class="forest-track">
-          <i class="zero-line" />
-          <span
-            v-if="row.ci_low != null && row.ci_high != null"
-            class="ci-line"
-            :style="{ left: `${contrastPosition(row.ci_low)}%`, width: `${contrastPosition(row.ci_high) - contrastPosition(row.ci_low)}%`, borderColor: color(row.comparison_condition) }"
-          />
-          <span class="effect-point" :style="{ left: `${contrastPosition(row.mean_difference)}%`, background: color(row.comparison_condition) }" />
-        </div>
-        <strong class="effect-value">{{ signed(row.mean_difference) }} <small>[{{ row.ci_low?.toFixed(2) ?? '—' }}, {{ row.ci_high?.toFixed(2) ?? '—' }}]</small></strong>
-      </div>
-    </div>
-    <footer class="figure-caption"><strong>图 2　智能眼镜与APP通知相对无辅助条件的阶段产生率均值差。</strong><span>中间竖线表示零差异；置信区间跨过零表示当前数据仍与“无稳定差异”相容。</span></footer>
+    <template #header><div class="chart-heading"><div><strong>Effects Relative to No Assistance</strong><span>Mean differences with session-level bootstrap 95% confidence intervals.</span></div><div class="chart-actions"><el-tooltip content="Enlarge chart"><el-button :icon="ZoomIn" circle @click="openChart(forestSvgRef, 'Effects Relative to No Assistance')" /></el-tooltip><el-tooltip content="Download SVG"><el-button :icon="Download" circle @click="downloadChart(forestSvgRef, 'coi-rate-effects-vs-no-assistance.svg')" /></el-tooltip></div></div></template>
+    <svg ref="forestSvgRef" class="rate-svg" :viewBox="`0 0 1200 ${forestHeight}`" role="img" aria-label="Mean differences relative to no assistance" @click="openChart(forestSvgRef, 'Effects Relative to No Assistance')">
+      <line x1="640" x2="640" y1="42" :y2="forestHeight - 24" stroke="#64748b" stroke-width="2" />
+      <text x="390" y="25" text-anchor="middle" class="tick">−{{ contrastMaximum.toFixed(1) }}</text>
+      <text x="640" y="25" text-anchor="middle" class="tick">0</text>
+      <text x="890" y="25" text-anchor="middle" class="tick">+{{ contrastMaximum.toFixed(1) }}</text>
+      <g v-for="(row,index) in contrastRows" :key="`${row.metric}-${row.comparison_condition}`">
+        <line x1="25" x2="1175" :y1="50 + index * 64" :y2="50 + index * 64" stroke="#e2e8f0" />
+        <text x="350" :y="73 + index * 64" text-anchor="end" class="metric">{{ metricLabelsEn[row.metric] ?? row.metric }}</text>
+        <text x="350" :y="91 + index * 64" text-anchor="end" class="comparison">{{ conditionLabelEn(row.comparison_condition) }} − No Assistance</text>
+        <line v-if="row.ci_low != null && row.ci_high != null" :x1="contrastX(row.ci_low)" :x2="contrastX(row.ci_high)" :y1="78 + index * 64" :y2="78 + index * 64" :stroke="color(row.comparison_condition)" stroke-width="4" />
+        <line v-if="row.ci_low != null" :x1="contrastX(row.ci_low)" :x2="contrastX(row.ci_low)" :y1="70 + index * 64" :y2="86 + index * 64" :stroke="color(row.comparison_condition)" stroke-width="3" />
+        <line v-if="row.ci_high != null" :x1="contrastX(row.ci_high)" :x2="contrastX(row.ci_high)" :y1="70 + index * 64" :y2="86 + index * 64" :stroke="color(row.comparison_condition)" stroke-width="3" />
+        <polygon :points="`${contrastX(row.mean_difference)},${70 + index * 64} ${contrastX(row.mean_difference) + 8},${78 + index * 64} ${contrastX(row.mean_difference)},${86 + index * 64} ${contrastX(row.mean_difference) - 8},${78 + index * 64}`" :fill="color(row.comparison_condition)" />
+        <text x="925" :y="83 + index * 64" class="effect">{{ signed(row.mean_difference) }} [{{ row.ci_low?.toFixed(2) ?? '—' }}, {{ row.ci_high?.toFixed(2) ?? '—' }}]</text>
+      </g>
+    </svg>
+    <footer class="figure-caption"><strong>Figure 3. Phase-rate differences for Smart Glasses and App Notification relative to No Assistance.</strong><span>The center line marks zero; intervals crossing zero are compatible with no stable difference.</span></footer>
   </el-card>
+  <el-dialog v-model="previewVisible" :title="previewTitle" width="96vw" top="2vh" append-to-body><div class="coi-rate-large" v-html="previewMarkup" /></el-dialog>
 </template>
 
 <style scoped>
 .academic-chart-card { border:1px solid #e3e9f2; border-radius:10px; }
-.chart-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
+.chart-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; }
 .chart-heading > div { display:flex; flex-direction:column; gap:4px; }
-.chart-heading strong { color:#26364b; }
-.chart-heading span { color:#718096; font-size:12px; }
+.chart-heading strong { color:#172033; font-size:16px; font-weight:750; }
+.chart-heading span { color:#526071; font-size:13px; font-weight:550; }
+.chart-actions{display:flex;gap:8px;flex-shrink:0}.rate-svg{display:block;width:100%;height:auto;cursor:zoom-in;font-family:Arial,"Helvetica Neue",sans-serif;text-rendering:geometricPrecision}
+.rate-svg .chart-title{fill:#0f172a;font-size:20px;font-weight:800}.rate-svg .condition{fill:#1e293b;font-size:15px;font-weight:700}.rate-svg .value{fill:#1e293b;font-size:15px;font-weight:750}.rate-svg .axis-note{fill:#526071;font-size:14px;font-weight:600}.rate-svg .metric{fill:#0f172a;font-size:15px;font-weight:750}.rate-svg .comparison{fill:#526071;font-size:13px;font-weight:600}.rate-svg .effect{fill:#1e293b;font-size:14px;font-weight:700}.rate-svg .tick{fill:#526071;font-size:13px;font-weight:650}
 .boxplot-layout { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; }
 .mean-total-panel { padding:2px 12px 18px; border-bottom:1px solid #e2e8f0; }
 .mean-total-panel h3,.mean-phase-panel h3 { margin:0 0 10px; color:#26364b; font-size:13px; }
@@ -182,5 +189,6 @@ function barWidth(value: number, maximum: number): number {
 .effect-point { position:absolute; top:7px; width:10px; height:10px; margin-left:-5px; transform:rotate(45deg); border:1px solid white; box-shadow:0 0 0 1px rgba(15,23,42,.15); }
 .effect-value { color:#3f4f63; font-size:11px; font-variant-numeric:tabular-nums; }
 .effect-value small { color:#7d899a; font-weight:500; }
+:global(.coi-rate-large){overflow:auto;background:#fff}:global(.coi-rate-large svg){display:block;width:1900px;max-width:none;height:auto}
 @media(max-width:900px){.boxplot-layout,.mean-phase-grid{grid-template-columns:1fr}.wide-panel{grid-column:auto}.forest-row{grid-template-columns:126px minmax(0,1fr) 118px;gap:7px}.forest-axis{margin-left:140px;margin-right:126px}}
 </style>

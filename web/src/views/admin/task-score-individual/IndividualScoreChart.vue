@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import { Download, ZoomIn } from '@element-plus/icons-vue'
 import type { IndividualScoreObservation } from '../../../api/admin/task-score-individual-analysis'
 import { conditionLabelEn } from '../task-score/reportHelpers'
-import { downloadSvgElement } from '../task-score/analysisExport'
+import { downloadSvgElement, serializeSvgElement } from '../task-score/analysisExport'
 
 const props = defineProps<{
   observations: IndividualScoreObservation[]
@@ -42,7 +42,7 @@ const pairedLines = computed(() => props.conditions.flatMap((condition, conditio
 
 function openPreview() {
   if (!svgRef.value) return
-  previewMarkup.value = new XMLSerializer().serializeToString(svgRef.value)
+  previewMarkup.value = serializeSvgElement(svgRef.value)
   previewVisible.value = true
 }
 
@@ -68,15 +68,6 @@ function downloadChart() {
     </template>
     <div v-if="observations.length" class="chart-shell">
       <svg ref="svgRef" :viewBox="`0 0 ${width} ${height}`" role="img" aria-label="Paired individual and group final scores">
-        <defs>
-          <style>
-            text { font-family: Arial, Helvetica, sans-serif; text-rendering: geometricPrecision; }
-            .tick-label { fill: #334155; font-size: 15px; font-weight: 650; }
-            .axis-label { fill: #1e293b; font-size: 16px; font-weight: 700; }
-            .phase-label { fill: #334155; font-size: 15px; font-weight: 700; }
-            .condition-label { fill: #0f172a; font-size: 19px; font-weight: 800; }
-          </style>
-        </defs>
         <g v-for="tick in ticks" :key="tick">
           <line :x1="margin.left" :x2="width - margin.right" :y1="yFor(tick)" :y2="yFor(tick)" stroke="#d4dde9" stroke-width="1.25" />
           <text :x="margin.left - 10" :y="yFor(tick) + 4" text-anchor="end" class="tick-label">{{ tick }}</text>
