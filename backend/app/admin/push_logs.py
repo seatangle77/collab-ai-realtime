@@ -259,6 +259,15 @@ async def delete_push_log(
     log_id: str,
     db: AsyncSession = Depends(get_db),
 ) -> None:
+    coding_result = await db.execute(
+        text("SELECT 1 FROM cue_uptake_codes WHERE push_log_id = :id LIMIT 1"),
+        {"id": log_id},
+    )
+    if coding_result.first():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="该推送已有提示采纳编码，不能删除；请先清除对应编码",
+        )
     result = await db.execute(
         text("DELETE FROM push_logs WHERE id = :id RETURNING id"),
         {"id": log_id},
@@ -273,6 +282,23 @@ async def batch_delete_push_logs(
     payload: BatchDeleteRequest,
     db: AsyncSession = Depends(get_db),
 ) -> BatchDeleteResponse:
+    coded_result = await db.execute(
+        text(
+            """
+            SELECT DISTINCT push_log_id
+            FROM cue_uptake_codes
+            WHERE push_log_id = ANY(:ids)
+            ORDER BY push_log_id
+            """
+        ),
+        {"ids": payload.ids},
+    )
+    coded_ids = list(coded_result.scalars().all())
+    if coded_ids:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"已选推送中有 {len(coded_ids)} 条存在提示采纳编码，请先清除编码后再删除",
+        )
     result = await db.execute(
         text("DELETE FROM push_logs WHERE id = ANY(:ids) RETURNING id"),
         {"ids": payload.ids},
