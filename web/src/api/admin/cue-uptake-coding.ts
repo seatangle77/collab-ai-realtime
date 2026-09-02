@@ -6,6 +6,7 @@ export type CueUptakeCode =
   | 'discussed_not_adopted'
   | 'discussed_adopted'
   | 'uncertain'
+  | 'not_included'
 
 export type CueCodingStatus = 'coded' | 'uncoded'
 export type CueCondition = 'glasses' | 'app_notification'
@@ -52,6 +53,11 @@ export interface CueContextTranscript {
   speaker_user_id: string | null
   speaker_name: string
   text: string | null
+  original_text: string | null
+  is_corrected: boolean
+  correction_reason: string | null
+  corrected_by: string | null
+  corrected_at: string | null
   start: string | null
   end: string | null
   created_at: string | null
@@ -74,6 +80,13 @@ export interface CueCodingProgress {
   uncoded: number
   completion_rate: number
   by_code: Record<CueUptakeCode, number>
+}
+
+export interface CueCodingGroup {
+  group_id: string
+  group_name: string
+  condition: CueCondition
+  event_count: number
 }
 
 export interface ListCueEventsParams {
@@ -117,6 +130,12 @@ function buildQuery(params: Record<string, string | number | undefined>): string
 export async function listCueEvents(params: ListCueEventsParams): Promise<Page<CueEvent>> {
   return http.get<Page<CueEvent>>(
     `/api/admin/cue-uptake-coding/events${buildQuery({ ...params })}`,
+  )
+}
+
+export async function listCueCodingGroups(condition?: CueCondition): Promise<CueCodingGroup[]> {
+  return http.get<CueCodingGroup[]>(
+    `/api/admin/cue-uptake-coding/groups${buildQuery({ condition })}`,
   )
 }
 

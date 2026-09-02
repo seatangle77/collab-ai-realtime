@@ -27,6 +27,7 @@ from .admin.discussion_states import router as admin_discussion_states_router
 from .push_logs import router as push_logs_router
 from .admin.push_logs import router as admin_push_logs_router
 from .admin.cue_uptake_coding import router as admin_cue_uptake_coding_router
+from .admin.transcript_corrections import router as admin_transcript_corrections_router
 from .ws_sessions import router as ws_sessions_router
 from .nlp.router import router as nlp_router
 from .nlp import embedder as nlp_embedder
@@ -107,6 +108,7 @@ app.include_router(admin_discussion_states_router)
 app.include_router(push_logs_router)
 app.include_router(admin_push_logs_router)
 app.include_router(admin_cue_uptake_coding_router)
+app.include_router(admin_transcript_corrections_router)
 app.include_router(admin_push_queue_router)
 app.include_router(admin_window_metrics_router)
 app.include_router(admin_discussion_summaries_router)

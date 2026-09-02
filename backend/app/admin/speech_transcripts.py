@@ -176,6 +176,21 @@ async def delete_speech_transcript(
     transcript_id: str,
     db: AsyncSession = Depends(get_db),
 ) -> None:
+    correction = await db.execute(
+        text(
+            """
+            SELECT 1
+            FROM speech_transcript_corrections
+            WHERE transcript_id = :transcript_id
+            """
+        ),
+        {"transcript_id": transcript_id},
+    )
+    if correction.first():
+        raise HTTPException(
+            status_code=409,
+            detail="该原始转写已有人工修订，不能删除；请先在提示转写修订页面清除修订",
+        )
     result = await db.execute(
         text("DELETE FROM speech_transcripts WHERE transcript_id = :transcript_id RETURNING transcript_id"),
         {"transcript_id": transcript_id},
@@ -190,6 +205,22 @@ async def batch_delete_speech_transcripts(
     payload: BatchDeleteRequest,
     db: AsyncSession = Depends(get_db),
 ) -> BatchDeleteResponse:
+    corrected = await db.execute(
+        text(
+            """
+            SELECT transcript_id
+            FROM speech_transcript_corrections
+            WHERE transcript_id = ANY(:ids)
+            LIMIT 1
+            """
+        ),
+        {"ids": payload.ids},
+    )
+    if corrected.first():
+        raise HTTPException(
+            status_code=409,
+            detail="所选原始转写中存在人工修订，不能批量删除；请先清除相关修订",
+        )
     result = await db.execute(
         text("DELETE FROM speech_transcripts WHERE transcript_id = ANY(:ids) RETURNING transcript_id"),
         {"ids": payload.ids},

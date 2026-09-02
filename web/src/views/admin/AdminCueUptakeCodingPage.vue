@@ -1,18 +1,19 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { listAdminGroups } from '../../api/admin/groups'
 import { listAdminChatSessions } from '../../api/admin/chat-sessions'
-import type { AdminChatSession, AdminGroup } from '../../types/admin'
+import type { AdminChatSession } from '../../types/admin'
 import { formatDateTimeToCST, formatTimeToCST } from '../../utils/datetime'
 import {
   deleteCueCoding,
   downloadCueCodingExport,
   getCueCodingProgress,
   getCueSessionContext,
+  listCueCodingGroups,
   listCueEvents,
   saveCueCoding,
   type CueCodingProgress,
+  type CueCodingGroup,
   type CueCodingStatus,
   type CueCondition,
   type CueContextTranscript,
@@ -57,6 +58,13 @@ const CODE_OPTIONS: Array<{
     definition: '现有文本或其他材料不足以作出判断。',
     type: 'danger',
   },
+  {
+    value: 'not_included',
+    label: '不纳入',
+    short: '不纳入',
+    definition: '提示本身存在问题，不作为有效分析样本。',
+    type: 'danger',
+  },
 ]
 
 interface TimelineTranscriptItem {
@@ -75,7 +83,7 @@ interface TimelineCueItem {
 
 type TimelineItem = TimelineTranscriptItem | TimelineCueItem
 
-const groups = ref<AdminGroup[]>([])
+const groups = ref<CueCodingGroup[]>([])
 const sessions = ref<AdminChatSession[]>([])
 const events = ref<CueEvent[]>([])
 const progress = ref<CueCodingProgress | null>(null)
@@ -87,6 +95,7 @@ const loadingContext = ref(false)
 const loadingSessions = ref(false)
 const saving = ref(false)
 const exporting = ref(false)
+const timelineScrollRef = ref<HTMLElement | null>(null)
 const page = ref(1)
 const pageSize = ref(30)
 const total = ref(0)
@@ -110,6 +119,14 @@ const form = reactive({
 
 const selectedEvent = computed(() =>
   events.value.find(item => item.push_log_id === selectedPushLogId.value) ?? null,
+)
+const selectedGroupName = computed(() =>
+  groups.value.find(group => group.group_id === filters.group_id)?.group_name
+    ?? selectedEvent.value?.group_name
+    ?? '当前小组',
+)
+const visibleGroups = computed(() =>
+  groups.value.filter(group => !filters.condition || group.condition === filters.condition),
 )
 const selectedEvidence = computed(() => {
   const idSet = new Set(form.evidence_transcript_ids)
@@ -169,10 +186,22 @@ function progressParams() {
 
 async function loadGroups() {
   try {
-    const response = await listAdminGroups({ page_size: 200 })
-    groups.value = response.items
+    const response = await listCueCodingGroups()
+    groups.value = response.sort((left, right) =>
+      left.group_name.localeCompare(right.group_name, 'zh-CN', {
+        numeric: true,
+        sensitivity: 'base',
+      }),
+    )
   } catch (error: any) {
-    ElMessage.error(error?.message || '加载群组失败')
+    ElMessage.error(error?.message || '加载可编码小组失败')
+  }
+}
+
+async function handleConditionChange() {
+  if (!visibleGroups.value.some(group => group.group_id === filters.group_id)) {
+    filters.group_id = visibleGroups.value[0]?.group_id ?? ''
+    await loadSessions()
   }
 }
 
@@ -227,6 +256,27 @@ async function refreshPage() {
   await Promise.all([loadEvents(), loadProgress()])
 }
 
+async function loadDefaultGroupAndData() {
+  loading.value = true
+  try {
+    const firstGroup = visibleGroups.value[0]
+    if (!firstGroup) {
+      events.value = []
+      total.value = 0
+      progress.value = await getCueCodingProgress({ coder_role: CODER_ROLE })
+      return
+    }
+    filters.group_id = firstGroup.group_id
+    await loadSessions()
+    page.value = 1
+    await refreshPage()
+  } catch (error: any) {
+    ElMessage.error(error?.message || '加载默认小组失败')
+  } finally {
+    loading.value = false
+  }
+}
+
 function resetForm() {
   form.uptake_code = ''
   form.evidence_transcript_ids = []
@@ -272,10 +322,13 @@ async function selectEvent(event: CueEvent, askBeforeSwitch = true) {
     }
     context.value = sessionContext
     nextTick(() => {
-      document.getElementById(`cue-timeline-${event.push_log_id}`)?.scrollIntoView({
-        behavior: 'auto',
-        block: 'center',
-      })
+      const container = timelineScrollRef.value
+      const target = document.getElementById(`cue-timeline-${event.push_log_id}`)
+      if (!container || !target) return
+      const top = target.getBoundingClientRect().top
+        - container.getBoundingClientRect().top
+        + container.scrollTop
+      container.scrollTo({ top, behavior: 'auto' })
     })
   } catch (error: any) {
     context.value = null
@@ -307,7 +360,7 @@ async function handleReset() {
   selectedPushLogId.value = ''
   context.value = null
   resetForm()
-  await refreshPage()
+  await loadDefaultGroupAndData()
 }
 
 function markDirty() {
@@ -439,7 +492,8 @@ async function handleExport() {
 }
 
 onMounted(async () => {
-  await Promise.all([loadGroups(), refreshPage()])
+  await loadGroups()
+  await loadDefaultGroupAndData()
 })
 </script>
 
@@ -455,18 +509,22 @@ onMounted(async () => {
 
     <el-card shadow="never" class="filter-card">
       <div class="filters">
-        <el-select v-model="filters.condition" placeholder="实验条件" clearable>
+        <el-select v-model="filters.condition" placeholder="实验条件" clearable @change="handleConditionChange">
           <el-option label="眼镜" value="glasses" />
           <el-option label="App 通知" value="app_notification" />
         </el-select>
         <el-select
           v-model="filters.group_id"
           placeholder="小组"
-          clearable
           filterable
           @change="loadSessions"
         >
-          <el-option v-for="group in groups" :key="group.id" :label="group.name" :value="group.id" />
+          <el-option
+            v-for="group in visibleGroups"
+            :key="group.group_id"
+            :label="`${group.group_name}（${group.event_count}）`"
+            :value="group.group_id"
+          />
         </el-select>
         <el-select
           v-model="filters.session_id"
@@ -505,7 +563,7 @@ onMounted(async () => {
 
     <section class="progress-strip">
       <div class="progress-main">
-        <span class="progress-label">总体进度</span>
+        <span class="progress-label">{{ selectedGroupName }} 编码进度</span>
         <strong>{{ progress?.coded ?? 0 }} / {{ progress?.total ?? 0 }}</strong>
         <el-progress :percentage="completionPercentage" :stroke-width="8" />
       </div>
@@ -571,7 +629,7 @@ onMounted(async () => {
           </div>
           <span v-if="context" class="member-count">{{ context.members.length }} 名成员</span>
         </div>
-        <div v-if="context" class="timeline-scroll">
+        <div v-if="context" ref="timelineScrollRef" class="timeline-scroll">
           <div
             v-for="item in timelineItems"
             :id="item.kind === 'cue' ? `cue-timeline-${item.cue.push_log_id}` : undefined"
@@ -589,7 +647,13 @@ onMounted(async () => {
                 <div class="transcript-meta">
                   <strong>{{ item.transcript.speaker_name }}</strong>
                   <span>{{ formatTimeToCST(item.timestamp) }}</span>
+                  <el-tag v-if="item.transcript.is_corrected" type="warning" size="small" effect="plain">已修订</el-tag>
+                  <el-popover v-if="item.transcript.is_corrected" placement="top" width="360" trigger="click">
+                    <template #reference><el-button link type="info">查看原文</el-button></template>
+                    <div class="raw-transcript-popover">{{ item.transcript.original_text || '（原始文本为空）' }}</div>
+                  </el-popover>
                   <el-button
+                    class="evidence-button"
                     link
                     :type="form.evidence_transcript_ids.includes(item.transcript.transcript_id) ? 'success' : 'primary'"
                     @click="toggleEvidence(item.transcript.transcript_id)"
@@ -612,6 +676,7 @@ onMounted(async () => {
               </div>
             </template>
           </div>
+          <div class="timeline-bottom-space" aria-hidden="true" />
         </div>
         <el-empty v-else description="请从左侧选择一条提示" />
       </main>
@@ -631,7 +696,13 @@ onMounted(async () => {
           </section>
 
           <el-radio-group v-model="form.uptake_code" class="code-options" @change="markDirty">
-            <el-radio v-for="option in CODE_OPTIONS" :key="option.value" :value="option.value" border>
+            <el-radio
+              v-for="option in CODE_OPTIONS"
+              :key="option.value"
+              :value="option.value"
+              border
+              :class="`code-option--${option.value}`"
+            >
               <div class="code-option-copy">
                 <strong>{{ option.label }}</strong>
                 <span>{{ option.definition }}</span>
@@ -697,7 +768,7 @@ onMounted(async () => {
 .filter-card { border: 1px solid #e3e9f2; }
 .filters { display: grid; grid-template-columns: 140px 180px 210px 140px 150px minmax(180px, 1fr) auto; gap: 10px; }
 .filter-actions { display: flex; white-space: nowrap; }
-.progress-strip { display: grid; grid-template-columns: minmax(270px, 1.6fr) repeat(5, minmax(92px, .55fr)); gap: 1px; overflow: hidden; border: 1px solid #e3e9f2; border-radius: 8px; background: #e3e9f2; }
+.progress-strip { display: grid; grid-template-columns: minmax(270px, 1.6fr) repeat(6, minmax(88px, .55fr)); gap: 1px; overflow: hidden; border: 1px solid #e3e9f2; border-radius: 8px; background: #e3e9f2; }
 .progress-main, .progress-count { min-height: 58px; padding: 10px 14px; background: #fff; box-sizing: border-box; }
 .progress-main { display: grid; grid-template-columns: auto auto minmax(110px, 1fr); align-items: center; gap: 10px; }
 .progress-main :deep(.el-progress) { width: 100%; }
@@ -722,13 +793,14 @@ onMounted(async () => {
 .event-pagination { display: flex; min-height: 48px; align-items: center; justify-content: center; padding: 4px 6px; border-top: 1px solid #e7ecf3; }
 .member-count { flex: 0 0 auto; color: #68778e; font-size: 12px; }
 .timeline-scroll { flex: 1; overflow-y: auto; padding: 18px 20px 36px; }
+.timeline-bottom-space { height: calc(100% - 110px); min-height: 260px; }
 .timeline-entry { display: flex; gap: 10px; margin-bottom: 17px; scroll-margin: 120px 0; }
 .timeline-avatar, .cue-marker { display: grid; flex: 0 0 auto; width: 34px; height: 34px; place-items: center; border-radius: 50%; background: #edf2f7; color: #516178; font-size: 12px; font-weight: 700; }
 .transcript-body { min-width: 0; flex: 1; padding: 10px 12px; border: 1px solid #e6ebf2; border-radius: 4px 10px 10px; background: #fff; }
 .transcript-meta { display: flex; align-items: center; gap: 9px; }
 .transcript-meta strong { color: #26364b; font-size: 13px; }
 .transcript-meta span { color: #8995a6; font-size: 11px; }
-.transcript-meta .el-button { margin-left: auto; }
+.transcript-meta .evidence-button { margin-left: auto; }
 .transcript-body p, .cue-body p { margin: 7px 0 0; color: #35455b; font-size: 14px; line-height: 1.65; white-space: pre-wrap; }
 .timeline-entry--evidence .transcript-body { border-color: #72c796; background: #f0fdf4; box-shadow: inset 3px 0 #22a65a; }
 .timeline-entry--cue { margin: 24px 0; }
@@ -749,6 +821,15 @@ onMounted(async () => {
 .code-options { display: flex; flex-direction: column; align-items: stretch; gap: 8px; margin-top: 12px; }
 .code-options :deep(.el-radio) { width: 100%; height: auto; margin: 0; padding: 10px 11px; box-sizing: border-box; }
 .code-options :deep(.el-radio__label) { min-width: 0; padding-left: 8px; white-space: normal; }
+.code-options :deep(.el-radio.is-bordered.is-checked) { box-shadow: 0 4px 12px color-mix(in srgb, var(--cue-code-color) 14%, transparent); }
+.code-options :deep(.el-radio.is-checked .el-radio__inner) { border-color: var(--cue-code-color); background: var(--cue-code-color); }
+.code-options :deep(.el-radio.is-checked .el-radio__label) { color: var(--cue-code-color); }
+.code-options :deep(.el-radio.is-bordered.is-checked) { border-color: var(--cue-code-color); background: var(--cue-code-bg); }
+.code-option--not_discussed { --cue-code-color: #64748b; --cue-code-bg: #f1f5f9; }
+.code-option--discussed_not_adopted { --cue-code-color: #d97706; --cue-code-bg: #fffbeb; }
+.code-option--discussed_adopted { --cue-code-color: #15803d; --cue-code-bg: #f0fdf4; }
+.code-option--uncertain { --cue-code-color: #7c3aed; --cue-code-bg: #f5f3ff; }
+.code-option--not_included { --cue-code-color: #be123c; --cue-code-bg: #fff1f2; }
 .code-option-copy { display: flex; flex-direction: column; gap: 3px; }
 .code-option-copy strong { color: #26364b; font-size: 13px; }
 .code-option-copy span { color: #748196; font-size: 11px; line-height: 1.45; }
@@ -768,6 +849,7 @@ onMounted(async () => {
 .dirty-note { color: #b7791f; }
 .coding-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 14px; }
 .coding-actions .el-button + .el-button { margin-left: 0; }
+.raw-transcript-popover { color: #526176; font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
 @media (max-width: 1350px) {
   .filters { grid-template-columns: repeat(4, minmax(140px, 1fr)); }
   .coding-workbench { grid-template-columns: 250px minmax(420px, 1fr) 320px; }

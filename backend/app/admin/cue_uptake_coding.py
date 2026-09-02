@@ -30,6 +30,7 @@ VALID_UPTAKE_CODES = {
     "discussed_not_adopted",
     "discussed_adopted",
     "uncertain",
+    "not_included",
 }
 ELIGIBLE_EVENT_WHERE = """
     pl.delivery_status = 'delivered'
@@ -82,6 +83,11 @@ class CueContextTranscriptOut(ApiModel):
     speaker_user_id: str | None = None
     speaker_name: str
     text: str | None = None
+    original_text: str | None = None
+    is_corrected: bool = False
+    correction_reason: str | None = None
+    corrected_by: str | None = None
+    corrected_at: datetime | None = None
     start: datetime | None = None
     end: datetime | None = None
     created_at: datetime | None = None
@@ -141,6 +147,13 @@ class CueProgressOut(ApiModel):
     uncoded: int
     completion_rate: float
     by_code: dict[str, int]
+
+
+class CueCodingGroupOut(ApiModel):
+    group_id: str
+    group_name: str
+    condition: str
+    event_count: int
 
 
 def _validate_optional_filters(
@@ -343,6 +356,39 @@ async def _get_eligible_event_session(
     )
 
 
+@router.get("/groups", response_model=list[CueCodingGroupOut])
+async def list_cue_coding_groups(
+    condition: str | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> list[CueCodingGroupOut]:
+    _validate_optional_filters(condition=condition)
+    condition_filter = "AND g.condition = :condition" if condition else ""
+    params = {"condition": condition} if condition else {}
+    rows = (
+        await db.execute(
+            text(
+                f"""
+                SELECT g.id AS group_id,
+                       g.name AS group_name,
+                       g.condition,
+                       COUNT(*)::int AS event_count
+                FROM push_logs pl
+                JOIN chat_sessions cs ON cs.id = pl.session_id
+                JOIN groups g ON g.id = cs.group_id
+                LEFT JOIN push_queue pq ON pq.id = pl.queue_id
+                LEFT JOIN discussion_states ds ON ds.id = pl.state_id
+                WHERE {ELIGIBLE_EVENT_WHERE}
+                  {condition_filter}
+                GROUP BY g.id, g.name, g.condition
+                ORDER BY g.name ASC, g.id ASC
+                """
+            ),
+            params,
+        )
+    ).mappings().all()
+    return [CueCodingGroupOut.model_validate(dict(row)) for row in rows]
+
+
 @router.get("/events", response_model=Page[CueEventOut])
 async def list_cue_events(
     page: int = Query(1, ge=1),
@@ -459,12 +505,24 @@ async def get_cue_session_context(
             text(
                 """
                 SELECT t.transcript_id,
-                       COALESCE(t.speaker_user_id, t.user_id) AS speaker_user_id,
+                       COALESCE(t.speaker_user_id, t.user_id, u.id) AS speaker_user_id,
                        COALESCE(u.name, t.speaker, '未知说话人') AS speaker_name,
-                       t.text, t.start, t."end", t.created_at
+                       COALESCE(tc.corrected_text, t.text) AS text,
+                       t.text AS original_text,
+                       (tc.id IS NOT NULL) AS is_corrected,
+                       tc.correction_reason,
+                       tc.corrected_by,
+                       tc.updated_at AS corrected_at,
+                       t.start, t."end", t.created_at
                 FROM speech_transcripts t
                 LEFT JOIN users_info u
-                       ON u.id = COALESCE(t.speaker_user_id, t.user_id)
+                       ON u.id = COALESCE(
+                           t.speaker_user_id,
+                           t.user_id,
+                           NULLIF(BTRIM(t.speaker), '')
+                       )
+                LEFT JOIN speech_transcript_corrections tc
+                       ON tc.transcript_id = t.transcript_id
                 WHERE t.session_id = :session_id
                 ORDER BY t.start ASC NULLS LAST, t.created_at ASC, t.transcript_id ASC
                 """
@@ -640,7 +698,8 @@ async def get_cue_coding_progress(
                     COUNT(*) FILTER (WHERE cuc.uptake_code = 'not_discussed')::int AS not_discussed,
                     COUNT(*) FILTER (WHERE cuc.uptake_code = 'discussed_not_adopted')::int AS discussed_not_adopted,
                     COUNT(*) FILTER (WHERE cuc.uptake_code = 'discussed_adopted')::int AS discussed_adopted,
-                    COUNT(*) FILTER (WHERE cuc.uptake_code = 'uncertain')::int AS uncertain
+                    COUNT(*) FILTER (WHERE cuc.uptake_code = 'uncertain')::int AS uncertain,
+                    COUNT(*) FILTER (WHERE cuc.uptake_code = 'not_included')::int AS not_included
                 FROM push_logs pl
                 JOIN chat_sessions cs ON cs.id = pl.session_id
                 JOIN groups g ON g.id = cs.group_id
@@ -718,10 +777,16 @@ async def export_cue_codings(
                     """
                     SELECT t.transcript_id,
                            COALESCE(u.name, t.speaker, '未知说话人') AS speaker_name,
-                           t.text
+                           COALESCE(tc.corrected_text, t.text) AS text
                     FROM speech_transcripts t
                     LEFT JOIN users_info u
-                           ON u.id = COALESCE(t.speaker_user_id, t.user_id)
+                           ON u.id = COALESCE(
+                               t.speaker_user_id,
+                               t.user_id,
+                               NULLIF(BTRIM(t.speaker), '')
+                           )
+                    LEFT JOIN speech_transcript_corrections tc
+                           ON tc.transcript_id = t.transcript_id
                     WHERE t.transcript_id = ANY(:transcript_ids)
                     """
                 ),
