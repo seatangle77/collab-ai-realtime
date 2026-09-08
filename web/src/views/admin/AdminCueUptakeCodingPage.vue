@@ -130,7 +130,9 @@ const visibleGroups = computed(() =>
 )
 const selectedEvidence = computed(() => {
   const idSet = new Set(form.evidence_transcript_ids)
-  return (context.value?.transcripts ?? []).filter(item => idSet.has(item.transcript_id))
+  return (context.value?.transcripts ?? []).filter(item =>
+    evidenceIds(item).some(transcriptId => idSet.has(transcriptId)),
+  )
 })
 const completionPercentage = computed(() =>
   progress.value ? Math.round(progress.value.completion_rate * 100) : 0,
@@ -367,10 +369,26 @@ function markDirty() {
   dirty.value = true
 }
 
-function toggleEvidence(transcriptId: string) {
-  const index = form.evidence_transcript_ids.indexOf(transcriptId)
-  if (index >= 0) form.evidence_transcript_ids.splice(index, 1)
-  else form.evidence_transcript_ids.push(transcriptId)
+function evidenceIds(transcript: CueContextTranscript): string[] {
+  return transcript.source_transcript_ids.length
+    ? transcript.source_transcript_ids
+    : [transcript.transcript_id]
+}
+
+function isEvidenceSelected(transcript: CueContextTranscript): boolean {
+  const selected = new Set(form.evidence_transcript_ids)
+  return evidenceIds(transcript).every(transcriptId => selected.has(transcriptId))
+}
+
+function toggleEvidence(transcript: CueContextTranscript) {
+  const ids = evidenceIds(transcript)
+  const selected = new Set(form.evidence_transcript_ids)
+  const shouldRemove = ids.every(transcriptId => selected.has(transcriptId))
+  ids.forEach((transcriptId) => {
+    if (shouldRemove) selected.delete(transcriptId)
+    else selected.add(transcriptId)
+  })
+  form.evidence_transcript_ids = [...selected]
   markDirty()
 }
 
@@ -638,7 +656,7 @@ onMounted(async () => {
             :class="{
               'timeline-entry--cue': item.kind === 'cue',
               'timeline-entry--current': item.kind === 'cue' && item.cue.push_log_id === selectedPushLogId,
-              'timeline-entry--evidence': item.kind === 'transcript' && form.evidence_transcript_ids.includes(item.transcript.transcript_id),
+              'timeline-entry--evidence': item.kind === 'transcript' && isEvidenceSelected(item.transcript),
             }"
           >
             <template v-if="item.kind === 'transcript'">
@@ -648,6 +666,9 @@ onMounted(async () => {
                   <strong>{{ item.transcript.speaker_name }}</strong>
                   <span>{{ formatTimeToCST(item.timestamp) }}</span>
                   <el-tag v-if="item.transcript.is_corrected" type="warning" size="small" effect="plain">已修订</el-tag>
+                  <el-tag v-if="item.transcript.is_merged" type="success" size="small" effect="plain">
+                    合并 {{ item.transcript.source_transcript_ids.length }} 条
+                  </el-tag>
                   <el-popover v-if="item.transcript.is_corrected" placement="top" width="360" trigger="click">
                     <template #reference><el-button link type="info">查看原文</el-button></template>
                     <div class="raw-transcript-popover">{{ item.transcript.original_text || '（原始文本为空）' }}</div>
@@ -655,10 +676,10 @@ onMounted(async () => {
                   <el-button
                     class="evidence-button"
                     link
-                    :type="form.evidence_transcript_ids.includes(item.transcript.transcript_id) ? 'success' : 'primary'"
-                    @click="toggleEvidence(item.transcript.transcript_id)"
+                    :type="isEvidenceSelected(item.transcript) ? 'success' : 'primary'"
+                    @click="toggleEvidence(item.transcript)"
                   >
-                    {{ form.evidence_transcript_ids.includes(item.transcript.transcript_id) ? '已选证据' : '选为证据' }}
+                    {{ isEvidenceSelected(item.transcript) ? '已选证据' : '选为证据' }}
                   </el-button>
                 </div>
                 <p>{{ item.transcript.text || '（无文本）' }}</p>
@@ -719,7 +740,7 @@ onMounted(async () => {
               <div v-for="evidence in selectedEvidence" :key="evidence.transcript_id" class="evidence-item">
                 <div><strong>{{ evidence.speaker_name }}</strong><span>{{ formatTimeToCST(evidence.start ?? evidence.created_at) }}</span></div>
                 <p>{{ evidence.text || '（无文本）' }}</p>
-                <el-button link type="danger" @click="toggleEvidence(evidence.transcript_id)">移除</el-button>
+                <el-button link type="danger" @click="toggleEvidence(evidence)">移除</el-button>
               </div>
             </div>
             <p v-else class="empty-hint">在中间讨论文本中点击“选为证据”。</p>

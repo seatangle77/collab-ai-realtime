@@ -80,6 +80,9 @@ class CueContextMemberOut(ApiModel):
 
 class CueContextTranscriptOut(ApiModel):
     transcript_id: str
+    source_transcript_ids: list[str] = Field(default_factory=list)
+    correction_id: str | None = None
+    is_merged: bool = False
     speaker_user_id: str | None = None
     speaker_name: str
     text: str | None = None
@@ -154,6 +157,52 @@ class CueCodingGroupOut(ApiModel):
     group_name: str
     condition: str
     event_count: int
+
+
+def _collapse_context_transcripts(
+    rows: list[dict[str, Any]],
+) -> list[CueContextTranscriptOut]:
+    rows_by_id = {row["transcript_id"]: row for row in rows}
+    emitted_corrections: set[str] = set()
+    result: list[CueContextTranscriptOut] = []
+    for row in rows:
+        correction_id = row.get("correction_id")
+        source_ids = list(row.get("source_transcript_ids") or [row["transcript_id"]])
+        is_merged = bool(row.get("is_merged"))
+        if not is_merged or not correction_id:
+            result.append(CueContextTranscriptOut.model_validate(row))
+            continue
+        if correction_id in emitted_corrections:
+            continue
+        emitted_corrections.add(correction_id)
+        members = [rows_by_id[item] for item in source_ids if item in rows_by_id]
+        if not members:
+            members = [row]
+        speaker_names = list(dict.fromkeys(item["speaker_name"] for item in members))
+        speaker_ids = list(
+            dict.fromkeys(
+                item.get("speaker_user_id")
+                for item in members
+                if item.get("speaker_user_id")
+            )
+        )
+        collapsed = {
+            **row,
+            "transcript_id": source_ids[0],
+            "source_transcript_ids": source_ids,
+            "speaker_user_id": speaker_ids[0] if len(speaker_ids) == 1 else None,
+            "speaker_name": " / ".join(speaker_names),
+            "original_text": " ".join(
+                str(item.get("original_text") or "").strip()
+                for item in members
+                if str(item.get("original_text") or "").strip()
+            ),
+            "start": members[0].get("start"),
+            "end": members[-1].get("end"),
+            "created_at": members[0].get("created_at"),
+        }
+        result.append(CueContextTranscriptOut.model_validate(collapsed))
+    return result
 
 
 def _validate_optional_filters(
@@ -510,10 +559,16 @@ async def get_cue_session_context(
                        COALESCE(tc.corrected_text, t.text) AS text,
                        t.text AS original_text,
                        (tc.id IS NOT NULL) AS is_corrected,
+                       tc.id AS correction_id,
                        tc.correction_reason,
                        tc.corrected_by,
                        tc.updated_at AS corrected_at,
-                       t.start, t."end", t.created_at
+                       t.start, t."end", t.created_at,
+                       COALESCE(
+                           correction_members.transcript_ids,
+                           ARRAY[t.transcript_id]::text[]
+                       ) AS source_transcript_ids,
+                       (COALESCE(correction_members.member_count, 0) > 1) AS is_merged
                 FROM speech_transcripts t
                 LEFT JOIN users_info u
                        ON u.id = COALESCE(
@@ -521,8 +576,16 @@ async def get_cue_session_context(
                            t.user_id,
                            NULLIF(BTRIM(t.speaker), '')
                        )
+                LEFT JOIN speech_transcript_correction_members tcm
+                       ON tcm.transcript_id = t.transcript_id
                 LEFT JOIN speech_transcript_corrections tc
-                       ON tc.transcript_id = t.transcript_id
+                       ON tc.id = tcm.correction_id
+                LEFT JOIN LATERAL (
+                    SELECT ARRAY_AGG(member.transcript_id ORDER BY member.order_index) AS transcript_ids,
+                           COUNT(*)::int AS member_count
+                    FROM speech_transcript_correction_members member
+                    WHERE member.correction_id = tc.id
+                ) correction_members ON TRUE
                 WHERE t.session_id = :session_id
                 ORDER BY t.start ASC NULLS LAST, t.created_at ASC, t.transcript_id ASC
                 """
@@ -554,7 +617,7 @@ async def get_cue_session_context(
         group_name=session_row["group_name"],
         condition=session_row["condition"],
         members=[CueContextMemberOut.model_validate(dict(row)) for row in member_rows],
-        transcripts=[CueContextTranscriptOut.model_validate(dict(row)) for row in transcript_rows],
+        transcripts=_collapse_context_transcripts([dict(row) for row in transcript_rows]),
         cues=[_row_to_event(dict(row)) for row in cue_rows],
     )
 
@@ -770,6 +833,7 @@ async def export_cue_codings(
     for row in rows:
         evidence_ids.extend(list(row.get("coding_evidence_transcript_ids") or []))
     evidence_map: dict[str, str] = {}
+    evidence_key_by_transcript: dict[str, str] = {}
     if evidence_ids:
         evidence_rows = (
             await db.execute(
@@ -777,7 +841,9 @@ async def export_cue_codings(
                     """
                     SELECT t.transcript_id,
                            COALESCE(u.name, t.speaker, '未知说话人') AS speaker_name,
-                           COALESCE(tc.corrected_text, t.text) AS text
+                           COALESCE(tc.corrected_text, t.text) AS text,
+                           tc.id AS correction_id,
+                           COALESCE(correction_members.member_count, 0) AS member_count
                     FROM speech_transcripts t
                     LEFT JOIN users_info u
                            ON u.id = COALESCE(
@@ -785,18 +851,29 @@ async def export_cue_codings(
                                t.user_id,
                                NULLIF(BTRIM(t.speaker), '')
                            )
+                    LEFT JOIN speech_transcript_correction_members tcm
+                           ON tcm.transcript_id = t.transcript_id
                     LEFT JOIN speech_transcript_corrections tc
-                           ON tc.transcript_id = t.transcript_id
+                           ON tc.id = tcm.correction_id
+                    LEFT JOIN LATERAL (
+                        SELECT COUNT(*)::int AS member_count
+                        FROM speech_transcript_correction_members member
+                        WHERE member.correction_id = tc.id
+                    ) correction_members ON TRUE
                     WHERE t.transcript_id = ANY(:transcript_ids)
                     """
                 ),
                 {"transcript_ids": list(dict.fromkeys(evidence_ids))},
             )
         ).mappings().all()
-        evidence_map = {
-            row["transcript_id"]: f"{row['speaker_name']}：{row.get('text') or ''}"
-            for row in evidence_rows
-        }
+        for row in evidence_rows:
+            key = (
+                row["correction_id"]
+                if row.get("correction_id") and row.get("member_count", 0) > 1
+                else row["transcript_id"]
+            )
+            evidence_key_by_transcript[row["transcript_id"]] = key
+            evidence_map.setdefault(key, f"{row['speaker_name']}：{row.get('text') or ''}")
 
     output = io.StringIO()
     writer = csv.writer(output)
@@ -809,6 +886,9 @@ async def export_cue_codings(
     for raw_row in rows:
         row = dict(raw_row)
         ids = list(row.get("coding_evidence_transcript_ids") or [])
+        display_keys = list(
+            dict.fromkeys(evidence_key_by_transcript.get(item, item) for item in ids)
+        )
         writer.writerow([
             row["group_id"],
             row["group_name"],
@@ -823,7 +903,7 @@ async def export_cue_codings(
             row["received_at"].isoformat() if row.get("received_at") else "",
             row.get("coding_uptake_code") or "",
             ";".join(ids),
-            "\n".join(evidence_map.get(item, "") for item in ids),
+            "\n".join(evidence_map.get(item, "") for item in display_keys),
             row.get("coding_reason") or "",
             row.get("coding_coded_by") or "",
             row["coding_coded_at"].isoformat() if row.get("coding_coded_at") else "",

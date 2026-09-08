@@ -257,7 +257,7 @@ async def delete_transcript(
         text(
             """
             SELECT 1
-            FROM speech_transcript_corrections
+            FROM speech_transcript_correction_members
             WHERE transcript_id = :tid
             """
         ),
@@ -292,7 +292,7 @@ async def batch_delete_transcripts(
         text(
             """
             SELECT transcript_id
-            FROM speech_transcript_corrections
+            FROM speech_transcript_correction_members
             WHERE transcript_id = ANY(:ids)
             LIMIT 1
             """

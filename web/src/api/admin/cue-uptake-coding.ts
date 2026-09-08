@@ -50,6 +50,9 @@ export interface CueContextMember {
 
 export interface CueContextTranscript {
   transcript_id: string
+  source_transcript_ids: string[]
+  correction_id: string | null
+  is_merged: boolean
   speaker_user_id: string | null
   speaker_name: string
   text: string | null
