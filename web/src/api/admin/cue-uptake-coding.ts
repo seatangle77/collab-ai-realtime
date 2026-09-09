@@ -38,6 +38,13 @@ export interface CueEvent {
   state_type: string
   received_at: string
   delivery_reason: string | null
+  generation_analysis?: string | null
+  generation_anchor?: {
+    transcript_id?: string | null
+    speaker_id?: string | null
+    speaker_name?: string | null
+    text?: string | null
+  } | null
   possible_duplicate: boolean
   coding: CueUptakeCoding | null
 }
@@ -75,6 +82,19 @@ export interface CueSessionContext {
   members: CueContextMember[]
   transcripts: CueContextTranscript[]
   cues: CueEvent[]
+}
+
+export interface CueRelatedDiscussion {
+  push_log_id: string
+  matches: Array<{ transcript_id: string; text: string; reason: string }>
+  analyzed_count: number
+  excluded_boundary_count: number
+}
+
+export function findCueRelatedDiscussion(pushLogId: string): Promise<CueRelatedDiscussion> {
+  return http.post<CueRelatedDiscussion>(
+    `/api/admin/cue-uptake-coding/events/${encodeURIComponent(pushLogId)}/related-discussion`,
+  )
 }
 
 export interface CueCodingProgress {

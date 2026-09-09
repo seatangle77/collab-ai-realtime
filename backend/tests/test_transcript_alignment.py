@@ -131,7 +131,7 @@ class TranscriptAlignmentTests(unittest.TestCase):
         self.assertEqual(matches[0]["reference_orders"], [1])
         self.assertEqual(matches[0]["transcript_ids"], ["tr1", "tr2"])
 
-    def test_model_match_cannot_cross_speaker_boundary(self) -> None:
+    def test_provisional_cross_speaker_match_is_split_before_saving(self) -> None:
         references = [_reference(0, "这是完整内容。", 20.0)]
         live_items = [
             _live(0, "这是", 10.0),
@@ -144,10 +144,13 @@ class TranscriptAlignmentTests(unittest.TestCase):
             "reference_orders": [1],
             "transcript_ids": ["tr1", "tr2"],
             "confidence": 0.98,
-            "reason": "模型错误地跨人合并",
+            "reason": "一段录音包含两位说话人",
         }], chunk, references, live_items, 10.0)
 
-        self.assertEqual(matches, [])
+        self.assertEqual(len(matches), 1)
+        final = _split_alignment_groups_by_speaker(matches, references, live_items, 10.0)
+        self.assertEqual([m["transcript_ids"] for m in final], [["tr1"], ["tr2"]])
+        self.assertIsNone(_alignment_structure_error(final, references, live_items, []))
 
     def test_rejects_non_contiguous_or_corrected_live_matches(self) -> None:
         references = [_reference(0, "准确内容", 10.0)]
@@ -503,7 +506,7 @@ class TranscriptAlignmentTests(unittest.TestCase):
         sections = _partition_manual_sections(refs, live, 100)
         self.assertEqual(sections, [{"references": refs, "live_items": live}])
 
-    def test_structure_check_rejects_missing_middle_transcript(self) -> None:
+    def test_structure_check_allows_unused_live_when_recording_is_complete(self) -> None:
         references = [_reference(0, "完整内容。", 10.0)]
         live_items = [_live(0, "完整", 0.0), _live(1, "内容", 1.0)]
         incomplete = [{
@@ -512,10 +515,7 @@ class TranscriptAlignmentTests(unittest.TestCase):
             "corrected_text": "完整内容。",
         }]
 
-        self.assertEqual(
-            _alignment_structure_error(incomplete, references, live_items, []),
-            "录音范围内仍有实时转写未完成修订",
-        )
+        self.assertIsNone(_alignment_structure_error(incomplete, references, live_items, []))
 
     def test_structure_check_rejects_blank_corrected_text(self) -> None:
         references = [_reference(0, "准确内容。", 10.0)]
@@ -610,7 +610,7 @@ class TranscriptAlignmentTests(unittest.TestCase):
 
 
 class TranscriptAlignmentOfflineFlowTests(unittest.IsolatedAsyncioTestCase):
-    async def test_model_failure_does_not_create_a_saveable_full_revision(self) -> None:
+    async def test_model_failure_finishes_without_retry_and_keeps_recording_source(self) -> None:
         refs = [_reference(0, "正文", 0)]
         live = [_live(0, "正文", 0)]
         run = {"run_id": "offline", "failed_chunks": [], "total_tokens": 0}
@@ -620,7 +620,7 @@ class TranscriptAlignmentOfflineFlowTests(unittest.IsolatedAsyncioTestCase):
              patch.object(alignment, "logger", Mock()), \
              patch.object(alignment, "_call_alignment_model", AsyncMock(side_effect=ValueError("offline failure"))):
             await alignment._execute_alignment_run("offline", refs, live, 0)
-        self.assertEqual(run["status"], "failed")
+        self.assertEqual(run["status"], "completed_with_errors")
         self.assertEqual(run["matches"], [])
 
     async def test_ambiguous_manual_range_stops_before_background_ai_starts(self) -> None:

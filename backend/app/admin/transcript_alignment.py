@@ -30,6 +30,7 @@ from ..db import get_db
 from ..redis_client import get_redis_client
 from ..settings import QWEN_CHAT_EXTRA_BODY, nlp_settings
 from .deps import require_admin
+from .transcript_final_scope import final_scope_exclusions, scope_reason
 
 
 logger = logging.getLogger(__name__)
@@ -46,7 +47,7 @@ REFERENCE_CHUNK_SIZE = 20
 MAX_LIVE_CANDIDATES_PER_CHUNK = 80
 TIME_MARGIN_SECONDS = 20.0
 AI_CORRECTION_REASON_PREFIX = "AI 整场匹配"
-ALIGNMENT_LOGIC_VERSION = 2
+ALIGNMENT_LOGIC_VERSION = 5
 _RUN_KEY_PREFIX = "admin:transcript-alignment:"
 _LOCAL_RUNS: dict[str, dict[str, Any]] = {}
 _LOCAL_RUNS_LOCK = asyncio.Lock()
@@ -110,6 +111,9 @@ class AlignmentRunOut(ApiModel):
     total_tokens: int = 0
     created_at: str
     out_of_scope_transcript_ids: list[str] = Field(default_factory=list)
+    unmatched_transcript_ids: list[str] = Field(default_factory=list)
+    unmatched_reference_orders: list[int] = Field(default_factory=list)
+    excluded_transcript_ids: list[str] = Field(default_factory=list)
 
 
 class SaveAlignmentRunIn(ApiModel):
@@ -237,10 +241,65 @@ def _relative_seconds(value: datetime | None, base: datetime | None) -> float | 
     return (value - base).total_seconds()
 
 
+def _calibrate_live_times(references, live_items, alignment_offset_seconds):
+    """Use corroborated, distinctive text anchors to account for clock drift.
+
+    Only temporary matching coordinates change; source timestamps and the
+    user's paired start anchor remain intact. Short/repeated phrases cannot
+    establish a new offset, nor can an isolated coincidental text match.
+    """
+    candidates = []
+    for ref in references:
+        target = _normalize_text(ref["content"])
+        if len(target) < 10 or ref["start_time"] is None:
+            continue
+        scored = sorted([
+            (SequenceMatcher(None, target, _normalize_text(item["text"])).ratio(), item)
+            for item in live_items
+            if not item["is_corrected"] and item["relative_seconds"] is not None
+            and abs(item["relative_seconds"] + alignment_offset_seconds - ref["start_time"]) <= 180
+        ], key=lambda pair: pair[0], reverse=True)
+        if not scored or scored[0][0] < .72:
+            continue
+        if len(scored) > 1 and scored[0][0] - scored[1][0] < .12:
+            continue
+        item = scored[0][1]
+        candidates.append((item["relative_seconds"], ref["start_time"] - alignment_offset_seconds))
+    anchors = []
+    for source, target in sorted(candidates):
+        if not any(0 < abs(other_source - source) <= 240
+                   and abs((other_source - other_target) - (source - target)) <= 15
+                   for other_source, other_target in candidates):
+            continue
+        if anchors and (source <= anchors[-1][0] or target <= anchors[-1][1]):
+            continue
+        anchors.append((source, target))
+    if len(anchors) < 2:
+        return [dict(item) for item in live_items]
+    first_time = next((item["relative_seconds"] for item in live_items if item["relative_seconds"] is not None), None)
+    if first_time is not None and first_time < anchors[0][0] and first_time < anchors[0][1]:
+        anchors.insert(0, (first_time, first_time))
+    result = []
+    for item in live_items:
+        copy = dict(item)
+        copy["original_relative_seconds"] = item["relative_seconds"]
+        time = item["relative_seconds"]
+        if time is not None and not item["is_corrected"]:
+            left = next((pair for pair in reversed(anchors) if pair[0] <= time), None)
+            right = next((pair for pair in anchors if pair[0] >= time), None)
+            if left and right and left[0] != right[0]:
+                copy["relative_seconds"] = left[1] + (time - left[0]) * (right[1] - left[1]) / (right[0] - left[0])
+            elif left:
+                copy["relative_seconds"] = time - left[0] + left[1]
+        result.append(copy)
+    return result
+
+
 def _build_chunks(
     references: list[dict[str, Any]],
     live_items: list[dict[str, Any]],
     alignment_offset_seconds: float,
+    time_margin_seconds: float = TIME_MARGIN_SECONDS,
 ) -> list[dict[str, Any]]:
     available_live = [item for item in live_items if not item["is_corrected"]]
     chunks: list[dict[str, Any]] = []
@@ -253,10 +312,9 @@ def _build_chunks(
             expected_end = max(item["start_time"] for item in timed_refs) - alignment_offset_seconds
             candidates = [
                 item for item in available_live
-                if item["relative_seconds"] is not None
-                and expected_start - TIME_MARGIN_SECONDS
-                <= item["relative_seconds"]
-                <= expected_end + TIME_MARGIN_SECONDS
+                if any(value is not None and expected_start - time_margin_seconds
+                       <= value <= expected_end + time_margin_seconds
+                       for value in (item["relative_seconds"], item.get("original_relative_seconds")))
             ]
         if not timed_refs and available_live:
             proportional_start = math.floor(start / max(len(references), 1) * len(available_live))
@@ -378,6 +436,7 @@ def _validate_model_matches(
     all_references: list[dict[str, Any]],
     all_live_items: list[dict[str, Any]],
     alignment_offset_seconds: float,
+    time_margin_seconds: float = TIME_MARGIN_SECONDS,
 ) -> list[dict[str, Any]]:
     if not isinstance(raw_matches, list):
         raise ValueError("模型未返回 matches 数组")
@@ -407,20 +466,18 @@ def _validate_model_matches(
         selected_live = [live_by_id[value] for value in transcript_ids]
         if any(item["is_corrected"] for item in selected_live):
             continue
-        if len({_speaker_key(item) for item in selected_live}) > 1:
-            # A model suggestion may never override a speaker boundary.  The
-            # later completion pass will split the accurate recording text at
-            # the corresponding live-speaker boundaries.
-            continue
+        # These are provisional correspondence groups. Recording rows can
+        # contain multiple speakers; split them before final validation/save.
         if not _are_consecutive([item["position"] for item in selected_references]):
             continue
         if not _are_consecutive([item["position"] for item in selected_live]):
             continue
         if any(
             ref["start_time"] is not None and not any(
-                item["relative_seconds"] is not None
-                and abs(ref["start_time"] - alignment_offset_seconds - item["relative_seconds"]) <= TIME_MARGIN_SECONDS
+                value is not None
+                and abs(ref["start_time"] - alignment_offset_seconds - value) <= time_margin_seconds
                 for item in selected_live
+                for value in (item["relative_seconds"], item.get("original_relative_seconds"))
             )
             for ref in selected_references
         ):
@@ -1040,8 +1097,8 @@ def _alignment_structure_error(
     ]
     if len(assigned_ids) != len(set(assigned_ids)):
         return "实时转写被重复分配到多个修订段落"
-    if set(assigned_ids) != expected_ids:
-        return "录音范围内仍有实时转写未完成修订"
+    if not set(assigned_ids).issubset(expected_ids):
+        return "修订引用了不属于当前对齐范围的实时转写"
     if any(not _has_single_speaker(match["transcript_ids"], live_by_id) for match in matches):
         return "仍存在跨说话人的修订段落"
     expected_reference_orders = {item["order_index"] for item in references}
@@ -1105,6 +1162,7 @@ def _build_prompt(chunk: dict[str, Any], alignment_offset_seconds: float) -> str
         {
             "id": item["transcript_id"],
             "time": item["relative_seconds"],
+            "original_time": item.get("original_relative_seconds", item["relative_seconds"]),
             "speaker": item["speaker_name"],
             "text": item["text"],
         }
@@ -1119,12 +1177,19 @@ def _build_prompt(chunk: dict[str, Any], alignment_offset_seconds: float) -> str
         "3. 同一条内容最多使用一次，不能跨越未包含的中间实时转写。\n"
         "4. 实时残句、重复和识别噪声只能作为对应来源归入同一说话人的相邻组，绝不能进入 corrected_text。\n"
         "5. 时间仅用于限制候选，语义和连续上下文共同决定对应关系。\n"
-        "6. 说话人边界是硬边界：一个分组只能包含同一 speaker，绝对不能跨人；无法判断时不要输出该组。\n"
+        "6. 这里输出的是临时对应组：一段录音含多人发言时，可以包含连续的不同 speaker，系统随后会按说话人拆分最终段落；不要因此漏掉录音句或实时碎片。\n"
         "7. confidence 必须是 0 到 1 的数字，reason 用简短中文说明。\n"
+        "8. 对每段录音给出最可能的说话人 speaker_guesses，即使未能精确匹配。根据上下文、发言顺序和候选转写判断，只能从候选中的 speaker 名称选择一个，不要留空或创造姓名。\n"
         "严格返回 JSON，不要输出 Markdown 或其他文字：\n"
         '{"matches":[{"reference_orders":[1],"transcript_ids":["id"],'
-        '"confidence":0.95,"reason":"语义和时间一致"}]}\n\n'
-        f"时间偏移（录音时间 - 实时时间）：{alignment_offset_seconds:.3f} 秒\n"
+        '"confidence":0.95,"reason":"语义和时间一致"}],"speaker_guesses":[{"reference_order":1,"speaker_name":"候选中的姓名"}]}\n\n'
+        + ("本段是在补查遗漏。请重新核对整段连续对应，允许一组包含多段录音及多条实时转写；"
+         "尤其检查长句、残句和跨说话人内容，不要只返回最容易匹配的短句。"
+         "仍须语义相关；无法确认的内容不得强行拼接。返回本段完整 matches，保留已能确认的对应。"
+         f"待查录音编号：{chunk.get('repair_missing_references', [])}；"
+         f"待查转写编号：{chunk.get('repair_missing_transcripts', [])}\n"
+         if 'repair_missing_references' in chunk else "")
+        + f"时间偏移（录音时间 - 实时时间）：{alignment_offset_seconds:.3f} 秒\n"
         f"准确录音文本：{json.dumps(references, ensure_ascii=False)}\n"
         f"实时转写候选：{json.dumps(live_items, ensure_ascii=False)}"
     )
@@ -1150,9 +1215,70 @@ async def _call_alignment_model(
     )
     raw = response.choices[0].message.content or ""
     parsed = json.loads(_strip_json_fence(raw))
+    if isinstance(parsed, dict):
+        names = {item['speaker_name'] for item in chunk['live_items']}
+        orders = {item['order_index'] for item in chunk['references']}
+        guesses = parsed.get('speaker_guesses', [])
+        chunk['speaker_guesses'] = {
+            str(item['reference_order']): item['speaker_name']
+            for item in guesses if isinstance(item, dict)
+            and isinstance(item.get('reference_order'), int) and item['reference_order'] in orders
+            and isinstance(item.get('speaker_name'), str) and item['speaker_name'] in names
+        } if isinstance(guesses, list) else {}
     usage = getattr(response, "usage", None)
     total_tokens = int(getattr(usage, "total_tokens", 0) or 0)
     return parsed.get("matches") if isinstance(parsed, dict) else None, total_tokens
+
+
+def _adopt_repair(existing, replacement, references, live_items):
+    """A repair may expand coverage, never erase or duplicate prior matches."""
+    new_refs = {o for m in replacement for o in m["reference_orders"]}
+    new_live = {i for m in replacement for i in m["transcript_ids"]}
+    affected = [m for m in existing if new_refs.intersection(m["reference_orders"])
+                or new_live.intersection(m["transcript_ids"])]
+    old_refs = {o for m in affected for o in m["reference_orders"]}
+    old_live = {i for m in affected for i in m["transcript_ids"]}
+    if not old_refs.issubset(new_refs) or not old_live.issubset(new_live):
+        return existing
+    if not (new_refs - old_refs or new_live - old_live):
+        return existing
+    combined = [m for m in existing if m not in affected] + replacement
+    rp = {r["order_index"]: r["position"] for r in references}
+    lp = {t["transcript_id"]: t["position"] for t in live_items}
+    combined.sort(key=lambda m: min(rp[o] for o in m["reference_orders"]))
+    last_ref = last_live = -1
+    for match in combined:
+        ref_positions = [rp[o] for o in match["reference_orders"]]
+        live_positions = [lp[i] for i in match["transcript_ids"]]
+        if min(ref_positions) <= last_ref or min(live_positions) <= last_live:
+            return existing
+        last_ref, last_live = max(ref_positions), max(live_positions)
+    return combined
+
+
+async def _repair_missing_matches(client, existing, section, offset, progress):
+    """One bounded repair pass over incomplete chunks, using broader context."""
+    refs, live = section["references"], section["live_items"]
+    for index, chunk in enumerate(_build_chunks(refs, live, offset, time_margin_seconds=90)):
+        used_refs = {o for m in existing for o in m["reference_orders"]}
+        used_live = {i for m in existing for i in m["transcript_ids"]}
+        missing_refs = [r["order_index"] for r in chunk["references"] if r["order_index"] not in used_refs]
+        # Only count the chunk's central time range, not its overlapping context.
+        times = [r["start_time"] - offset for r in chunk["references"] if r["start_time"] is not None]
+        missing_live = [t["transcript_id"] for t in chunk["live_items"] if t["transcript_id"] not in used_live
+                        and times and t["relative_seconds"] is not None and min(times) <= t["relative_seconds"] <= max(times)]
+        if not chunk["live_items"] or not missing_refs:
+            continue
+        chunk = {**chunk, "repair_missing_references": missing_refs, "repair_missing_transcripts": missing_live}
+        await progress(f"正在补查遗漏段落 {index + 1}：{len(missing_refs)} 段录音、{len(missing_live)} 条转写")
+        try:
+            raw, tokens = await _call_alignment_model(client, chunk, offset)
+            replacement = _deduplicate_matches(_validate_model_matches(raw, chunk, refs, live, offset, time_margin_seconds=90))
+            existing = _adopt_repair(existing, replacement, refs, live)
+            await progress(None, tokens)
+        except Exception as exc:
+            logger.warning("[transcript-alignment] gap repair failed chunk=%d type=%s", index, type(exc).__name__)
+    return existing
 
 
 async def _execute_alignment_run(
@@ -1168,6 +1294,10 @@ async def _execute_alignment_run(
     run["message"] = "正在准备分段匹配"
     await _store_run(run)
     sections = _partition_manual_sections(references, live_items, alignment_offset_seconds)
+    for section in sections:
+        section["live_items"] = _calibrate_live_times(section["references"], section["live_items"], alignment_offset_seconds)
+    calibrated = {item["transcript_id"]: item for section in sections for item in section["live_items"]}
+    live_items = [calibrated.get(item["transcript_id"], item) for item in live_items]
     references = [ref for section in sections for ref in section["references"]]
     chunks = [
         chunk for section in sections
@@ -1176,7 +1306,8 @@ async def _execute_alignment_run(
     client = AsyncOpenAI(
         api_key=nlp_settings.qwen_api_key,
         base_url=nlp_settings.qwen_base_url,
-        timeout=120.0,
+        timeout=60.0,
+        max_retries=0,
     )
     all_matches: list[dict[str, Any]] = []
     try:
@@ -1193,6 +1324,7 @@ async def _execute_alignment_run(
                     chunk,
                     alignment_offset_seconds,
                 )
+                run.setdefault('speaker_guesses', {}).update(chunk.get('speaker_guesses', {}))
                 all_matches.extend(_validate_model_matches(
                     raw_matches,
                     chunk,
@@ -1218,9 +1350,11 @@ async def _execute_alignment_run(
         out_of_scope_ids: list[str] = []
         for section_index, section in enumerate(sections):
             section_ids = {item["transcript_id"] for item in section["live_items"]}
+            section_seeds = [match for match in _deduplicate_matches(all_matches)
+                             if set(match["transcript_ids"]).issubset(section_ids)]
+            # One AI pass only; remaining recording rows are placed deterministically at save time.
             section_matches, outside = _complete_alignment(
-                [match for match in _deduplicate_matches(all_matches)
-                 if set(match["transcript_ids"]).issubset(section_ids)],
+                section_seeds,
                 section["references"], section["live_items"], alignment_offset_seconds,
             )
             for match in section_matches:
@@ -1240,6 +1374,8 @@ async def _execute_alignment_run(
             alignment_offset_seconds,
         )
         run["matches"] = completed_matches
+        excluded_ids, out_of_scope_ids = final_scope_exclusions(completed_matches, live_items)
+        run["excluded_transcript_ids"] = excluded_ids
         run["out_of_scope_transcript_ids"] = out_of_scope_ids
         run["summary"] = _summary(
             completed_matches,
@@ -1247,21 +1383,13 @@ async def _execute_alignment_run(
             live_items,
             out_of_scope_ids,
         )
-        structure_error = _alignment_structure_error(
-            completed_matches,
-            references,
-            live_items,
-            out_of_scope_ids,
-        )
-        if structure_error:
-            run["status"] = "failed"
-            run["message"] = f"整理结果未通过完整性检查：{structure_error}，请重新整理"
-        elif run["failed_chunks"]:
-            run["status"] = "failed"
-            run["message"] = "部分 AI 匹配失败，请重新整理；未自动合并或保存缺失内容"
-        else:
-            run["status"] = "completed"
-            run["message"] = "整场整理完成"
+        matched_live = {i for match in completed_matches for i in match["transcript_ids"]}
+        matched_refs = {o for match in completed_matches for o in match["reference_orders"]}
+        run["unmatched_transcript_ids"] = [item["transcript_id"] for item in live_items
+            if not item["is_corrected"] and item["transcript_id"] not in matched_live and item["transcript_id"] not in out_of_scope_ids]
+        run["unmatched_reference_orders"] = [item["order_index"] for item in references if item["order_index"] not in matched_refs]
+        run["status"] = "completed_with_errors" if run["failed_chunks"] else "completed"
+        run["message"] = "AI整理完成，全部录音将自动按顺序归入修订结果，可直接保存"
     except Exception as exc:  # pragma: no cover - defensive task boundary
         logger.exception("[transcript-alignment] run failed run=%s", run_id)
         run["status"] = "failed"
@@ -1331,14 +1459,15 @@ async def _load_alignment_source(
                        t.created_at,
                        existing_correction.id AS existing_correction_id,
                        existing_correction.corrected_text AS manual_corrected_text,
-                       COALESCE(existing_correction.correction_reason, '') AS existing_correction_reason,
                        (
                            existing_correction.id IS NOT NULL
                            AND COALESCE(existing_correction.correction_reason, '') NOT LIKE 'AI 整场匹配%'
+                           AND COALESCE(existing_correction.correction_reason, '') NOT LIKE '录音完整修订%'
                        ) AS is_corrected,
                        (
                            existing_correction.id IS NOT NULL
-                           AND COALESCE(existing_correction.correction_reason, '') LIKE 'AI 整场匹配%'
+                           AND (COALESCE(existing_correction.correction_reason, '') LIKE 'AI 整场匹配%'
+                                OR COALESCE(existing_correction.correction_reason, '') LIKE '录音完整修订%')
                        ) AS has_ai_correction
                 FROM speech_transcripts t
                 LEFT JOIN users_info u
@@ -1440,6 +1569,7 @@ async def start_alignment_run(
     run: dict[str, Any] = {
         "run_id": run_id,
         "logic_version": ALIGNMENT_LOGIC_VERSION,
+        "alignment_offset_seconds": offset,
         "protected_manual": [
             {"transcript_id": item["transcript_id"],
              "correction_id": item["existing_correction_id"],
@@ -1618,13 +1748,6 @@ async def save_alignment_run(
             run.get("status"),
         )
         raise HTTPException(status_code=409, detail="AI 匹配尚未完成")
-    if int(run.get("summary", {}).get("unmatched_transcripts", 0)) != 0:
-        logger.warning(
-            "[transcript-alignment] save rejected run=%s reason=unmatched_transcripts count=%s",
-            run_id,
-            run.get("summary", {}).get("unmatched_transcripts"),
-        )
-        raise HTTPException(status_code=409, detail="录音范围内仍有未修订内容，禁止保存")
     if int(run.get("summary", {}).get("unmatched_references", 0)) != 0:
         logger.warning(
             "[transcript-alignment] save rejected run=%s reason=unmatched_references count=%s",
@@ -1684,7 +1807,7 @@ async def save_alignment_run(
     ))
     replacement_scope_ids = list(dict.fromkeys(
         all_transcript_ids + [
-            str(item) for item in run.get("out_of_scope_transcript_ids", [])
+            str(item) for item in run.get("excluded_transcript_ids", [])
         ]
     ))
 
@@ -1859,8 +1982,9 @@ async def save_alignment_run(
                         "id": correction_id,
                         "transcript_id": transcript_ids[0] if len(transcript_ids) == 1 else None,
                         "corrected_text": corrected_text,
-                        "correction_reason": (
-                            f"AI 整场匹配（run={run_id}，{run['model']}，可信度 {match['confidence']:.3f}）"
+                        "correction_reason": scope_reason(
+                            f"AI 整场匹配（run={run_id}，{run['model']}，可信度 {match['confidence']:.3f}）",
+                            run.get("excluded_transcript_ids", []),
                         ),
                         "corrected_by": corrected_by,
                     },

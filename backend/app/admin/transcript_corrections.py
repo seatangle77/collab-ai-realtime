@@ -14,6 +14,8 @@ from ..api_model import ApiModel
 from ..db import get_db
 from .deps import require_admin
 from .schemas import Page, PageMeta
+from .recording_document_metadata import PREFIX, public_reason
+from .transcript_final_scope import SCOPE_MARKER, excluded_ids_from_reasons
 
 
 router = APIRouter(
@@ -64,6 +66,7 @@ class CorrectableTranscriptOut(ApiModel):
     corrected_at: datetime | None = None
     source_transcript_ids: list[str] = Field(default_factory=list)
     is_merged: bool = False
+    final_excluded: bool = False
 
 
 class SaveTranscriptCorrectionIn(ApiModel):
@@ -261,8 +264,11 @@ async def list_correctable_transcripts(
     correction_status: str | None = None,
     speaker: str | None = None,
     keyword: str | None = None,
+    content_view: str = "latest",
     db: AsyncSession = Depends(get_db),
 ) -> Page[CorrectableTranscriptOut]:
+    if content_view not in ('original', 'latest'):
+        raise HTTPException(400, 'content_view 只能是 original 或 latest')
     if correction_status is not None and correction_status not in CORRECTION_STATUSES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -297,7 +303,7 @@ async def list_correctable_transcripts(
         where.append("COALESCE(u.name, t.speaker, '') ILIKE :speaker")
         params["speaker"] = f"%{speaker.strip()}%"
     if keyword and keyword.strip():
-        where.append("COALESCE(tc.corrected_text, t.text, '') ILIKE :keyword")
+        where.append("COALESCE(t.original_text, t.text, '') ILIKE :keyword" if content_view == 'original' else "COALESCE(tc.corrected_text, t.text, '') ILIKE :keyword")
         params["keyword"] = f"%{keyword.strip()}%"
     where_sql = " AND ".join(where)
 
@@ -320,9 +326,10 @@ async def list_correctable_transcripts(
             WHERE member.correction_id = tc.id
         ) correction_members ON TRUE
     """
+    count_joins = joins.split("        LEFT JOIN LATERAL", 1)[0]
     total = (
         await db.execute(
-            text(f"SELECT COUNT(*) {joins} WHERE {where_sql}"),
+            text(f"SELECT COUNT(*) {count_joins} WHERE {where_sql}"),
             params,
         )
     ).scalar_one()
@@ -335,14 +342,14 @@ async def list_correctable_transcripts(
                        t.session_id,
                        COALESCE(t.speaker_user_id, t.user_id, u.id) AS speaker_user_id,
                        COALESCE(u.name, t.speaker, '未知说话人') AS speaker_name,
-                       t.text AS original_text,
+                       COALESCE(t.original_text, t.text) AS original_text,
                        COALESCE(tc.corrected_text, t.text) AS effective_text,
                        t.start,
                        t."end",
                        t.created_at,
                        (tc.id IS NOT NULL) AS is_corrected,
                        tc.id AS correction_id,
-                       tc.correction_reason,
+                       split_part(tc.correction_reason, E'\\n[recording-document-v1]', 1) AS correction_reason,
                        tc.corrected_by,
                        tc.updated_at AS corrected_at,
                        COALESCE(
@@ -365,8 +372,27 @@ async def list_correctable_transcripts(
             },
         )
     ).mappings().all()
+    # Read scope from the entire session, not just the filtered/current page.
+    # Metadata lives with saved AI corrections, so refresh/Redis expiry cannot
+    # bring discarded ASR noise back into the final version.
+    scope_rows = (await db.execute(text("""
+        SELECT DISTINCT tc.correction_reason
+        FROM speech_transcript_corrections tc
+        JOIN speech_transcript_correction_members member ON member.correction_id = tc.id
+        JOIN speech_transcripts source ON source.transcript_id = member.transcript_id
+        WHERE source.session_id = :session_id
+          AND tc.correction_reason LIKE 'AI 整场匹配%'
+    """), {"session_id": session_id})).mappings().all()
+    excluded = excluded_ids_from_reasons(row["correction_reason"] for row in scope_rows)
+    items = []
+    for row in rows:
+        item = dict(row)
+        item["final_excluded"] = item["transcript_id"] in excluded and not item["is_corrected"]
+        if item.get("correction_reason"):
+            item["correction_reason"] = public_reason(item["correction_reason"].split(SCOPE_MARKER, 1)[0])
+        items.append(CorrectableTranscriptOut.model_validate(item))
     return Page[CorrectableTranscriptOut](
-        items=[CorrectableTranscriptOut.model_validate(dict(row)) for row in rows],
+        items=items,
         meta=PageMeta(total=total, page=page, page_size=page_size),
     )
 
@@ -381,6 +407,13 @@ async def save_transcript_correction(
     db: AsyncSession = Depends(get_db),
 ) -> TranscriptCorrectionOut:
     await _get_assisted_transcript(db, transcript_id)
+    protected = (await db.execute(text("""
+        SELECT 1 FROM speech_transcript_corrections c
+        JOIN speech_transcript_correction_members m ON m.correction_id = c.id
+        WHERE m.transcript_id = :id AND c.correction_reason LIKE :prefix
+    """), {'id': transcript_id, 'prefix': PREFIX + '%'})).first()
+    if protected:
+        raise HTTPException(409, '此条属于完整录音修订，请在最终版本面板重新预览和保存')
     existing_membership = (
         await db.execute(
             text(
@@ -656,7 +689,9 @@ async def update_merged_transcript_correction(
     payload: UpdateMergedTranscriptCorrectionIn,
     db: AsyncSession = Depends(get_db),
 ) -> MergedTranscriptCorrectionOut:
-    _, transcript_ids = await _get_merged_correction(db, correction_id)
+    existing, transcript_ids = await _get_merged_correction(db, correction_id)
+    if (existing.get('correction_reason') or '').startswith(PREFIX):
+        raise HTTPException(409, '此份为完整录音修订，请在最终版本面板重新预览和保存')
     row = (
         await db.execute(
             text(

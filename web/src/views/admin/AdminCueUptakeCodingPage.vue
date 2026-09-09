@@ -9,6 +9,8 @@ import {
   downloadCueCodingExport,
   getCueCodingProgress,
   getCueSessionContext,
+  findCueRelatedDiscussion,
+  type CueRelatedDiscussion,
   listCueCodingGroups,
   listCueEvents,
   saveCueCoding,
@@ -100,6 +102,50 @@ const page = ref(1)
 const pageSize = ref(30)
 const total = ref(0)
 const dirty = ref(false)
+const relatedResults = reactive(new Map<string, CueRelatedDiscussion>())
+const relatedPending = reactive(new Set<string>())
+const relatedErrors = reactive(new Map<string, string>())
+const relatedPositions = reactive(new Map<string, number>())
+const currentRelated = computed(() => relatedResults.get(selectedPushLogId.value))
+const relatedMatches = computed(() => (currentRelated.value?.matches ?? []).filter(match =>
+  context.value?.transcripts.some(item => item.transcript_id === match.transcript_id && item.text === match.text),
+))
+const relatedById = computed(() => new Map(relatedMatches.value.map(match => [match.transcript_id, match])))
+const relatedPosition = computed(() => relatedPositions.get(selectedPushLogId.value) ?? -1)
+
+async function lookupRelated() {
+  const event = selectedEvent.value
+  if (!event || relatedPending.has(event.push_log_id)) return
+  const id = event.push_log_id
+  relatedPending.add(id)
+  relatedErrors.delete(id)
+  try {
+    const result = await findCueRelatedDiscussion(id)
+    if (result.push_log_id !== id) throw new Error('查找结果与当前提示不一致，请重试')
+    relatedResults.set(id, result)
+    relatedPositions.delete(id)
+  } catch (error: any) {
+    relatedErrors.set(id, error?.message || 'AI 查找失败，请重试')
+  } finally {
+    relatedPending.delete(id)
+  }
+}
+
+function navigateRelated(direction: number) {
+  const matches = relatedMatches.value
+  if (!matches.length) return
+  const previous = relatedPosition.value
+  const index = previous < 0 ? (direction > 0 ? 0 : matches.length - 1)
+    : (previous + direction + matches.length) % matches.length
+  const match = matches[index]
+  if (!match) return
+  relatedPositions.set(selectedPushLogId.value, index)
+  const container = timelineScrollRef.value
+  const target = document.getElementById(`transcript-timeline-${match.transcript_id}`)
+  if (container && target) {
+    container.scrollTo({ top: target.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop - 12, behavior: 'auto' })
+  }
+}
 
 const filters = reactive({
   condition: '' as CueCondition | '',
@@ -322,8 +368,10 @@ async function selectEvent(event: CueEvent, askBeforeSwitch = true) {
       sessionContext = await getCueSessionContext(event.session_id, CODER_ROLE)
       contextCache.set(cacheKey, sessionContext)
     }
+    if (selectedPushLogId.value !== event.push_log_id) return
     context.value = sessionContext
     nextTick(() => {
+      if (selectedPushLogId.value !== event.push_log_id) return
       const container = timelineScrollRef.value
       const target = document.getElementById(`cue-timeline-${event.push_log_id}`)
       if (!container || !target) return
@@ -333,10 +381,11 @@ async function selectEvent(event: CueEvent, askBeforeSwitch = true) {
       container.scrollTo({ top, behavior: 'auto' })
     })
   } catch (error: any) {
+    if (selectedPushLogId.value !== event.push_log_id) return
     context.value = null
     ElMessage.error(error?.message || '加载会话上下文失败')
   } finally {
-    loadingContext.value = false
+    if (selectedPushLogId.value === event.push_log_id) loadingContext.value = false
   }
 }
 
@@ -516,7 +565,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="cue-page">
+  <div class="cue-page review-workspace">
     <header class="page-header">
       <div>
         <h1>提示采纳编码</h1>
@@ -647,16 +696,36 @@ onMounted(async () => {
           </div>
           <span v-if="context" class="member-count">{{ context.members.length }} 名成员</span>
         </div>
+        <div v-if="selectedEvent" class="related-toolbar">
+          <div class="related-controls">
+            <el-button size="small" type="primary" plain :loading="relatedPending.has(selectedPushLogId)" :disabled="loadingContext || !context" @click="lookupRelated">
+              {{ relatedPending.has(selectedPushLogId) ? '正在查找' : currentRelated ? '重新查找' : 'AI 查找相关讨论' }}
+            </el-button>
+            <template v-if="currentRelated">
+              <span role="status">{{ !currentRelated.analyzed_count ? '没有可分析的后续讨论' : relatedMatches.length ? `找到 ${relatedMatches.length} 条相关讨论` : '未找到相关讨论' }}</span>
+              <template v-if="relatedMatches.length">
+                <el-button size="small" @click="navigateRelated(-1)">上一条</el-button>
+                <span>{{ relatedPosition < 0 ? '—' : relatedPosition + 1 }} / {{ relatedMatches.length }}</span>
+                <el-button size="small" @click="navigateRelated(1)">下一条</el-button>
+              </template>
+            </template>
+          </div>
+          <small>仅查找当前提示之后的讨论；AI 标记供参考，刷新后清除。</small>
+          <small v-if="currentRelated?.excluded_boundary_count">已排除 {{ currentRelated.excluded_boundary_count }} 段跨越提示时间、时间相同或时间不明的发言。</small>
+          <small v-if="currentRelated && relatedMatches.length !== currentRelated.matches.length">部分原文与结果不一致，已隐藏相关标记，请刷新页面后重新查找。</small>
+          <span v-if="relatedErrors.get(selectedPushLogId)" class="related-error" role="alert">{{ relatedErrors.get(selectedPushLogId) }}</span>
+        </div>
         <div v-if="context" ref="timelineScrollRef" class="timeline-scroll">
           <div
             v-for="item in timelineItems"
-            :id="item.kind === 'cue' ? `cue-timeline-${item.cue.push_log_id}` : undefined"
+            :id="item.kind === 'cue' ? `cue-timeline-${item.cue.push_log_id}` : `transcript-timeline-${item.transcript.transcript_id}`"
             :key="item.id"
             class="timeline-entry"
             :class="{
               'timeline-entry--cue': item.kind === 'cue',
               'timeline-entry--current': item.kind === 'cue' && item.cue.push_log_id === selectedPushLogId,
               'timeline-entry--evidence': item.kind === 'transcript' && isEvidenceSelected(item.transcript),
+              'timeline-entry--related': item.kind === 'transcript' && relatedById.has(item.transcript.transcript_id),
             }"
           >
             <template v-if="item.kind === 'transcript'">
@@ -665,6 +734,9 @@ onMounted(async () => {
                 <div class="transcript-meta">
                   <strong>{{ item.transcript.speaker_name }}</strong>
                   <span>{{ formatTimeToCST(item.timestamp) }}</span>
+                  <el-tooltip v-if="relatedById.has(item.transcript.transcript_id)" :content="relatedById.get(item.transcript.transcript_id)?.reason" placement="top">
+                    <el-tag type="warning" size="small" tabindex="0">AI 相关</el-tag>
+                  </el-tooltip>
                   <el-tag v-if="item.transcript.is_corrected" type="warning" size="small" effect="plain">已修订</el-tag>
                   <el-tag v-if="item.transcript.is_merged" type="success" size="small" effect="plain">
                     合并 {{ item.transcript.source_transcript_ids.length }} 条
@@ -714,6 +786,19 @@ onMounted(async () => {
             <div><span>提示对象</span><strong>{{ selectedEvent.target_user_name }}</strong></div>
             <p>{{ selectedEvent.push_content }}</p>
             <small>{{ formatDateTimeToCST(selectedEvent.received_at) }}</small>
+            <details :key="selectedEvent.push_log_id" class="generation-basis">
+              <summary>生成依据</summary>
+              <div class="generation-basis-content">
+                <template v-if="selectedEvent.generation_analysis || selectedEvent.generation_anchor?.text">
+                  <strong>生成理由</strong>
+                  <p>{{ selectedEvent.generation_analysis || '未记录生成理由' }}</p>
+                  <strong>对应原发言<span v-if="selectedEvent.generation_anchor?.speaker_name"> · {{ selectedEvent.generation_anchor.speaker_name }}</span></strong>
+                  <p>{{ selectedEvent.generation_anchor?.text || '未记录对应原发言' }}</p>
+                  <small>生成时的记录，仅帮助理解提示意图，不代表后续讨论证据。</small>
+                </template>
+                <p v-else>无生成依据</p>
+              </div>
+            </details>
           </section>
 
           <el-radio-group v-model="form.uptake_code" class="code-options" @change="markDirty">
@@ -782,7 +867,7 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.cue-page { display: flex; flex-direction: column; gap: 14px; min-width: 1000px; }
+.cue-page { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .page-header h1 { margin: 0; color: #1e2d40; font-size: 20px; font-weight: 700; }
 .page-header p { margin: 6px 0 0; color: #68778e; font-size: 14px; }
@@ -793,7 +878,7 @@ onMounted(async () => {
 .progress-main, .progress-count { min-height: 58px; padding: 10px 14px; background: #fff; box-sizing: border-box; }
 .progress-main { display: grid; grid-template-columns: auto auto minmax(110px, 1fr); align-items: center; gap: 10px; }
 .progress-main :deep(.el-progress) { width: 100%; }
-.progress-label, .progress-count span { color: #718098; font-size: 12px; }
+.progress-label, .progress-count span { color: #718098; font-size: 13px; }
 .progress-main strong, .progress-count strong { color: #1e2d40; font-size: 17px; }
 .progress-count { display: flex; flex-direction: column; justify-content: center; gap: 3px; }
 .coding-workbench { display: grid; grid-template-columns: 286px minmax(430px, 1fr) 350px; gap: 12px; height: calc(100vh - 260px); min-height: 570px; }
@@ -801,44 +886,51 @@ onMounted(async () => {
 .pane-heading { display: flex; min-height: 58px; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid #e7ecf3; box-sizing: border-box; }
 .pane-heading > div { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
 .pane-heading strong { color: #24344a; font-size: 15px; }
-.pane-heading span { overflow: hidden; color: #7a8799; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.pane-heading span { overflow: hidden; color: #7a8799; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .event-pane, .timeline-pane, .coding-pane { display: flex; flex-direction: column; }
 .event-list { flex: 1; overflow-y: auto; padding: 8px; }
 .event-card { display: block; width: 100%; margin: 0 0 8px; padding: 11px; border: 1px solid #e3e9f1; border-radius: 8px; background: #fff; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .event-card:hover { border-color: #9eb7d5; background: #f8fbff; }
 .event-card.active { border-color: #3b82f6; background: #eff6ff; box-shadow: inset 3px 0 #3b82f6; }
 .event-card__top, .event-card__meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.event-target { color: #26364b; font-size: 13px; font-weight: 700; }
-.event-card p { display: -webkit-box; overflow: hidden; margin: 8px 0; color: #425269; font-size: 13px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
-.event-card__meta { margin-bottom: 6px; color: #8a96a8; font-size: 11px; }
+.event-target { color: #26364b; font-size: 14px; font-weight: 700; }
+.event-card p { display: -webkit-box; overflow: hidden; margin: 8px 0; color: #425269; font-size: 14px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.event-card__meta { margin-bottom: 6px; color: #8a96a8; font-size: 12px; }
 .event-pagination { display: flex; min-height: 48px; align-items: center; justify-content: center; padding: 4px 6px; border-top: 1px solid #e7ecf3; }
-.member-count { flex: 0 0 auto; color: #68778e; font-size: 12px; }
+.member-count { flex: 0 0 auto; color: #68778e; font-size: 13px; }
 .timeline-scroll { flex: 1; overflow-y: auto; padding: 18px 20px 36px; }
 .timeline-bottom-space { height: calc(100% - 110px); min-height: 260px; }
 .timeline-entry { display: flex; gap: 10px; margin-bottom: 17px; scroll-margin: 120px 0; }
-.timeline-avatar, .cue-marker { display: grid; flex: 0 0 auto; width: 34px; height: 34px; place-items: center; border-radius: 50%; background: #edf2f7; color: #516178; font-size: 12px; font-weight: 700; }
+.timeline-avatar, .cue-marker { display: grid; flex: 0 0 auto; width: 34px; height: 34px; place-items: center; border-radius: 50%; background: #edf2f7; color: #516178; font-size: 13px; font-weight: 700; }
 .transcript-body { min-width: 0; flex: 1; padding: 10px 12px; border: 1px solid #e6ebf2; border-radius: 4px 10px 10px; background: #fff; }
 .transcript-meta { display: flex; align-items: center; gap: 9px; }
-.transcript-meta strong { color: #26364b; font-size: 13px; }
-.transcript-meta span { color: #8995a6; font-size: 11px; }
+.transcript-meta strong { color: #26364b; font-size: 14px; }
+.transcript-meta span { color: #8995a6; font-size: 12px; }
 .transcript-meta .evidence-button { margin-left: auto; }
 .transcript-body p, .cue-body p { margin: 7px 0 0; color: #35455b; font-size: 14px; line-height: 1.65; white-space: pre-wrap; }
 .timeline-entry--evidence .transcript-body { border-color: #72c796; background: #f0fdf4; box-shadow: inset 3px 0 #22a65a; }
+.timeline-entry--related .transcript-body { border-color: #e6bd58; background: #fffbeb; }
+.timeline-entry--related.timeline-entry--evidence .transcript-body { box-shadow: inset 3px 0 #22a65a; }
+.related-toolbar { padding: 10px 16px; border-bottom: 1px solid #e6eaf0; display: flex; flex-direction: column; gap: 7px; }
+.related-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 13px; }
+.related-controls .el-button + .el-button { margin-left: 0; }
+.related-toolbar small { color: #77859a; font-size: 12px; }
+.related-error { color: #c0392b; font-size: 13px; overflow-wrap: anywhere; }
 .timeline-entry--cue { margin: 24px 0; }
 .timeline-entry--cue .cue-marker { background: #eef2ff; color: #4f46e5; }
 .cue-body { min-width: 0; flex: 1; padding: 12px 14px; border: 1px dashed #aab8d0; border-radius: 9px; background: #f8faff; }
 .timeline-entry--current .cue-marker { background: #2563eb; color: #fff; }
 .timeline-entry--current .cue-body { border: 2px solid #3b82f6; background: #eff6ff; box-shadow: 0 8px 20px rgba(59, 130, 246, .12); }
-.cue-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; color: #6f7d91; font-size: 11px; }
-.cue-meta strong { color: #315b9b; font-size: 13px; }
+.cue-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; color: #6f7d91; font-size: 12px; }
+.cue-meta strong { color: #315b9b; font-size: 14px; }
 .coding-pane { overflow-y: auto; }
 .coding-pane > .pane-heading { flex: 0 0 auto; }
 .coding-form { padding: 14px; }
 .selected-cue { padding: 11px 12px; border-radius: 8px; background: #f4f7fb; }
 .selected-cue > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.selected-cue span, .selected-cue small { color: #77859a; font-size: 11px; }
-.selected-cue strong { color: #293a51; font-size: 13px; }
-.selected-cue p { margin: 8px 0; color: #34455c; font-size: 13px; line-height: 1.55; white-space: pre-wrap; }
+.selected-cue span, .selected-cue small { color: #77859a; font-size: 12px; }
+.selected-cue strong { color: #293a51; font-size: 14px; }
+.selected-cue p { margin: 8px 0; color: #34455c; font-size: 14px; line-height: 1.55; white-space: pre-wrap; }
 .code-options { display: flex; flex-direction: column; align-items: stretch; gap: 8px; margin-top: 12px; }
 .code-options :deep(.el-radio) { width: 100%; height: auto; margin: 0; padding: 10px 11px; box-sizing: border-box; }
 .code-options :deep(.el-radio__label) { min-width: 0; padding-left: 8px; white-space: normal; }
@@ -852,27 +944,35 @@ onMounted(async () => {
 .code-option--uncertain { --cue-code-color: #7c3aed; --cue-code-bg: #f5f3ff; }
 .code-option--not_included { --cue-code-color: #be123c; --cue-code-bg: #fff1f2; }
 .code-option-copy { display: flex; flex-direction: column; gap: 3px; }
-.code-option-copy strong { color: #26364b; font-size: 13px; }
-.code-option-copy span { color: #748196; font-size: 11px; line-height: 1.45; }
+.code-option-copy strong { color: #26364b; font-size: 14px; }
+.code-option-copy span { color: #748196; font-size: 12px; line-height: 1.45; }
 .evidence-box { margin-top: 14px; padding: 10px; border: 1px solid #e2e8f0; border-radius: 8px; }
 .section-title { display: flex; align-items: center; justify-content: space-between; }
-.section-title strong, .field-label { color: #34445a; font-size: 12px; font-weight: 700; }
-.section-title span { color: #718098; font-size: 11px; }
+.section-title strong, .field-label { color: #34445a; font-size: 13px; font-weight: 700; }
+.section-title span { color: #718098; font-size: 12px; }
 .evidence-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .evidence-item { padding: 8px; border-radius: 6px; background: #f0fdf4; }
 .evidence-item > div { display: flex; gap: 8px; }
-.evidence-item strong { color: #23663e; font-size: 11px; }
-.evidence-item span { color: #789184; font-size: 10px; }
-.evidence-item p { display: -webkit-box; overflow: hidden; margin: 4px 0; color: #405749; font-size: 11px; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.empty-hint { margin: 8px 0 0; color: #8995a6; font-size: 11px; }
+.evidence-item strong { color: #23663e; font-size: 12px; }
+.evidence-item span { color: #789184; font-size: 12px; }
+.evidence-item p { display: -webkit-box; overflow: hidden; margin: 4px 0; color: #405749; font-size: 12px; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.empty-hint { margin: 8px 0 0; color: #8995a6; font-size: 12px; }
 .field-label { display: block; margin: 14px 0 6px; }
-.saved-meta, .dirty-note { margin-top: 9px; color: #8491a3; font-size: 11px; }
+.saved-meta, .dirty-note { margin-top: 9px; color: #8491a3; font-size: 12px; }
 .dirty-note { color: #b7791f; }
 .coding-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 14px; }
 .coding-actions .el-button + .el-button { margin-left: 0; }
-.raw-transcript-popover { color: #526176; font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
+.raw-transcript-popover { color: #526176; font-size: 14px; line-height: 1.6; white-space: pre-wrap; }
 @media (max-width: 1350px) {
   .filters { grid-template-columns: repeat(4, minmax(140px, 1fr)); }
   .coding-workbench { grid-template-columns: 250px minmax(420px, 1fr) 320px; }
 }
+.generation-basis { margin-top: 10px; border-top: 1px solid #dce4ee; padding-top: 8px; }
+.generation-basis summary { cursor: pointer; color: #47658a; font-size: 13px; }
+.generation-basis-content { display: block !important; max-height: 240px; overflow-y: auto; padding-top: 10px; overflow-wrap: anywhere; }
+.generation-basis-content > strong { display: block; font-size: 12px; color: #52647b; }
+.generation-basis-content p { white-space: pre-wrap; font-size: 13px; line-height: 1.6; margin: 5px 0 12px; }
+.generation-basis-content small { display: block; line-height: 1.5; }
 </style>
+
+<style scoped src="../../styles/review-workspace.css"></style>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import RecordingFinalVersionPanel from '../../components/admin/RecordingFinalVersionPanel.vue'
 import { formatDateTimeToCST } from '../../utils/datetime'
 import {
   getSessionUtterances,
@@ -27,6 +28,8 @@ import {
   type TranscriptCorrectionGroup,
   type TranscriptCorrectionSession,
 } from '../../api/admin/transcript-corrections'
+
+const showLegacyEditor = ref(false)
 
 const CONDITION_LABELS: Record<AssistedCondition, string> = {
   glasses: '眼镜',
@@ -103,7 +106,10 @@ const currentSession = computed(() =>
 
 const displayTranscripts = computed<CorrectableTranscript[]>(() => {
   const emittedCorrections = new Set<string>()
-  return transcripts.value.flatMap((transcript) => {
+  return transcripts.value.flatMap((source) => {
+    const transcript = source.correction_reason === '录音完整修订'
+      ? { ...source, speaker_name: '录音修订（说话人见最终版本）', speaker_user_id: null }
+      : source
     if (!transcript.is_merged || !transcript.correction_id) return [transcript]
     if (emittedCorrections.has(transcript.correction_id)) return []
     emittedCorrections.add(transcript.correction_id)
@@ -112,7 +118,7 @@ const displayTranscripts = computed<CorrectableTranscript[]>(() => {
     const speakerNames = [...new Set(members.map(item => item.speaker_name))]
     return [{
       ...transcript,
-      speaker_name: speakerNames.join(' / '),
+      speaker_name: transcript.correction_reason === '录音完整修订' ? transcript.speaker_name : speakerNames.join(' / '),
       original_text: members.map(item => item.original_text?.trim()).filter(Boolean).join(' '),
       start: members[0]?.start ?? transcript.start,
       end: members[members.length - 1]?.end ?? transcript.end,
@@ -122,7 +128,8 @@ const displayTranscripts = computed<CorrectableTranscript[]>(() => {
 const transcriptListItems = computed(() =>
   transcriptContentView.value === 'original' ? transcripts.value : displayTranscripts.value,
 )
-const finalTranscripts = computed(() => displayTranscripts.value)
+const finalTranscripts = computed(() => displayTranscripts.value.filter(item => !item.final_excluded))
+const excludedFinalTranscripts = computed(() => displayTranscripts.value.filter(item => item.final_excluded))
 const selectedTranscript = computed(() =>
   transcriptListItems.value.find(item => item.transcript_id === selectedTranscriptId.value) ?? null,
 )
@@ -182,7 +189,7 @@ const alignmentRunInProgress = computed(() =>
 const alignmentProgress = computed(() => {
   const run = alignmentRun.value
   if (!run?.total_chunks) return 0
-  return Math.round(run.completed_chunks / run.total_chunks * 100)
+  return Math.min(run.status === 'running' || run.status === 'queued' ? 99 : 100, Math.round(run.completed_chunks / run.total_chunks * 100))
 })
 const focusedAiMatch = computed(() =>
   alignmentRun.value?.matches.find(item => item.match_id === focusedAiMatchId.value) ?? null,
@@ -199,6 +206,8 @@ const aiMatchByTranscriptId = computed(() => {
 const outOfScopeTranscriptIds = computed(() =>
   new Set(alignmentRun.value?.out_of_scope_transcript_ids ?? []),
 )
+const unmatchedTranscriptIds = computed(() => new Set(alignmentRun.value?.unmatched_transcript_ids ?? []))
+const unmatchedReferenceOrders = computed(() => new Set(alignmentRun.value?.unmatched_reference_orders ?? []))
 const unsavedOrganizedMatches = computed(() =>
   (alignmentRun.value?.matches ?? []).filter(item => !item.saved),
 )
@@ -351,7 +360,7 @@ async function pollAlignmentRun(runId: string) {
     } else if (run.status === 'completed_with_errors') {
       ElMessage.warning(run.message || '部分内容需要确认')
     } else if (completedNow) {
-      ElMessage.success(`整场整理完成，需要确认 ${run.summary.review_required ?? 0} 处`)
+      ElMessage.success(`AI整理完成，可以直接保存`)
     }
   } catch (error: any) {
     const message = String(error?.message ?? '')
@@ -559,17 +568,22 @@ async function loadSessions(groupId: string, selectFirst = true) {
   }
 }
 
+let transcriptLoadRequest = 0
 async function loadTranscripts(selectFirst = true) {
+  const request = ++transcriptLoadRequest
+  const sessionId = selectedSessionId.value
   if (!selectedSessionId.value) return
   loadingTranscripts.value = true
   try {
-    const response = await listCorrectableTranscripts(selectedSessionId.value, {
+    const response = await listCorrectableTranscripts(sessionId, {
       page: page.value,
       page_size: pageSize.value,
+      content_view: transcriptContentView.value,
       correction_status: filters.correction_status || undefined,
       speaker: filters.speaker.trim() || undefined,
       keyword: filters.keyword.trim() || undefined,
     })
+    if (request !== transcriptLoadRequest || sessionId !== selectedSessionId.value) return
     transcripts.value = response.items
     total.value = response.meta.total
     page.value = response.meta.page
@@ -582,9 +596,9 @@ async function loadTranscripts(selectFirst = true) {
       selectTranscript(transcriptListItems.value[0], false)
     }
   } catch (error: any) {
-    ElMessage.error(error?.message || '加载转写失败')
+    if (request === transcriptLoadRequest && sessionId === selectedSessionId.value) ElMessage.error(error?.message || '加载转写失败')
   } finally {
-    loadingTranscripts.value = false
+    if (request === transcriptLoadRequest) loadingTranscripts.value = false
   }
 }
 
@@ -724,7 +738,7 @@ async function saveWholeAlignment() {
   if (!(await confirmDiscard())) return
   try {
     await ElMessageBox.confirm(
-      `即将一次保存整场 ${unsavedOrganizedMatches.value.length} 个 AI 修订组。${run.summary.replaceable_ai_transcripts ? `其中 ${run.summary.replaceable_ai_transcripts} 条旧 AI 结果会在同一事务中替换。` : ''}${reviewRequiredCount.value ? `有 ${reviewRequiredCount.value} 个橙色位置尚未检查，也会按当前录音原文保存。` : ''}人工修订、原始录音文本和实时转写都不会修改。`,
+      `即将一次保存整场 ${unsavedOrganizedMatches.value.length} 个 AI 修订组。${run.excluded_transcript_ids?.length ? `范围内 ${run.excluded_transcript_ids.length} 条未匹配实时转写将不进入最终正文，原始数据保留。` : ''}${run.summary.replaceable_ai_transcripts ? `其中 ${run.summary.replaceable_ai_transcripts} 条旧 AI 结果会在同一事务中替换。` : ''}${reviewRequiredCount.value ? `有 ${reviewRequiredCount.value} 个橙色位置尚未检查，也会按当前录音原文保存。` : ''}人工修订、原始录音文本和实时转写都不会修改。`,
       '保存整场修订',
       { type: 'warning', confirmButtonText: '保存整场修订', cancelButtonText: '取消' },
     )
@@ -766,6 +780,8 @@ async function switchTranscriptContentView(view: TranscriptContentView) {
     clearAlignmentRun()
   }
   transcriptContentView.value = view
+  page.value = 1
+  await loadTranscripts(false)
   selectedTranscriptId.value = ''
   resetMergeEditing()
   fillForm(null)
@@ -980,12 +996,13 @@ onBeforeUnmount(stopAlignmentPolling)
 </script>
 
 <template>
-  <div class="correction-page">
+  <div class="correction-page review-workspace">
     <header class="page-header">
       <div>
         <h1>提示转写修订</h1>
-        <p>对照同一会话已保存的录音重转译内容，修订辅助条件小组的实时转写；两份原始数据均不修改。</p>
+        <p>以全部录音文字生成最终正文；实时转写辅助确认位置和说话人，原始数据保留。</p>
       </div>
+      <el-button @click="showLegacyEditor = !showLegacyEditor">{{ showLegacyEditor ? '返回录音最终版本' : '查看旧版逐条修订' }}</el-button>
     </header>
 
     <el-card shadow="never" class="filter-card">
@@ -1109,10 +1126,11 @@ onBeforeUnmount(stopAlignmentPolling)
             </div>
           </div>
         </div>
+        <div id="recording-save-controls"></div>
         <div class="transcript-ai-bar">
           <div class="transcript-ai-bar__top">
             <div>
-              <strong>{{ hasSessionCorrections ? '历史修订重新整理' : '自动整理整场' }}</strong>
+              <strong>{{ showLegacyEditor ? (hasSessionCorrections ? '历史修订重新整理' : '自动整理整场') : 'AI整理' }}</strong>
               <el-tag size="small" effect="plain">qwen3-max</el-tag>
             </div>
             <el-button
@@ -1121,13 +1139,13 @@ onBeforeUnmount(stopAlignmentPolling)
               :loading="startingAlignmentRun || alignmentRunInProgress"
               :disabled="!alignmentAnchor || !referenceUtterances.length || alignmentRunInProgress || !historicalRerunReady"
               @click="startAiAlignment"
-            >{{ hasSessionCorrections ? '重新 AI 整理' : '自动整理整场' }}</el-button>
+            >{{ showLegacyEditor ? (hasSessionCorrections ? '重新 AI 整理' : '自动整理整场') : 'AI整理' }}</el-button>
           </div>
           <span
             v-if="hasSessionCorrections && transcriptContentView === 'latest'"
             class="transcript-ai-hint"
           >如需重新整理历史修订，请先切换到“修订前实时转写”。</span>
-          <span v-else-if="!alignmentAnchor" class="transcript-ai-hint">请先在上方设置对齐起点。</span>
+          <span v-else-if="!alignmentAnchor" class="transcript-ai-hint">请先设置对齐起点，再运行AI整理。</span>
           <template v-else-if="alignmentRun">
             <div v-if="alignmentRunInProgress" class="ai-progress">
               <el-progress :percentage="alignmentProgress" :stroke-width="9" />
@@ -1146,12 +1164,12 @@ onBeforeUnmount(stopAlignmentPolling)
                 <el-tag v-if="alignmentRun.summary.replaceable_ai_transcripts" type="info">
                   将替换旧 AI {{ alignmentRun.summary.replaceable_ai_transcripts }} 条
                 </el-tag>
-                <el-tag v-else type="success" effect="plain">AI 已全部整理</el-tag>
+                <el-tag v-else type="success" effect="plain">{{ showLegacyEditor ? 'AI 已全部整理' : '辅助对应已结束' }}</el-tag>
                 <el-tag v-if="alignmentRun.summary.out_of_scope_transcripts" type="info">
                   录音范围外 {{ alignmentRun.summary.out_of_scope_transcripts }} 条
                 </el-tag>
               </div>
-              <div class="transcript-ai-controls">
+              <div v-if="showLegacyEditor" class="transcript-ai-controls">
                 <el-button
                   size="small"
                   type="success"
@@ -1166,10 +1184,13 @@ onBeforeUnmount(stopAlignmentPolling)
             </template>
             <el-alert
               v-else
-              type="error"
+              type="warning"
               :closable="false"
-              :title="alignmentRun.message || 'AI 匹配失败，请重新运行'"
+              :title="showLegacyEditor ? alignmentRun.message : `AI整理已结束，录音会自动按连续段归入正文，可直接保存。`"
             />
+            <p v-if="alignmentRun.status === 'failed' && (unmatchedTranscriptIds.size || unmatchedReferenceOrders.size)" class="transcript-ai-hint">
+              录音会自动按连续段归入正文，无需人工逐条匹配。
+            </p>
           </template>
           <span v-else class="transcript-ai-hint">整理结果会直接显示在下方；正常位置不需要操作。</span>
         </div>
@@ -1189,7 +1210,7 @@ onBeforeUnmount(stopAlignmentPolling)
             @click="selectTranscript(transcript)"
           >
             <div
-              v-if="hasPreparedAlignment && aiMatchForTranscript(transcript.transcript_id) && isFirstVisibleTranscriptInMatch(transcript.transcript_id, aiMatchForTranscript(transcript.transcript_id)!)"
+              v-if="transcriptContentView === 'latest' && hasPreparedAlignment && aiMatchForTranscript(transcript.transcript_id) && isFirstVisibleTranscriptInMatch(transcript.transcript_id, aiMatchForTranscript(transcript.transcript_id)!)"
               class="inline-ai-match"
               :class="{ 'needs-review': aiMatchForTranscript(transcript.transcript_id)!.review_required }"
               @click.stop="focusAiMatch(aiMatchForTranscript(transcript.transcript_id)!)"
@@ -1242,6 +1263,8 @@ onBeforeUnmount(stopAlignmentPolling)
                 @change="toggleMergeSelection(transcript)"
               />
               <strong>{{ transcript.speaker_name }}</strong>
+              <el-tag v-if="transcript.final_excluded || alignmentRun?.excluded_transcript_ids?.includes(transcript.transcript_id)" type="info" size="small">不进入正文</el-tag>
+              <el-tag v-else-if="transcriptContentView === 'latest' && unmatchedTranscriptIds.has(transcript.transcript_id)" type="danger" size="small">按连续段整理</el-tag>
               <span>相对时间 {{ formatRelativeTime(transcriptRelativeSeconds(transcript)) }}</span>
               <el-tag v-if="transcriptContentView === 'latest' && transcript.is_merged" type="success" size="small">
                 已合并 {{ transcript.source_transcript_ids.length }} 条
@@ -1303,6 +1326,7 @@ onBeforeUnmount(stopAlignmentPolling)
           >
             <div class="reference-row__meta">
               <strong>#{{ utterance.order_index }}</strong>
+              <el-tag v-if="unmatchedReferenceOrders.has(utterance.order_index)" type="danger" size="small">按连续段整理</el-tag>
               <span>{{ formatRelativeTime(utterance.start_time) }}</span>
             </div>
             <p>{{ utterance.content }}</p>
@@ -1323,7 +1347,27 @@ onBeforeUnmount(stopAlignmentPolling)
         </div>
       </section>
 
-      <aside class="editor-pane pane-card">
+      <aside v-if="!showLegacyEditor" class="editor-pane pane-card">
+        <RecordingFinalVersionPanel
+          :session-id="selectedSessionId"
+          :alignment-run-id="alignmentRun?.run_id"
+          :alignment-status="alignmentRun?.status"
+          :alignment-offset-seconds="alignmentAnchor ? alignmentAnchor.referenceStartTime - alignmentAnchor.transcriptRelativeSeconds : undefined"
+          :suggested-start-id="alignmentAnchor?.transcriptId"
+          @saved="loadTranscripts(false)"
+        >
+          <template #empty>
+            <div v-if="hasSavedCorrections" class="final-version-list">
+              <article v-for="item in finalTranscripts" :key="item.correction_id || item.transcript_id">
+                <div><strong>{{ item.speaker_name }}</strong><span>{{ formatDateTimeToCST(item.start ?? item.created_at) }}</span></div>
+                <p>{{ item.effective_text || '（无文本）' }}</p>
+              </article>
+            </div>
+            <el-empty v-else description="AI整理完成并确认保存后，显示最终修订结果" :image-size="60" />
+          </template>
+        </RecordingFinalVersionPanel>
+      </aside>
+      <aside v-else class="editor-pane pane-card">
         <div
           v-if="showAlignmentPanel"
           class="ai-ready-panel"
@@ -1364,7 +1408,8 @@ onBeforeUnmount(stopAlignmentPolling)
             <div class="final-version-summary">
               <span class="manual">原有人工修订 {{ manuallyCorrectedFinalCount }}</span>
               <span class="ai">AI 修订 {{ aiCorrectedFinalCount }}</span>
-              <span v-if="originalFinalCount" class="original">保留原文 {{ originalFinalCount }} 条</span>
+              <span v-if="originalFinalCount" class="original">前后保留原文 {{ originalFinalCount }} 条</span>
+              <span v-if="excludedFinalTranscripts.length" class="original">未进入正文 {{ excludedFinalTranscripts.length }} 条</span>
             </div>
             <div class="final-version-actions">
               <el-button
@@ -1374,7 +1419,7 @@ onBeforeUnmount(stopAlignmentPolling)
               >查看修订前内容并重新整理</el-button>
             </div>
             <p class="final-version-note">
-              修订内容与未被修订的实时转写原文均按原始时间顺序显示，不删除任何未匹配内容。
+              对齐范围内只显示录音修订内容，未匹配的实时转写不进入正文；对齐范围前后可保留原文。
             </p>
             <div class="final-version-list">
               <article
@@ -1487,7 +1532,7 @@ onBeforeUnmount(stopAlignmentPolling)
 </template>
 
 <style scoped>
-.correction-page { display: flex; flex-direction: column; gap: 14px; min-width: 1180px; }
+.correction-page { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .page-header h1 { margin: 0; color: #1e2d40; font-size: 20px; }
 .page-header p { margin: 6px 0 0; color: #68778e; font-size: 14px; }
 .filter-card { border: 1px solid #e3e9f2; }
@@ -1495,22 +1540,22 @@ onBeforeUnmount(stopAlignmentPolling)
 .filter-actions { display: flex; white-space: nowrap; }
 .summary-strip { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px; overflow: hidden; border: 1px solid #e3e9f2; border-radius: 8px; background: #e3e9f2; }
 .summary-strip > div { display: flex; min-height: 58px; flex-direction: column; justify-content: center; gap: 4px; padding: 9px 16px; background: #fff; }
-.summary-strip span { color: #748196; font-size: 12px; }
+.summary-strip span { color: #748196; font-size: 13px; }
 .summary-strip strong { color: #26364b; font-size: 16px; }
 .summary-strip .corrected-number { color: #b45309; }
 .alignment-strip { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 11px 14px; border: 1px solid #d7e1ee; border-radius: 8px; background: #f8fafc; }
 .alignment-strip.is-aligned { border-color: #9bd5b7; background: #f2fbf6; }
-.alignment-copy { display: flex; min-width: 0; flex: 1; flex-wrap: wrap; align-items: center; gap: 6px 12px; color: #627086; font-size: 12px; }
-.alignment-copy strong { color: #26364b; font-size: 13px; }
+.alignment-copy { display: flex; min-width: 0; flex: 1; flex-wrap: wrap; align-items: center; gap: 6px 12px; color: #627086; font-size: 13px; }
+.alignment-copy strong { color: #26364b; font-size: 14px; }
 .alignment-copy .current-alignment { flex-basis: 100%; color: #327255; }
 .alignment-actions { display: flex; flex: 0 0 auto; gap: 8px; }
 .alignment-actions .el-button + .el-button { margin-left: 0; }
 .transcript-ai-bar { padding: 10px 12px; border-bottom: 1px solid #e1e7f0; background: #f8f7ff; }
 .transcript-ai-bar__top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.transcript-ai-bar__top > div { display: flex; align-items: center; gap: 7px; color: #334155; font-size: 13px; }
-.transcript-ai-hint { display: block; margin-top: 6px; color: #718096; font-size: 11px; }
+.transcript-ai-bar__top > div { display: flex; align-items: center; gap: 7px; color: #334155; font-size: 14px; }
+.transcript-ai-hint { display: block; margin-top: 6px; color: #718096; font-size: 12px; }
 .ai-progress { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; }
-.ai-progress span { color: #68778e; font-size: 12px; }
+.ai-progress span { color: #68778e; font-size: 13px; }
 .ai-summary { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
 .transcript-ai-controls { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .transcript-ai-controls .el-button + .el-button { margin-left: 0; }
@@ -1518,9 +1563,9 @@ onBeforeUnmount(stopAlignmentPolling)
 .inline-ai-match.needs-review { border-color: #f0b65a; background: #fff8e8; }
 .inline-ai-match > div { min-width: 0; }
 .inline-ai-match__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
-.inline-ai-match__meta strong { color: #276749; font-size: 11px; }
-.inline-ai-match p { margin: 5px 0 0; color: #40574d; font-size: 12px; line-height: 1.5; white-space: pre-wrap; }
-.inline-ai-match small { display: block; margin-top: 4px; color: #9a6700; font-size: 10px; }
+.inline-ai-match__meta strong { color: #276749; font-size: 12px; }
+.inline-ai-match p { margin: 5px 0 0; color: #40574d; font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
+.inline-ai-match small { display: block; margin-top: 4px; color: #9a6700; font-size: 12px; }
 .boundary-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; max-width: 210px; }
 .boundary-actions .el-button + .el-button { margin-left: 0; }
 .correction-workbench { display: grid; grid-template-columns: minmax(330px, .9fr) minmax(400px, 1.15fr) minmax(370px, 1fr); gap: 12px; height: 62vh; min-height: 520px; }
@@ -1531,7 +1576,7 @@ onBeforeUnmount(stopAlignmentPolling)
 .pane-heading { display: flex; min-height: 58px; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #e7ecf3; box-sizing: border-box; }
 .pane-heading > div { display: flex; flex-direction: column; gap: 3px; }
 .pane-heading strong { color: #24344a; font-size: 15px; }
-.pane-heading span { color: #7a8799; font-size: 12px; }
+.pane-heading span { color: #7a8799; font-size: 13px; }
 .pane-heading .transcript-heading-actions { align-items: flex-end; flex-direction: row; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .pane-heading .merge-actions { flex-direction: row; flex-wrap: wrap; justify-content: flex-end; }
 .merge-actions .el-button + .el-button { margin-left: 0; }
@@ -1545,8 +1590,8 @@ onBeforeUnmount(stopAlignmentPolling)
 .transcript-row.ai-focused { outline: 2px solid #8b5cf6; outline-offset: -2px; }
 .transcript-row.corrected:not(.active) { border-color: #f3c477; background: #fffbeb; }
 .transcript-row__meta { display: flex; align-items: center; gap: 9px; }
-.transcript-row__meta strong { color: #26364b; font-size: 13px; }
-.transcript-row__meta span { margin-right: auto; color: #8995a6; font-size: 11px; }
+.transcript-row__meta strong { color: #26364b; font-size: 14px; }
+.transcript-row__meta span { margin-right: auto; color: #8995a6; font-size: 12px; }
 .transcript-row p { margin: 7px 0 0; color: #405067; font-size: 14px; line-height: 1.6; white-space: pre-wrap; }
 .pagination { display: flex; min-height: 52px; align-items: center; justify-content: flex-end; padding: 5px 12px; border-top: 1px solid #e7ecf3; }
 .reference-list { flex: 1; overflow-y: auto; padding: 10px; }
@@ -1557,62 +1602,62 @@ onBeforeUnmount(stopAlignmentPolling)
 .reference-row.active { border-color: #3b82f6; background: #eff6ff; box-shadow: inset 4px 0 #3b82f6; }
 .reference-row.ai-focused { outline: 2px solid #8b5cf6; outline-offset: -2px; }
 .reference-row__meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.reference-row__meta strong { color: #217052; font-size: 12px; }
-.reference-row__meta span { color: #87968f; font-size: 11px; }
+.reference-row__meta strong { color: #217052; font-size: 13px; }
+.reference-row__meta span { color: #87968f; font-size: 12px; }
 .reference-row p { margin: 6px 0 0; color: #40574d; font-size: 14px; line-height: 1.6; white-space: pre-wrap; }
-.reference-note { padding: 9px 12px; border-top: 1px solid #e7ecf3; color: #7b8b84; font-size: 11px; line-height: 1.5; }
+.reference-note { padding: 9px 12px; border-top: 1px solid #e7ecf3; color: #7b8b84; font-size: 12px; line-height: 1.5; }
 .editor-pane { overflow-y: auto; }
 .editor-pane .pane-heading { flex: 0 0 auto; }
 .ai-ready-panel { display: flex; min-height: 100%; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 30px; box-sizing: border-box; text-align: center; background: linear-gradient(180deg, #f2fbf6 0%, #fff 70%); }
 .ai-ready-panel h2 { margin: 2px 0 0; color: #22543d; font-size: 22px; }
 .ai-ready-panel p { max-width: 330px; margin: 0; color: #536b60; font-size: 14px; line-height: 1.75; }
-.ai-ready-panel small { max-width: 330px; color: #718096; font-size: 12px; line-height: 1.6; }
+.ai-ready-panel small { max-width: 330px; color: #718096; font-size: 13px; line-height: 1.6; }
 .ai-ready-count { display: flex; flex-direction: column; gap: 3px; padding: 14px 32px; border: 1px solid #b7e1ca; border-radius: 10px; background: #fff; }
 .ai-ready-count strong { color: #16a34a; font-size: 30px; }
-.ai-ready-count span { color: #64748b; font-size: 12px; }
+.ai-ready-count span { color: #64748b; font-size: 13px; }
 .ai-ready-panel.shows-final { min-height: 0; align-items: stretch; justify-content: flex-start; gap: 10px; padding: 0; text-align: left; background: #fff; }
 .final-version-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 16px 10px; border-bottom: 1px solid #e5e7eb; background: #f2fbf6; }
 .final-version-heading > div { display: flex; align-items: center; gap: 8px; }
 .final-version-heading h2 { margin: 0; font-size: 17px; }
-.final-version-heading > span { color: #64748b; font-size: 11px; }
+.final-version-heading > span { color: #64748b; font-size: 12px; }
 .final-version-summary { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px; }
-.final-version-summary span { padding: 5px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; }
+.final-version-summary span { padding: 5px 8px; border-radius: 6px; font-size: 12px; font-weight: 700; }
 .final-version-summary .manual { color: #9a5b00; background: #fff3d6; }
 .final-version-summary .ai { color: #18794e; background: #e7f8ef; }
 .final-version-summary .original { color: #596579; background: #edf1f6; }
 .final-version-actions { padding: 0 16px; }
-.ai-ready-panel .final-version-note { max-width: none; padding: 0 16px; color: #557064; font-size: 12px; line-height: 1.55; }
+.ai-ready-panel .final-version-note { max-width: none; padding: 0 16px; color: #557064; font-size: 13px; line-height: 1.55; }
 .final-version-list { flex: 1; overflow-y: auto; padding: 0 12px 12px; }
 .final-version-list article { margin-bottom: 8px; padding: 10px 11px; border: 1px solid #d7e9df; border-radius: 8px; background: #fbfefc; }
 .final-version-list article.is-manual { border-color: #efc472; background: #fffaf0; }
 .final-version-list article.is-ai { border-color: #a7d7bd; background: #f5fcf8; }
 .final-version-list article > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.final-version-list article strong { color: #285b44; font-size: 12px; }
-.final-version-list article span { color: #84958d; font-size: 10px; }
+.final-version-list article strong { color: #285b44; font-size: 13px; }
+.final-version-list article span { color: #84958d; font-size: 12px; }
 .final-row-meta { display: flex; align-items: center; justify-content: flex-end; gap: 5px; }
-.final-version-list article p { margin: 6px 0 0; color: #334b40; font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
-.final-version-list article small { display: block; max-width: none; margin-top: 5px; color: #7a8d83; font-size: 10px; }
+.final-version-list article p { margin: 6px 0 0; color: #334b40; font-size: 14px; line-height: 1.6; white-space: pre-wrap; }
+.final-version-list article small { display: block; max-width: none; margin-top: 5px; color: #7a8d83; font-size: 12px; }
 .editor-form { display: flex; flex-direction: column; padding: 16px; }
 .speaker-card { padding: 11px 12px; border-radius: 8px; background: #f4f7fb; }
 .speaker-card > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .speaker-card strong { color: #26364b; font-size: 14px; }
-.speaker-card span, .speaker-card small { color: #7b8798; font-size: 11px; }
+.speaker-card span, .speaker-card small { color: #7b8798; font-size: 12px; }
 .speaker-card small { display: block; margin-top: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.editor-form label { margin: 14px 0 6px; color: #34445a; font-size: 12px; font-weight: 700; }
+.editor-form label { margin: 14px 0 6px; color: #34445a; font-size: 13px; font-weight: 700; }
 .original-text { min-height: 86px; padding: 11px 12px; border: 1px solid #e2e8f0; border-radius: 7px; background: #f8fafc; color: #536176; font-size: 14px; line-height: 1.65; white-space: pre-wrap; }
 .source-transcript-list { overflow: hidden; border: 1px solid #d8ddeb; border-radius: 7px; background: #fafbff; }
 .source-transcript-list > div { padding: 9px 11px; border-bottom: 1px solid #e7eaf1; }
 .source-transcript-list > div:last-child { border-bottom: 0; }
-.source-transcript-list span { color: #7c8798; font-size: 11px; }
-.source-transcript-list p { margin: 4px 0 0; color: #4d5b70; font-size: 13px; line-height: 1.55; white-space: pre-wrap; }
+.source-transcript-list span { color: #7c8798; font-size: 12px; }
+.source-transcript-list p { margin: 4px 0 0; color: #4d5b70; font-size: 14px; line-height: 1.55; white-space: pre-wrap; }
 .selected-reference { padding: 10px 11px; border: 1px solid #93c5fd; border-radius: 7px; background: #eff6ff; }
 .selected-reference > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.selected-reference strong { color: #2563eb; font-size: 12px; }
-.selected-reference span { color: #7184a0; font-size: 11px; }
-.selected-reference p { margin: 7px 0 9px; color: #405067; font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
+.selected-reference strong { color: #2563eb; font-size: 13px; }
+.selected-reference span { color: #7184a0; font-size: 12px; }
+.selected-reference p { margin: 7px 0 9px; color: #405067; font-size: 14px; line-height: 1.6; white-space: pre-wrap; }
 .reference-actions { display: flex; gap: 6px; }
 .reference-actions .el-button + .el-button { margin-left: 0; }
-.saved-meta, .dirty-note { margin-top: 10px; color: #8390a2; font-size: 11px; }
+.saved-meta, .dirty-note { margin-top: 10px; color: #8390a2; font-size: 12px; }
 .dirty-note { color: #b7791f; }
 .editor-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .editor-actions .el-button + .el-button { margin-left: 0; }
@@ -1622,3 +1667,5 @@ onBeforeUnmount(stopAlignmentPolling)
   .transcript-ai-controls { align-items: flex-start; flex-direction: column; }
 }
 </style>
+
+<style scoped src="../../styles/review-workspace.css"></style>

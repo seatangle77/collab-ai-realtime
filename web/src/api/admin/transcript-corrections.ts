@@ -25,6 +25,7 @@ export interface TranscriptCorrectionSession {
 }
 
 export interface CorrectableTranscript {
+  final_excluded?: boolean
   transcript_id: string
   group_id: string
   session_id: string
@@ -65,6 +66,7 @@ export interface MergedTranscriptCorrection {
 }
 
 export interface ListCorrectableTranscriptsParams {
+  content_view?: 'original' | 'latest'
   page?: number
   page_size?: number
   correction_status?: CorrectionStatus
@@ -142,6 +144,9 @@ export interface AlignmentRun {
   total_tokens: number
   created_at: string
   out_of_scope_transcript_ids: string[]
+  unmatched_transcript_ids?: string[]
+  unmatched_reference_orders?: number[]
+  excluded_transcript_ids?: string[]
 }
 
 export interface SaveAlignmentRunResult {

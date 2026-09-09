@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import uuid
 from datetime import datetime
 from typing import Any
@@ -11,10 +12,12 @@ from pydantic import Field, field_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .recording_document_metadata import decode_document, public_reason
 from ..api_model import ApiModel
 from ..db import get_db
 from .deps import require_admin
 from .schemas import Page, PageMeta
+from .cue_related_discussion import RelatedDiscussionOut, eligible_transcripts, find_related
 
 
 router = APIRouter(
@@ -54,6 +57,13 @@ class CueCodingOut(ApiModel):
     updated_at: datetime
 
 
+class CueGenerationAnchor(ApiModel):
+    transcript_id: str | None = None
+    speaker_id: str | None = None
+    speaker_name: str | None = None
+    text: str | None = None
+
+
 class CueEventOut(ApiModel):
     push_log_id: str
     queue_id: str | None = None
@@ -68,6 +78,8 @@ class CueEventOut(ApiModel):
     state_type: str
     received_at: datetime
     delivery_reason: str | None = None
+    generation_analysis: str | None = None
+    generation_anchor: CueGenerationAnchor | None = None
     possible_duplicate: bool = False
     coding: CueCodingOut | None = None
 
@@ -166,6 +178,11 @@ def _collapse_context_transcripts(
     emitted_corrections: set[str] = set()
     result: list[CueContextTranscriptOut] = []
     for row in rows:
+        row = dict(row)
+        if decode_document(row.get('correction_reason'), row.get('text')):
+            row['speaker_name'] = '录音修订（说话人见最终版本）'
+            row['speaker_user_id'] = None
+        row['correction_reason'] = public_reason(row.get('correction_reason'))
         correction_id = row.get("correction_id")
         source_ids = list(row.get("source_transcript_ids") or [row["transcript_id"]])
         is_merged = bool(row.get("is_merged"))
@@ -190,8 +207,8 @@ def _collapse_context_transcripts(
             **row,
             "transcript_id": source_ids[0],
             "source_transcript_ids": source_ids,
-            "speaker_user_id": speaker_ids[0] if len(speaker_ids) == 1 else None,
-            "speaker_name": " / ".join(speaker_names),
+            "speaker_user_id": speaker_ids[0] if len(speaker_ids) == 1 and row.get("correction_reason") != "录音完整修订" else None,
+            "speaker_name": row["speaker_name"] if row.get("correction_reason") == "录音完整修订" else " / ".join(speaker_names),
             "original_text": " ".join(
                 str(item.get("original_text") or "").strip()
                 for item in members
@@ -294,6 +311,7 @@ def _event_select(where_sql: str) -> str:
             COALESCE(pq.state_type, ds.state_type) AS state_type,
             COALESCE(pl.delivered_at, pl.triggered_at) AS received_at,
             pl.delivery_reason,
+            basis.trigger_metrics AS generation_basis,
             EXISTS (
                 SELECT 1
                 FROM push_logs duplicate
@@ -326,6 +344,25 @@ def _event_select(where_sql: str) -> str:
         JOIN users_info target_user ON target_user.id = pl.target_user_id
         LEFT JOIN push_queue pq ON pq.id = pl.queue_id
         LEFT JOIN discussion_states ds ON ds.id = pl.state_id
+        LEFT JOIN LATERAL (
+            SELECT source.trigger_metrics
+            FROM discussion_states source
+            WHERE source.session_id = pl.session_id
+              AND source.target_user_id = pl.target_user_id
+              AND (
+                  source.trigger_metrics ->> 'queued_push_id' = pl.queue_id
+                  OR (
+                      source.id = pl.state_id
+                      AND (
+                          pl.queue_id IS NULL
+                          OR source.trigger_metrics ->> 'queued_push_id' IS NULL
+                      )
+                  )
+              )
+            ORDER BY (source.id = pl.state_id) DESC NULLS LAST,
+                     source.triggered_at DESC, source.id DESC
+            LIMIT 1
+        ) basis ON TRUE
         LEFT JOIN cue_uptake_codes cuc
                ON cuc.push_log_id = pl.id
               AND cuc.coder_role = :coder_role
@@ -351,6 +388,21 @@ def _row_to_coding(row: dict[str, Any]) -> CueCodingOut | None:
 
 
 def _row_to_event(row: dict[str, Any]) -> CueEventOut:
+    basis = row.get("generation_basis")
+    if isinstance(basis, str):
+        try:
+            basis = json.loads(basis)
+        except (ValueError, TypeError):
+            basis = None
+    basis = basis if isinstance(basis, dict) else {}
+    analysis = basis.get("analysis")
+    anchor = basis.get("anchor")
+    # Historical records may contain missing or malformed optional metadata.
+    anchor_fields = {
+        key: value.strip()
+        for key, value in (anchor.items() if isinstance(anchor, dict) else [])
+        if key in CueGenerationAnchor.model_fields and isinstance(value, str) and value.strip()
+    }
     return CueEventOut(
         push_log_id=row["push_log_id"],
         queue_id=row.get("queue_id"),
@@ -365,6 +417,8 @@ def _row_to_event(row: dict[str, Any]) -> CueEventOut:
         state_type=row["state_type"],
         received_at=row["received_at"],
         delivery_reason=row.get("delivery_reason"),
+        generation_analysis=analysis.strip() or None if isinstance(analysis, str) else None,
+        generation_anchor=CueGenerationAnchor(**anchor_fields) if anchor_fields else None,
         possible_duplicate=bool(row.get("possible_duplicate")),
         coding=_row_to_coding(row),
     )
@@ -622,6 +676,20 @@ async def get_cue_session_context(
     )
 
 
+@router.post("/events/{push_log_id}/related-discussion", response_model=RelatedDiscussionOut)
+async def find_cue_related_discussion(push_log_id: str, db: AsyncSession = Depends(get_db)):
+    session_id = await _get_eligible_event_session(db, push_log_id)
+    context = await get_cue_session_context(session_id, "primary", db)
+    cue = next((item for item in context.cues if item.push_log_id == push_log_id), None)
+    if cue is None:
+        raise HTTPException(404, "提示不存在")
+    rows = (await db.execute(text(
+        "SELECT transcript_id, start FROM speech_transcripts WHERE session_id = :session_id"
+    ), {"session_id": session_id})).mappings().all()
+    transcripts, excluded = eligible_transcripts(context.transcripts, {row["transcript_id"]: row["start"] for row in rows}, cue.received_at)
+    return await find_related(cue, transcripts, excluded)
+
+
 @router.put("/events/{push_log_id}/coding", response_model=CueCodingOut)
 async def save_cue_coding(
     push_log_id: str,
@@ -843,6 +911,7 @@ async def export_cue_codings(
                            COALESCE(u.name, t.speaker, '未知说话人') AS speaker_name,
                            COALESCE(tc.corrected_text, t.text) AS text,
                            tc.id AS correction_id,
+                           tc.correction_reason,
                            COALESCE(correction_members.member_count, 0) AS member_count
                     FROM speech_transcripts t
                     LEFT JOIN users_info u
@@ -873,7 +942,8 @@ async def export_cue_codings(
                 else row["transcript_id"]
             )
             evidence_key_by_transcript[row["transcript_id"]] = key
-            evidence_map.setdefault(key, f"{row['speaker_name']}：{row.get('text') or ''}")
+            speaker = '录音修订（说话人见最终版本）' if decode_document(row.get('correction_reason'), row.get('text')) else row['speaker_name']
+            evidence_map.setdefault(key, f"{speaker}：{row.get('text') or ''}")
 
     output = io.StringIO()
     writer = csv.writer(output)
