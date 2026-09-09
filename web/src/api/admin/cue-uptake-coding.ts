@@ -89,11 +89,17 @@ export interface CueRelatedDiscussion {
   matches: Array<{ transcript_id: string; text: string; reason: string }>
   analyzed_count: number
   excluded_boundary_count: number
+  interpretation: string | null
+  suggested_code: 'not_discussed' | 'discussed_not_adopted' | 'discussed_adopted' | null
+  coding_reason: string | null
 }
 
-export function findCueRelatedDiscussion(pushLogId: string): Promise<CueRelatedDiscussion> {
+export type CueTaskType = 'moon' | 'sea' | 'winter'
+
+export function findCueRelatedDiscussion(pushLogId: string, taskType: CueTaskType): Promise<CueRelatedDiscussion> {
   return http.post<CueRelatedDiscussion>(
     `/api/admin/cue-uptake-coding/events/${encodeURIComponent(pushLogId)}/related-discussion`,
+    { task_type: taskType },
   )
 }
 

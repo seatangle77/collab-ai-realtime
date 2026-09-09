@@ -17,7 +17,7 @@ from ..api_model import ApiModel
 from ..db import get_db
 from .deps import require_admin
 from .schemas import Page, PageMeta
-from .cue_related_discussion import RelatedDiscussionOut, eligible_transcripts, find_related
+from .cue_related_discussion import RelatedDiscussionIn, RelatedDiscussionOut, eligible_transcripts, find_related
 
 
 router = APIRouter(
@@ -677,7 +677,7 @@ async def get_cue_session_context(
 
 
 @router.post("/events/{push_log_id}/related-discussion", response_model=RelatedDiscussionOut)
-async def find_cue_related_discussion(push_log_id: str, db: AsyncSession = Depends(get_db)):
+async def find_cue_related_discussion(push_log_id: str, payload: RelatedDiscussionIn, db: AsyncSession = Depends(get_db)):
     session_id = await _get_eligible_event_session(db, push_log_id)
     context = await get_cue_session_context(session_id, "primary", db)
     cue = next((item for item in context.cues if item.push_log_id == push_log_id), None)
@@ -687,7 +687,7 @@ async def find_cue_related_discussion(push_log_id: str, db: AsyncSession = Depen
         "SELECT transcript_id, start FROM speech_transcripts WHERE session_id = :session_id"
     ), {"session_id": session_id})).mappings().all()
     transcripts, excluded = eligible_transcripts(context.transcripts, {row["transcript_id"]: row["start"] for row in rows}, cue.received_at)
-    return await find_related(cue, transcripts, excluded)
+    return await find_related(cue, transcripts, excluded, payload.task_type)
 
 
 @router.put("/events/{push_log_id}/coding", response_model=CueCodingOut)

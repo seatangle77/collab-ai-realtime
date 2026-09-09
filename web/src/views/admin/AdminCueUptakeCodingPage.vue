@@ -11,6 +11,7 @@ import {
   getCueSessionContext,
   findCueRelatedDiscussion,
   type CueRelatedDiscussion,
+  type CueTaskType,
   listCueCodingGroups,
   listCueEvents,
   saveCueCoding,
@@ -36,28 +37,28 @@ const CODE_OPTIONS: Array<{
     value: 'not_discussed',
     label: '未讨论',
     short: '未讨论',
-    definition: '后续讨论中没有把该提示内容拿出来讨论。',
+    definition: '后续讨论未实质涉及提示提出的问题或思考方向；仅出现相同物品名称不算讨论',
     type: 'info',
   },
   {
     value: 'discussed_not_adopted',
     label: '讨论未采纳',
     short: '未采纳',
-    definition: '提示被拿出来讨论，但没有被接受或用于推进讨论。',
+    definition: '后续实质讨论了提示提出的问题或思考方向，但未见其被用于形成、支持或调整小组观点、判断或答案',
     type: 'warning',
   },
   {
     value: 'discussed_adopted',
     label: '讨论并采纳',
     short: '已采纳',
-    definition: '提示经过讨论后被认为有用，并用于形成观点或推进讨论。',
+    definition: '后续实质讨论了提示提出的问题或思考方向，并有明确证据表明它被用于形成、支持或调整小组观点、判断或答案；不要求同意问句隐含的立场',
     type: 'success',
   },
   {
     value: 'uncertain',
     label: '无法判断',
     short: '无法判断',
-    definition: '现有文本或其他材料不足以作出判断。',
+    definition: '因提示前已有相同讨论、提示重叠或材料不足，无法可靠区分上述情况',
     type: 'danger',
   },
   {
@@ -106,6 +107,27 @@ const relatedResults = reactive(new Map<string, CueRelatedDiscussion>())
 const relatedPending = reactive(new Set<string>())
 const relatedErrors = reactive(new Map<string, string>())
 const relatedPositions = reactive(new Map<string, number>())
+const sessionTasks = reactive<Record<string, CueTaskType>>({})
+try {
+  const saved = JSON.parse(localStorage.getItem('cue-session-tasks-v1') || '{}')
+  for (const [id, task] of Object.entries(saved || {})) {
+    if (task === 'moon' || task === 'sea' || task === 'winter') sessionTasks[id] = task
+  }
+} catch { /* Invalid or unavailable local storage leaves tasks unselected. */ }
+const selectedTask = computed(() => selectedEvent.value ? sessionTasks[selectedEvent.value.session_id] : undefined)
+const sessionAnalysisPending = computed(() => events.value.some(event =>
+  event.session_id === selectedEvent.value?.session_id && relatedPending.has(event.push_log_id)))
+function changeTask(task: CueTaskType) {
+  const event = selectedEvent.value
+  if (!event) return
+  sessionTasks[event.session_id] = task
+  try { localStorage.setItem('cue-session-tasks-v1', JSON.stringify(sessionTasks)) } catch { /* Keep in-memory selection. */ }
+  for (const cue of context.value?.cues ?? []) {
+    relatedResults.delete(cue.push_log_id)
+    relatedErrors.delete(cue.push_log_id)
+    relatedPositions.delete(cue.push_log_id)
+  }
+}
 const currentRelated = computed(() => relatedResults.get(selectedPushLogId.value))
 const relatedMatches = computed(() => (currentRelated.value?.matches ?? []).filter(match =>
   context.value?.transcripts.some(item => item.transcript_id === match.transcript_id && item.text === match.text),
@@ -115,13 +137,15 @@ const relatedPosition = computed(() => relatedPositions.get(selectedPushLogId.va
 
 async function lookupRelated() {
   const event = selectedEvent.value
-  if (!event || relatedPending.has(event.push_log_id)) return
+  const task = selectedTask.value
+  if (!event || !task || relatedPending.has(event.push_log_id)) return
   const id = event.push_log_id
   relatedPending.add(id)
   relatedErrors.delete(id)
   try {
-    const result = await findCueRelatedDiscussion(id)
+    const result = await findCueRelatedDiscussion(id, task)
     if (result.push_log_id !== id) throw new Error('查找结果与当前提示不一致，请重试')
+    if (sessionTasks[event.session_id] !== task) return
     relatedResults.set(id, result)
     relatedPositions.delete(id)
   } catch (error: any) {
@@ -145,6 +169,15 @@ function navigateRelated(direction: number) {
   if (container && target) {
     container.scrollTo({ top: target.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop - 12, behavior: 'auto' })
   }
+}
+
+function applySuggestedCode() {
+  const recommendation = currentRelated.value
+  if (!recommendation?.suggested_code || loadingContext.value || saving.value
+    || relatedMatches.value.length !== recommendation.matches.length) return
+  form.uptake_code = recommendation.suggested_code
+  markDirty()
+  ElMessage.info('已填入推荐编码，请核对证据和判断说明后保存')
 }
 
 const filters = reactive({
@@ -698,8 +731,13 @@ onMounted(async () => {
         </div>
         <div v-if="selectedEvent" class="related-toolbar">
           <div class="related-controls">
-            <el-button size="small" type="primary" plain :loading="relatedPending.has(selectedPushLogId)" :disabled="loadingContext || !context" @click="lookupRelated">
-              {{ relatedPending.has(selectedPushLogId) ? '正在查找' : currentRelated ? '重新查找' : 'AI 查找相关讨论' }}
+            <el-select :model-value="selectedTask" aria-label="本会话任务类型" placeholder="先选择本会话任务" size="small" style="width: 170px" :disabled="sessionAnalysisPending" @change="changeTask">
+              <el-option label="月球求生" value="moon" />
+              <el-option label="海上求生" value="sea" />
+              <el-option label="冬季求生（冬日）" value="winter" />
+            </el-select>
+            <el-button size="small" type="primary" plain :loading="relatedPending.has(selectedPushLogId)" :disabled="loadingContext || !context || !selectedTask" @click="lookupRelated">
+              {{ relatedPending.has(selectedPushLogId) ? '正在分析' : currentRelated ? '重新分析' : 'AI 分析提示与讨论' }}
             </el-button>
             <template v-if="currentRelated">
               <span role="status">{{ !currentRelated.analyzed_count ? '没有可分析的后续讨论' : relatedMatches.length ? `找到 ${relatedMatches.length} 条相关讨论` : '未找到相关讨论' }}</span>
@@ -710,7 +748,8 @@ onMounted(async () => {
               </template>
             </template>
           </div>
-          <small>仅查找当前提示之后的讨论；AI 标记供参考，刷新后清除。</small>
+          <small v-if="!selectedTask">请先选择本会话任务类型；选择会在当前浏览器按会话记住。</small>
+          <small>解释提示含义，分析提示后直到本次会话结束的讨论并推荐编码；结果供参考，刷新后清除。</small>
           <small v-if="currentRelated?.excluded_boundary_count">已排除 {{ currentRelated.excluded_boundary_count }} 段跨越提示时间、时间相同或时间不明的发言。</small>
           <small v-if="currentRelated && relatedMatches.length !== currentRelated.matches.length">部分原文与结果不一致，已隐藏相关标记，请刷新页面后重新查找。</small>
           <span v-if="relatedErrors.get(selectedPushLogId)" class="related-error" role="alert">{{ relatedErrors.get(selectedPushLogId) }}</span>
@@ -783,6 +822,7 @@ onMounted(async () => {
         </div>
         <div v-if="selectedEvent" class="coding-form">
           <section class="selected-cue">
+            <header class="review-block-heading"><strong>提示原文</strong><span>生成时记录</span></header>
             <div><span>提示对象</span><strong>{{ selectedEvent.target_user_name }}</strong></div>
             <p>{{ selectedEvent.push_content }}</p>
             <small>{{ formatDateTimeToCST(selectedEvent.received_at) }}</small>
@@ -801,6 +841,19 @@ onMounted(async () => {
             </details>
           </section>
 
+          <section v-if="currentRelated?.interpretation" class="cue-ai-analysis" aria-label="AI 提示分析">
+            <header class="review-block-heading"><strong>AI 分析</strong><span>辅助参考</span></header>
+            <strong>提示含义</strong>
+            <p>{{ currentRelated.interpretation }}</p>
+            <template v-if="currentRelated.suggested_code">
+              <div class="ai-recommendation-label"><strong>推荐编码</strong><span>{{ codeMeta(currentRelated.suggested_code)?.label }}</span></div>
+              <p>{{ currentRelated.coding_reason }}</p>
+              <small>仅回答或展开问题不自动算采纳，需有用于小组判断的明确证据。提示前已有讨论或提示重叠需人工核对；相关高亮不等于正式证据。</small>
+              <el-button size="small" plain :disabled="loadingContext || saving || relatedPending.has(selectedPushLogId) || relatedMatches.length !== currentRelated.matches.length" @click="applySuggestedCode">采用推荐编码</el-button>
+            </template>
+          </section>
+
+          <div class="manual-coding-heading">人工编码</div>
           <el-radio-group v-model="form.uptake_code" class="code-options" @change="markDirty">
             <el-radio
               v-for="option in CODE_OPTIONS"
@@ -818,7 +871,7 @@ onMounted(async () => {
 
           <section class="evidence-box">
             <div class="section-title">
-              <strong>证据发言</strong>
+              <strong>已选证据发言</strong>
               <span>{{ selectedEvidence.length }} 条</span>
             </div>
             <div v-if="selectedEvidence.length" class="evidence-list">
@@ -926,11 +979,11 @@ onMounted(async () => {
 .coding-pane { overflow-y: auto; }
 .coding-pane > .pane-heading { flex: 0 0 auto; }
 .coding-form { padding: 14px; }
-.selected-cue { padding: 11px 12px; border-radius: 8px; background: #f4f7fb; }
+.selected-cue { padding: 14px; border: 1px solid #e9d5ac; border-left: 3px solid #b88635; border-radius: 9px; background: #fffaf0; }
 .selected-cue > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.selected-cue span, .selected-cue small { color: #77859a; font-size: 12px; }
+.selected-cue span, .selected-cue small { color: #7b6a50; font-size: 12px; }
 .selected-cue strong { color: #293a51; font-size: 14px; }
-.selected-cue p { margin: 8px 0; color: #34455c; font-size: 14px; line-height: 1.55; white-space: pre-wrap; }
+.selected-cue p { margin: 10px 0; color: #493c2b; font-size: 15px; line-height: 1.7; white-space: pre-wrap; }
 .code-options { display: flex; flex-direction: column; align-items: stretch; gap: 8px; margin-top: 12px; }
 .code-options :deep(.el-radio) { width: 100%; height: auto; margin: 0; padding: 10px 11px; box-sizing: border-box; }
 .code-options :deep(.el-radio__label) { min-width: 0; padding-left: 8px; white-space: normal; }
@@ -945,18 +998,18 @@ onMounted(async () => {
 .code-option--not_included { --cue-code-color: #be123c; --cue-code-bg: #fff1f2; }
 .code-option-copy { display: flex; flex-direction: column; gap: 3px; }
 .code-option-copy strong { color: #26364b; font-size: 14px; }
-.code-option-copy span { color: #748196; font-size: 12px; line-height: 1.45; }
-.evidence-box { margin-top: 14px; padding: 10px; border: 1px solid #e2e8f0; border-radius: 8px; }
+.code-option-copy span { color: #64748b; font-size: 13px; line-height: 1.65; }
+.evidence-box { margin-top: 18px; padding: 14px; border: 1px solid #b9dccf; border-left: 3px solid #438770; border-radius: 9px; background: #f3faf7; }
 .section-title { display: flex; align-items: center; justify-content: space-between; }
 .section-title strong, .field-label { color: #34445a; font-size: 13px; font-weight: 700; }
 .section-title span { color: #718098; font-size: 12px; }
 .evidence-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
-.evidence-item { padding: 8px; border-radius: 6px; background: #f0fdf4; }
-.evidence-item > div { display: flex; gap: 8px; }
-.evidence-item strong { color: #23663e; font-size: 12px; }
-.evidence-item span { color: #789184; font-size: 12px; }
-.evidence-item p { display: -webkit-box; overflow: hidden; margin: 4px 0; color: #405749; font-size: 12px; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.empty-hint { margin: 8px 0 0; color: #8995a6; font-size: 12px; }
+.evidence-item { padding: 12px; border: 1px solid #deeee6; border-radius: 7px; background: #fff; }
+.evidence-item > div { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px 10px; }
+.evidence-item strong { color: #28634f; font-size: 13px; }
+.evidence-item span { color: #617e70; font-size: 12px; font-variant-numeric: tabular-nums; }
+.evidence-item p { max-height: 180px; overflow-y: auto; margin: 8px 0; color: #344c40; font-size: 14px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.empty-hint { margin: 10px 0 0; color: #617e70; font-size: 13px; line-height: 1.6; }
 .field-label { display: block; margin: 14px 0 6px; }
 .saved-meta, .dirty-note { margin-top: 9px; color: #8491a3; font-size: 12px; }
 .dirty-note { color: #b7791f; }
@@ -967,12 +1020,26 @@ onMounted(async () => {
   .filters { grid-template-columns: repeat(4, minmax(140px, 1fr)); }
   .coding-workbench { grid-template-columns: 250px minmax(420px, 1fr) 320px; }
 }
-.generation-basis { margin-top: 10px; border-top: 1px solid #dce4ee; padding-top: 8px; }
-.generation-basis summary { cursor: pointer; color: #47658a; font-size: 13px; }
-.generation-basis-content { display: block !important; max-height: 240px; overflow-y: auto; padding-top: 10px; overflow-wrap: anywhere; }
-.generation-basis-content > strong { display: block; font-size: 12px; color: #52647b; }
-.generation-basis-content p { white-space: pre-wrap; font-size: 13px; line-height: 1.6; margin: 5px 0 12px; }
-.generation-basis-content small { display: block; line-height: 1.5; }
+.generation-basis { margin-top: 12px; border-top: 1px solid #eadcbe; padding-top: 10px; }
+.generation-basis summary { cursor: pointer; color: #856020; font-size: 13px; font-weight: 600; }
+.generation-basis summary:focus-visible { outline: 2px solid #b88635; outline-offset: 4px; border-radius: 3px; }
+.cue-ai-analysis { margin: 16px 0; padding: 14px; border: 1px solid #d9ccec; border-left: 3px solid #8b6bb1; border-radius: 9px; background: #f8f5fc; overflow-wrap: anywhere; }
+.cue-ai-analysis strong { display: block; color: #654884; font-size: 13px; }
+.cue-ai-analysis p { margin: 7px 0 14px; font-size: 14px; color: #443b50; line-height: 1.75; white-space: pre-wrap; }
+.cue-ai-analysis small { display: block; color: #756781; font-size: 12px; line-height: 1.65; margin-bottom: 12px; }
+.generation-basis-content { max-height: 280px; overflow-y: auto; margin-top: 10px; padding: 12px; border-radius: 6px; background: #f5eddc; overflow-wrap: anywhere; }
+.generation-basis-content > strong { display: block; font-size: 13px; color: #775723; }
+.generation-basis-content p { white-space: pre-wrap; font-size: 14px; line-height: 1.7; margin: 6px 0 14px; }
+.generation-basis-content small { display: block; line-height: 1.6; }
+.coding-pane .review-block-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 10px; margin-bottom: 14px; }
+.coding-pane .review-block-heading strong { font-size: 14px; font-weight: 650; color: #856020; }
+.coding-pane .review-block-heading span { padding: 2px 7px; border-radius: 4px; background: #f2e6cc; color: #795d2d; font-size: 11px; line-height: 1.5; }
+.cue-ai-analysis .review-block-heading strong { color: #654884; }
+.cue-ai-analysis .review-block-heading span { background: #eae1f3; color: #6c508d; }
+.ai-recommendation-label { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding-top: 12px; border-top: 1px solid #e5dced; }
+.ai-recommendation-label > span { font-size: 13px; font-weight: 600; color: #654884; background: #eae1f3; border-radius: 5px; padding: 3px 8px; }
+.cue-ai-analysis :deep(.el-button) { --el-button-text-color: #654884; --el-button-border-color: #cdbbdf; --el-button-bg-color: #fff; --el-button-hover-text-color: #53356f; --el-button-hover-border-color: #8b6bb1; --el-button-hover-bg-color: #eee7f5; }
+.manual-coding-heading { margin-top: 20px; padding-top: 16px; border-top: 1px solid #e3e8ef; font-size: 14px; font-weight: 650; color: #34445a; }
 </style>
 
 <style scoped src="../../styles/review-workspace.css"></style>
