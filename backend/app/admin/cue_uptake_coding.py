@@ -4,7 +4,7 @@ import csv
 import io
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -13,6 +13,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .recording_document_metadata import decode_document, public_reason
+from .recording_final_versions import get_final_version
 from ..api_model import ApiModel
 from ..db import get_db
 from .deps import require_admin
@@ -92,6 +93,8 @@ class CueContextMemberOut(ApiModel):
 
 class CueContextTranscriptOut(ApiModel):
     transcript_id: str
+    final_version_id: str | None = None
+    relative_seconds: float | None = None
     source_transcript_ids: list[str] = Field(default_factory=list)
     correction_id: str | None = None
     is_merged: bool = False
@@ -115,6 +118,7 @@ class CueSessionContextOut(ApiModel):
     group_name: str
     condition: str
     members: list[CueContextMemberOut]
+    final_version_id: str | None = None
     transcripts: list[CueContextTranscriptOut]
     cues: list[CueEventOut]
 
@@ -169,6 +173,23 @@ class CueCodingGroupOut(ApiModel):
     group_name: str
     condition: str
     event_count: int
+
+
+def _final_version_transcripts(version, session_start):
+    """One displayed row per saved segment, including unlinked and boundary rows."""
+    return [CueContextTranscriptOut(
+        transcript_id=f"final:{version['id']}:{segment['id']}",
+        final_version_id=version['id'],
+        relative_seconds=segment.get('time'),
+        source_transcript_ids=segment.get('transcript_ids') or [],
+        speaker_name=segment.get('speaker_name') or '说话人未确定',
+        text=segment['text'],
+        is_corrected=segment['kind'] == 'recording',
+        correction_id=version['id'],
+        correction_reason='最终修订版本',
+        start=(session_start + timedelta(seconds=segment['time']))
+            if session_start is not None and segment.get('time') is not None else None,
+    ) for segment in version['document']['segments']]
 
 
 def _collapse_context_transcripts(
@@ -576,6 +597,7 @@ async def get_cue_session_context(
         text(
             """
             SELECT cs.id AS session_id, cs.session_title, cs.group_id,
+                   COALESCE(cs.started_at, cs.created_at) AS session_start,
                    g.name AS group_name, g.condition
             FROM chat_sessions cs
             JOIN groups g ON g.id = cs.group_id
@@ -603,50 +625,56 @@ async def get_cue_session_context(
         )
     ).mappings().all()
 
-    transcript_rows = (
-        await db.execute(
-            text(
-                """
-                SELECT t.transcript_id,
-                       COALESCE(t.speaker_user_id, t.user_id, u.id) AS speaker_user_id,
-                       COALESCE(u.name, t.speaker, '未知说话人') AS speaker_name,
-                       COALESCE(tc.corrected_text, t.text) AS text,
-                       t.text AS original_text,
-                       (tc.id IS NOT NULL) AS is_corrected,
-                       tc.id AS correction_id,
-                       tc.correction_reason,
-                       tc.corrected_by,
-                       tc.updated_at AS corrected_at,
-                       t.start, t."end", t.created_at,
-                       COALESCE(
-                           correction_members.transcript_ids,
-                           ARRAY[t.transcript_id]::text[]
-                       ) AS source_transcript_ids,
-                       (COALESCE(correction_members.member_count, 0) > 1) AS is_merged
-                FROM speech_transcripts t
-                LEFT JOIN users_info u
-                       ON u.id = COALESCE(
-                           t.speaker_user_id,
-                           t.user_id,
-                           NULLIF(BTRIM(t.speaker), '')
-                       )
-                LEFT JOIN speech_transcript_correction_members tcm
-                       ON tcm.transcript_id = t.transcript_id
-                LEFT JOIN speech_transcript_corrections tc
-                       ON tc.id = tcm.correction_id
-                LEFT JOIN LATERAL (
-                    SELECT ARRAY_AGG(member.transcript_id ORDER BY member.order_index) AS transcript_ids,
-                           COUNT(*)::int AS member_count
-                    FROM speech_transcript_correction_members member
-                    WHERE member.correction_id = tc.id
-                ) correction_members ON TRUE
-                WHERE t.session_id = :session_id
-                ORDER BY t.start ASC NULLS LAST, t.created_at ASC, t.transcript_id ASC
-                """
-            ),
-            {"session_id": session_id},
-        )
-    ).mappings().all()
+    # Use exactly the same reader as the correct right-hand final-version panel.
+    version = await get_final_version(session_id, db)
+    if version is not None:
+        transcripts = _final_version_transcripts(version, session_row['session_start'])
+    else:
+        transcript_rows = (
+            await db.execute(
+                text(
+                    """
+                    SELECT t.transcript_id,
+                           COALESCE(t.speaker_user_id, t.user_id, u.id) AS speaker_user_id,
+                           COALESCE(u.name, t.speaker, '未知说话人') AS speaker_name,
+                           COALESCE(tc.corrected_text, t.text) AS text,
+                           t.text AS original_text,
+                           (tc.id IS NOT NULL) AS is_corrected,
+                           tc.id AS correction_id,
+                           tc.correction_reason,
+                           tc.corrected_by,
+                           tc.updated_at AS corrected_at,
+                           t.start, t."end", t.created_at,
+                           COALESCE(
+                               correction_members.transcript_ids,
+                               ARRAY[t.transcript_id]::text[]
+                           ) AS source_transcript_ids,
+                           (COALESCE(correction_members.member_count, 0) > 1) AS is_merged
+                    FROM speech_transcripts t
+                    LEFT JOIN users_info u
+                           ON u.id = COALESCE(
+                               t.speaker_user_id,
+                               t.user_id,
+                               NULLIF(BTRIM(t.speaker), '')
+                           )
+                    LEFT JOIN speech_transcript_correction_members tcm
+                           ON tcm.transcript_id = t.transcript_id
+                    LEFT JOIN speech_transcript_corrections tc
+                           ON tc.id = tcm.correction_id
+                    LEFT JOIN LATERAL (
+                        SELECT ARRAY_AGG(member.transcript_id ORDER BY member.order_index) AS transcript_ids,
+                               COUNT(*)::int AS member_count
+                        FROM speech_transcript_correction_members member
+                        WHERE member.correction_id = tc.id
+                    ) correction_members ON TRUE
+                    WHERE t.session_id = :session_id
+                    ORDER BY t.start ASC NULLS LAST, t.created_at ASC, t.transcript_id ASC
+                    """
+                ),
+                {"session_id": session_id},
+            )
+        ).mappings().all()
+        transcripts = _collapse_context_transcripts([dict(row) for row in transcript_rows])
 
     where_sql, params = _build_event_filters(
         coder_role=coder_role,
@@ -671,7 +699,8 @@ async def get_cue_session_context(
         group_name=session_row["group_name"],
         condition=session_row["condition"],
         members=[CueContextMemberOut.model_validate(dict(row)) for row in member_rows],
-        transcripts=_collapse_context_transcripts([dict(row) for row in transcript_rows]),
+        final_version_id=version["id"] if version is not None else None,
+        transcripts=transcripts,
         cues=[_row_to_event(dict(row)) for row in cue_rows],
     )
 
@@ -686,7 +715,10 @@ async def find_cue_related_discussion(push_log_id: str, payload: RelatedDiscussi
     rows = (await db.execute(text(
         "SELECT transcript_id, start FROM speech_transcripts WHERE session_id = :session_id"
     ), {"session_id": session_id})).mappings().all()
-    transcripts, excluded = eligible_transcripts(context.transcripts, {row["transcript_id"]: row["start"] for row in rows}, cue.received_at)
+    starts = {row["transcript_id"]: row["start"] for row in rows}
+    if context.final_version_id:
+        starts = {item.transcript_id: item.start for item in context.transcripts}
+    transcripts, excluded = eligible_transcripts(context.transcripts, starts, cue.received_at)
     return await find_related(cue, transcripts, excluded, payload.task_type)
 
 
@@ -727,7 +759,12 @@ async def save_cue_coding(
                 },
             )
         ).scalars().all()
-        if set(evidence_rows) != set(payload.evidence_transcript_ids):
+        valid_ids = set(evidence_rows)
+        if any(ident.startswith('final:') for ident in payload.evidence_transcript_ids):
+            version = await get_final_version(session_id, db)
+            if version:
+                valid_ids.update(item.transcript_id for item in _final_version_transcripts(version, None))
+        if not set(payload.evidence_transcript_ids).issubset(valid_ids):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="部分证据发言不存在或不属于该提示的会话",
@@ -944,6 +981,20 @@ async def export_cue_codings(
             evidence_key_by_transcript[row["transcript_id"]] = key
             speaker = '录音修订（说话人见最终版本）' if decode_document(row.get('correction_reason'), row.get('text')) else row['speaker_name']
             evidence_map.setdefault(key, f"{speaker}：{row.get('text') or ''}")
+
+    # Segment references retain the saved version so later revisions do not change evidence.
+    version_ids = list({ident.split(':', 2)[1] for ident in evidence_ids if ident.startswith('final:') and ident.count(':') >= 2})
+    if version_ids:
+        versions = (await db.execute(text("""
+            SELECT id, correction_reason, corrected_text FROM speech_transcript_corrections
+            WHERE id = ANY(:ids)
+        """), {'ids': version_ids})).mappings().all()
+        for version in versions:
+            document = decode_document(version['correction_reason'], version['corrected_text'])
+            if document:
+                for segment in document['segments']:
+                    ident = f"final:{version['id']}:{segment['id']}"
+                    evidence_map[ident] = f"{segment.get('speaker_name') or '说话人未确定'}：{segment['text']}"
 
     output = io.StringIO()
     writer = csv.writer(output)

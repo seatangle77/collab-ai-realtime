@@ -66,7 +66,7 @@ def eligible_transcripts(transcripts: list[Any], starts: dict[str, datetime | No
     eligible = []
     excluded = 0
     for item in transcripts:
-        ids = item.source_transcript_ids or [item.transcript_id]
+        ids = [item.transcript_id] if getattr(item, 'final_version_id', None) else (item.source_transcript_ids or [item.transcript_id])
         times = [starts.get(source_id) for source_id in ids]
         # Check EVERY original member, including missing timestamps and merged text.
         if not all(value is not None and value > cutoff for value in times):
@@ -75,7 +75,7 @@ def eligible_transcripts(transcripts: list[Any], starts: dict[str, datetime | No
             continue
         if item.text and item.text.strip():
             eligible.append(item)
-    return sorted(eligible, key=lambda item: (min(starts[i] for i in (item.source_transcript_ids or [item.transcript_id])), item.transcript_id)), excluded
+    return sorted(eligible, key=lambda item: (min(starts[i] for i in ([item.transcript_id] if getattr(item, 'final_version_id', None) else (item.source_transcript_ids or [item.transcript_id]))), item.transcript_id)), excluded
 
 
 async def find_related(cue: Any, transcripts: list[Any], excluded: int, task_type: TaskType | None = None) -> RelatedDiscussionOut:

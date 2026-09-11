@@ -91,7 +91,7 @@ const sessions = ref<AdminChatSession[]>([])
 const events = ref<CueEvent[]>([])
 const progress = ref<CueCodingProgress | null>(null)
 const context = ref<CueSessionContext | null>(null)
-const contextCache = new Map<string, CueSessionContext>()
+let contextRequest = 0
 const selectedPushLogId = ref('')
 const loading = ref(false)
 const loadingContext = ref(false)
@@ -210,7 +210,8 @@ const visibleGroups = computed(() =>
 const selectedEvidence = computed(() => {
   const idSet = new Set(form.evidence_transcript_ids)
   return (context.value?.transcripts ?? []).filter(item =>
-    evidenceIds(item).some(transcriptId => idSet.has(transcriptId)),
+    evidenceIds(item).some(transcriptId => idSet.has(transcriptId))
+      || item.source_transcript_ids.some(id => idSet.has(id)),
   )
 })
 const completionPercentage = computed(() =>
@@ -230,6 +231,19 @@ const timelineItems = computed<TimelineItem[]>(() => {
     timestamp: cue.received_at,
     cue,
   }))
+  if (context.value.final_version_id) {
+    // Keep the document's exact order, even when times repeat or are missing.
+    const remaining = [...cues].sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp))
+    const result: TimelineItem[] = []
+    for (const transcript of transcripts) {
+      const time = transcript.timestamp ? Date.parse(transcript.timestamp) : null
+      while (remaining.length && time !== null && Date.parse(remaining[0]!.timestamp) <= time) {
+        result.push(remaining.shift()!)
+      }
+      result.push(transcript)
+    }
+    return [...result, ...remaining]
+  }
   return [...transcripts, ...cues].sort((left, right) => {
     const leftTime = left.timestamp ? new Date(left.timestamp).getTime() : Number.MAX_SAFE_INTEGER
     const rightTime = right.timestamp ? new Date(right.timestamp).getTime() : Number.MAX_SAFE_INTEGER
@@ -393,18 +407,15 @@ async function selectEvent(event: CueEvent, askBeforeSwitch = true) {
   if (askBeforeSwitch && !(await confirmDiscard())) return
   selectedPushLogId.value = event.push_log_id
   fillForm(event)
-  const cacheKey = `${event.session_id}:${CODER_ROLE}`
+  const request = ++contextRequest
+  context.value = null
   loadingContext.value = true
   try {
-    let sessionContext = contextCache.get(cacheKey)
-    if (!sessionContext) {
-      sessionContext = await getCueSessionContext(event.session_id, CODER_ROLE)
-      contextCache.set(cacheKey, sessionContext)
-    }
-    if (selectedPushLogId.value !== event.push_log_id) return
+    const sessionContext = await getCueSessionContext(event.session_id, CODER_ROLE)
+    if (request !== contextRequest || selectedPushLogId.value !== event.push_log_id) return
     context.value = sessionContext
     nextTick(() => {
-      if (selectedPushLogId.value !== event.push_log_id) return
+      if (request !== contextRequest || selectedPushLogId.value !== event.push_log_id) return
       const container = timelineScrollRef.value
       const target = document.getElementById(`cue-timeline-${event.push_log_id}`)
       if (!container || !target) return
@@ -414,11 +425,11 @@ async function selectEvent(event: CueEvent, askBeforeSwitch = true) {
       container.scrollTo({ top, behavior: 'auto' })
     })
   } catch (error: any) {
-    if (selectedPushLogId.value !== event.push_log_id) return
+    if (request !== contextRequest || selectedPushLogId.value !== event.push_log_id) return
     context.value = null
     ElMessage.error(error?.message || '加载会话上下文失败')
   } finally {
-    if (selectedPushLogId.value === event.push_log_id) loadingContext.value = false
+    if (request === contextRequest && selectedPushLogId.value === event.push_log_id) loadingContext.value = false
   }
 }
 
@@ -451,7 +462,15 @@ function markDirty() {
   dirty.value = true
 }
 
+function discussionTime(transcript: CueContextTranscript) {
+  if (!transcript.final_version_id) return formatTimeToCST(transcript.start ?? transcript.created_at)
+  const seconds = transcript.relative_seconds
+  if (seconds == null) return '时间未标注'
+  return `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`
+}
+
 function evidenceIds(transcript: CueContextTranscript): string[] {
+  if (transcript.final_version_id) return [transcript.transcript_id]
   return transcript.source_transcript_ids.length
     ? transcript.source_transcript_ids
     : [transcript.transcript_id]
@@ -506,7 +525,7 @@ async function handleSave(moveNext: boolean) {
       coded_by: form.coded_by.trim() || null,
     })
     event.coding = coding
-    const cachedContext = contextCache.get(`${event.session_id}:${CODER_ROLE}`)
+    const cachedContext = context.value?.session_id === event.session_id ? context.value : null
     const cachedEvent = cachedContext?.cues.find(item => item.push_log_id === event.push_log_id)
     if (cachedEvent) cachedEvent.coding = coding
     dirty.value = false
@@ -547,7 +566,7 @@ async function handleDeleteCoding() {
   try {
     await deleteCueCoding(event.push_log_id, CODER_ROLE)
     event.coding = null
-    const cachedContext = contextCache.get(`${event.session_id}:${CODER_ROLE}`)
+    const cachedContext = context.value?.session_id === event.session_id ? context.value : null
     const cachedEvent = cachedContext?.cues.find(item => item.push_log_id === event.push_log_id)
     if (cachedEvent) cachedEvent.coding = null
     resetForm()
@@ -727,6 +746,7 @@ onMounted(async () => {
             <strong>会话讨论</strong>
             <span v-if="context">{{ context.group_name }} · {{ context.session_title || context.session_id }}</span>
           </div>
+          <el-tag v-if="context?.final_version_id" type="success" size="small">最终修订版本 · {{ context.transcripts.length }} 段</el-tag>
           <span v-if="context" class="member-count">{{ context.members.length }} 名成员</span>
         </div>
         <div v-if="selectedEvent" class="related-toolbar">
@@ -772,7 +792,7 @@ onMounted(async () => {
               <div class="transcript-body">
                 <div class="transcript-meta">
                   <strong>{{ item.transcript.speaker_name }}</strong>
-                  <span>{{ formatTimeToCST(item.timestamp) }}</span>
+                  <span>{{ discussionTime(item.transcript) }}</span>
                   <el-tooltip v-if="relatedById.has(item.transcript.transcript_id)" :content="relatedById.get(item.transcript.transcript_id)?.reason" placement="top">
                     <el-tag type="warning" size="small" tabindex="0">AI 相关</el-tag>
                   </el-tooltip>
@@ -780,7 +800,7 @@ onMounted(async () => {
                   <el-tag v-if="item.transcript.is_merged" type="success" size="small" effect="plain">
                     合并 {{ item.transcript.source_transcript_ids.length }} 条
                   </el-tag>
-                  <el-popover v-if="item.transcript.is_corrected" placement="top" width="360" trigger="click">
+                  <el-popover v-if="item.transcript.is_corrected && !item.transcript.final_version_id" placement="top" width="360" trigger="click">
                     <template #reference><el-button link type="info">查看原文</el-button></template>
                     <div class="raw-transcript-popover">{{ item.transcript.original_text || '（原始文本为空）' }}</div>
                   </el-popover>
@@ -793,7 +813,7 @@ onMounted(async () => {
                     {{ isEvidenceSelected(item.transcript) ? '已选证据' : '选为证据' }}
                   </el-button>
                 </div>
-                <p>{{ item.transcript.text || '（无文本）' }}</p>
+                <p>{{ item.transcript.text || (item.transcript.final_version_id ? '（空白原文）' : '（无文本）') }}</p>
               </div>
             </template>
             <template v-else>

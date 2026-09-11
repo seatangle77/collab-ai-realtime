@@ -56,6 +56,8 @@ export interface CueContextMember {
 }
 
 export interface CueContextTranscript {
+  final_version_id?: string | null
+  relative_seconds?: number | null
   transcript_id: string
   source_transcript_ids: string[]
   correction_id: string | null
@@ -74,6 +76,7 @@ export interface CueContextTranscript {
 }
 
 export interface CueSessionContext {
+  final_version_id?: string | null
   session_id: string
   session_title: string | null
   group_id: string
