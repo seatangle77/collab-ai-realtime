@@ -23,6 +23,30 @@ def test_time_boundary_checks_all_merged_members():
     assert excluded == 5
 
 
+@pytest.mark.parametrize('naive_cutoff', [False, True])
+@pytest.mark.parametrize('final_version', [False, True])
+def test_mixed_timezones_preserve_boundary_and_sorting(naive_cutoff, final_version):
+    # Pure in-memory time checks: no database writes or AI requests.
+    shanghai = timezone(timedelta(hours=8))
+    rows = [transcript(ident) for ident in ['later', 'equal', 'unknown', 'before', 'after']]
+    for item in rows:
+        item.end = (NOW + timedelta(seconds=10)).replace(tzinfo=None)
+        if final_version:
+            item.final_version_id = 'version'
+            item.source_transcript_ids = ['unrelated-original']
+    starts = {
+        'before': (NOW - timedelta(seconds=1)).replace(tzinfo=None),
+        'equal': NOW.astimezone(shanghai),
+        'unknown': None,
+        'after': (NOW + timedelta(seconds=1)).replace(tzinfo=None),
+        'later': (NOW + timedelta(seconds=2)).astimezone(shanghai),
+    }
+    cutoff = NOW.replace(tzinfo=None) if naive_cutoff else NOW.astimezone(shanghai)
+    eligible, excluded = service.eligible_transcripts(rows, starts, cutoff)
+    assert [item.transcript_id for item in eligible] == ['after', 'later']
+    assert excluded == 3
+
+
 class Client:
     content = ''
     request = None

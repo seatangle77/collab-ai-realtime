@@ -13,6 +13,7 @@ from fastapi import HTTPException
 from openai import AsyncOpenAI, APITimeoutError, APIConnectionError, APIStatusError
 
 from ..api_model import ApiModel
+from ..time_utils import utc_datetime
 from ..settings import QWEN_CHAT_EXTRA_BODY, nlp_settings
 
 logger = logging.getLogger(__name__)
@@ -63,14 +64,18 @@ class RelatedDiscussionOut(ApiModel):
 
 
 def eligible_transcripts(transcripts: list[Any], starts: dict[str, datetime | None], cutoff: datetime):
+    # Database timestamps may be naive UTC; API timestamps may carry an offset.
+    cutoff = utc_datetime(cutoff)
+    starts = {ident: utc_datetime(value) for ident, value in starts.items()}
     eligible = []
     excluded = 0
     for item in transcripts:
         ids = [item.transcript_id] if getattr(item, 'final_version_id', None) else (item.source_transcript_ids or [item.transcript_id])
         times = [starts.get(source_id) for source_id in ids]
+        end = utc_datetime(item.end)
         # Check EVERY original member, including missing timestamps and merged text.
         if not all(value is not None and value > cutoff for value in times):
-            if any(value is None or value >= cutoff for value in times) or (item.end and item.end > cutoff):
+            if any(value is None or value >= cutoff for value in times) or (end and end > cutoff):
                 excluded += 1
             continue
         if item.text and item.text.strip():
