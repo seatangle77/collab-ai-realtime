@@ -52,6 +52,7 @@ from .admin.window_metrics_batch_reasoning import (
 from .admin.speech_transcripts import router as admin_speech_transcripts_router
 from .admin.test_seed import router as test_seed_router
 from .vad import router as vad_router
+from .admin.cue_uptake_analysis import router as admin_cue_uptake_analysis_router
 from .admin.ai_push_analysis import router as admin_ai_push_analysis_router
 from .admin.info_gap_recall_analysis import router as admin_info_gap_recall_analysis_router
 from .admin.task_score_analysis import router as admin_task_score_analysis_router
@@ -109,6 +110,7 @@ app.include_router(admin_transcripts_router)
 app.include_router(admin_discussion_states_router)
 app.include_router(push_logs_router)
 app.include_router(admin_push_logs_router)
+app.include_router(admin_cue_uptake_analysis_router)
 app.include_router(admin_cue_uptake_coding_router)
 app.include_router(admin_transcript_corrections_router)
 app.include_router(admin_transcript_alignment_router)

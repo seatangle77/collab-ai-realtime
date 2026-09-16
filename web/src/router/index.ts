@@ -244,6 +244,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('../views/admin/AdminCueUptakeCodingPage.vue'),
       },
       {
+        path: 'cue-uptake-analysis',
+        name: 'AdminCueUptakeAnalysis',
+        component: () => import('../views/admin/AdminCueUptakeAnalysisPage.vue'),
+      },
+      {
         path: 'coi-utterances',
         name: 'AdminCoiUtterances',
         redirect: '/admin/coi-transcript-coding',
