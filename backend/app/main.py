@@ -69,6 +69,7 @@ from .admin.questionnaire_hierarchical_analysis import router as admin_questionn
 from .admin.coi_utterances import router as admin_coi_utterances_router
 from .admin.coi_analysis import router as admin_coi_analysis_router
 from .admin.ena_analysis import router as admin_ena_analysis_router
+from .admin.lexical_diversity import router as admin_lexical_diversity_router
 from .admin.coi_transcript_coding import router as admin_coi_transcript_coding_router
 from .admin.coi_units import router as admin_coi_units_router
 from .admin.coi_ai_coding import router as admin_coi_ai_coding_router
@@ -142,6 +143,7 @@ app.include_router(admin_questionnaire_hierarchical_analysis_router)
 app.include_router(admin_coi_utterances_router)
 app.include_router(admin_coi_analysis_router)
 app.include_router(admin_ena_analysis_router)
+app.include_router(admin_lexical_diversity_router)
 app.include_router(admin_coi_transcript_coding_router)
 app.include_router(admin_coi_units_router)
 app.include_router(admin_coi_ai_coding_router)

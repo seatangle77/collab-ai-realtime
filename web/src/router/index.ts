@@ -307,6 +307,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('../views/admin/AdminCoiRateAnalysisPage.vue'),
       },
       {
+        path: 'lexical-diversity',
+        name: 'AdminLexicalDiversity',
+        component: () => import('../views/admin/AdminLexicalDiversityPage.vue'),
+      },
+      {
         path: 'ena-analysis',
         name: 'AdminEnaAnalysis',
         component: () => import('../views/admin/AdminEnaAnalysisPage.vue'),
