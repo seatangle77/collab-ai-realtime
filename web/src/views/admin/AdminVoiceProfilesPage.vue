@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import type { AdminVoiceProfileSummary } from '../../types/admin'
+import type { AdminGroup, AdminVoiceProfileSummary } from '../../types/admin'
 import { batchDeleteAdminVoiceProfiles, listAdminVoiceProfiles } from '../../api/admin/voice-profiles'
+import { listAdminGroups } from '../../api/admin/groups'
 import { formatDateTimeToCST } from '../../utils/datetime'
 import type { PageMeta } from '../../types/admin'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { exportRowsToCsv } from '../../utils/csv'
 
 interface Filters {
+  group_id: string
   user_id: string
   has_samples: '' | 'true' | 'false'
   has_embedding: '' | 'true' | 'false'
@@ -17,6 +19,8 @@ interface Filters {
 const router = useRouter()
 const route = useRoute()
 
+const groups = ref<AdminGroup[]>([])
+const groupsLoading = ref(false)
 const loading = ref(false)
 const profiles = ref<AdminVoiceProfileSummary[]>([])
 const meta = ref<PageMeta | null>(null)
@@ -25,6 +29,7 @@ const batchDeleting = ref(false)
 const tableRef = ref<any>(null)
 
 const filters = reactive<Filters>({
+  group_id: '',
   user_id: '',
   has_samples: '',
   has_embedding: '',
@@ -39,12 +44,36 @@ function clearListSelection() {
   tableRef.value?.clearSelection?.()
 }
 
+async function fetchGroups() {
+  groupsLoading.value = true
+  try {
+    const items: AdminGroup[] = []
+    let nextPage = 1
+    while (true) {
+      const res = await listAdminGroups({ page: nextPage, page_size: 200 })
+      items.push(...res.items)
+      if (!res.items.length || items.length >= res.meta.total) break
+      nextPage += 1
+    }
+    groups.value = items.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true }))
+  } catch (err: any) {
+    ElMessage.error(err?.message || '加载组别失败，请重新打开下拉框重试')
+  } finally {
+    groupsLoading.value = false
+  }
+}
+
+function handleGroupDropdown(visible: boolean) {
+  if (visible && !groups.value.length && !groupsLoading.value) void fetchGroups()
+}
+
 async function fetchProfiles() {
   loading.value = true
   try {
     const res = await listAdminVoiceProfiles({
       page: page.value,
       page_size: pageSize.value,
+      group_id: filters.group_id || undefined,
       user_id: filters.user_id || undefined,
       has_samples:
         filters.has_samples === ''
@@ -78,6 +107,7 @@ function handleSearch() {
 }
 
 function handleReset() {
+  filters.group_id = ''
   filters.user_id = ''
   filters.has_samples = ''
   filters.has_embedding = ''
@@ -107,6 +137,7 @@ function goDetail(row: AdminVoiceProfileSummary) {
     query: {
       page: String(page.value),
       page_size: String(pageSize.value),
+      ...(filters.group_id ? { group_id: filters.group_id } : {}),
       ...(filters.user_id ? { user_id: filters.user_id } : {}),
       ...(filters.has_samples ? { has_samples: filters.has_samples } : {}),
       ...(filters.has_embedding ? { has_embedding: filters.has_embedding } : {}),
@@ -183,9 +214,11 @@ onMounted(() => {
   const q = route.query
   if (q.page) page.value = Math.max(1, parseInt(String(q.page), 10) || 1)
   if (q.page_size) pageSize.value = Math.max(1, Math.min(200, parseInt(String(q.page_size), 10) || 20))
+  if (q.group_id) filters.group_id = String(q.group_id)
   if (q.user_id) filters.user_id = String(q.user_id)
   if (q.has_samples === 'true' || q.has_samples === 'false') filters.has_samples = q.has_samples
   if (q.has_embedding === 'true' || q.has_embedding === 'false') filters.has_embedding = q.has_embedding
+  void fetchGroups()
   void fetchProfiles()
 })
 </script>
@@ -199,6 +232,28 @@ onMounted(() => {
     <el-card class="admin-voice-profiles-filters" shadow="never">
       <el-form :model="filters" label-width="90px" class="admin-voice-profiles-filters-form">
         <el-row :gutter="12">
+          <el-col :span="6">
+            <el-form-item label="组别">
+              <el-select
+                v-model="filters.group_id"
+                aria-label="组别"
+                placeholder="全部组别"
+                filterable
+                clearable
+                :loading="groupsLoading"
+                style="width: 100%"
+                @change="handleSearch"
+                @visible-change="handleGroupDropdown"
+              >
+                <el-option
+                  v-for="group in groups"
+                  :key="group.id"
+                  :label="`${group.name}（${group.id}）`"
+                  :value="group.id"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
           <el-col :span="6">
             <el-form-item label="用户 ID">
               <el-input v-model="filters.user_id" placeholder="按用户 ID 精确查询" clearable />

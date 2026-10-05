@@ -32,3 +32,8 @@ demo_app/*
 
 # Local research documents
 2027CE&CEAI/
+
+# Local note workspace and presentation build artifacts
+.obsidian/
+.pptx-build/
+.chart-data-*/

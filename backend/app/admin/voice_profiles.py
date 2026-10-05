@@ -54,6 +54,7 @@ async def list_voice_profiles(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     user_id: str | None = None,
+    group_id: str | None = None,
     has_samples: bool | None = None,
     has_embedding: bool | None = None,
     db: AsyncSession = Depends(get_db),
@@ -64,8 +65,19 @@ async def list_voice_profiles(
     params: dict[str, Any] = {}
 
     if user_id:
-        where_clauses.append("user_id = :user_id")
+        where_clauses.append("p.user_id = :user_id")
         params["user_id"] = user_id
+
+    if group_id:
+        where_clauses.append("""
+            EXISTS (
+                SELECT 1 FROM group_memberships gm_filter
+                WHERE gm_filter.user_id = p.user_id
+                  AND gm_filter.group_id = :group_id
+                  AND gm_filter.status = 'active'
+            )
+        """)
+        params["group_id"] = group_id
 
     if has_samples is True:
         where_clauses.append("jsonb_array_length(sample_audio_urls) > 0")

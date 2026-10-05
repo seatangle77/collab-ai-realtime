@@ -10,6 +10,7 @@ import type {
 export interface ListAdminVoiceProfilesParams {
   page?: number
   page_size?: number
+  group_id?: string
   user_id?: string
   has_samples?: boolean
   has_embedding?: boolean
@@ -27,6 +28,7 @@ export async function listAdminVoiceProfiles(
   const query = new URLSearchParams()
   if (params.page) query.set('page', String(params.page))
   if (params.page_size) query.set('page_size', String(params.page_size))
+  if (params.group_id) query.set('group_id', params.group_id)
   if (params.user_id) query.set('user_id', params.user_id)
   if (typeof params.has_samples === 'boolean') query.set('has_samples', String(params.has_samples))
   if (typeof params.has_embedding === 'boolean') query.set('has_embedding', String(params.has_embedding))
