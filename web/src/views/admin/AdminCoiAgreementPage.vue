@@ -11,6 +11,7 @@ import {
 } from '../../api/admin/coi-units'
 import type { AdminChatSession, AdminGroup } from '../../types/admin'
 import { coiCodesDraftKey } from '../../utils/coiDraftKeys'
+import { exportRowsToCsv } from '../../utils/csv'
 
 interface AgreementItem {
   unitId: string
@@ -246,6 +247,33 @@ function tagLabel(cat: CoiCategory): string {
   return `${cat} ${COI_LABELS[cat].label}`
 }
 
+function exportCsv() {
+  if (!selectedSessionId.value || loadingItems.value || saving.value || !items.value.length) return
+  const groupName = groups.value.find(group => group.id === selectedGroupId.value)?.name ?? ''
+  const sessionTitle = sessions.value.find(session => session.id === selectedSessionId.value)?.session_title ?? ''
+  const filename = `CoI最终协商_${groupName}_${sessionTitle}_${selectedSessionId.value}`
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
+  exportRowsToCsv<AgreementItem>({
+    filename: `${filename}.csv`,
+    rows: items.value,
+    columns: [
+      { key: 'groupId', title: '群组ID', format: () => selectedGroupId.value },
+      { key: 'groupName', title: '群组', format: () => groupName },
+      { key: 'sessionId', title: '会话ID', format: () => selectedSessionId.value },
+      { key: 'sessionTitle', title: '会话', format: () => sessionTitle },
+      { key: 'unitId', title: '观点ID' },
+      { key: 'orderIndex', title: '序号' },
+      { key: 'startTime', title: '开始时间（秒）' },
+      { key: 'content', title: '观点内容' },
+      { key: 'coderA', title: '研究员A编码', format: item => item.coderA.join(';') },
+      { key: 'coderC', title: '研究员C编码', format: item => item.coderC.join(';') },
+      { key: 'status', title: 'A/C一致状态', format: statusText },
+      { key: 'finalCategories', title: '最终编码（页面当前值）', format: item => item.finalCategories.join(';') },
+      { key: 'finalStatus', title: '最终编码完成状态', format: item => item.finalCategories.length ? '已定' : '未定' },
+    ],
+  })
+}
+
 async function handleSave() {
   if (!selectedSessionId.value) { ElMessage.warning('请先选择会话'); return }
   if (finalCount.value === 0) { ElMessage.warning('还没有最终编码'); return }
@@ -333,12 +361,17 @@ async function handleSave() {
           >
             加载协商数据
           </el-button>
+          <el-button
+            :disabled="!selectedSessionId || !items.length || loadingItems || saving"
+            @click="exportCsv"
+          >导出 CSV</el-button>
           <template v-if="items.length > 0">
             <el-button @click="saveDraft">保存草稿</el-button>
             <el-button type="primary" :loading="saving" @click="handleSave">保存最终编码</el-button>
           </template>
         </div>
       </div>
+      <p class="export-hint">CSV 导出当前会话全部观点（不受“只看不一致”影响），包含页面上尚未保存的最终编码；如需写入数据库，请先保存最终编码。</p>
     </el-card>
 
     <el-alert
@@ -469,6 +502,7 @@ async function handleSave() {
 .control-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .control-item { display: flex; align-items: center; gap: 8px; }
 .control-label { font-size: 14px; color: #606266; white-space: nowrap; }
+.export-hint { margin: 12px 0 0; color: #909399; font-size: 12px; line-height: 1.6; }
 .progress-text { font-size: 14px; font-weight: 500; color: #303133; white-space: nowrap; }
 .list-header { display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; }
 .list-title { font-size: 15px; font-weight: 600; color: #303133; }
