@@ -601,11 +601,62 @@ async function changePageSize(value: number) {
 
 function exportDiscussionCsv() {
   const session = context.value
-  if (loadingContext.value || !session?.transcripts.length) return
-  const rows = timelineItems.value
-    .filter((item): item is TimelineTranscriptItem => item.kind === 'transcript')
-    .map((item, index) => ({ ...item.transcript, order: index + 1 }))
-  const filename = `会话讨论_${session.group_name}_${session.session_title || session.session_id}_${session.session_id}`
+  if (loadingContext.value || saving.value || !session || !timelineItems.value.length) return
+  const transcriptsByEvidenceId = new Map<string, CueContextTranscript[]>()
+  for (const transcript of session.transcripts) {
+    for (const id of new Set([transcript.transcript_id, ...transcript.source_transcript_ids])) {
+      const matches = transcriptsByEvidenceId.get(id) ?? []
+      matches.push(transcript)
+      transcriptsByEvidenceId.set(id, matches)
+    }
+  }
+  const rows = timelineItems.value.map((item, index) => {
+    const transcript = item.kind === 'transcript' ? item.transcript : null
+    const cue = item.kind === 'cue' ? item.cue : null
+    const evidence = (cue?.coding?.evidence_transcript_ids ?? []).map(id => {
+      const matches = transcriptsByEvidenceId.get(id) ?? []
+      return {
+        evidence_id: id,
+        status: matches.length ? '已匹配当前会话文本' : '当前会话版本未找到',
+        segments: matches.map(match => ({
+          transcript_id: match.transcript_id,
+          speaker: match.speaker_name,
+          start: match.start,
+          relative_seconds: match.relative_seconds ?? null,
+          text: match.text,
+        })),
+      }
+    })
+    return {
+      ...transcript,
+      order: index + 1,
+      record_type: cue ? 'AI提示' : '成员发言',
+      timestamp: item.timestamp,
+      display_time: item.timestamp ? formatDateTimeToCST(item.timestamp) : '',
+      content: cue ? cue.push_content : transcript?.text ?? '',
+      time_source: cue
+        ? '提示送达时间（缺失时后台回退为触发时间）'
+        : transcript?.final_version_id
+          ? '会话起点加修订段落相对秒数'
+          : transcript?.start ? '转录开始时间' : '记录创建时间（发言时间缺失）',
+      push_log_id: cue?.push_log_id ?? '',
+      target_user_id: cue?.target_user_id ?? '',
+      target_user_name: cue?.target_user_name ?? '',
+      received_at: cue?.received_at ?? '',
+      uptake_code: cue?.coding?.uptake_code ?? '',
+      uptake_label: cue ? codeMeta(cue.coding?.uptake_code)?.label ?? '未编码' : '',
+      evidence_ids: cue?.coding?.evidence_transcript_ids.join(';') ?? '',
+      evidence_text: evidence.map(entry => entry.segments.length
+        ? entry.segments.map(segment => `[${entry.evidence_id}] ${segment.speaker}：${segment.text ?? ''}`).join('\n')
+        : `[${entry.evidence_id}] 当前会话版本未找到`).join('\n'),
+      evidence_details: evidence.length ? JSON.stringify(evidence) : '',
+      missing_evidence_count: cue ? evidence.filter(entry => !entry.segments.length).length : '',
+      coding_reason: cue?.coding?.coding_reason ?? '',
+      coded_at: cue?.coding?.coded_at ?? '',
+      coded_by: cue?.coding?.coded_by ?? '',
+    }
+  })
+  const filename = `会话完整时间线_${session.group_name}_${session.session_title || session.session_id}_${session.session_id}`
     .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
   exportRowsToCsv({
     filename: `${filename}.csv`,
@@ -616,9 +667,13 @@ function exportDiscussionCsv() {
       { key: 'session_id', title: '会话ID', format: () => session.session_id },
       { key: 'session_title', title: '会话', format: () => session.session_title ?? '' },
       { key: 'condition', title: '实验条件', format: () => session.condition },
-      { key: 'order', title: '讨论显示序号' },
+      { key: 'order', title: '时间线显示序号' },
+      { key: 'record_type', title: '记录类型' },
+      { key: 'timestamp', title: '时间线时间（ISO）' },
+      { key: 'display_time', title: '时间线时间（北京时间）' },
+      { key: 'content', title: '内容（成员发言或AI提示）' },
       { key: 'transcript_id', title: '发言ID（用于关联采纳证据）' },
-      { key: 'source_transcript_ids', title: '来源转录ID', format: row => row.source_transcript_ids.join(';') },
+      { key: 'source_transcript_ids', title: '来源转录ID', format: row => row.source_transcript_ids?.join(';') ?? '' },
       { key: 'final_version_id', title: '最终修订版本ID' },
       { key: 'speaker_user_id', title: '说话人ID' },
       { key: 'speaker_name', title: '说话人' },
@@ -626,14 +681,27 @@ function exportDiscussionCsv() {
       { key: 'start', title: '开始时间（ISO）' },
       { key: 'end', title: '结束时间（ISO）' },
       { key: 'created_at', title: '记录创建时间（非发言时间）' },
-      { key: 'time_source', title: '开始时间来源', format: row => row.final_version_id ? '会话起点加修订段落相对秒数' : '转录记录' },
+      { key: 'time_source', title: '时间线时间来源' },
       { key: 'text', title: '发言内容（页面当前版本）' },
       { key: 'original_text', title: '原始发言内容' },
-      { key: 'is_corrected', title: '是否修订', format: row => row.is_corrected ? '是' : '否' },
-      { key: 'is_merged', title: '是否合并', format: row => row.is_merged ? '是' : '否' },
+      { key: 'is_corrected', title: '是否修订', format: row => row.record_type === 'AI提示' ? '' : row.is_corrected ? '是' : '否' },
+      { key: 'is_merged', title: '是否合并', format: row => row.record_type === 'AI提示' ? '' : row.is_merged ? '是' : '否' },
+      { key: 'push_log_id', title: '提示日志ID' },
+      { key: 'target_user_id', title: '提示接收成员ID' },
+      { key: 'target_user_name', title: '提示接收成员' },
+      { key: 'received_at', title: '提示收到时间（ISO，可能回退为触发时间）' },
+      { key: 'uptake_code', title: '采纳编码（已保存）' },
+      { key: 'uptake_label', title: '采纳标签（已保存）' },
+      { key: 'evidence_ids', title: '证据发言ID' },
+      { key: 'evidence_text', title: '证据发言（匹配当前会话版本）' },
+      { key: 'evidence_details', title: '证据编号、时间和文本对应明细（JSON）' },
+      { key: 'missing_evidence_count', title: '当前会话版本未找到的证据数' },
+      { key: 'coding_reason', title: '编码理由' },
+      { key: 'coded_by', title: '编码者' },
+      { key: 'coded_at', title: '编码保存时间（非反应时间）' },
     ],
   })
-  ElMessage.success(`已导出当前会话全部 ${rows.length} 段讨论`)
+  ElMessage.success(`已导出 ${session.transcripts.length} 段讨论和 ${session.cues.length} 条提示（含已保存编码）`)
 }
 
 async function handleExport() {
@@ -788,10 +856,11 @@ onMounted(async () => {
           <span v-if="context" class="member-count">{{ context.members.length }} 名成员</span>
           <el-button
             size="small"
-            :disabled="loadingContext || !context?.transcripts.length"
+            :disabled="loadingContext || saving || !context || !timelineItems.length"
             @click="exportDiscussionCsv"
-          >导出 CSV</el-button>
+          >导出完整时间线 CSV</el-button>
         </div>
+        <p class="timeline-export-note">导出本会话全部发言、AI 提示、时间及已保存的采纳编码；未保存的编码修改不包含在内。</p>
         <div v-if="selectedEvent" class="related-toolbar">
           <div class="related-controls">
             <el-select :model-value="selectedTask" aria-label="本会话任务类型" placeholder="先选择本会话任务" size="small" style="width: 170px" :disabled="sessionAnalysisPending" @change="changeTask">
@@ -866,6 +935,9 @@ onMounted(async () => {
                   <strong>{{ item.cue.push_log_id === selectedPushLogId ? '当前提示' : '同会话其他提示' }}</strong>
                   <span>发送给 {{ item.cue.target_user_name }}</span>
                   <span>{{ formatTimeToCST(item.timestamp) }}</span>
+                  <el-tag size="small" :type="codeMeta(item.cue.coding?.uptake_code)?.type ?? 'info'">
+                    {{ codeMeta(item.cue.coding?.uptake_code)?.label ?? '未编码' }}
+                  </el-tag>
                 </div>
                 <p>{{ item.cue.push_content }}</p>
               </div>
@@ -1004,6 +1076,7 @@ onMounted(async () => {
 .pane-heading strong { color: #24344a; font-size: 15px; }
 .pane-heading span { overflow: hidden; color: #7a8799; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .event-pane, .timeline-pane, .coding-pane { display: flex; flex-direction: column; }
+.timeline-export-note { margin: 0; padding: 8px 14px; color: #718098; font-size: 12px; line-height: 1.5; border-bottom: 1px solid #e7ecf3; }
 .event-list { flex: 1; overflow-y: auto; padding: 8px; }
 .event-card { display: block; width: 100%; margin: 0 0 8px; padding: 11px; border: 1px solid #e3e9f1; border-radius: 8px; background: #fff; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .event-card:hover { border-color: #9eb7d5; background: #f8fbff; }
