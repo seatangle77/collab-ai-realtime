@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { listAdminChatSessions } from '../../api/admin/chat-sessions'
 import type { AdminChatSession } from '../../types/admin'
 import { formatDateTimeToCST, formatTimeToCST } from '../../utils/datetime'
+import { exportRowsToCsv } from '../../utils/csv'
 import {
   deleteCueCoding,
   downloadCueCodingExport,
@@ -598,6 +599,43 @@ async function changePageSize(value: number) {
   await loadEvents()
 }
 
+function exportDiscussionCsv() {
+  const session = context.value
+  if (loadingContext.value || !session?.transcripts.length) return
+  const rows = timelineItems.value
+    .filter((item): item is TimelineTranscriptItem => item.kind === 'transcript')
+    .map((item, index) => ({ ...item.transcript, order: index + 1 }))
+  const filename = `会话讨论_${session.group_name}_${session.session_title || session.session_id}_${session.session_id}`
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
+  exportRowsToCsv({
+    filename: `${filename}.csv`,
+    rows,
+    columns: [
+      { key: 'group_id', title: '小组ID', format: () => session.group_id },
+      { key: 'group_name', title: '小组', format: () => session.group_name },
+      { key: 'session_id', title: '会话ID', format: () => session.session_id },
+      { key: 'session_title', title: '会话', format: () => session.session_title ?? '' },
+      { key: 'condition', title: '实验条件', format: () => session.condition },
+      { key: 'order', title: '讨论显示序号' },
+      { key: 'transcript_id', title: '发言ID（用于关联采纳证据）' },
+      { key: 'source_transcript_ids', title: '来源转录ID', format: row => row.source_transcript_ids.join(';') },
+      { key: 'final_version_id', title: '最终修订版本ID' },
+      { key: 'speaker_user_id', title: '说话人ID' },
+      { key: 'speaker_name', title: '说话人' },
+      { key: 'relative_seconds', title: '相对时间（秒）' },
+      { key: 'start', title: '开始时间（ISO）' },
+      { key: 'end', title: '结束时间（ISO）' },
+      { key: 'created_at', title: '记录创建时间（非发言时间）' },
+      { key: 'time_source', title: '开始时间来源', format: row => row.final_version_id ? '会话起点加修订段落相对秒数' : '转录记录' },
+      { key: 'text', title: '发言内容（页面当前版本）' },
+      { key: 'original_text', title: '原始发言内容' },
+      { key: 'is_corrected', title: '是否修订', format: row => row.is_corrected ? '是' : '否' },
+      { key: 'is_merged', title: '是否合并', format: row => row.is_merged ? '是' : '否' },
+    ],
+  })
+  ElMessage.success(`已导出当前会话全部 ${rows.length} 段讨论`)
+}
+
 async function handleExport() {
   exporting.value = true
   try {
@@ -748,6 +786,11 @@ onMounted(async () => {
           </div>
           <el-tag v-if="context?.final_version_id" type="success" size="small">最终修订版本 · {{ context.transcripts.length }} 段</el-tag>
           <span v-if="context" class="member-count">{{ context.members.length }} 名成员</span>
+          <el-button
+            size="small"
+            :disabled="loadingContext || !context?.transcripts.length"
+            @click="exportDiscussionCsv"
+          >导出 CSV</el-button>
         </div>
         <div v-if="selectedEvent" class="related-toolbar">
           <div class="related-controls">
